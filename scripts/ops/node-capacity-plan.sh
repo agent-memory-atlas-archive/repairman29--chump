@@ -24,7 +24,7 @@
 # Placement model (capacity -> worker budget):
 #   reserved      = orchestration_reserve (1 if heavy-organ host) + embed_reserve (1 if CPU-bound ollama)
 #   usable        = cores - reserved
-#   worker_budget = floor(usable * HEADROOM_PCT/100)              # headroom so we don't peg every core
+#   worker_budget = round(usable * HEADROOM_PCT/100)              # headroom so we don't peg every core
 #   worker_budget = clamp(1 .. cores-1)                           # always leave 1 core for OS/organs
 #   worker_budget = 1  if root_disk_pct >= DISK_BRAKE_PCT         # don't pile build churn on a full disk
 #
@@ -60,7 +60,19 @@ compute_worker_budget() {
   local reserved=$(( orch_reserve + embed_reserve ))
   local usable=$(( cores - reserved ))
   [ "$usable" -lt 1 ] && usable=1
-  local budget=$(( usable * headroom / 100 ))
+  # RESILIENT-1204: round-half-up, NOT floor. Integer floor truncated CJ's real
+  # capacity — a 4-core orchestration+embed host has usable=2, and floor(2*0.75)=
+  # floor(1.5)=1 STARVED it to a single worker despite a large backlog (the operator
+  # even set CHUMP_ORCH_WORKER_MAX=2 via drop-in, silently overridden by budget=1).
+  # The 1<->2 build-thrash at load ~5 that justified the original sub-cores-1 budget
+  # is now independently prevented by the AGGREGATE cargo-jobs cap (INFRA-3659:
+  # enforce_cargo_jobs pins worker_count*CARGO_BUILD_JOBS<=cores, so 2 workers on CJ
+  # run 2 rustc jobs each = 4 = cores, never the ~56-thread swap-thrash of the
+  # uncapped era) plus the orchestrator's runtime RAM/load shed guards. So the budget
+  # no longer needs to double-discount fixed overhead (once as a reserved core, again
+  # by flooring the headroom). Round-half-up gives CJ its true 2; the clamp below
+  # still guarantees >=1 free core, so this can never over-scale past cores-1.
+  local budget=$(( (usable * headroom + 50) / 100 ))
   [ "$budget" -lt 1 ] && budget=1
   local cap=$(( cores - 1 )); [ "$cap" -lt 1 ] && cap=1
   [ "$budget" -gt "$cap" ] && budget=$cap
@@ -205,7 +217,7 @@ plan() {
   "budget": {
     "worker_budget": $WORKER_BUDGET,
     "workers_up": $WORKERS_UP,
-    "formula": "floor((cores - orch_reserve - embed_reserve) * ${HEADROOM_PCT}/100), clamp(1..cores-1), disk-brake@${DISK_BRAKE_PCT}%",
+    "formula": "round((cores - orch_reserve - embed_reserve) * ${HEADROOM_PCT}/100), clamp(1..cores-1), disk-brake@${DISK_BRAKE_PCT}%",
     "orch_reserve": $orch_reserve,
     "embed_reserve": $embed_reserve
   },
