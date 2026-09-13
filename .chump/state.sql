@@ -2938,11 +2938,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a new `#[test]` function named `test_summarized_pct_enforcement` inside the existing `mod open_pr_dup_tests` in `crates/chump-atomic-claim/src/atomic_claim.rs`. The test calls the public API that computes `summarized_pct` under the current enforcement settings and asserts that the returned value is greater than 95.0, causing the test to fail on the baseline code and succeed after the enforcement fix from CREDIBLE‑891.
+    
+    Target file(s):
+    - crates/chump-atomic-claim/src/atomic_claim.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A new test (using `cargo test` or a CI script) asserts that `summarized_pct` is >95% and fails when the enforcement is removed.
-    - Running the test suite shows the new test failing on the baseline code and passing after applying CREDIBLE-891.
-    - "`cargo fmt` and `cargo clippy --all-targets -D warnings` run without any formatting or lint warnings."
-    - All tests, including the new one, pass after the change.
+    - Running `cargo test` prints a failure for `test_summarized_pct_enforcement` on the current baseline commit and passes after the enforcement change is applied.
+    - "The file `crates/chump-atomic-claim/src/atomic_claim.rs` contains a function `fn test_summarized_pct_enforcement()` annotated with `#[test]` that asserts `summarized_pct > 95.0`."
+    - Executing `cargo fmt -- --check` exits with status 0 and reports no formatting differences.
+    - Executing `cargo clippy --all-targets -D warnings` exits with status 0 and reports no lint warnings.
   depends_on: [CREDIBLE-1045]
   notes: |
     [chump harvest check 'Almanac']
@@ -213863,6 +213870,7 @@ gaps:
     [2026-09-13T13:02:10Z] rot-reaper: PR #4621 auto-closed (required-check-red, 53h) 2026-09-13; re-attempt on fresh main.
     [2026-09-13T13:27:26Z] rot-reaper: PR #4621 auto-closed (required-check-red, 53h) 2026-09-13; re-attempt on fresh main.
     [2026-09-13T15:02:12Z] rot-reaper: PR #4621 auto-closed (required-check-red, 55h) 2026-09-13; re-attempt on fresh main.
+    [2026-09-13T15:16:58Z] rot-reaper: PR #4621 auto-closed (required-check-red, 55h) 2026-09-13; RESPAWN CAP 3 reached (3 prior recycles) — NOT re-queued, escalating to operator.
 
 - id: RESILIENT-1108
   domain: RESILIENT
