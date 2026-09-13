@@ -43,6 +43,12 @@ fn isolation_env(root: &Path) -> Vec<(String, String)> {
     vec![
         ("CHUMP_REPO".into(), r.clone()),
         ("CHUMP_HOME".into(), r.clone()),
+        // Isolate HOME too: the RESILIENT-069 farmer gate resolves the
+        // oauth-token.json under $HOME/.chump, so without this a stale token in
+        // the developer's real ~/.chump makes farmer RED and every reserve/ship
+        // test fail. An empty tempdir HOME has no token -> farmer fails open
+        // (green), so the tests exercise gap mechanics deterministically.
+        ("HOME".into(), r.clone()),
         ("CHUMP_RESERVE_SCAN_OPEN_PRS".into(), "0".into()),
         ("CHUMP_RESERVE_NO_AUTOSTAGE".into(), "1".into()),
         ("CHUMP_RAW_YAML_LOCK".into(), "0".into()),

@@ -9759,13 +9759,6 @@ async fn main() -> Result<()> {
         // resolves to the linked worktree the operator is actually in.
         // state.db remains under repo_root (shared canonical state).
         let worktree_root = repo_path::worktree_root();
-        let store = match gap_store::GapStore::open(&repo_root) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("chump gap: cannot open state.db: {e:#}");
-                std::process::exit(1);
-            }
-        };
         let flag = |name: &str| -> Option<String> {
             args.iter()
                 .position(|a| a == name)
@@ -9773,6 +9766,211 @@ async fn main() -> Result<()> {
                 .cloned()
         };
         let json_out = args.iter().any(|a| a == "--json");
+
+        // A client explicitly configured for canonical-server mode must not
+        // touch its local state.db before routing. Otherwise a corrupt or
+        // stale Mac replica can block the very recovery path intended to
+        // replace it. The server performs the normal validation and mutation
+        // against its own managed checkout; failures are deliberately
+        // fail-closed below.
+        if gap_route::canonical_server_mode()
+            && matches!(
+                subcmd,
+                "reserve" | "set" | "update" | "modify" | "edit" | "change" | "ship"
+            )
+        {
+            let server_base = std::env::var(gap_route::GAP_SERVER_ENV)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if server_base.is_empty() {
+                eprintln!(
+                    "chump gap: CHUMP_GAP_SERVER_MODE=canonical requires a non-empty CHUMP_GAP_SERVER; refusing a local write to prevent split gap state"
+                );
+                std::process::exit(2);
+            }
+            let token = std::env::var(gap_route::BATPHONE_TOKEN_ENV).unwrap_or_default();
+            let routed = match subcmd {
+                "reserve" => {
+                    let has_flag_domain = args.iter().any(|a| a == "--domain");
+                    let domain = flag("--domain").or_else(|| {
+                        args.get(3)
+                            .and_then(|arg| (!arg.starts_with('-')).then(|| arg.clone()))
+                    });
+                    let domain = domain.unwrap_or_else(|| {
+                        eprintln!("Usage: chump gap reserve --domain D --title T");
+                        std::process::exit(2);
+                    });
+                    let title = flag("--title").unwrap_or_else(|| {
+                        if has_flag_domain {
+                            eprintln!("--title required when using --domain");
+                            std::process::exit(2);
+                        }
+                        args.get(4..)
+                            .map(|tail| tail.join(" "))
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or_else(|| "New gap".into())
+                    });
+                    let acceptance_criteria = flag("--acceptance-criteria")
+                        .map(|raw| raw.split('|').map(str::to_string).collect::<Vec<_>>());
+                    let body = gap_route::GapMutationBody {
+                        op: "reserve".into(),
+                        domain: Some(domain),
+                        title: Some(title),
+                        priority: flag("--priority"),
+                        effort: flag("--effort"),
+                        outcome: flag("--outcome"),
+                        evidence: flag("--evidence"),
+                        acceptance_criteria,
+                        external_repo: flag("--external-repo"),
+                        force: Some(args.iter().any(|arg| arg == "--force")),
+                        skip_obs_acs: Some(args.iter().any(|arg| arg == "--skip-obs-acs")),
+                        ..Default::default()
+                    };
+                    gap_route::route_gap_mutation(&server_base, &token, &body).await
+                }
+                "ship" => {
+                    let gap_id = args.get(3).cloned().unwrap_or_else(|| {
+                        eprintln!("Usage: chump gap ship <GAP-ID> [--update-yaml] [--closed-pr N]");
+                        std::process::exit(2);
+                    });
+                    let closed_pr = match flag("--closed-pr") {
+                        Some(value) => match value.trim().parse::<i64>() {
+                            Ok(value) if value > 0 => Some(value),
+                            _ => {
+                                eprintln!(
+                                    "chump gap ship: --closed-pr expects a positive integer (got {:?})",
+                                    value
+                                );
+                                std::process::exit(2);
+                            }
+                        },
+                        None => None,
+                    };
+                    let session = flag("--session")
+                        .or_else(crate::ambient_stream::env_session_id)
+                        .unwrap_or_else(|| format!("chump-anon-{}", unix_ts()));
+                    let body = gap_route::GapMutationBody {
+                        op: "ship".into(),
+                        gap_id: Some(gap_id),
+                        closed_pr,
+                        session: Some(session),
+                        ..Default::default()
+                    };
+                    gap_route::route_gap_mutation(&server_base, &token, &body).await
+                }
+                "set" | "update" | "modify" | "edit" | "change" => {
+                    let gap_id = args.get(3).cloned().unwrap_or_else(|| {
+                        eprintln!("Usage: chump gap set <GAP-ID> [--title T] [--description D] [--priority P]");
+                        std::process::exit(2);
+                    });
+                    if gap_id.starts_with("--") {
+                        eprintln!(
+                            "Error: unknown flag {:?}. Did you forget the GAP-ID?",
+                            gap_id
+                        );
+                        std::process::exit(2);
+                    }
+                    let acceptance_values: Vec<String> = args
+                        .windows(2)
+                        .filter(|&pair| pair[0] == "--acceptance-criteria")
+                        .map(|pair| pair[1].clone())
+                        .collect();
+                    let acceptance_criteria =
+                        if acceptance_values.len() == 1 && acceptance_values[0].contains('|') {
+                            Some(
+                                acceptance_values[0]
+                                    .split('|')
+                                    .map(str::to_string)
+                                    .collect(),
+                            )
+                        } else if acceptance_values.is_empty() {
+                            None
+                        } else {
+                            Some(acceptance_values)
+                        };
+                    let closed_pr = match flag("--closed-pr") {
+                        Some(value) => match value.trim().parse::<i64>() {
+                            Ok(value) if value > 0 => Some(value),
+                            _ => {
+                                eprintln!(
+                                    "chump gap set: --closed-pr expects a positive integer (got {:?})",
+                                    value
+                                );
+                                std::process::exit(2);
+                            }
+                        },
+                        None => None,
+                    };
+                    let body = gap_route::GapMutationBody {
+                        op: "set".into(),
+                        gap_id: Some(gap_id),
+                        title: flag("--title"),
+                        description: flag("--description"),
+                        priority: flag("--priority"),
+                        effort: flag("--effort"),
+                        status: flag("--status"),
+                        outcome: flag("--outcome"),
+                        acceptance_criteria,
+                        depends_on: flag("--depends-on"),
+                        notes: flag("--notes"),
+                        add_note: flag("--add-note"),
+                        source_doc: flag("--source-doc"),
+                        opened_date: flag("--opened-date"),
+                        closed_date: flag("--closed-date"),
+                        closed_pr,
+                        skills_required: flag("--skills-required"),
+                        preferred_backend: flag("--preferred-backend"),
+                        preferred_machine: flag("--preferred-machine"),
+                        estimated_minutes: flag("--estimated-minutes"),
+                        required_model: flag("--required-model"),
+                        evidence: flag("--evidence"),
+                        artifact_type: flag("--artifact-type"),
+                        ..Default::default()
+                    };
+                    gap_route::route_gap_mutation(&server_base, &token, &body).await
+                }
+                _ => unreachable!("canonical mutation subcommand already matched"),
+            };
+            match routed {
+                Ok(result) => {
+                    let _ = crate::ambient_emit::emit(&crate::ambient_emit::EmitArgs {
+                        kind: "gap_mutation_routed_to_server".to_string(),
+                        source: Some(format!("chump_gap_{}", result.op)),
+                        gap: Some(result.gap_id.clone()),
+                        fields: vec![
+                            ("op".to_string(), result.op.clone()),
+                            ("server".to_string(), server_base),
+                            ("behind".to_string(), "unverified-canonical".to_string()),
+                        ],
+                        ..Default::default()
+                    });
+                    match result.op.as_str() {
+                        "reserve" if json_out => {
+                            println!("{{\"id\":\"{}\",\"yaml_path\":\"\"}}", result.gap_id)
+                        }
+                        "reserve" => println!("{}", result.gap_id),
+                        "ship" => println!("shipped {}", result.gap_id),
+                        _ => println!("updated {}", result.gap_id),
+                    }
+                    return Ok(());
+                }
+                Err(error) => {
+                    eprintln!(
+                        "chump gap: canonical fleet-server routing failed ({error:#}); refusing a local write to prevent split gap state"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        let store = match gap_store::GapStore::open(&repo_root) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("chump gap: cannot open state.db: {e:#}");
+                std::process::exit(1);
+            }
+        };
 
         match subcmd {
             // INFRA-498: 'chump gap show <ID>' — human-readable per-gap
@@ -11208,10 +11406,12 @@ async fn main() -> Result<()> {
                     let server_base = server_base.trim().to_string();
                     if !server_base.is_empty() {
                         let behind = store.behind_origin_main();
-                        if gap_route::should_route_to_server(behind, true) {
+                        let canonical_mode = gap_route::canonical_server_mode();
+                        if gap_route::should_route_to_server(behind, true, canonical_mode) {
                             if !quiet {
                                 eprintln!(
-                                    "[reserve] local main is {} commit(s) behind origin/main; CHUMP_GAP_SERVER={} set — routing to fleet-server instead of writing local state.db",
+                                    "[reserve] routing to fleet-server (mode={}, local main behind={} commit(s)); CHUMP_GAP_SERVER={} — not writing local state.db",
+                                    if canonical_mode { "canonical" } else { "stale-only" },
                                     behind.unwrap_or(0),
                                     server_base
                                 );
@@ -11230,7 +11430,11 @@ async fn main() -> Result<()> {
                                 priority: Some(priority.clone()),
                                 effort: Some(effort.clone()),
                                 outcome: reserve_outcome_id.clone(),
+                                evidence: reserve_evidence.clone(),
                                 acceptance_criteria: ac_list,
+                                external_repo: reserve_external_repo.clone(),
+                                force: Some(force),
+                                skip_obs_acs: Some(skip_obs_acs),
                                 ..Default::default()
                             };
                             match gap_route::route_gap_mutation(&server_base, &token, &body).await {
@@ -11267,15 +11471,16 @@ async fn main() -> Result<()> {
                                     return Ok(());
                                 }
                                 Err(e) => {
-                                    // Do NOT silently fall back to a local write on a
-                                    // known-stale checkout — that's exactly the write
-                                    // this routing exists to avoid. Fall through to the
-                                    // existing local path below, where INFRA-3687's
-                                    // fail-closed reserve() gate refuses an
-                                    // unverifiable/stale canonical write on its own.
-                                    eprintln!(
-                                        "[reserve] fleet-server routing failed ({e:#}); falling through to local reserve path"
-                                    );
+                                    if canonical_mode {
+                                        eprintln!(
+                                            "[reserve] fleet-server routing failed ({e:#}); canonical mode refuses a local reserve to prevent split gap state"
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                    // Stale-only mode preserves its original compatibility
+                                    // behavior; reserve_verified below independently blocks
+                                    // a stale/unverifiable canonical local write.
+                                    eprintln!("[reserve] fleet-server routing failed ({e:#}); falling through to local reserve path");
                                 }
                             }
                         }
@@ -11797,9 +12002,11 @@ async fn main() -> Result<()> {
                     let server_base = server_base.trim().to_string();
                     if !server_base.is_empty() {
                         let behind = store.behind_origin_main();
-                        if gap_route::should_route_to_server(behind, true) {
+                        let canonical_mode = gap_route::canonical_server_mode();
+                        if gap_route::should_route_to_server(behind, true, canonical_mode) {
                             eprintln!(
-                                "[gap ship] local main is {} commit(s) behind origin/main; CHUMP_GAP_SERVER={} set — routing to fleet-server instead of writing local state.db",
+                                "[gap ship] routing to fleet-server (mode={}, local main behind={} commit(s)); CHUMP_GAP_SERVER={} — not writing local state.db",
+                                if canonical_mode { "canonical" } else { "stale-only" },
                                 behind.unwrap_or(0),
                                 server_base
                             );
@@ -11808,6 +12015,8 @@ async fn main() -> Result<()> {
                             let body = gap_route::GapMutationBody {
                                 op: "ship".into(),
                                 gap_id: Some(gap_id.clone()),
+                                closed_pr,
+                                session: Some(session_id.clone()),
                                 ..Default::default()
                             };
                             match gap_route::route_gap_mutation(&server_base, &token, &body).await {
@@ -11831,12 +12040,13 @@ async fn main() -> Result<()> {
                                     return Ok(());
                                 }
                                 Err(e) => {
-                                    // Do NOT silently fall back to a local write on a
-                                    // known-stale checkout. Fall through to the existing
-                                    // local path below.
-                                    eprintln!(
-                                        "[gap ship] fleet-server routing failed ({e:#}); falling through to local ship path"
-                                    );
+                                    if canonical_mode {
+                                        eprintln!(
+                                            "[gap ship] fleet-server routing failed ({e:#}); canonical mode refuses a local ship to prevent split gap state"
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                    eprintln!("[gap ship] fleet-server routing failed ({e:#}); falling through to local ship path");
                                 }
                             }
                         }
@@ -12360,9 +12570,11 @@ async fn main() -> Result<()> {
                     let server_base = server_base.trim().to_string();
                     if !server_base.is_empty() {
                         let behind = store.behind_origin_main();
-                        if gap_route::should_route_to_server(behind, true) {
+                        let canonical_mode = gap_route::canonical_server_mode();
+                        if gap_route::should_route_to_server(behind, true, canonical_mode) {
                             eprintln!(
-                                "[gap set] local main is {} commit(s) behind origin/main; CHUMP_GAP_SERVER={} set — routing to fleet-server instead of writing local state.db",
+                                "[gap set] routing to fleet-server (mode={}, local main behind={} commit(s)); CHUMP_GAP_SERVER={} — not writing local state.db",
+                                if canonical_mode { "canonical" } else { "stale-only" },
                                 behind.unwrap_or(0),
                                 server_base
                             );
@@ -12386,6 +12598,24 @@ async fn main() -> Result<()> {
                                 } else {
                                     Some(ac_list)
                                 },
+                                depends_on: flag_local("--depends-on"),
+                                // Send the operator's raw intent. `notes` above is
+                                // the local-path value (and may contain a stale
+                                // client's copy); the server must calculate
+                                // `--add-note` against its own canonical row.
+                                notes: flag_local("--notes"),
+                                add_note: flag_local("--add-note"),
+                                source_doc: flag_local("--source-doc"),
+                                opened_date: flag_local("--opened-date"),
+                                closed_date: flag_local("--closed-date"),
+                                closed_pr,
+                                skills_required: flag_local("--skills-required"),
+                                preferred_backend: flag_local("--preferred-backend"),
+                                preferred_machine: flag_local("--preferred-machine"),
+                                estimated_minutes: flag_local("--estimated-minutes"),
+                                required_model: flag_local("--required-model"),
+                                evidence: flag_local("--evidence"),
+                                artifact_type: flag_local("--artifact-type"),
                                 ..Default::default()
                             };
                             match gap_route::route_gap_mutation(&server_base, &token, &body).await {
@@ -12409,12 +12639,13 @@ async fn main() -> Result<()> {
                                     return Ok(());
                                 }
                                 Err(e) => {
-                                    // Do NOT silently fall back to a local write on a
-                                    // known-stale checkout. Fall through to the existing
-                                    // local path below.
-                                    eprintln!(
-                                        "[gap set] fleet-server routing failed ({e:#}); falling through to local set path"
-                                    );
+                                    if canonical_mode {
+                                        eprintln!(
+                                            "[gap set] fleet-server routing failed ({e:#}); canonical mode refuses a local set to prevent split gap state"
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                    eprintln!("[gap set] fleet-server routing failed ({e:#}); falling through to local set path");
                                 }
                             }
                         }

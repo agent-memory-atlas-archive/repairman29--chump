@@ -4654,9 +4654,9 @@ events:
   - kind: gap_mutation_routed_to_server
     effect_metric: self
     emitter: src/main.rs chump gap reserve|set|ship (INFRA-3689, via src/gap_route.rs)
-    trigger: CHUMP_GAP_SERVER is set AND the local checkout's `main` branch is
-      verifiably behind origin/main (gap_route::should_route_to_server) — the
-      mutation is delegated to chump-fleet-server's POST /api/gap
+    trigger: CHUMP_GAP_SERVER is set and either the local checkout's `main`
+      branch is verifiably behind origin/main or CHUMP_GAP_SERVER_MODE=canonical
+      is set — the mutation is delegated to chump-fleet-server's POST /api/gap
       (crates/chump-fleet-server/src/gap_write.rs) instead of writing the
       local (non-canonical) state.db.
     consumers: [waste-tally, fleet-brief]

@@ -17,6 +17,7 @@ organs runner, and a now-dead-helsinki witness — none of it reproducible, half
 ## The one command
 ```
 chump-node-install.sh --role brain|muscle|all [--home DIR] [--self-test-only]
+                      [--control-plane-only] [--with-fleet-server]
 ```
 
 ## Phases (each idempotent, logged, verified)
@@ -25,7 +26,10 @@ chump-node-install.sh --role brain|muscle|all [--home DIR] [--self-test-only]
 2. **HOME** — ONE canonical layout under `$NODE_DIR` (default `~/.chumpnode`): `repo/` (clean
    checkout), `bin/chump`, `organs/`, `logs/`. State stays at the established `~/.chump/`
    (providers.env, state.db, AUTONOMY_LEVEL, heartbeat). No junk-drawer, no multi-checkout.
-3. **CREDS** — `~/.chump/providers.env` must exist with the required keys (OAuth, GH). Fail loud.
+3. **CREDS** — provider credentials enable worker execution, but they are not a
+   prerequisite for installation. Without them—or with `--control-plane-only`—the
+   node is a successful control plane: binary refresh, state, health, and (when
+   requested) the cockpit remain available while the worker is deliberately stopped.
 4. **BINARY** — a working `chump` binary at `$NODE_DIR/bin/chump` that passes a WARM smoke
    (answers a prompt). Termux builds on-device or via `deploy-pixel-node.sh` cross-compile.
 4b. **SEED** (INFRA-3633) — one-shot `chump gap sync --pull` loading the canonical
@@ -37,10 +41,16 @@ chump-node-install.sh --role brain|muscle|all [--home DIR] [--self-test-only]
 5. **ORGANS** — install the role's organ set under the host supervisor, from a manifest.
    *brain*: heartbeat, node-describe-register, discord-gateway, coordination.
    *muscle*: worker, build/CI. Reproducible — the organ list is data, not hand-`cp`.
-6. **SUPERVISE** — survive reboot: termux-boot hook (Termux) / systemd enable (Linux).
-7. **SELF-TEST** — the canary that defines "installed": host detected, creds valid, binary
-   answers, canonical store has a non-empty, docs/gaps-matching pickable gap count (INFRA-3633),
-   every role organ's supervisor entry is UP, heartbeat is fresh. GREEN → INSTALLED ✓.
+6. **SUPERVISE** — survive reboot: termux-boot hook (Termux) / systemd enable (Linux). Linux
+   installs the binary-refresh timer targeting the same `$NODE_DIR/bin/chump` the worker uses.
+   `--with-fleet-server` additionally installs the dashboard at
+   `$NODE_DIR/bin/chump-fleet-server`; it binds localhost by default. Tailnet exposure is an
+   explicit `CHUMP_FLEET_SERVER_BIND=<tailscale-ip>` operator choice.
+7. **SELF-TEST** — the canary that defines "installed": host detected, binary answers,
+   canonical store has a non-empty, docs/gaps-matching pickable gap count (INFRA-3633), every
+   applicable role organ's supervisor entry is UP, and heartbeat is fresh. GREEN reports either
+   `mode=work-ready` (provider worker enabled) or `mode=control-plane` (worker intentionally
+   stopped); neither state is misreported as the other.
 
 ## Role → node (settled architecture)
 - **Pixel = brain** (always-on, owned, in-pocket): coordination, registry, heartbeat,

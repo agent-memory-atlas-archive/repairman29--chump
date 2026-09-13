@@ -61,6 +61,11 @@ fn two_concurrent_reserves_return_distinct_ids() {
                 // CHUMP_REPO/CHUMP_HOME, so test gaps don't pollute the real registry.
                 ("CHUMP_REPO", &root_a_str),
                 ("CHUMP_HOME", &root_a_str),
+                // Isolate HOME too: the RESILIENT-069 farmer gate resolves
+                // oauth-token.json under $HOME/.chump; an empty tempdir HOME has
+                // no token so the gate fails open (green), keeping the test
+                // independent of the dev box's ambient token freshness.
+                ("HOME", &root_a_str),
             ])
             .args([
                 "gap",
@@ -91,6 +96,9 @@ fn two_concurrent_reserves_return_distinct_ids() {
                 // CHUMP_REPO/CHUMP_HOME, so test gaps don't pollute the real registry.
                 ("CHUMP_REPO", &root_b_str),
                 ("CHUMP_HOME", &root_b_str),
+                // Isolate HOME too (see session-a note): farmer gate reads
+                // $HOME/.chump/oauth-token.json; empty tempdir -> fails open.
+                ("HOME", &root_b_str),
             ])
             .args([
                 "gap",

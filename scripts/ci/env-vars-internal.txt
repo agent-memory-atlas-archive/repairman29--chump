@@ -2412,6 +2412,9 @@ CHUMP_RESERVE_ALLOW_STALE
 CHUMP_BATPHONE_TOKEN
 # detected in: (standard input)
 CHUMP_GAP_SERVER
+# Operator-only mode: makes the configured gap server authoritative and
+# refuses local mutations when it is unavailable.
+CHUMP_GAP_SERVER_MODE
 CHUMP_UNVERIFIED_SHIP_ESCALATE_N
 # detected in: (standard input)
 CHUMP_UNVERIFIED_SHIP_PARK_M

@@ -48,7 +48,7 @@ pub fn is_valid_op(op: &str) -> bool {
 }
 
 /// Inbound gap-mutation payload for `POST /api/gap`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct GapWriteRequest {
     pub op: String,
     #[serde(default)]
@@ -69,12 +69,46 @@ pub struct GapWriteRequest {
     pub acceptance_criteria: Option<Vec<String>>,
     #[serde(default)]
     pub status: Option<String>,
+    #[serde(default)]
+    pub depends_on: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub add_note: Option<String>,
+    #[serde(default)]
+    pub source_doc: Option<String>,
+    #[serde(default)]
+    pub opened_date: Option<String>,
+    #[serde(default)]
+    pub closed_date: Option<String>,
+    #[serde(default)]
+    pub closed_pr: Option<i64>,
+    #[serde(default)]
+    pub skills_required: Option<String>,
+    #[serde(default)]
+    pub preferred_backend: Option<String>,
+    #[serde(default)]
+    pub preferred_machine: Option<String>,
+    #[serde(default)]
+    pub estimated_minutes: Option<String>,
+    #[serde(default)]
+    pub required_model: Option<String>,
     /// RESILIENT-1030: `--evidence` text for the CREDIBLE-107 P0/P1
     /// RESILIENT/MISSION/CREDIBLE gate in `chump gap reserve`. Forwarded
     /// verbatim when non-empty; see `execute_gap_write`'s `reserve` arm for
     /// the exemption behavior when this is omitted.
     #[serde(default)]
     pub evidence: Option<String>,
+    #[serde(default)]
+    pub artifact_type: Option<String>,
+    #[serde(default)]
+    pub external_repo: Option<String>,
+    #[serde(default)]
+    pub force: Option<bool>,
+    #[serde(default)]
+    pub skip_obs_acs: Option<bool>,
+    #[serde(default)]
+    pub session: Option<String>,
 }
 
 /// Result of a successful gap mutation, serialized back to the caller.
@@ -114,6 +148,62 @@ fn evidence_gate_args(evidence: Option<&str>) -> Vec<String> {
         Some(ev) if !ev.is_empty() => vec!["--evidence".into(), ev.to_string()],
         _ => vec!["--no-evidence-required".into()],
     }
+}
+
+/// Translate the full `chump gap set` mutation surface into CLI flags. Keep
+/// this alongside the wire schema so a canonical client cannot report success
+/// while silently dropping fields it would have applied locally.
+fn append_string_arg(args: &mut Vec<String>, flag: &str, value: &Option<String>) -> bool {
+    if let Some(value) = value {
+        args.push(flag.into());
+        args.push(value.clone());
+        true
+    } else {
+        false
+    }
+}
+
+fn append_set_args(args: &mut Vec<String>, req: &GapWriteRequest) -> bool {
+    let mut touched = append_string_arg(args, "--title", &req.title);
+    touched |= append_string_arg(args, "--description", &req.description);
+    if let Some(v) = &req.priority {
+        args.push("--priority".into());
+        args.push(sanitize_priority(Some(v)));
+        touched = true;
+    }
+    if let Some(v) = &req.effort {
+        args.push("--effort".into());
+        args.push(sanitize_effort(Some(v)));
+        touched = true;
+    }
+    touched |= append_string_arg(args, "--status", &req.status);
+    touched |= append_string_arg(args, "--outcome", &req.outcome);
+    if let Some(ac_list) = &req.acceptance_criteria {
+        for ac in ac_list {
+            args.push("--acceptance-criteria".into());
+            args.push(ac.clone());
+            touched = true;
+        }
+    }
+    touched |= append_string_arg(args, "--depends-on", &req.depends_on);
+    touched |= append_string_arg(args, "--notes", &req.notes);
+    touched |= append_string_arg(args, "--add-note", &req.add_note);
+    touched |= append_string_arg(args, "--source-doc", &req.source_doc);
+    touched |= append_string_arg(args, "--opened-date", &req.opened_date);
+    touched |= append_string_arg(args, "--closed-date", &req.closed_date);
+    if let Some(v) = req.closed_pr {
+        args.push("--closed-pr".into());
+        args.push(v.to_string());
+        touched = true;
+    }
+    touched |= append_string_arg(args, "--skills-required", &req.skills_required);
+    touched |= append_string_arg(args, "--preferred-backend", &req.preferred_backend);
+    touched |= append_string_arg(args, "--preferred-machine", &req.preferred_machine);
+    touched |= append_string_arg(args, "--estimated-minutes", &req.estimated_minutes);
+    touched |= append_string_arg(args, "--required-model", &req.required_model);
+    touched |= append_string_arg(args, "--evidence", &req.evidence);
+    touched |= append_string_arg(args, "--artifact-type", &req.artifact_type);
+    touched
 }
 
 /// Execute a `reserve|set|ship` gap mutation canonically (blocking; call
@@ -161,6 +251,27 @@ pub fn execute_gap_write(
                 effort,
             ];
             reserve_args.extend(evidence_gate_args(req.evidence.as_deref()));
+            if req.force == Some(true) {
+                reserve_args.push("--force".into());
+            }
+            if req.skip_obs_acs == Some(true) {
+                reserve_args.push("--skip-obs-acs".into());
+            }
+            if let Some(ref ac_list) = req.acceptance_criteria {
+                let ac: Vec<&str> = ac_list
+                    .iter()
+                    .map(String::as_str)
+                    .filter(|item| !item.trim().is_empty())
+                    .collect();
+                if !ac.is_empty() {
+                    reserve_args.push("--acceptance-criteria".into());
+                    reserve_args.push(ac.join("|"));
+                }
+            }
+            if let Some(ref external_repo) = req.external_repo {
+                reserve_args.push("--external-repo".into());
+                reserve_args.push(external_repo.clone());
+            }
             let reserve_args_ref: Vec<&str> = reserve_args.iter().map(String::as_str).collect();
 
             let stdout = run_chump(&chump, repo_root, &reserve_args_ref)?;
@@ -178,33 +289,7 @@ pub fn execute_gap_write(
             // follow-up `gap set` so a P0/P1 mission with an outcome doesn't
             // silently drop it and 500 later on the MISSION-045 close gate.
             let mut set_args: Vec<String> = vec!["gap".into(), "set".into(), gap_id.clone()];
-            let mut has_set_fields = false;
-            if let Some(ref outcome) = req.outcome {
-                let outcome = outcome.trim();
-                if !outcome.is_empty() {
-                    set_args.push("--outcome".into());
-                    set_args.push(outcome.to_string());
-                    has_set_fields = true;
-                }
-            }
-            if let Some(ref desc) = req.description {
-                let desc = desc.trim();
-                if !desc.is_empty() {
-                    set_args.push("--description".into());
-                    set_args.push(desc.to_string());
-                    has_set_fields = true;
-                }
-            }
-            if let Some(ref ac_list) = req.acceptance_criteria {
-                for ac in ac_list {
-                    let ac = ac.trim();
-                    if !ac.is_empty() {
-                        set_args.push("--acceptance-criteria".into());
-                        set_args.push(ac.to_string());
-                        has_set_fields = true;
-                    }
-                }
-            }
+            let has_set_fields = append_set_args(&mut set_args, &req);
             if has_set_fields {
                 let args_ref: Vec<&str> = set_args.iter().map(String::as_str).collect();
                 run_chump(&chump, repo_root, &args_ref)?;
@@ -232,52 +317,7 @@ pub fn execute_gap_write(
                 anyhow::bail!("op=set: {gap_id:?} does not look like a gap id");
             }
             let mut set_args: Vec<String> = vec!["gap".into(), "set".into(), gap_id.to_string()];
-            let mut touched = false;
-            if let Some(ref v) = req.description {
-                if !v.trim().is_empty() {
-                    set_args.push("--description".into());
-                    set_args.push(v.trim().to_string());
-                    touched = true;
-                }
-            }
-            if let Some(ref v) = req.priority {
-                if !v.trim().is_empty() {
-                    set_args.push("--priority".into());
-                    set_args.push(sanitize_priority(Some(v)));
-                    touched = true;
-                }
-            }
-            if let Some(ref v) = req.effort {
-                if !v.trim().is_empty() {
-                    set_args.push("--effort".into());
-                    set_args.push(sanitize_effort(Some(v)));
-                    touched = true;
-                }
-            }
-            if let Some(ref v) = req.outcome {
-                if !v.trim().is_empty() {
-                    set_args.push("--outcome".into());
-                    set_args.push(v.trim().to_string());
-                    touched = true;
-                }
-            }
-            if let Some(ref v) = req.status {
-                if !v.trim().is_empty() {
-                    set_args.push("--status".into());
-                    set_args.push(v.trim().to_string());
-                    touched = true;
-                }
-            }
-            if let Some(ref ac_list) = req.acceptance_criteria {
-                for ac in ac_list {
-                    let ac = ac.trim();
-                    if !ac.is_empty() {
-                        set_args.push("--acceptance-criteria".into());
-                        set_args.push(ac.to_string());
-                        touched = true;
-                    }
-                }
-            }
+            let touched = append_set_args(&mut set_args, &req);
             if !touched {
                 anyhow::bail!("op=set requires at least one field to update");
             }
@@ -300,7 +340,17 @@ pub fn execute_gap_write(
             if !is_gap_id(gap_id) {
                 anyhow::bail!("op=ship: {gap_id:?} does not look like a gap id");
             }
-            run_chump(&chump, repo_root, &["gap", "ship", gap_id])?;
+            let mut ship_args = vec!["gap".to_string(), "ship".to_string(), gap_id.to_string()];
+            if let Some(closed_pr) = req.closed_pr {
+                ship_args.push("--closed-pr".into());
+                ship_args.push(closed_pr.to_string());
+            }
+            if let Some(ref session) = req.session {
+                ship_args.push("--session".into());
+                ship_args.push(session.clone());
+            }
+            let ship_args_ref: Vec<&str> = ship_args.iter().map(String::as_str).collect();
+            run_chump(&chump, repo_root, &ship_args_ref)?;
             Ok(GapWriteOutcome {
                 gap_id: gap_id.to_string(),
                 op: "ship".into(),
@@ -352,16 +402,7 @@ mod tests {
     fn execute_gap_write_rejects_bad_op_before_shelling_out() {
         let req = GapWriteRequest {
             op: "delete".into(),
-            domain: None,
-            title: None,
-            gap_id: None,
-            priority: None,
-            outcome: None,
-            effort: None,
-            description: None,
-            acceptance_criteria: None,
-            status: None,
-            evidence: None,
+            ..Default::default()
         };
         let err = execute_gap_write(Path::new("/nonexistent"), req).unwrap_err();
         assert!(err.to_string().contains("unsupported op"));
@@ -371,16 +412,8 @@ mod tests {
     fn execute_gap_write_reserve_requires_domain_and_title() {
         let req = GapWriteRequest {
             op: "reserve".into(),
-            domain: None,
             title: Some("t".into()),
-            gap_id: None,
-            priority: None,
-            outcome: None,
-            effort: None,
-            description: None,
-            acceptance_criteria: None,
-            status: None,
-            evidence: None,
+            ..Default::default()
         };
         let err = execute_gap_write(Path::new("/nonexistent"), req).unwrap_err();
         assert!(err.to_string().contains("domain"));
@@ -390,16 +423,7 @@ mod tests {
     fn execute_gap_write_set_requires_gap_id_and_a_field() {
         let req = GapWriteRequest {
             op: "set".into(),
-            domain: None,
-            title: None,
-            gap_id: None,
-            priority: None,
-            outcome: None,
-            effort: None,
-            description: None,
-            acceptance_criteria: None,
-            status: None,
-            evidence: None,
+            ..Default::default()
         };
         let err = execute_gap_write(Path::new("/nonexistent"), req).unwrap_err();
         assert!(err.to_string().contains("gap_id"));
@@ -409,19 +433,43 @@ mod tests {
     fn execute_gap_write_ship_requires_gap_id() {
         let req = GapWriteRequest {
             op: "ship".into(),
-            domain: None,
-            title: None,
-            gap_id: None,
-            priority: None,
-            outcome: None,
-            effort: None,
-            description: None,
-            acceptance_criteria: None,
-            status: None,
-            evidence: None,
+            ..Default::default()
         };
         let err = execute_gap_write(Path::new("/nonexistent"), req).unwrap_err();
         assert!(err.to_string().contains("gap_id"));
+    }
+
+    #[test]
+    fn append_set_args_preserves_nontrivial_mutation_fields() {
+        let req = GapWriteRequest {
+            title: Some("new title".into()),
+            depends_on: Some("INFRA-1,INFRA-2".into()),
+            add_note: Some("operator note".into()),
+            closed_pr: Some(42),
+            artifact_type: Some("design".into()),
+            ..Default::default()
+        };
+        let mut args = vec!["gap".into(), "set".into(), "INFRA-9".into()];
+
+        assert!(append_set_args(&mut args, &req));
+        assert_eq!(
+            args,
+            vec![
+                "gap",
+                "set",
+                "INFRA-9",
+                "--title",
+                "new title",
+                "--depends-on",
+                "INFRA-1,INFRA-2",
+                "--add-note",
+                "operator note",
+                "--closed-pr",
+                "42",
+                "--artifact-type",
+                "design",
+            ]
+        );
     }
 
     // RESILIENT-1030: the evidence gate must forward real evidence when

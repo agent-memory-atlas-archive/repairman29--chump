@@ -68,10 +68,12 @@ fi
 REPO_ROOT="${CHUMP_NODE_REPO:-}"
 if [[ -z "$REPO_ROOT" ]]; then
     for c in "$HOME/chump-host" "$HOME/Projects/Chump" "$HOME/chump"; do
-        [[ -d "$c/.git" ]] && { REPO_ROOT="$c"; break; }
+        git -C "$c" rev-parse --is-inside-work-tree >/dev/null 2>&1 && { REPO_ROOT="$c"; break; }
     done
 fi
-TARGET_BIN="${CHUMP_FLEET_SERVER_BIN:-$HOME/.local/bin/chump-fleet-server}"
+DEFAULT_TARGET_BIN="${CHUMP_NODE_DIR:+$CHUMP_NODE_DIR/bin/chump-fleet-server}"
+DEFAULT_TARGET_BIN="${DEFAULT_TARGET_BIN:-$HOME/.local/bin/chump-fleet-server}"
+TARGET_BIN="${CHUMP_FLEET_SERVER_BIN:-$DEFAULT_TARGET_BIN}"
 FLEET_UNIT="${CHUMP_FLEET_SERVER_UNIT:-chump-fleet-server.service}"
 NODE_AMBIENT="${NODE_AMBIENT:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 CHUMP_NODE_ARTIFACT_WORKFLOW="${CHUMP_NODE_ARTIFACT_WORKFLOW:-build-fleet-binaries.yml}"
@@ -100,7 +102,7 @@ _halt() {
 
 [[ "${CHUMP_SKIP_FLEET_SERVER_REFRESH:-0}" == "1" ]] && { log "BYPASS: CHUMP_SKIP_FLEET_SERVER_REFRESH=1"; exit 0; }
 
-if [[ -z "$REPO_ROOT" || ! -d "$REPO_ROOT/.git" ]]; then
+if [[ -z "$REPO_ROOT" ]] || ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     log "FATAL: no chump mirror checkout found (set CHUMP_NODE_REPO)"
     emit fleet_server_refresh_failed "\"reason\":\"no_repo\""
     exit 1

@@ -483,7 +483,7 @@ if [[ "${CHUMP_SKIP_NODE_REFRESH:-0}" == "1" ]]; then
     log "BYPASS: CHUMP_SKIP_NODE_REFRESH=1"; exit 0
 fi
 
-if [[ -z "$REPO_ROOT" || ! -d "$REPO_ROOT/.git" ]]; then
+if [[ -z "$REPO_ROOT" ]] || ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     log "FATAL: no chump mirror checkout found (set CHUMP_NODE_REPO)"
     emit node_binary_refresh_failed "\"reason\":\"no_repo\""
     exit 1

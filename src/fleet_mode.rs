@@ -120,6 +120,13 @@ mod tests {
         std::env::remove_var("CHUMP_AUTH_MODE");
         std::env::remove_var("CHUMP_OAUTH_TOKEN_FILE");
         std::env::remove_var("CHUMP_CASCADE_ENABLED");
+        // Isolate on-disk credential sources (CHUMP_HOME/config.toml, refresh
+        // file) so ambient login state on a dev box cannot leak an oauth token
+        // into these auth-detection tests and flip the resolved mode.
+        std::env::set_var(
+            "CHUMP_HOME",
+            std::env::temp_dir().join(format!("chump-authtest-{}", std::process::id())),
+        );
     }
 
     #[test]

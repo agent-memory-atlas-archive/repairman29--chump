@@ -9,7 +9,7 @@
 #
 # Usage:
 #   chump-node-install.sh --role brain|muscle|all [--home DIR] [--self-test-only] [--dry-run]
-#                          [--creds-file PATH]
+#                          [--creds-file PATH] [--control-plane-only] [--with-fleet-server]
 #
 # Zero-touch creds (INFRA-3629, the "bot told to do it" path — no human ever
 # opens an editor): supply creds from exactly ONE source and the CREDS phase
@@ -22,13 +22,18 @@
 # only the source used and which required keys are present/missing are logged.
 # If ~/.chump/providers.env already exists it is left alone (idempotent).
 #
-# Phases: DETECT -> HOME -> CREDS -> BINARY -> ORGANS -> SUPERVISE -> SELF-TEST
+# Phases: DETECT -> HOME -> CREDS -> BINARY -> ORGANS -> SUPERVISE -> SELF-TEST.
+# A missing or deliberately-disabled work provider produces a successful
+# control-plane install: inventory, health, refresh, and the cockpit substrate
+# are safe to use, while the token-consuming worker remains stopped.
 # Idempotent + non-destructive: installs into $NODE_DIR (default ~/.chumpnode) and
 # supervises via the host's native supervisor; state stays at ~/.chump.
 set -uo pipefail
 
 # ---------- args ----------
 ROLE="brain"; NODE_DIR="${CHUMP_NODE_DIR:-$HOME/.chumpnode}"; SELF_TEST_ONLY=0; DRY=0; CREDS_FILE=""
+CONTROL_PLANE_ONLY=0
+WITH_FLEET_SERVER=0
 RECONCILE_ORGANS_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,6 +41,8 @@ while [ $# -gt 0 ]; do
     --home) NODE_DIR="$2"; shift 2;;
     --self-test-only|--check) SELF_TEST_ONLY=1; shift;;
     --dry-run) DRY=1; shift;;
+    --control-plane-only) CONTROL_PLANE_ONLY=1; shift;;
+    --with-fleet-server) WITH_FLEET_SERVER=1; shift;;
     --creds-file) CREDS_FILE="$2"; shift 2;;
     # RESILIENT-1035: fast path for the per-node auto-deploy timer
     # (scripts/ops/node-refresh-chump.sh). A full run re-clones/re-fetches
@@ -138,7 +145,10 @@ svc_install() {
 [Unit]
 Description=ChumpOS organ $name
 [Service]
-ExecStart=$cmd
+# providers.env accepts both KEY=value and `export KEY=value`; source it via
+# bash so every installer-supported form reaches the organ without writing a
+# secret value into the unit file.
+ExecStart=/bin/bash -c 'set -a; [ -r "$CREDS" ] && . "$CREDS"; set +a; exec "$cmd"'
 Restart=always
 Environment=CHUMP_NODE_DIR=$NODE_DIR
 [Install]
@@ -147,6 +157,14 @@ EOF"
       run "systemctl daemon-reload"
       ;;
     *) run "mkdir -p '$SVC_DIR'"; run "echo '$cmd' > '$SVC_DIR/$name.cmd'";;
+  esac
+}
+svc_down() {
+  local name="$1"
+  case "$SUPERVISOR" in
+    runit) run "sv down '$SVC_DIR/$name' 2>/dev/null || true";;
+    systemd) run "systemctl disable --now 'chump-$name' 2>/dev/null || true";;
+    *) :;;
   esac
 }
 svc_up() {
@@ -267,6 +285,29 @@ REQUIRED_CRED_KEYS="CLAUDE_CODE_OAUTH_TOKEN GH_TOKEN"
 # operator does wire one in — no separate manual step or editor.
 OPTIONAL_CRED_KEYS="DISCORD_TOKEN CHUMP_TEAM_URL CHUMP_TEAM_API_KEY"
 
+# A node remains useful before an LLM provider is configured: it can keep a
+# verified binary current, expose local state, retain its health signals, and
+# accept a provider later. Keep "provider-ready" separate from "installed" so
+# a token outage never turns first boot into a false failure. The explicit
+# --control-plane-only switch also covers a present-but-exhausted subscription.
+provider_creds_ready() {
+  [ -f "$CREDS" ] || return 1
+  local k
+  for k in $REQUIRED_CRED_KEYS; do
+    grep -qE "^(export )?$k=.+" "$CREDS" || return 1
+  done
+  return 0
+}
+
+worker_execution_enabled() {
+  [ "$CONTROL_PLANE_ONLY" != 1 ] || return 1
+  if [ -n "${CHUMP_NODE_WORK_ENABLED:-}" ]; then
+    [ "$CHUMP_NODE_WORK_ENABLED" = 1 ]
+  else
+    provider_creds_ready
+  fi
+}
+
 # Zero-touch acquire (INFRA-3629): materialize $CREDS from --creds-file or
 # $CHUMP_BOOTSTRAP_CREDS. Never echoes secret VALUES — only which source was
 # used. Leaves an existing file untouched (idempotent, no clobber).
@@ -378,9 +419,9 @@ EOF
 check_creds() {
   materialize_creds
   [ -f "$CREDS" ] || { no "creds missing: $CREDS (supply --creds-file PATH or \$CHUMP_BOOTSTRAP_CREDS)"; return 1; }
-  local missing=""
+  local missing="" k
   for k in $REQUIRED_CRED_KEYS; do
-    grep -qE "^(export )?$k=" "$CREDS" || missing="$missing $k"
+    grep -qE "^(export )?$k=.+" "$CREDS" || missing="$missing $k"
   done
   [ -n "$missing" ] && { no "creds present but missing keys:$missing — supply via --creds-file/\$CHUMP_BOOTSTRAP_CREDS and re-run"; return 1; }
   ok "creds ok ($(grep -cE '^(export )?[A-Z_]+=' "$CREDS") keys, incl OAuth+GH, mode $(stat -c %a "$CREDS" 2>/dev/null || stat -f %Lp "$CREDS" 2>/dev/null))"
@@ -414,6 +455,11 @@ write_node_env() {
   local _chump_localhost="localhost"
   team_url="${team_url:-http://${_chump_localhost}:3000}"
   local store_backend="${CHUMP_STORE_BACKEND:-postgrest}"
+  local work_enabled=0 node_mode="control-plane"
+  if [ "$CONTROL_PLANE_ONLY" != 1 ] && provider_creds_ready; then
+    work_enabled=1
+    node_mode="work-ready"
+  fi
   mkdir -p "$STATE_DIR"
   ( umask 077
     {
@@ -424,13 +470,17 @@ write_node_env() {
       # RESILIENT-1083: persist this node's role OUTSIDE the repo so the recurring
       # organ-reconcile can self-scope to it (and survive `git reset --hard`).
       printf 'export CHUMP_NODE_ROLE=%s\n' "$ROLE"
+      # OOTB contract: safe control-plane operation is valid without a provider;
+      # workers start only after a credentialed re-install enables work mode.
+      printf 'export CHUMP_NODE_WORK_ENABLED=%s\n' "$work_enabled"
+      printf 'export CHUMP_NODE_MODE=%s\n' "$node_mode"
     } > "$node_env"
   )
   # Source now so subsequent phases inherit the canonical settings.
   # shellcheck disable=SC1090
   . "$node_env"
-  export CHUMP_STATE_DIR CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE
-  ok "node.env written + sourced: $node_env"
+  export CHUMP_STATE_DIR CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE CHUMP_NODE_WORK_ENABLED CHUMP_NODE_MODE
+  ok "node.env written + sourced: $node_env (mode=$CHUMP_NODE_MODE)"
 }
 
 # ---------- 4. BINARY ----------
@@ -1167,7 +1217,13 @@ FHS"
   local list; case "$ROLE" in brain) list="$(brain_organs; common_organs)";; muscle) list="$(muscle_organs; common_organs)";; all) list="$(brain_organs; muscle_organs; common_organs)";; esac
   echo "$list" | while IFS='|' read -r name exec; do
     [ -z "$name" ] && continue
-    svc_install "$name" "$exec"; svc_up "$name"; ok "organ installed+up: $name"
+    svc_install "$name" "$exec"
+    if [ "$name" = worker ] && ! worker_execution_enabled; then
+      svc_down "$name"
+      info ORGANS "worker installed but deliberately stopped (mode=control-plane; add working provider credentials and re-run without --control-plane-only to enable it)"
+      continue
+    fi
+    svc_up "$name"; ok "organ installed+up: $name"
   done
   # RESILIENT-1055: PLACE the role's manifest unit files (host-rewritten) BEFORE
   # reconcile enables them — otherwise reconcile's `enable --now` hits a
@@ -1245,6 +1301,63 @@ ensure_eyes() {
 }
 
 # ---------- 6. SUPERVISE (survive reboot) ----------
+# Linux nodes must refresh the same verified binary the worker resolves
+# ($NODE_DIR/bin/chump). Calling the existing installer here closes the old
+# hand-run gap where a fresh node had a one-time binary but no durable update
+# path after its first boot.
+install_binary_refresh() {
+  [ "$HOST_KIND" = linux-systemd ] || return 0
+  local refresh="$NODE_DIR/repo/scripts/setup/install-node-refresh-systemd.sh"
+  [ -f "$refresh" ] || refresh="$(dirname "$0")/install-node-refresh-systemd.sh"
+  if [ ! -f "$refresh" ]; then
+    no "binary refresh installer missing: $refresh"
+    return 1
+  fi
+  if [ "$DRY" = 1 ]; then
+    echo "  DRY: CHUMP_NODE_REPO='$NODE_DIR/repo' CHUMP_NODE_BIN='$BIN' bash '$refresh'"
+    return 0
+  fi
+  if CHUMP_NODE_REPO="$NODE_DIR/repo" CHUMP_NODE_BIN="$BIN" CHUMP_NODE_ROLE="$ROLE" bash "$refresh"; then
+    ok "binary refresh timer installed for canonical binary: $BIN"
+  else
+    no "binary refresh timer install failed; node cannot claim a durable installation"
+    return 1
+  fi
+}
+
+# The cockpit is an opt-in control-plane organ: nodes that only need a local
+# CLI do not need to expose HTTP, while CJ/Pixel can request it explicitly with
+# --with-fleet-server. The server installer itself only pulls a prebuilt binary
+# (never cargo-builds on a live node); make its absence a hard failure here so
+# an opted-in cockpit is never reported as installed when it cannot serve.
+install_fleet_server() {
+  [ "$WITH_FLEET_SERVER" = 1 ] || return 0
+  [ "$HOST_KIND" = linux-systemd ] || {
+    info FLEET-SERVER "not installed on host=$HOST_KIND (Linux systemd only)"
+    return 0
+  }
+  local installer="$NODE_DIR/repo/scripts/setup/install-fleet-server-node.sh"
+  [ -f "$installer" ] || installer="$(dirname "$0")/install-fleet-server-node.sh"
+  if [ ! -f "$installer" ]; then
+    no "fleet-server installer missing: $installer"
+    return 1
+  fi
+  local server_bin="$NODE_DIR/bin/chump-fleet-server"
+  if [ "$DRY" = 1 ]; then
+    echo "  DRY: CHUMP_NODE_REPO='$NODE_DIR/repo' CHUMP_NODE_DIR='$NODE_DIR' CHUMP_FLEET_SERVER_BIN='$server_bin' bash '$installer'"
+    return 0
+  fi
+  if ! CHUMP_NODE_REPO="$NODE_DIR/repo" CHUMP_NODE_DIR="$NODE_DIR" CHUMP_FLEET_SERVER_BIN="$server_bin" bash "$installer"; then
+    no "fleet-server installer failed"
+    return 1
+  fi
+  if [ ! -x "$server_bin" ]; then
+    no "fleet-server binary unavailable after install: $server_bin (wait for a prebuilt artifact, then re-run)"
+    return 1
+  fi
+  ok "fleet-server installed at canonical node path: $server_bin"
+}
+
 install_supervise() {
   case "$HOST_KIND" in
     termux)
@@ -1256,7 +1369,11 @@ sshd 2>/dev/null; termux-wake-lock 2>/dev/null
 BT"
       run "chmod +x '$BOOT_DIR/10-chump-node.sh'"; ok "reboot hook: $BOOT_DIR/10-chump-node.sh"
       ;;
-    linux-systemd) ok "systemd enables organs on boot (done in svc_up)";;
+    linux-systemd)
+      ok "systemd enables organs on boot (done in svc_up)"
+      install_binary_refresh
+      install_fleet_server
+      ;;
     *) info SUPERVISE "manual supervision on $HOST_KIND";;
   esac
 }
@@ -1284,10 +1401,26 @@ self_test_dry_run_organs() {
 self_test() {
   info SELF-TEST "verifying node is installed & healthy"
   if [ "$DRY" = 1 ]; then self_test_dry_run_organs; return 0; fi
+  # `--self-test-only` starts a fresh process; restore the persisted mode so it
+  # judges a control-plane install by its honest contract rather than demanding
+  # a provider that was intentionally absent at first boot.
+  local node_env="$STATE_DIR/node.env"
+  if [ -f "$node_env" ]; then
+    # shellcheck disable=SC1090
+    . "$node_env"
+  fi
+  if [ "$CONTROL_PLANE_ONLY" = 1 ]; then
+    CHUMP_NODE_WORK_ENABLED=0
+    CHUMP_NODE_MODE="control-plane"
+  fi
   local fail=0
   [ -n "$HOST_KIND" ] && ok "host detected: $HOST_KIND/$ARCH" || { no "host detect"; fail=1; }
-  check_creds || fail=1
-  if [ -d "$NODE_DIR/repo/.git" ]; then
+  if provider_creds_ready && [ "${CHUMP_NODE_WORK_ENABLED:-1}" = 1 ]; then
+    check_creds || fail=1
+  else
+    info CREDS "provider unavailable or intentionally disabled — control-plane mode is healthy; worker execution remains stopped"
+  fi
+  if git -C "$NODE_DIR/repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     local head_sha origin_sha
     head_sha="$(git -C "$NODE_DIR/repo" rev-parse HEAD 2>/dev/null)"
     origin_sha="$(git -C "$NODE_DIR/repo" rev-parse origin/main 2>/dev/null)"
@@ -1332,6 +1465,10 @@ self_test() {
   # process-organ-heal, must be part of the "installed" bar for every role)
   local list; case "$ROLE" in brain) list="$(brain_organs; common_organs)";; muscle) list="$(muscle_organs; common_organs)";; all) list="$(brain_organs; muscle_organs; common_organs)";; esac
   echo "$list" | while IFS='|' read -r name _; do [ -z "$name" ] && continue
+    if [ "$name" = worker ] && ! worker_execution_enabled; then
+      info SELF-TEST "worker intentionally stopped (control-plane mode)"
+      continue
+    fi
     if [ "$(svc_status "$name")" = up ]; then ok "organ up: $name"; else no "organ DOWN: $name"; fi
   done
   # heartbeat freshness (< 180s old)
@@ -1341,7 +1478,11 @@ self_test() {
     [ "$age" -lt 180 ] 2>/dev/null && ok "heartbeat fresh (${age}s)" || no "heartbeat stale (${age}s)"
   else no "no heartbeat yet (organ just started; re-run --self-test-only in ~70s)"; fi
   # aggregate organ-down check (subshell above can't set fail; re-check here)
-  echo "$list" | while IFS='|' read -r name _; do [ -z "$name" ] && continue; [ "$(svc_status "$name")" = up ] || exit 1; done || fail=1
+  echo "$list" | while IFS='|' read -r name _; do
+    [ -z "$name" ] && continue
+    [ "$name" = worker ] && ! worker_execution_enabled && continue
+    [ "$(svc_status "$name")" = up ] || exit 1
+  done || fail=1
   # RESILIENT-746: the role's MANIFEST-declared organ set (organ-manifest.txt,
   # role-scoped via organ_role_filter) must also be UP — the ORGANS phase is
   # only "installed" once the fleet-wide organ-reconcile source of truth
@@ -1389,7 +1530,7 @@ self_test() {
     else no "eyes: almanac organ incomplete (re-run: bash $eyes_script)"; fail=1; fi
   fi
   echo
-  if [ "$fail" = 0 ]; then printf '\033[42m INSTALLED ✓ \033[0m role=%s host=%s\n' "$ROLE" "$HOST_KIND"; return 0
+  if [ "$fail" = 0 ]; then printf '\033[42m INSTALLED ✓ \033[0m role=%s host=%s mode=%s\n' "$ROLE" "$HOST_KIND" "${CHUMP_NODE_MODE:-work-ready}"; return 0
   else printf '\033[41m NOT FULLY INSTALLED \033[0m — fix the ✗ above\n'; return 1; fi
 }
 
@@ -1412,14 +1553,20 @@ fi
 if [ "$SELF_TEST_ONLY" = 1 ]; then self_test; exit $?; fi
 toolchain_preflight
 ensure_home || { no "HOME phase failed (repo clone/fetch) — fix and re-run"; exit 1; }
-check_creds || info CREDS "fix creds before organs will authenticate"
+if check_creds; then
+  info CREDS "provider credentials accepted — worker mode will be enabled"
+elif [ "$CONTROL_PLANE_ONLY" = 1 ]; then
+  info CREDS "provider intentionally disabled — installing control-plane only"
+else
+  info CREDS "provider unavailable — installing a healthy control plane; worker remains stopped until credentials are supplied"
+fi
 write_node_env
 ensure_binary || info BINARY "install a binary, then re-run"
 ensure_seed
 install_organs
 ensure_substrate
 ensure_eyes
-install_supervise
+install_supervise || { no "SUPERVISE phase failed — fix the binary refresh timer and re-run"; exit 1; }
 # RESILIENT-318: install the self-management suite (orchestrator + reapers + disk-monitor).
 # RESILIENT-1015: SUBSTRATE/EYES are already async (see run_phase_async), so
 # they no longer eat this budget — this check guards the one remaining

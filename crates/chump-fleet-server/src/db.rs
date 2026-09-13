@@ -62,6 +62,13 @@ impl FleetStore {
     /// exists even if INFRA-2174 hasn't run yet, so the server starts cleanly
     /// on a fresh or fixture DB.
     pub fn open(path: &Path) -> Result<Self> {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating fleet db directory {}", parent.display()))?;
+        }
         let conn = Connection::open(path)
             .with_context(|| format!("opening fleet db at {}", path.display()))?;
 
@@ -385,4 +392,28 @@ pub fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FleetStore;
+
+    #[test]
+    fn open_creates_a_missing_db_parent_directory() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp
+            .path()
+            .join("fresh")
+            .join(".chump")
+            .join("fleet_events.db");
+
+        let store = FleetStore::open(&path).expect("fresh fleet store opens");
+
+        assert!(
+            path.is_file(),
+            "fleet DB should be created: {}",
+            path.display()
+        );
+        assert!(store.all_session_ids().expect("read fresh db").is_empty());
+    }
 }

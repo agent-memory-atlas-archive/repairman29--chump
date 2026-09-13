@@ -92,16 +92,18 @@ iron, e.g. CJ):
   `chump gap <op>` command against **its own** `repo_root`'s state.db — the
   write still goes through the normal CLI path into store #1, just on a
   different machine.
-- **Client side**: `src/gap_route.rs` — when `CHUMP_GAP_SERVER` is set
-  *and* the client's local `main` is verifiably behind `origin/main`
-  (`gap_route::should_route_to_server`), the mutation is POSTed to the
-  server instead of calling `GapStore::reserve|set_fields|ship` locally.
-  Unset `CHUMP_GAP_SERVER` (the default) or a canonical local checkout ⇒
-  unchanged local-first behavior.
-- **Fail-closed on routing failure**: if the server is unreachable or
-  errors, the client does **not** silently fall back to writing its own
-  (known-stale) `state.db` — see INFRA-3687 (`GapStore::behind_origin_main`)
-  for the companion fail-closed gate inside `reserve()` itself.
+- **Client side**: `src/gap_route.rs` supports two explicit modes. With only
+  `CHUMP_GAP_SERVER` set, a client routes only when its local `main` is
+  verifiably behind `origin/main` (`gap_route::should_route_to_server`). Set
+  `CHUMP_GAP_SERVER_MODE=canonical` on the Mac after CJ is ready: all
+  `reserve|set|ship` mutations route before opening the local `state.db`, so
+  a stale or damaged replica cannot block recovery. Canonical mode requires a
+  non-empty server URL and fails closed; an unset server keeps the default
+  local-first behavior for offline-capable fleet nodes.
+- **Fail-closed on routing failure**: if the server is unreachable or errors,
+  canonical mode never opens or falls back to the local replica. Stale-only
+  compatibility mode retains its original local-first behavior when staleness
+  cannot be established.
 - **Observability**: every successful route emits `kind=gap_mutation_routed_to_server`
   to `ambient.jsonl` (`docs/observability/EVENT_REGISTRY.yaml`) with `op`,
   `server`, and `behind` — so a reconcile pass can distinguish

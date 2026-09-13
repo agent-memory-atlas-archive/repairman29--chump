@@ -21,7 +21,10 @@
 //! The whole routing path is gated behind the `CHUMP_GAP_SERVER` env var
 //! (a base URL, e.g. `http://127.0.0.1:7070`) being set. Unset ==
 //! unconditionally unchanged local-first behavior — fleet nodes stay fast
-//! and offline-capable by default.
+//! and offline-capable by default. Set `CHUMP_GAP_SERVER_MODE=canonical` on
+//! an operator client once the owned server is the authority: every mutation
+//! then routes there and a server failure fails closed instead of splitting
+//! state between the client and the node.
 //!
 //! ## Ambient events
 //!
@@ -41,21 +44,39 @@ use serde::{Deserialize, Serialize};
 /// mutations to, e.g. `http://127.0.0.1:7070`. Unset => routing is fully
 /// disabled and the CLI behaves exactly as before this gap.
 pub const GAP_SERVER_ENV: &str = "CHUMP_GAP_SERVER";
+/// Env var: choose `canonical` to route every mutation to `CHUMP_GAP_SERVER`,
+/// including when the local checkout is currently up to date. Any other value
+/// retains the stale-client-only behavior for backwards compatibility.
+pub const GAP_SERVER_MODE_ENV: &str = "CHUMP_GAP_SERVER_MODE";
 /// Env var: bearer token for the fleet-server's `/api/gap` (same token as
 /// `/api/mission`'s `CHUMP_BATPHONE_TOKEN` — one bat-phone, two endpoints).
 pub const BATPHONE_TOKEN_ENV: &str = "CHUMP_BATPHONE_TOKEN";
 
+/// Whether this client treats the configured fleet-server as the sole gap
+/// authority. Kept separate from the pure routing decision below so tests do
+/// not need to mutate process environment.
+pub fn canonical_server_mode() -> bool {
+    matches!(
+        std::env::var(GAP_SERVER_MODE_ENV)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "canonical" | "always"
+    )
+}
+
 /// Pure decision function (the INFRA-3689 test seam). Route a gap mutation
 /// to the fleet-server instead of writing the local state.db when BOTH:
 ///   - the operator opted in via `CHUMP_GAP_SERVER` (`server_set`)
-///   - the local canonical checkout is *verifiably* behind `origin/main`
-///     (`behind` is `Some(n)` with `n > 0`)
+///   - `canonical_mode` is set, OR the local canonical checkout is *verifiably*
+///     behind `origin/main` (`behind` is `Some(n)` with `n > 0`)
 ///
 /// `behind == None` (staleness unknown) does NOT route: an unverifiable
-/// check falls through to the existing local-first path, where
-/// INFRA-3687's fail-closed `reserve()` gate governs canonical writes.
-pub fn should_route_to_server(behind: Option<u64>, server_set: bool) -> bool {
-    server_set && behind.is_some_and(|n| n > 0)
+/// check falls through to the existing local-first path unless canonical mode
+/// is explicitly selected.
+pub fn should_route_to_server(behind: Option<u64>, server_set: bool, canonical_mode: bool) -> bool {
+    server_set && (canonical_mode || behind.is_some_and(|n| n > 0))
 }
 
 /// Body posted to the fleet-server's `POST /api/gap` (INFRA-3689), mirroring
@@ -81,6 +102,42 @@ pub struct GapMutationBody {
     pub acceptance_criteria: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depends_on: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub add_note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_doc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opened_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_pr: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills_required: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_backend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_machine: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_minutes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub force: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skip_obs_acs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }
 
 /// Response from `POST /api/gap`, mirroring
@@ -131,27 +188,33 @@ mod tests {
 
     #[test]
     fn routes_when_stale_and_server_set() {
-        assert!(should_route_to_server(Some(1), true));
-        assert!(should_route_to_server(Some(42), true));
+        assert!(should_route_to_server(Some(1), true, false));
+        assert!(should_route_to_server(Some(42), true, false));
     }
 
     #[test]
     fn stays_local_when_canonical() {
-        assert!(!should_route_to_server(Some(0), true));
+        assert!(!should_route_to_server(Some(0), true, false));
     }
 
     #[test]
     fn stays_local_when_staleness_unverifiable() {
         // None must never be treated as "definitely stale" — an
         // unverifiable check falls through to the existing local path.
-        assert!(!should_route_to_server(None, true));
+        assert!(!should_route_to_server(None, true, false));
     }
 
     #[test]
     fn stays_local_when_server_not_set() {
-        assert!(!should_route_to_server(Some(5), false));
-        assert!(!should_route_to_server(None, false));
-        assert!(!should_route_to_server(Some(0), false));
+        assert!(!should_route_to_server(Some(5), false, false));
+        assert!(!should_route_to_server(None, false, true));
+        assert!(!should_route_to_server(Some(0), false, true));
+    }
+
+    #[test]
+    fn canonical_mode_routes_even_when_local_state_is_current_or_unverifiable() {
+        assert!(should_route_to_server(Some(0), true, true));
+        assert!(should_route_to_server(None, true, true));
     }
 
     #[test]
@@ -160,11 +223,15 @@ mod tests {
             op: "reserve".into(),
             domain: Some("INFRA".into()),
             title: Some("t".into()),
+            external_repo: Some("owner/repo".into()),
+            force: Some(true),
             ..Default::default()
         };
         let json = serde_json::to_value(&body).unwrap();
         assert_eq!(json["op"], "reserve");
         assert_eq!(json["domain"], "INFRA");
+        assert_eq!(json["external_repo"], "owner/repo");
+        assert_eq!(json["force"], true);
         assert!(
             json.get("gap_id").is_none(),
             "unset fields must be omitted: {json:?}"

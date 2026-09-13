@@ -30,6 +30,7 @@ name = "chump-fleet-server"
 path = "src/main.rs"
 
 [dev-dependencies]
+tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 
