@@ -55,8 +55,8 @@ fi
 # env_trim_eq|env_flags|env_bool helpers, C getenv, Python os.environ|os.getenv,
 # JS process.env, Deno.env). A name that appears ONLY as a bare string mention
 # (doc/registry/comment/absence-assertion/concat-fragment) has no read-site and is
-# NOT a functional bypass. Generous by design: err toward COUNTING so a real var is
-# never dropped; only provable phantoms fall out.
+# NOT a functional bypass. Feed it a COMMENT-STRIPPED haystack (see _strip_comments
+# + _count_bypass_debt) so a read-shaped string inside a comment is never a hit.
 _bypass_var_has_readsite() {
   local _v="$1"; shift
   local _tmpl='(\$\{?VAR\b|env::var(_os)?\([[:space:]]*"?VAR|env_trim_eq\([[:space:]]*"?VAR|env_flags::[a-z_]+\([[:space:]]*"?VAR|env_bool\([[:space:]]*"?VAR|getenv\([[:space:]]*"?VAR|os\.getenv\([[:space:]]*"?VAR|os\.environ[^)]*VAR|process\.env[.\[][[:space:]]*"?VAR|Deno\.env[^)]*VAR|(^|[^A-Za-z0-9_])VAR=)'
@@ -64,59 +64,92 @@ _bypass_var_has_readsite() {
   grep -rqE "$_rx" "$@" 2>/dev/null
 }
 
+# ── INFRA-6073: comment stripper (the honest-counting fix). RESILIENT-298 made the
+# counter require a functional read-site, but it tested that read-site against a RAW
+# haystack that still included COMMENT lines — so a read-SHAPED string sitting inside
+# a comment (e.g. a `// see env::var("CHUMP_X_BYPASS")` doc line, or a `# CHUMP_X_SKIP=1`
+# usage note) matched the read-site regex and counted as a phantom. That is the exact
+# self-defeating failure INFRA-6073 tracks: PR #4637 tripped `count 219 > ceiling 218`
+# purely by NAMING CHUMP_ROT_REAPER_SPARE_RECOVERABLE in a code comment, blocking the
+# very rot-reaper fix meant to reduce debt. This filter removes comment content before
+# the read-site test, so ONLY real code reads are counted. It removes: full-line comments
+# (leading #, //, *, /*, or > markdown-quote) and trailing inline # / // comments.
+# Deterministic, language-agnostic, one awk pass (fast in CI). Over-stripping can only
+# ever DROP a would-be hit (never invent one), so it cannot hide a genuine bypass.
+_strip_comments() {
+  awk '
+    {
+      s = $0; sub(/^[ \t]+/, "", s)
+      if (s ~ /^#/)    next   # shell / python / yaml / toml full-line comment
+      if (s ~ /^\/\//) next   # rust / js / c++ full-line comment
+      if (s ~ /^\*/)   next   # block-comment body line
+      if (s ~ /^\/\*/) next   # block-comment opener
+      if (s ~ /^>/)    next   # markdown blockquote
+      line = $0
+      sub(/[ \t]+#.*$/,   "", line)   # trailing shell/py comment
+      sub(/[ \t]+\/\/.*$/, "", line)  # trailing rust/js comment
+      print line
+    }'
+}
+
+# ── INFRA-6073: count DISTINCT bypass-class vars that have a real read-site under
+# the given source roots. Shared by the debt-ceiling block and its self-test so the
+# test exercises the real counting path. Excludes this gate's own bookkeeping files
+# (self-test fixtures, ceiling changelog, allowlist, env registry) and docs/*.md, and
+# strips comments before matching — so the count is real read-backed bypass debt, not
+# string-mentions in prose. NOTE: scripts/ci/test-*.sh files are NOT excluded — in this
+# repo those ARE the real CI gate implementations (e.g. this file, test-silent-failure-
+# tax.sh), so their bypass reads are genuine debt. Prints the integer count to stdout.
+_count_bypass_debt() {
+  local _cands _hayfile _v _n=0
+  _cands="$(grep -rhoE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP|IGNORE|_CHECK|NO_)[A-Z0-9_]*' \
+            "$@" 2>/dev/null \
+            --exclude='test-no-new-bypass-env-vars.sh' \
+            --exclude='bypass-var-ceiling.txt' \
+            --exclude='bypass-env-var-allowlist.txt' \
+            --exclude='env-vars-internal.txt' \
+            --exclude='*.md' \
+            | grep -vE '_CMD$' | sort -u)"
+  # Speed: build a one-pass, comment-stripped haystack of every line mentioning a
+  # candidate token, then read-site-test each candidate against that small file.
+  _hayfile="$(mktemp)"
+  grep -rhE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP|IGNORE|_CHECK|NO_)' \
+    "$@" 2>/dev/null \
+    --exclude='test-no-new-bypass-env-vars.sh' \
+    --exclude='bypass-var-ceiling.txt' \
+    --exclude='bypass-env-var-allowlist.txt' \
+    --exclude='env-vars-internal.txt' \
+    --exclude='*.md' \
+    | _strip_comments > "$_hayfile" || true
+  while IFS= read -r _v; do
+    [ -z "$_v" ] && continue
+    if _bypass_var_has_readsite "$_v" "$_hayfile"; then
+      _n=$((_n + 1))
+    fi
+  done <<< "$_cands"
+  rm -f "$_hayfile"
+  printf '%s\n' "$_n"
+}
+
 if [[ "${1:-}" != "--self-test" ]]; then
   _ceiling_file="$REPO_ROOT/scripts/ci/bypass-var-ceiling.txt"
   _ceiling="$(grep -oE '^[0-9]+' "$_ceiling_file" 2>/dev/null | head -1 || true)"
   _ceiling="${_ceiling:-99999}"
-  # Counter correctness (RESILIENT-297). The scan matched var-name STRINGS in any
-  # file under scripts/src/crates — including prose that merely NAMES a var rather
-  # than using it. Three classes were inflating the count as a result:
-  #   1. --exclude this linter's own file. Its --self-test cases below embed
-  #      synthetic props (CHUMP_BRAND_NEW_BYPASS, CHUMP_XYZ_SKIP, ...) to exercise
-  #      the diff-scanner — test doubles, never real toggles.
-  #   2. --exclude the ceiling file itself. bypass-var-ceiling.txt is this gate's
-  #      DOCUMENTATION: its changelog names every var it signs off on. Scanning it
-  #      double-counts each documented var (once at its real use-site, once in the
-  #      prose) and, worse, counts vars that live ONLY in the changelog — so the
-  #      act of DOCUMENTING a sign-off raised the very count it documents. The
-  #      linter's own bookkeeping files must not be part of its input.
-  #   3. Drop command-VALUED vars (…_CMD). CHUMP_DUTY_OFFICER_REALITY_CHECK_CMD
-  #      names a command to RUN — not a check-disabling toggle; the greedy _CHECK
-  #      branch matched it as a false positive.
-  # This is a ratchet-DOWN of the honest baseline, not a bypass: the true count of
-  # real bypass USE-SITES falls, and the ceiling file falls with it.
-  # RESILIENT-298: count only bypass vars that have a FUNCTIONAL READ-SITE. The bare
-  # string-mention scan over-counted PHANTOMS — names that appear ONLY in documentation,
-  # registry lines (env-vars-internal.txt), absence-assertion guards (a test grepping
-  # that a DELETED var is *not* present), string-concat fragments of removed names,
-  # include-guard sentinels (_CHUMP_*_LOADED), or out-of-scope toggles read in web/
-  # (localStorage) or .github/ (Actions repo-vars). So the act of DOCUMENTING or
-  # GUARDING a var inflated the very count it documents. A real bypass var must be READ
-  # to function, so requiring a read-site cannot hide a genuine bypass (the per-PR
-  # diff-scanner below still blocks any NEW unallowlisted var at add-time) — it only
-  # stops counting phantoms. Honest instrument: the ceiling measures real read-backed
-  # bypass debt, not string mentions. Before/after on main: 221 (mentions) -> 211 (read-backed, excl. linter meta-files).
-  _cands="$(grep -rhoE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP|IGNORE|_CHECK|NO_)[A-Z0-9_]*' \
-            "$REPO_ROOT/scripts" "$REPO_ROOT/src" "$REPO_ROOT/crates" 2>/dev/null \
-            --exclude='test-no-new-bypass-env-vars.sh' \
-            --exclude='bypass-var-ceiling.txt' \
-            | grep -vE '_CMD$' | sort -u)"
-  # Speed: build a one-pass haystack of every line that mentions a candidate token,
-  # then read-site-test each candidate against that small in-memory file (grep -rq on a
-  # single file). Identical detection to scanning the tree per-var, ~1s instead of ~12s.
-  _hayfile="$(mktemp)"
-  grep -rhE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP|IGNORE|_CHECK|NO_)' \
-    "$REPO_ROOT/scripts" "$REPO_ROOT/src" "$REPO_ROOT/crates" 2>/dev/null \
-    --exclude='test-no-new-bypass-env-vars.sh' \
-    --exclude='bypass-var-ceiling.txt' > "$_hayfile" || true
-  _now=0
-  while IFS= read -r _v; do
-    [ -z "$_v" ] && continue
-    if _bypass_var_has_readsite "$_v" "$_hayfile"; then
-      _now=$((_now + 1))
-    fi
-  done <<< "$_cands"
-  rm -f "$_hayfile"
+  # Counter correctness lineage:
+  #   RESILIENT-297: exclude this linter's own file + the ceiling file (their prose
+  #     names vars), and drop command-VALUED …_CMD false positives.
+  #   RESILIENT-298: count only vars with a FUNCTIONAL READ-SITE, not bare string
+  #     mentions (registry lines, absence-assertion guards, concat fragments).
+  #   INFRA-6073: strip COMMENTS before the read-site test (via _count_bypass_debt),
+  #     and also exclude the allowlist file, env-vars-internal.txt, and docs/*.md.
+  #     RESILIENT-298 still tested read-sites against comment lines, so a read-shaped
+  #     string in a comment (`// env::var("CHUMP_X_BYPASS")`, `# CHUMP_X_SKIP=1`) still
+  #     counted — the self-defeating bug where merely DOCUMENTING a var raised the count
+  #     it documents, blocking debt-reducing fixes (PR #4637). The gate's INTENT is
+  #     unchanged and NOT weakened: it still caps real read-backed bypass debt, and the
+  #     per-PR diff-scanner below still blocks any NEW unallowlisted var at add-time. This
+  #     only stops counting phantoms, so the honest count legitimately falls (218 -> 216).
+  _now="$(_count_bypass_debt "$REPO_ROOT/scripts" "$REPO_ROOT/src" "$REPO_ROOT/crates")"
   if [ "${_now:-0}" -gt "$_ceiling" ]; then
     {
       echo "[bypass-lint] FAIL (EFFECTIVE-094 debt-ceiling): bypass/skip/check var count ${_now} > ceiling ${_ceiling}."
@@ -242,6 +275,29 @@ if [[ "${1:-}" == "--self-test" ]]; then
   fi
   rm -rf "$_rs_root"
 
+  # ── INFRA-6073: the count must exclude COMMENT-mention phantoms. This is the exact
+  # bug INFRA-6073 tracks — a var named only in a comment (with a read-SHAPED string)
+  # inflated the ceiling and blocked the fix that named it (PR #4637). Exercise the real
+  # counting path (_count_bypass_debt, which strips comments) against a synthetic tree:
+  # one var with a genuine read, plus two vars that appear ONLY inside comments.
+  _cm_root="$(mktemp -d)"
+  # A real read (shell dereference of the var) — MUST count.
+  printf '%s\n' 'if [ "${CHUMP_CM_REAL_SKIP:-0}" = "1" ]; then :; fi' > "$_cm_root/real.sh"
+  # Comment mentions containing read-SHAPED strings — must NOT count. Without the
+  # comment-strip these matched the read-site regex (env::var(...) and VAR=...).
+  {
+    printf '%s\n' '// documented: env::var("CHUMP_CM_RUST_COMMENT_SKIP") is read elsewhere, not here'
+    printf '%s\n' 'let ok = true; // trailing note: CHUMP_CM_TRAILING_BYPASS=1 would skip (prose)'
+  } > "$_cm_root/mod.rs"
+  printf '%s\n' '# usage note: CHUMP_CM_SHELL_COMMENT_SKIP=1 disables it (a comment, not a read)' > "$_cm_root/notes.sh"
+  _cm_count="$(_count_bypass_debt "$_cm_root")"
+  if [[ "$_cm_count" == "1" ]]; then
+    echo "  PASS: only the real read counts; comment-mention phantoms excluded (count=1)"; PASS=$((PASS + 1))
+  else
+    echo "  FAIL: expected count 1 (real read only), got '$_cm_count' — comment phantom leaked"; FAIL=$((FAIL + 1))
+  fi
+  rm -rf "$_cm_root"
+
   echo ""
   if [[ $FAIL -gt 0 ]]; then
     echo "[bypass-lint self-test] FAIL: $FAIL/$((PASS+FAIL)) cases failed"
@@ -335,8 +391,11 @@ extract_bypass_varnames() {
       #   - this lint script itself (self-test case strings)
       #   - the allowlist file (grandfathered var documentation)
       #   - env-vars-internal.txt (var documentation registry, not code)
+      #   - the ceiling file (INFRA-6073): its changelog names every var it
+      #     signs off on — bookkeeping prose, not a real introduction
       suppress = ($0 ~ /scripts\/ci\/test-no-new-bypass-env-vars\.sh/ ||
                   $0 ~ /scripts\/ci\/bypass-env-var-allowlist\.txt/ ||
+                  $0 ~ /scripts\/ci\/bypass-var-ceiling\.txt/ ||
                   $0 ~ /scripts\/ci\/env-vars-internal\.txt/)
     }
     !suppress { print }

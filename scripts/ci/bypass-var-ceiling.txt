@@ -4,7 +4,7 @@
 # you must delete one. Raising it requires operator sign-off + a reason below.
 # Baseline 2026-06-03 (was 113 when INFRA-2525 was filed — the climb to here is
 # exactly what this ceiling now reverses). Ratchet DOWN as gates are culled.
-218
+216
 
 # 233 → 234 (2026-06-04): CREDIBLE-085 introduced CHUMP_SCCACHE_HIT_RATE_CHECK
 # as a cold-cache escape valve for the new sccache hit-rate gate. Cold-cache
@@ -148,3 +148,27 @@
 # bypass var added or hidden, enforcement unchanged, but the ceiling no longer measures
 # string-mentions — so the exact zero-headroom jam that closed #4161's siblings
 # (INFRA-3639/3677/3679 audit-shard trips) cannot recur on a phantom.
+
+# 218 -> 216 (2026-09-13, INFRA-6073 / RESILIENT-298 residual): HONEST-INSTRUMENT fix,
+# not a bump. RESILIENT-298 made the counter require a functional read-site, but it tested
+# that read-site against a RAW haystack that still contained COMMENT lines — so a
+# read-SHAPED string sitting inside a comment still matched and counted as a phantom.
+# That is the self-defeating failure INFRA-6073 tracks: PR #4637 (a rot-reaper fix) tripped
+# `count 219 > ceiling 218` PURELY by naming CHUMP_ROT_REAPER_SPARE_RECOVERABLE in a code
+# comment — the gate blocking the very debt-reducing fix that mentioned the var. The counter
+# (in test-no-new-bypass-env-vars.sh) now strips comments before the read-site test — full-line
+# comments (#, //, *, /*, > markdown-quote) and trailing inline # / // comments — via the shared
+# _count_bypass_debt() helper, and also excludes the allowlist file, env-vars-internal.txt, and
+# docs/*.md from its own input. Two comment-only phantoms fall out of the count:
+#   - CHUMP_PR_SCOPE_CHECK          (only mention: a `#`-comment EXAMPLE of gate_emit_result in
+#                                     scripts/ci/lib/gate-emit.sh — `CHUMP_PR_SCOPE_CHECK=0` in prose)
+#   - CHUMP_SKIP_SPIKE_ISOLATION_CHECK (only read-shaped mention: a `# Bypass: ...=1` comment in
+#                                     scripts/ci/test-spike-isolation.sh; its other two mentions are
+#                                     a string-presence grep + an echo, neither an env read)
+# True read-backed count 218 -> 216. Enforcement is UNCHANGED and NOT weakened: the gate still caps
+# real read-backed bypass debt, and the per-PR diff-scanner still blocks any NEW unallowlisted var at
+# add-time (it already skipped comment lines; that path is untouched). NOTE: scripts/ci/test-*.sh are
+# deliberately NOT excluded from the count — in this repo those ARE the real CI gate implementations
+# (this file; test-silent-failure-tax.sh reads CHUMP_SILENT_FAILURE_TAX_BYPASS as a genuine gate), so
+# their bypass reads are real debt. New ceiling 216 = the honest count, a ratchet-DOWN with no headroom
+# added. Recurring dead-bypass cull for standing headroom stays tracked by INFRA-3625.
