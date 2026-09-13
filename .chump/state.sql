@@ -3837,9 +3837,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a new top‑level section titled “## Findings and Recommendations” at the end of docs/architecture/POLICY-sandbox-tool-routing.md that enumerates the experiment results, cost analysis, failure map, and routing policy, provides a concise summary recommendation, and includes markdown links to the raw data artifacts hosted on Confluence.
+    
+    Target file(s):
+    - docs/architecture/POLICY-sandbox-tool-routing.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All experiment results, cost analysis, failure map, and routing policy are compiled into a single Confluence page
-    - Page includes a summary recommendation and links to raw data artifacts
+    - "? Running `grep -A5 '## Findings and Recommendations' docs/architecture/POLICY-sandbox-tool-routing.md` returns a heading followed by a bullet list containing the four items : Experiment results, Cost analysis, Failure map, Routing policy."
+    - "Each bullet in the new section contains a markdown link whose URL matches the regex `^https://confluence\\.example\\.com/.+` pointing to the corresponding raw data artifact."
+    - "The file docs/architecture/POLICY-sandbox-tool-routing.md now includes a paragraph beginning with “**Recommendation:**” that summarizes the overall recommendation."
+    - After building the documentation (`make docs`), the generated HTML contains a heading “Findings and Recommendations” and the linked artifacts are rendered as clickable links.
   depends_on: [CREDIBLE-1070]
   notes: |
     [chump harvest check 'inference']
@@ -3866,11 +3875,18 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Modify the `_extract_gap_ids` function in `scripts/ops/github-webhook-receiver.py` so that it extracts gap IDs only from the PR title (or from an explicit “Closes: <ID>” trailer in the title) and ignores any IDs that appear solely in the PR body; update the test script `scripts/ci/test-webhook-gap-flip.sh` to assert the new behavior.
+    
+    Target file(s):
+    - scripts/ops/github-webhook-receiver.py
+    - scripts/ci/test-webhook-gap-flip.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The `_extract_gap_ids` function reads only the PR title; any IDs present only in the PR body are ignored.
-    - "If a PR does not contain a \"Closes: <ID>\" trailer in the title, no gap IDs are extracted."
-    - Unit test verifies that a PR with IDs in the body but not in the title results in zero extracted IDs.
-    - Existing PRs that already contain IDs in the title continue to be processed correctly.
+    - In `scripts/ops/github-webhook-receiver.py`, `_extract_gap_ids` returns an empty list when a PR body contains a gap ID but the title does not.
+    - In `scripts/ci/test-webhook-gap-flip.sh`, a simulated PR whose title lacks IDs but whose body contains “CREDIBLE-9999” results in zero extracted IDs (the script exits with status 0 and prints no IDs).
+    - "? In `scripts/ops/github-webhook-receiver.py`, `_extract_gap_ids` still returns the correct ID list when the PR title includes “CREDIBLE-1234” or a “Closes : CREDIBLE-1234” trailer."
   notes: |
     [chump harvest check 'merging']
     === primitives_index match for 'merging' ===
@@ -3893,11 +3909,19 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Update the `_auto_flip_gaps_done` function in `scripts/ops/github-webhook-receiver.py` to invoke `chump gap ship <ID> --closed-pr <N>` for each extracted gap ID instead of using `gap set`, and adjust the CI test script `scripts/ci/test-gap-closed-pr-cli.sh` to verify that the ship command is called and that the `closed_date` field is populated.
+    
+    Target file(s):
+    - scripts/ops/github-webhook-receiver.py
+    - scripts/ci/test-gap-closed-pr-cli.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - When a merged PR is received, `_auto_flip_gaps_done` invokes `chump gap ship <ID> --closed-pr <N>` for each extracted ID.
-    - The `closed_date` field is populated for every gap closed via this path.
-    - Proof‑of‑merge guard (`INFRA-1392`) fires, confirming the ship path was used.
-    - No gaps remain in status=done with an empty `closed_date` after processing.
+    - In `scripts/ops/github-webhook-receiver.py`, the `_auto_flip_gaps_done` function calls the CLI `chump gap ship` with the `--closed-pr` flag for every gap ID parsed from a merged PR payload.
+    - Executing the webhook receiver on a merged PR results in each affected gap having a non‑null `closed_date` field, as confirmed by running `chump gap get <ID>` after processing.
+    - The test script `scripts/ci/test-gap-closed-pr-cli.sh` exits with status 0 and its output contains the substring `gap ship` and the `--closed-pr` argument, proving the ship path was used.
+    - The proof‑of‑merge guard `INFRA-1392` logs a line containing `gap ship` when processing a merged PR, demonstrating that the guard fired for the ship path.
   notes: |
     [chump harvest check 'merging']
     === primitives_index match for 'merging' ===
@@ -3947,11 +3971,19 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Add a new event‑handler registration for `stale_post_merge_gap` in `scripts/dispatch/fix-trunk-dispatcher.sh` that routes the event to a consumer function, and extend the `reopen_respawned_gaps` function in `scripts/ops/stuck-pr-filer.sh` to detect a reopened gap whose `closed_pr` is stale, invoke `gap ship <gap-id>` and set the gap’s status to `done` with a proper `closed_date`. The handler must ensure exactly one `gap ship` command is emitted per gap.
+    
+    Target file(s):
+    - scripts/dispatch/fix-trunk-dispatcher.sh
+    - scripts/ops/stuck-pr-filer.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A new consumer listens for `stale_post_merge_gap` events and invokes `gap ship` for the associated gap.
-    - Gaps that were reopened with status=open and a stale `closed_pr` are automatically transitioned to status=done with a proper `closed_date`.
-    - Integration test simulates the event and verifies the gap ends in the correct state.
-    - No duplicate events are emitted for the same gap.
+    - Running `scripts/ops/stuck-pr-filer.sh` on a gap that has been reopened with status=open and a stale `closed_pr` prints a line containing `gap ship` with the correct gap ID (verified via stdout capture).
+    - After the script executes, `gap show --id <gap-id>` reports `status=done` and a non‑empty `closed_date` for that gap (checked in a shell‑test).
+    - The `emit_ambient` function in `scripts/dispatch/fix-trunk-dispatcher.sh` now registers a handler for `stale_post_merge_gap` and the event log contains exactly one `gap ship` entry per processed gap (validated by counting matching lines in the log file).
+    - "The integration test `crates/chump-coord/tests/a2a_layer1a.rs::backpressure_event_emitted_on_slow_consumer` passes when it simulates a `stale_post_merge_gap` event, confirming the consumer invokes `gap ship` and the gap reaches `status=done`."
   depends_on: [CREDIBLE-1073]
   notes: |
     [chump harvest check 'merging']
@@ -3975,11 +4007,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update the `main` function in `scripts/dispatch/_pick_and_claim_gap.py` to parse the PR title, extract only numeric gap IDs (e.g., “CREDIBLE‑1234”), and invoke the `gap ship` command exclusively for those IDs. Add a verification step that counts the `gap_flipped_done_on_merge` events emitted by the receiver and asserts that this count matches the number of extracted IDs. Enhance `scripts/coord/conflict-resolution-consumer.sh` to emit a distinct log line “proof‑of‑merge guard executed” when the receiver finishes processing a merge, making the guard observable in test logs.
+    
+    Target file(s):
+    - scripts/dispatch/_pick_and_claim_gap.py
+    - scripts/coord/conflict-resolution-consumer.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A test PR merged on the `main` branch triggers the receiver process (confirmed by a single running process).
-    - The receiver extracts IDs only from the PR title, calls `gap ship`, and the affected gaps show status=done with a non‑empty `closed_date`.
-    - No collateral gaps are flipped (count of `gap_flipped_done_on_merge` events matches the number of IDs in the title).
-    - Logs show the proof‑of‑merge guard executing.
+    - In `scripts/dispatch/_pick_and_claim_gap.py` the `main` function extracts IDs only from the PR title string and ignores any IDs that might appear in the PR body or other metadata (validated by a unit test that supplies a title with IDs and a body with extra IDs).
+    - When a test PR is merged into the `main` branch, the receiver process is started and its PID appears in the system process list as `gap-receiver` (checked by invoking `ps -C gap-receiver` in the CI test script).
+    - After the merge, each gap ID that was present in the PR title has its record updated to `status=done` with a non‑empty `closed_date` field (verified by running `gap query --id <ID>` and asserting the fields).
+    - The log output from `scripts/coord/conflict-resolution-consumer.sh` contains the line “proof‑of‑merge guard executed” and the number of `gap_flipped_done_on_merge` events logged equals the number of IDs extracted from the title (checked by grepping the CI log).
   depends_on: [CREDIBLE-1072, CREDIBLE-1073, CREDIBLE-1075]
   notes: |
     [chump harvest check 'merging']
@@ -4056,9 +4096,19 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Add a reusable shell function `ensure_target_exists` to the header section of each listed CI test script that verifies the existence of a given file or symbol and aborts with a non‑zero exit code and a clear error message if the target is missing; then modify every negative‑assertion command (e.g., `grep -v`, `! test -e`) in those scripts to call this guard before evaluation, ensuring that a missing target causes the script to fail rather than pass vacuously.
+    
+    Target file(s):
+    - scripts/ci/test-claim-open-pr-abort.sh
+    - scripts/ci/test-stale-binary-ship-blocked.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A reusable shell function or script check is created that fails if a target file or symbol is completely missing before evaluating a negative assertion (e.g., grep -v / absence checks).
-    - Tests verify that negative checks fail when pointed at non-existent targets rather than passing vacuously.
+    - "? Running `scripts/ci/test-claim-open-pr-abort.sh` with a non‑existent target file passed to `ensure_target_exists` exits with status 1 and prints “ERROR : target <path> not found”."
+    - The function `ensure_target_exists` is defined in `scripts/ci/test-claim-open-pr-abort.sh` and returns 1 when the supplied path does not exist.
+    - A negative grep check in `scripts/ci/test-stale-binary-ship-blocked.sh` now invokes `ensure_target_exists` and the script exits with status 1 when the target file is missing, instead of succeeding.
+    - The test suite reports a failure for a negative‑assertion test case that references a missing file, confirming that the guard is exercised in both modified scripts.
   notes: |
     [chump harvest check 'gates']
     === primitives_index match for 'gates' ===
@@ -4304,11 +4354,19 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Add a new “grep‑target‑sweep” mode to the existing CI test script and the false‑done‑sweep Python utility. In `scripts/ci/test-false-done-sweep.sh` a case branch “grep-target-sweep” is introduced that walks the `scripts/ci` directory, greps each file for `grep` invocations, extracts the path argument, checks the path’s existence, and prints a summary count plus a detailed list of each vacuous grep with its source file and line number. The same functionality is mirrored in `scripts/ops/false-done-sweep.py` under a new `--grep-target-sweep` flag, reusing the Python‑based file walk and regex parsing logic, and both exit with status 0 regardless of findings.
+    
+    Target file(s):
+    - scripts/ci/test-false-done-sweep.sh
+    - scripts/ops/false-done-sweep.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A script scans all files under scripts/ci for grep commands and extracts their target paths
-    - The script identifies any target path that does not exist in the repository at runtime
-    - The script outputs a summary count and a detailed list of each vacuous grep with file location and line number
-    - The script exits with status 0 regardless of findings (non‑failing)
+    - "Running `scripts/ci/test-false-done-sweep.sh grep-target-sweep` prints a line `Vacuous grep count: <N>` followed by one line per finding in the format `<repo‑relative‑path>:<line‑number> – <missing‑target>`."
+    - "`scripts/ci/test-false-done-sweep.sh grep-target-sweep` exits with status 0 even when at least one missing target is reported."
+    - Invoking `scripts/ops/false-done-sweep.py --grep-target-sweep` produces the same summary line and detailed list as the shell script, and also exits with status 0.
+    - Both tools correctly identify a known missing target, e.g., a `grep` command in `scripts/ci/example.sh` that references `nonexistent/path.txt`, and include that entry in the detailed list.
 
 - id: CREDIBLE-1088
   domain: CREDIBLE
@@ -4316,10 +4374,17 @@ gaps:
   status: open
   priority: P1
   effort: xs
+  description: |
+    Extend `scripts/ab-harness/run-ablation-sweep.py` with a new CLI flag `--print-cron` that emits a ready‑to‑use daily cron line invoking the script with a `--log-file` argument, and enhance the main execution path to write a structured log entry (ISO‑8601 timestamp, count of findings, and error count) to the specified log file; the script now exits with status 0 regardless of logged errors to avoid blocking CI pipelines.
+    
+    Target file(s):
+    - scripts/ab-harness/run-ablation-sweep.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The sweep script from slice 0 is invoked automatically on a daily schedule (e.g., via launchd, cron, or a CI scheduled pipeline)
-    - Execution logs are retained and include timestamp, count of findings, and any errors
-    - The scheduled job does not block any builds or PR pipelines
+    - Running `python3 scripts/ab-harness/run-ablation-sweep.py --print-cron` outputs exactly `0 0 * * * /usr/bin/env python3 $(pwd)/scripts/ab-harness/run-ablation-sweep.py --log-file logs/sweep.log`.
+    - "Executing `python3 scripts/ab-harness/run-ablation-sweep.py --log-file logs/sweep.log` creates (or appends to) `logs/sweep.log` and adds a line matching the regex `^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*findings:\\s*\\d+.*errors:\\s*\\d+`."
+    - The script exits with status code 0 even when the internal sweep reports non‑zero error counts, verified by `echo $?` after a run that forces an error condition.
   depends_on: [CREDIBLE-1087]
 
 - id: CREDIBLE-1089
@@ -199834,15 +199899,219 @@ gaps:
   domain: INFRA
   title: "Bypass-var ceiling is string-mention based: self-defeating gate blocks fixes that merely NAME a var"
   status: open
-  priority: P1
+  priority: P2
   effort: m
   acceptance_criteria:
     - "The change described by \"self-defeating gate blocks fixes that merely NAME a var\" is implemented in the relevant INFRA code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  notes: |
+    Decomposed into 8 slices: INFRA-6074, INFRA-6075, INFRA-6076, INFRA-6077, INFRA-6078, INFRA-6079, INFRA-6080, INFRA-6081
   outcome_id: META-067
   evidence: |
     CI no-new-bypass-env-vars (EFFECTIVE-094) counts CHUMP_*_BYPASS/SKIP mentions as STRINGS, including in comments/changelogs/allowlist prose. bypass-var-ceiling.txt itself admits string-mention counting double-counts and that documenting a sign-off raises the count it documents (RESILIENT-298). PR #4637 (the rot-reaper spare-good-PRs FIX) tripped 219>218 purely by mentioning CHUMP_ROT_REAPER_SPARE_RECOVERABLE in a comment. Net: the gate blocks the very fixes meant to reduce bypass debt, and is red fleet-wide -> every PR verified goes red. Fix: count real env::var read USE-SITES (AST/parse), not string mentions; exclude comments/docs/allowlist.
+
+- id: INFRA-6074
+  domain: INFRA
+  title: "INFRA: Locate bypass-var ceiling implementation in INFRA codebase (INFRA-6073 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - All source files and functions where the bypass‑var ceiling logic is applied are identified and listed in a short markdown note.
+  notes: |
+    [chump harvest check 'ceiling']
+    === primitives_index match for 'ceiling' ===
+    
+    === cluster keyword match for 'ceiling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ceiling' ===
+    
+    === repo-description match for 'ceiling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ceiling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'ceiling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: INFRA-6075
+  domain: INFRA
+  title: "INFRA: Document required behavior change (design note) (INFRA-6073 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - A design note explains that the gate must not block fixes that only NAME a variable, and outlines the intended condition change.
+  depends_on: [INFRA-6074]
+  notes: |
+    [chump harvest check 'ceiling']
+    === primitives_index match for 'ceiling' ===
+    
+    === cluster keyword match for 'ceiling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ceiling' ===
+    
+    === repo-description match for 'ceiling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ceiling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'ceiling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: INFRA-6076
+  domain: INFRA
+  title: "INFRA: Implement code change to allow fixes that only name a var (INFRA-6073 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Modified INFRA code compiles without errors.
+    - The gate condition no longer rejects fixes that merely name a variable.
+  depends_on: [INFRA-6075]
+  notes: |
+    [chump harvest check 'ceiling']
+    === primitives_index match for 'ceiling' ===
+    
+    === cluster keyword match for 'ceiling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ceiling' ===
+    
+    === repo-description match for 'ceiling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ceiling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'ceiling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: INFRA-6077
+  domain: INFRA
+  title: "INFRA: Add unit test confirming var‑name‑only fix passes the gate (INFRA-6073 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - cargo test includes a new test that succeeds with the change and fails when the change is reverted.
+  depends_on: [INFRA-6076]
+  notes: |
+    [chump harvest check 'ceiling']
+    === primitives_index match for 'ceiling' ===
+    
+    === cluster keyword match for 'ceiling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ceiling' ===
+    
+    === repo-description match for 'ceiling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ceiling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'ceiling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: INFRA-6078
+  domain: INFRA
+  title: "INFRA: Add CI script test for new bypass‑var behavior (INFRA-6073 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - A script under scripts/ci (e.g., test-bypass-var.sh) runs the scenario and exits with status 0 only when the change is present.
+  depends_on: [INFRA-6076]
+  notes: |
+    [chump harvest check 'ceiling']
+    === primitives_index match for 'ceiling' ===
+    
+    === cluster keyword match for 'ceiling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ceiling' ===
+    
+    === repo-description match for 'ceiling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ceiling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'ceiling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: INFRA-6079
+  domain: INFRA
+  title: "INFRA: Run cargo fmt and clippy, fix any warnings (INFRA-6073 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - cargo fmt formats all changed files.
+    - cargo clippy --all-targets -D warnings passes with no warnings.
+  depends_on: [INFRA-6076]
+  notes: |
+    [chump harvest check 'ceiling']
+    === primitives_index match for 'ceiling' ===
+    
+    === cluster keyword match for 'ceiling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ceiling' ===
+    
+    === repo-description match for 'ceiling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ceiling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'ceiling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: INFRA-6080
+  domain: INFRA
+  title: "INFRA: Execute full test suite to verify no regressions (INFRA-6073 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - All existing cargo tests and CI scripts pass after the change.
+  depends_on: [INFRA-6076]
+  notes: |
+    [chump harvest check 'ceiling']
+    === primitives_index match for 'ceiling' ===
+    
+    === cluster keyword match for 'ceiling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ceiling' ===
+    
+    === repo-description match for 'ceiling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ceiling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'ceiling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: INFRA-6081
+  domain: INFRA
+  title: "INFRA: Update documentation and CHANGELOG for INFRA‑6073 (INFRA-6073 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - CHANGELOG contains an entry describing the bypass‑var ceiling fix.
+    - Relevant INFRA documentation reflects the new behavior.
+  depends_on: [INFRA-6076]
+  notes: |
+    [chump harvest check 'ceiling']
+    === primitives_index match for 'ceiling' ===
+    
+    === cluster keyword match for 'ceiling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ceiling' ===
+    
+    === repo-description match for 'ceiling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ceiling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'ceiling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
 
 - id: INFRA-635
   domain: INFRA
@@ -214480,6 +214749,7 @@ gaps:
     [2026-09-13T15:31:46Z] rot-reaper: PR #4621 auto-closed (required-check-red, 56h) 2026-09-13; RESPAWN CAP 3 reached (4 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T15:46:38Z] rot-reaper: PR #4621 auto-closed (required-check-red, 56h) 2026-09-13; RESPAWN CAP 3 reached (5 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T15:55:05Z] rot-reaper: PR #4621 auto-closed (required-check-red, 56h) 2026-09-13; RESPAWN CAP 3 reached (6 prior recycles) — NOT re-queued, escalating to operator.
+    [2026-09-13T16:31:02Z] rot-reaper: PR #4621 auto-closed (required-check-red, 57h) 2026-09-13; RESPAWN CAP 3 reached (7 prior recycles) — NOT re-queued, escalating to operator.
 
 - id: RESILIENT-1108
   domain: RESILIENT
@@ -217021,12 +217291,14 @@ gaps:
   domain: RESILIENT
   title: "Rot-reaper self-strangles on shared-gate-red: closes ALL PRs when one required gate is red fleet-wide"
   status: open
-  priority: P1
+  priority: P2
   effort: m
   acceptance_criteria:
     - "The change described by \"closes ALL PRs when one required gate is red fleet-wide\" is implemented in the relevant RESILIENT code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  notes: |
+    Decomposed into 7 slices: RESILIENT-1190, RESILIENT-1191, RESILIENT-1192, RESILIENT-1193, RESILIENT-1194, RESILIENT-1195, RESILIENT-1196
   outcome_id: META-067
   evidence: |
     rot-reaper closes mergeable PRs whose branch-protection-required verified is red past SLO. When a SHARED gate breaks on main (e.g. bypass-ceiling 219>218), verified goes red for EVERY open PR, so the reaper closes them all - including #4635 which is the reaper-spare FIX, and #4612/#4633. Self-strangling anti-Memento loop. #4637 adds green-underneath sparing but the deeper fix: the reaper must detect a gate that is red across main+most-open-PRs (systemic) vs a PR genuinely dead, and NEVER close on systemic red. Also reaped PRs enter GitHub limbo (cannot be reopened), forcing fresh PRs.
@@ -217064,6 +217336,198 @@ gaps:
     [2026-08-29T07:41:21Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=6004B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
   opened_date: '2026-07-26'
   outcome_id: RESILIENT-000
+
+- id: RESILIENT-1190
+  domain: RESILIENT
+  title: "RESILIENT: Locate PR‑closing gate check code (RESILIENT-1188 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - File path and function(s) that decide to close PRs based on gate status are identified
+    - Comments added in the code indicating the location for future modifications
+  notes: |
+    [chump harvest check 'closes']
+    === primitives_index match for 'closes' ===
+    
+    === cluster keyword match for 'closes' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'closes' ===
+    
+    === repo-description match for 'closes' ===
+    
+    === HARVEST_ROADMAP.md mention of 'closes' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'closes' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1191
+  domain: RESILIENT
+  title: "RESILIENT: Add guard to prevent closing all PRs when any required gate is red (RESILIENT-1188 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - New conditional checks that a required gate is green before invoking the bulk‑close logic
+    - Compilation succeeds with the new code
+    - No existing behavior is altered for the happy‑path (all gates green)
+  depends_on: [RESILIENT-1190]
+  notes: |
+    [chump harvest check 'closes']
+    === primitives_index match for 'closes' ===
+    
+    === cluster keyword match for 'closes' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'closes' ===
+    
+    === repo-description match for 'closes' ===
+    
+    === HARVEST_ROADMAP.md mention of 'closes' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'closes' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1192
+  domain: RESILIENT
+  title: "RESILIENT: Add unit test for the new guard logic (RESILIENT-1188 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Test simulates a required gate being red and asserts that PRs are not closed
+    - Test passes only when the guard is present
+    - Test fails on the current code base (demonstrating regression without change)
+  depends_on: [RESILIENT-1191]
+  notes: |
+    [chump harvest check 'closes']
+    === primitives_index match for 'closes' ===
+    
+    === cluster keyword match for 'closes' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'closes' ===
+    
+    === repo-description match for 'closes' ===
+    
+    === HARVEST_ROADMAP.md mention of 'closes' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'closes' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1193
+  domain: RESILIENT
+  title: "RESILIENT: Add CI script test to verify fleet‑wide gate handling (RESILIENT-1188 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - A script under scripts/ci/test‑gate‑red.sh runs the binary in a scenario with a red gate and confirms PRs remain open
+    - The script exits with status 0 only when the new behavior is correct
+    - CI configuration includes the script in the test matrix
+  depends_on: [RESILIENT-1191]
+  notes: |
+    [chump harvest check 'closes']
+    === primitives_index match for 'closes' ===
+    
+    === cluster keyword match for 'closes' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'closes' ===
+    
+    === repo-description match for 'closes' ===
+    
+    === HARVEST_ROADMAP.md mention of 'closes' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'closes' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1194
+  domain: RESILIENT
+  title: "RESILIENT: Run cargo fmt and clippy, fix warnings (RESILIENT-1188 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - cargo fmt runs without changes needed
+    - cargo clippy --all-targets -D warnings passes with zero warnings
+  depends_on: [RESILIENT-1191]
+  notes: |
+    [chump harvest check 'closes']
+    === primitives_index match for 'closes' ===
+    
+    === cluster keyword match for 'closes' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'closes' ===
+    
+    === repo-description match for 'closes' ===
+    
+    === HARVEST_ROADMAP.md mention of 'closes' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'closes' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1195
+  domain: RESILIENT
+  title: "RESILIENT: Execute full test suite to confirm no regressions (RESILIENT-1188 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - All existing cargo test cases pass
+    - All CI test scripts (including the new gate‑red test) pass
+    - No new failures are introduced
+  depends_on: [RESILIENT-1194]
+  notes: |
+    [chump harvest check 'closes']
+    === primitives_index match for 'closes' ===
+    
+    === cluster keyword match for 'closes' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'closes' ===
+    
+    === repo-description match for 'closes' ===
+    
+    === HARVEST_ROADMAP.md mention of 'closes' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'closes' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1196
+  domain: RESILIENT
+  title: "RESILIENT: Update code comments and documentation for new behavior (RESILIENT-1188 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Relevant modules contain updated comments describing the guard and its purpose
+    - README or developer guide includes a note about the changed PR‑closing semantics
+  depends_on: [RESILIENT-1191]
+  notes: |
+    [chump harvest check 'closes']
+    === primitives_index match for 'closes' ===
+    
+    === cluster keyword match for 'closes' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'closes' ===
+    
+    === repo-description match for 'closes' ===
+    
+    === HARVEST_ROADMAP.md mention of 'closes' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'closes' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
 
 - id: RESILIENT-120
   domain: RESILIENT
