@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 # scripts/ci/test-node-refresh-green-main.sh — RESILIENT-327
 #
-# Proves node-refresh-chump.sh advances the live node to the last-GREEN main
-# pointer, not raw origin/main HEAD: with a green sha older than HEAD injected
-# via CHUMP_NODE_REFRESH_TEST_GREEN_SHA, the mirror checkout must land on the
-# green commit, and a fake "bad" commit ahead of it must NEVER reach the live
-# node's working tree. Also proves the explicit (non-silent) fallback to raw
-# HEAD when no green sha can be found.
+# Proves node-refresh-chump.sh keeps the BINARY pinned to the last-GREEN main
+# pointer while the SOURCE TREE tracks origin/main HEAD (RESILIENT-327 +
+# RESILIENT-1205). With a green sha OLDER than HEAD injected via
+# CHUMP_NODE_REFRESH_TEST_GREEN_SHA:
+#   * the working tree must land on origin/main HEAD (the "bad" tip) — so a
+#     merged BASH-organ fix on HEAD actually reaches the iron and this script
+#     never fights chump-node-converge (RESILIENT-1189) over the tree SHA;
+#   * the INSTALLED BINARY must still report the GREEN sha (built from a detached
+#     worktree at the green pin), never the unverified HEAD binary.
+# Also proves the explicit (non-silent) fallback to raw HEAD when no green sha
+# can be found.
 #
-# Fails without RESILIENT-327: pre-change node-refresh-chump.sh always does
-# `git reset --hard origin/main`, so test 1 below would leave the mirror at
-# the "bad" commit instead of the pinned green one.
+# RESILIENT-1205 regression guard: the pre-1205 script reset the WORKING TREE to
+# the green pin, which permanently pinned the checkout behind HEAD whenever green
+# lagged (a coherence-sync commit with no build artifact) — the merged-!=-deployed
+# keystone. This test now asserts the tree tracks HEAD and only the binary is
+# green-pinned.
 
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
@@ -52,16 +59,16 @@ mkdir -p "$TMP/bin" "$MIRROR/target/release"
 cat > "$TMP/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
 # Fake `cargo build --release --bin chump`: writes a stub binary that reports
-# the CURRENT HEAD sha via `chump --version`, mirroring the real binary's
-# "(<sha> built ...)" format closely enough for the refresh script's grep.
-mkdir -p target/release
+# the sha of the BUILD cwd's HEAD via `chump --version`, mirroring the real
+# binary's "(<sha> built ...)" format closely enough for the refresh script's
+# grep. Honors CARGO_TARGET_DIR (RESILIENT-1205: node-refresh builds the green
+# pin in a detached worktree while reusing the repo's warm target dir).
+out="${CARGO_TARGET_DIR:-target}/release"
+mkdir -p "$out"
 sha="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-cat > target/release/chump <<INNER
-#!/usr/bin/env bash
-echo "chump 0.0.0-test (\$sha built now)"
-INNER
-sed -i "s/\\\$sha/$sha/" target/release/chump
-chmod +x target/release/chump
+# portable (no sed -i, which differs on BSD/macOS vs GNU): bake the sha directly.
+printf '#!/usr/bin/env bash\necho "chump 0.0.0-test (%s built now)"\n' "$sha" > "$out/chump"
+chmod +x "$out/chump"
 exit 0
 EOF
 chmod +x "$TMP/bin/cargo"
@@ -69,7 +76,7 @@ chmod +x "$TMP/bin/cargo"
 AMBIENT="$TMP/.chump-locks/ambient.jsonl"
 mkdir -p "$TMP/.chump-locks"
 
-# ── Test 1: green sha older than HEAD → mirror lands on green, not bad ─────
+# ── Test 1: green sha older than HEAD → TREE lands on HEAD, BINARY on green ─
 CHUMP_NODE_REPO="$MIRROR" \
 CHUMP_NODE_BIN="$TMP/installed-chump" \
 NODE_AMBIENT="$AMBIENT" \
@@ -81,10 +88,21 @@ PATH="$TMP/bin:$PATH" \
 rc=$?
 [ "$rc" -eq 0 ] || fail "green-pin run exited $rc: $(cat "$TMP/out1.log")"
 
+# RESILIENT-1205: the SOURCE tree tracks origin/main HEAD (the bad tip), so
+# merged bash-organ fixes reach the iron and node-converge is never fought.
 LANDED_SHA="$(git -C "$MIRROR" rev-parse HEAD)"
-[ "$LANDED_SHA" = "$GREEN_SHA" ] \
-    || fail "mirror landed on $LANDED_SHA, expected green sha $GREEN_SHA (bad sha was $BAD_SHA)"
-ok "node-refresh pins the mirror to green-main, not the bad HEAD ahead of it"
+[ "$LANDED_SHA" = "$BAD_SHA" ] \
+    || fail "source tree landed on $LANDED_SHA, expected origin/main HEAD $BAD_SHA (green pin was $GREEN_SHA)"
+ok "node-refresh converges the source tree to origin/main HEAD (RESILIENT-1205)"
+
+# RESILIENT-327: the installed BINARY must still be the GREEN one, built from a
+# detached worktree at the green pin — never the unverified HEAD binary.
+INSTALLED_VER="$("$TMP/installed-chump" --version 2>/dev/null || echo none)"
+case "$INSTALLED_VER" in
+    *"${GREEN_SHA:0:12}"*) ok "installed binary is green-pinned ($INSTALLED_VER), not the HEAD binary" ;;
+    *"${BAD_SHA:0:12}"*)   fail "installed binary is the HEAD/bad sha ($INSTALLED_VER) — green pin violated" ;;
+    *)                     fail "installed binary version unexpected: $INSTALLED_VER" ;;
+esac
 
 grep -q "PIN: raw HEAD" "$TMP/out1.log" \
     || fail "expected a loud PIN log line noting raw HEAD is ahead of green-main"
