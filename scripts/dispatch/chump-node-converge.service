@@ -32,3 +32,6 @@ Environment=CHUMP_NODE_REPO=/root/Projects/chump
 TimeoutStartSec=300
 Nice=10
 ExecStart=/bin/bash -lc 'cd /root/Projects/chump; exec bash scripts/ops/node-converge.sh'
+
+[Install]
+WantedBy=multi-user.target
