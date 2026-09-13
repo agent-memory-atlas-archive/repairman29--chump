@@ -18933,9 +18933,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a new function `get_freshness_config()` to `scripts/ci/test-mission-scoreboard-deploy-freshness-sla.sh` that reads the environment variables `CREDIBLE_FRESHNESS_MINUTES` and `CREDIBLE_FRESHNESS_COMMITS`, applies defaults of 30 minutes and 0 commits, and returns these values; modify the script’s main flow to use this getter when configuring the scoreboard deployment and to echo the resolved SLA parameters.
+    
+    Target file(s):
+    - scripts/ci/test-mission-scoreboard-deploy-freshness-sla.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Configuration struct / env vars for `freshness_minutes` (default 30) and `freshness_commits` (default 0) are added
-    - Parameters are exposed to the scoreboard module via a public getter
+    - "? scripts/ci/test-mission-scoreboard-deploy-freshness-sla.sh defines a function `get_freshness_config()` that outputs two space‑separated numbers : the minutes and the commits, defaulting to 30 and 0 when the env vars are unset."
+    - The main body of `scripts/ci/test-mission-scoreboard-deploy-freshness-sla.sh` calls `get_freshness_config()` and passes the returned values to the scoreboard deployment command instead of hard‑coded literals.
+    - "? Executing `scripts/ci/test-mission-scoreboard-deploy-freshness-sla.sh` with no freshness env vars prints a line containing `Freshness SLA : 30 minutes, 0 commits`."
+    - "? Executing the same script with `CREDIBLE_FRESHNESS_MINUTES=45 CREDIBLE_FRESHNESS_COMMITS=5` prints a line containing `Freshness SLA : 45 minutes, 5 commits`."
   depends_on: [CREDIBLE-554]
   notes: |
     [chump harvest check 'Deploy']
@@ -19024,10 +19033,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a new `#[cfg(test)]` module in `crates/chump-atomic-claim/src/atomic_claim.rs` that defines two unit tests—`test_freshness_sla_within_window` and `test_freshness_sla_exceeds_window`—which call the existing freshness‑SLA function (e.g., `freshness_sla`) with timestamps that are respectively inside and outside the 30‑minute window, asserting success and failure accordingly.
+    
+    Target file(s):
+    - crates/chump-atomic-claim/src/atomic_claim.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test case where binary SHA is within the 30‑minute window passes
-    - Test case where binary SHA exceeds the window fails
-    - Test runs via `cargo test` and fails before the implementation, passes after
+    - "The file `crates/chump-atomic-claim/src/atomic_claim.rs` contains a `#[cfg(test)]` module with the two test functions `test_freshness_sla_within_window` and `test_freshness_sla_exceeds_window`."
+    - Running `cargo test test_freshness_sla_within_window` reports the test as passed.
+    - Running `cargo test test_freshness_sla_exceeds_window` reports the test as failed before the implementation is completed.
+    - The overall `cargo test` run includes exactly two tests named `test_freshness_sla_within_window` and `test_freshness_sla_exceeds_window` and reports their pass/fail status as described.
   depends_on: [CREDIBLE-557]
   notes: |
     [chump harvest check 'Deploy']
@@ -19177,11 +19194,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend `compute_capability_stage` in `scripts/ops/capability-lifecycle.sh` to recognise the successful completion of the build step and return the literal stage name "built", and augment the `main` function in the same script to invoke the existing gauge‑recording routine with this new stage and persist it to the lifecycle state store; add a corresponding test case in `scripts/ci/test-capability-lifecycle.sh` that runs the build step and asserts that a gauge entry for "built" appears in the store.
+    
+    Target file(s):
+    - scripts/ops/capability-lifecycle.sh
+    - scripts/ci/test-capability-lifecycle.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "Gauge records a capability as \"built\" when the build step completes"
-    - Gauge entry is persisted in the lifecycle state store
-    - "Unit test verifies that invoking the build step creates a \"built\" gauge entry"
-    - cargo fmt + clippy passes with no new warnings
+    - "scripts/ops/capability-lifecycle.sh:compute_capability_stage returns the string \"built\" when the build step exits with status 0."
+    - "scripts/ops/capability-lifecycle.sh:main calls the gauge‑record function with the argument \"built\" and the entry is written to the lifecycle state store file."
+    - "? scripts/ci/test-capability-lifecycle.sh includes a test that executes the build step and checks that the gauge file contains a line matching `stage : built`."
+    - Running `cargo fmt` and `cargo clippy` on the repository completes without emitting new warnings.
   notes: |
     [chump harvest check 'lifecycle']
     === primitives_index match for 'lifecycle' ===
@@ -19433,10 +19458,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a pure Rust function `normalize_unset(value: &str) -> String` to `crates/chump-coord/src/rpc.rs` that collapses the spellings `"default="`, `"(unset)"`, and `"<unset>"` into the single token `"<UNSET>"`, returns the original string for all other inputs, and document its behavior; also add a dedicated unit‑test module in the same file to verify the three spellings map to `"<UNSET>"`.
+    
+    Target file(s):
+    - crates/chump-coord/src/rpc.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "Function `normalize_unset(value: str) -> str` collapses \"default=\", \"(unset)\", \"<unset>\" to a single token `<UNSET>`"
-    - Unit tests cover all three spellings and verify they map to `<UNSET>`
-    - Normalization is pure (no side effects) and documented
+    - "The new function `normalize_unset` in `crates/chump-coord/src/rpc.rs` returns `\"<UNSET>\"` for the inputs `\"default=\"`, `\"(unset)\"`, and `\"<unset>\"` and returns the unchanged input for any other string."
+    - "The unit‑test module in `crates/chump-coord/src/rpc.rs` contains three test cases, each asserting that calling `normalize_unset` with one of the three spellings yields exactly `\"<UNSET>\"`, and all tests pass when running `cargo test`."
+    - The function `normalize_unset` is documented with a Rust doc comment that states it is pure (no side effects) and lists the supported unset spellings.
   depends_on: [CREDIBLE-570]
   notes: |
     [chump harvest check 'almanac']
@@ -19492,10 +19524,16 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Insert a new noise‑filter rule inside the `install_patch_panic_filter_once` function in `src/patch_apply.rs` that detects the three ANTHROPIC_API_KEY spellings (`default=`, `(unset)`, `<unset>`) and marks them as noise in the central filtering configuration.
+    
+    Target file(s):
+    - src/patch_apply.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Rule identifies the three spellings (`default=`, `(unset)`, `<unset>`) for ANTHROPIC_API_KEY and marks them as `noise`
-    - Applying the rule to a sample dataset of 78 reads reduces the noise count to 0 for this key
-    - Rule is added to the central filtering configuration
+    - "src/patch_apply.rs: the `install_patch_panic_filter_once` function contains a pattern (e.g., regex or match arm) that captures `default=`, `(unset)`, and `<unset>` for the key `ANTHROPIC_API_KEY` and classifies them as noise."
+    - "? Running the filter binary on the supplied sample dataset of 78 reads (`cargo run --bin filter -- data/sample_reads.json`) prints a line exactly `Noise count for ANTHROPIC_API_KEY : 0`."
   depends_on: [CREDIBLE-571]
   notes: |
     [chump harvest check 'almanac']
@@ -102593,7 +102631,7 @@ gaps:
     - "7. Doc: docs/process/BUILDBUDDY.md — operator setup (5min), fallback behavior, cost monitoring (free tier limits ~5000 builds/mo)"
     - "8. Test: scripts/ci/test-buildbuddy-fallback.sh — assert sccache config has both BuildBuddy URL AND R2 fallback URL"
   notes: |
-    Decomposed into 8 slices: INFRA-5559, INFRA-5560, INFRA-5561, INFRA-5562, INFRA-5563, INFRA-5564, INFRA-5565, INFRA-5566
+    Decomposed into 8 slices: INFRA-6159, INFRA-6160, INFRA-6161, INFRA-6162, INFRA-6163, INFRA-6164, INFRA-6165, INFRA-6166
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -164580,7 +164618,7 @@ gaps:
 - id: INFRA-4970
   domain: INFRA
   title: "INFRA: Add startup wallclock budget and timeout handling in main.rs (INFRA-1809 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -164604,6 +164642,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+    [2026-09-13T22:29:44Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=2985B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-4971
   domain: INFRA
@@ -203170,6 +203209,7 @@ gaps:
     - ".cargo/config.toml contains a [build] section with rustc-wrapper = \"sccache\""
     - Environment variable SCCACHE_BUILDBUDDY_URL points to grpc.buildbuddy.io and includes the API key
     - Configuration falls back to existing R2 backend when BuildBuddy is unreachable
+  depends_on: [INFRA-6159]
   notes: |
     [chump harvest check 'EFFECTIVE']
     === primitives_index match for 'EFFECTIVE' ===
@@ -203204,6 +203244,7 @@ gaps:
     - ci.yml cargo-test, clippy, and audit jobs expose BUILDBUDDY_API_KEY from GitHub Secrets
     - sccache picks up the BuildBuddy remote cache during CI runs
     - R2 remains configured as a warm fallback
+  depends_on: [INFRA-6159, INFRA-6160]
   notes: |
     [chump harvest check 'EFFECTIVE']
     === primitives_index match for 'EFFECTIVE' ===
@@ -203238,6 +203279,7 @@ gaps:
     - "cargo-test job runs with \"cargo nextest run --target-dir-strategy buildbuddy\" (or equivalent)"
     - Test results are cached in BuildBuddy and skipped on unchanged source+dependency hashes
     - CI logs show when tests are skipped due to cache hits
+  depends_on: [INFRA-6160, INFRA-6161]
   notes: |
     [chump harvest check 'EFFECTIVE']
     === primitives_index match for 'EFFECTIVE' ===
@@ -203272,6 +203314,112 @@ gaps:
     - A list of 10 PRs is identified for post‑rollout measurement
     - Median cargo-test wall‑clock time is recorded and compared against the R2‑only baseline
     - Target reduction of ≥40% on cache‑hit runs is documented
+  depends_on: [INFRA-6162]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6164
+  domain: INFRA
+  title: "INFRA: Enable BuildBuddy RBE preview for the chump-tool-macro crate (INFRA-2249 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - BuildBuddy RBE is enabled for the chump-tool-macro crate in Cargo.toml or .cargo/config.toml
+    - Remote execution latency is measured and logged during CI runs
+    - Results are documented and compared to local execution times
+  depends_on: [INFRA-6159, INFRA-6160, INFRA-6161]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6165
+  domain: INFRA
+  title: "INFRA: Document BuildBuddy setup and fallback behavior (INFRA-2249 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - docs/process/BUILDBUDDY.md exists
+    - Instructions cover operator setup (≈5 min), API key storage, fallback to R2, and free‑tier cost monitoring
+    - Documentation is reviewed and merged
+  depends_on: [INFRA-6159, INFRA-6160, INFRA-6161, INFRA-6164]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6166
+  domain: INFRA
+  title: "INFRA: Add CI test script to verify sccache config with fallback URLs (INFRA-2249 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - scripts/ci/test-buildbuddy-fallback.sh is added to the repo
+    - Script asserts that SCCACHE_BUILDBUDDY_URL and the R2 fallback URL are both present in the sccache configuration
+    - CI fails if the assertion does not hold
+  depends_on: [INFRA-6160, INFRA-6161]
   notes: |
     [chump harvest check 'EFFECTIVE']
     === primitives_index match for 'EFFECTIVE' ===
