@@ -6287,9 +6287,16 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Add two concrete unit tests inside the existing `mod tests` block of `src/hooks.rs` that exercise `almanac_search_fleet` with a mock remote‑cached repository and with a normal repository, asserting that the returned result contains `remote_cached == true` and a populated `reclone_instructions` for the cached case, and that `remote_cached` is false (or absent) and `reclone_instructions` is None for the normal case while the overall output matches the historic snapshot.
+    
+    Target file(s):
+    - src/hooks.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test creates a mock remote‑cached repository, runs almanac_search_fleet, and asserts that `remote_cached` is true and `reclone_instructions` is present.
-    - Test runs almanac_search_fleet on a normal repository and asserts that the new fields are absent and output matches previous behavior.
+    - In src/hooks.rs, the new test `test_almanac_search_fleet_remote_cached` creates a mock repository marked as remote‑cached, calls `almanac_search_fleet`, and asserts that the returned struct’s `remote_cached` field is true and that `reclone_instructions` is `Some(_)`.
+    - In src/hooks.rs, the new test `test_almanac_search_fleet_normal_repo` creates a mock non‑cached repository, calls `almanac_search_fleet`, and asserts that `remote_cached` is false (or the field is absent) and that `reclone_instructions` is `None`, and that the textual output of the function matches the stored snapshot `tests/snapshots/normal_repo.txt`.
   depends_on: [CREDIBLE-1148]
   notes: |
     [chump harvest check 'omits']
@@ -6313,9 +6320,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a new subsection titled “Remote‑cached repositories” under the existing “Hard rules” heading in `docs/process/CLAUDE_GOTCHAS.md`. The subsection will define what “remote‑cached” means, explain why the condition occurs, and give step‑by‑step user guidance for re‑cloning the repository, explicitly referencing the new CLI warning message and the `reclone_instructions` field emitted by the CLI.
+    
+    Target file(s):
+    - docs/process/CLAUDE_GOTCHAS.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - README/UX section added describing what remote‑cached means, why it occurs, and how to re‑clone the repository.
-    - Documentation references the new CLI message and the `reclone_instructions` field.
+    - docs/process/CLAUDE_GOTCHAS.md contains a level‑3 heading “Remote‑cached repositories” placed directly after the “Hard rules” heading.
+    - The new subsection includes a concise definition of “remote‑cached” and a paragraph explaining that it happens when the local checkout lacks required objects and falls back to a remote cache.
+    - "The subsection mentions the exact CLI warning text (e.g., “Warning: repository is remote‑cached; please re‑clone”) and provides a reference to the `reclone_instructions` field in the CLI output."
+    - Executing the CLI command that triggers the remote‑cached check (e.g., `credible status`) prints the warning message and displays the `reclone_instructions` field, matching the description in the documentation.
   depends_on: [CREDIBLE-1148]
   notes: |
     [chump harvest check 'omits']
@@ -6339,9 +6355,18 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Add a regression test function in `scripts/ab-harness/run-cloud-v2.py` that parses a citation lacking the `remote_cached` flag and asserts no exception, and register this test with the existing test runner so that the script’s exit code reflects the success of both the new regression test and all pre‑existing integration tests.
+    
+    Target file(s):
+    - scripts/ab-harness/run-cloud-v2.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All existing integration tests pass unchanged.
-    - A regression test confirms that citations without `remote_cached` are still parsed and processed without errors.
+    - "scripts/ab-harness/run-cloud-v2.py: The function `test_citation_without_remote_cached` runs and completes without raising any exception."
+    - "scripts/ab-harness/run-cloud-v2.py: The `main` entry point returns exit code 0 when the new regression test and all existing integration tests succeed."
+    - Command `python scripts/ab-harness/run-cloud-v2.py --run-tests` finishes with a zero exit status and outputs the line “All tests passed”.
+    - The test summary printed by `run-cloud-v2.py` shows the same count of previously existing passed tests plus one additional passed test for the new regression case.
   depends_on: [CREDIBLE-1148, CREDIBLE-1149]
   notes: |
     [chump harvest check 'omits']
@@ -6365,10 +6390,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new command‑line option `--audit-hardcoded-paths` and an accompanying `audit_hardcoded_src_paths` function to `scripts/ci/test-ci-heavy-jobs-cross-platform.sh`. The function scans all `scripts/ci/*.sh` files for grep patterns that contain a hardcoded `src/*.rs` path, determines whether each grep is used as a behavior assertion (its exit status drives script flow) or a location assertion (its output is stored or printed), and reports any negative greps (`grep -v` or `! grep`) that lack an explicit existence check for the referenced file. The audit results are printed to stdout in a tab‑separated format: `<file>:<line>	<classification>	<missing‑existence‑check>`.
+    
+    Target file(s):
+    - scripts/ci/test-ci-heavy-jobs-cross-platform.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All occurrences of hardcoded src/*.rs paths in scripts/ci/*.sh are inventoried
-    - Each occurrence is classified as behavior assertion vs location assertion
-    - Inventory identifies all negative greps lacking target existence checks
+    - "Running `scripts/ci/test-ci-heavy-jobs-cross-platform.sh --audit-hardcoded-paths` outputs a line containing `scripts/ci/test-pr-rescue-audit-handler.sh:23	behavior assertion` indicating that the grep at that location is classified as a behavior assertion."
+    - "The same command outputs a line containing `scripts/ci/test-required-checks-self-audit.sh:40	location assertion` indicating classification as a location assertion."
+    - "The output includes a line for `scripts/ci/test-cli-integration.sh:113	negative grep	no existence check` showing that the negative grep at that line lacks a target existence verification."
+    - The script exits with status code 0 after completing the audit without executing any of the original CI test logic.
   notes: |
     [chump harvest check 'gates']
     === primitives_index match for 'gates' ===
@@ -6526,9 +6559,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Replace the hard‑coded location‑pinned path assertion inside the `_chump_gh_rate_remaining` function in `scripts/ci/test-graphql-exhausted-false-positive-guard.sh` with a dynamic resolution that first checks for the path via a CLI `test -e` call and falls back to an environment‑provided override; add a small guard in `src/ingest_librarian.rs::run_sweep` that validates the resolved path before proceeding, ensuring the CI gate that invokes the script still passes.
+    
+    Target file(s):
+    - scripts/ci/test-graphql-exhausted-false-positive-guard.sh
+    - src/ingest_librarian.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Positive location-pinned path assertions in scripts/ci/ are converted to CLI behavior checks or dynamic path resolution
-    - Moving code between Rust modules does not break the affected CI gates
+    - "? Running `scripts/ci/test-graphql-exhausted-false-positive-guard.sh` with `TEST_PATH_OVERRIDE=/tmp/mock/path` creates no assertion failure and exits with status 0, printing “Resolved path : /tmp/mock/path”."
+    - "? Invoking `scripts/ci/test-graphql-exhausted-false-positive-guard.sh` without the override but with an existing file at the original hard‑coded location also exits with status 0 and prints “Resolved path : <original‑path>”."
+    - "Executing `cargo test --bin ingest_librarian` (which calls `src/ingest_librarian.rs::run_sweep`) succeeds (exit 0) and logs “Path validated” when the resolved path exists."
+    - The CI job that runs the script and then `run_sweep` reports “All checks passed” in its console output, confirming that moving code between Rust modules did not break the gate.
   depends_on: [CREDIBLE-1153, CREDIBLE-1155, CREDIBLE-1156, CREDIBLE-1157]
   notes: |
     [chump harvest check 'gates']
@@ -6570,9 +6613,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Modify the `curator_decisions` function in `scripts/coord/opus-curator.sh` so that every negative `grep` check now invokes the `target_existence_precondition` helper first; the helper is called with the intended target path and, if the precondition fails, the script aborts with a clear error instead of silently passing the grep.
+    
+    Target file(s):
+    - scripts/coord/opus-curator.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All negative source greps in scripts/ci/*.sh use the target-existence precondition helper
-    - Target file or module relocation causes CI scripts to report missing precondition rather than passing vacuously
+    - In `scripts/coord/opus-curator.sh`, each line that performs a negative `grep` (e.g., `if ! grep -q …`) now includes a preceding call to `target_existence_precondition <target_path>` and the grep is wrapped in an `if` that only runs when the precondition returns success.
+    - "? Executing `scripts/coord/opus-curator.sh` with a missing target file causes the script to exit with a non‑zero status and prints exactly `Precondition failed : target does not exist` before any grep evaluation."
+    - Executing the same script with the target file present allows the negative grep to run and the script proceeds to the next step without emitting the precondition error message.
+    - A positive `grep` statement elsewhere in `scripts/coord/opus-curator.sh` (e.g., `if grep -q …`) remains unchanged; its output and exit code are identical to the pre‑change behavior.
   depends_on: [CREDIBLE-1153, CREDIBLE-1154, CREDIBLE-1158]
   notes: |
     [chump harvest check 'gates']
@@ -93993,7 +94045,7 @@ gaps:
     - Cross-pollination brief CP-005-echeo-ship-velocity-score.md documents harvest and gap-vs-need mapping
     - Coordinate with INFRA-1764 — routing layer reads this score, does not compute its own competing one
   notes: |
-    Decomposed into 10 slices: INFRA-5375, INFRA-5376, INFRA-5377, INFRA-5378, INFRA-5379, INFRA-5380, INFRA-5381, INFRA-5382, INFRA-5383, INFRA-5384
+    Decomposed into 7 slices: INFRA-6104, INFRA-6105, INFRA-6106, INFRA-6107, INFRA-6108, INFRA-6109, INFRA-6110
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -94131,7 +94183,7 @@ gaps:
     - Smoke test scripts/ci/test-harvester-cli.sh exercises scan, check, brief, deep-scan; each subcommand exits 0 on synthetic happy path and exit 2 on bad input
     - "Documentation: chump harvest --help, docs/arsenal/HARVESTER.md updated with CLI surface, CLAUDE.md references the CLI in addition to the slash command and agent"
   notes: |
-    Decomposed into 9 slices: INFRA-5417, INFRA-5418, INFRA-5419, INFRA-5420, INFRA-5421, INFRA-5422, INFRA-5423, INFRA-5424, INFRA-5425
+    Decomposed into 9 slices: INFRA-6111, INFRA-6112, INFRA-6113, INFRA-6114, INFRA-6115, INFRA-6116, INFRA-6117, INFRA-6118, INFRA-6119
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -200864,6 +200916,433 @@ gaps:
     === cross-pollination briefs mentioning 'ZERO-WASTE' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
 
+- id: INFRA-6104
+  domain: INFRA
+  title: "INFRA: Document echeo score formula and CP-005 brief (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Create CP-005-echeo-ship-velocity-score.md documenting echeo calculate_ship_velocity_score formula (cosine similarity + boosts, capped at 1.0)
+    - Document echeo Match struct fields (score, reasons, capability, need) and gap-vs-need mapping
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6105
+  domain: INFRA
+  title: "INFRA: Scaffold src/gap_scoring.rs with vendoring lineage headers (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Create src/gap_scoring.rs file stub
+    - Include vendoring lineage comment citing repairman29/echeo commit SHA for calculate_ship_velocity_score (CP-005)
+    - Document architectural decision favoring vendoring for v0 over external crate
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6106
+  domain: INFRA
+  title: "INFRA: Define gap scoring data types in src/gap_scoring.rs (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Define Gap and RoutingOutcome input structs in src/gap_scoring.rs
+    - Support task class, domain, and language metadata attributes on Gap and RoutingOutcome
+  depends_on: [INFRA-6105]
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6107
+  domain: INFRA
+  title: "INFRA: Implement calculate_gap_value_score with echeo boost factors (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Implement calculate_gap_value_score returning f64 bounded between 0.0 and 1.0
+    - Incorporate cosine similarity base score with language match boost (0.1), domain match boost, and recency boost capped at 1.0
+  depends_on: [INFRA-6106]
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6108
+  domain: INFRA
+  title: "INFRA: Add unit tests for gap value score calculations (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Unit tests verify exact score calculation for baseline, boost scenarios, and cap at 1.0
+    - Unit tests verify deterministic output for synthetic gap and routing outcome inputs
+  depends_on: [INFRA-6107]
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6109
+  domain: INFRA
+  title: "INFRA: Create CI smoke test script scripts/ci/test-gap-scoring.sh (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Create executable scripts/ci/test-gap-scoring.sh
+    - Smoke test feeds synthetic gap and routing_outcomes table and asserts deterministic score output in range [0.0, 1.0]
+  depends_on: [INFRA-6108]
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6110
+  domain: INFRA
+  title: "INFRA: Expose gap value score API interface for INFRA-1764 routing layer (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Expose public interface for calculate_gap_value_score so routing layer can read without computing competing scores
+    - Document interface contract for INFRA-1764 integration
+  depends_on: [INFRA-6107]
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6111
+  domain: INFRA
+  title: "INFRA: Create chump harvest CLI subcommand scaffold with scan, check, brief, deep-scan actions and help output (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "Running `chump harvest --help` lists subcommands: scan, check, brief, deep-scan"
+    - CLI can be invoked from any harness (Claude Code, opencode, codex, manual) without errors
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6112
+  domain: INFRA
+  title: "INFRA: Implement `chump harvest scan` action (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "`chump harvest scan` refreshes docs/arsenal/raw/github_repos.json"
+    - "`chump harvest scan` runs scripts/arsenal/build.py"
+    - Command exits with code 0 on success and non‑zero when any high‑severity alerts are present
+  depends_on: [INFRA-6111]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6113
+  domain: INFRA
+  title: "INFRA: Implement `chump harvest check` action (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "`chump harvest check <GAP-ID>` or `<free‑form topic>` reads docs/arsenal/GLOBAL_ARSENAL.json and primitives_index"
+    - "Command returns an overlap report containing file:line citations for matching primitives"
+    - Command exits with code 0 on successful report generation
+  depends_on: [INFRA-6111]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6114
+  domain: INFRA
+  title: "INFRA: Integrate check into `chump gap decompose` pre‑flight (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "`chump gap decompose` invokes `chump harvest check` internally before decomposition"
+    - If overlap is found, the citation is included in the decomposition output visible to the implementing worker
+    - Decompose command still completes with exit code 0 when pre‑flight succeeds
+  depends_on: [INFRA-6111, INFRA-6113]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6115
+  domain: INFRA
+  title: "INFRA: Add scheduled weekly rebuild via launchd plist (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - scripts/launchd/com.chump.harvester-scan.plist exists and is loaded to run weekly
+    - Weekly run executes `python3 scripts/arsenal/build.py`
+    - Run emits ambient event `kind=arsenal_rebuilt` with counts of repos, clusters, duplicates, and alerts
+  depends_on: [INFRA-6112]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6116
+  domain: INFRA
+  title: "INFRA: Register `arsenal_rebuilt` event in observability registry (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - docs/observability/EVENT_REGISTRY.yaml contains an entry for `arsenal_rebuilt` with description and payload schema
+    - Event registration passes schema validation tests
+  depends_on: [INFRA-6115]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6117
+  domain: INFRA
+  title: "INFRA: Perform coverage push: deep‑scan remaining 45 repos and update GLOBAL_ARSENAL.json (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Parallel explorer processes the remaining 45 fleet repos in a one‑time run
+    - Extracted primitives are added to docs/arsenal/GLOBAL_ARSENAL.json under the appropriate repo entries
+    - Run completes with exit code 0 and logs number of primitives added
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6118
+  domain: INFRA
+  title: "INFRA: Create smoke‑test script `scripts/ci/test-harvester-cli.sh` (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Script exercises `chump harvest scan`, `check`, `brief`, and `deep-scan` with synthetic happy‑path inputs and expects exit code 0
+    - Script supplies bad inputs to each subcommand and expects exit code 2
+    - Script returns overall exit code 0 only when all subcommand checks pass
+  depends_on: [INFRA-6111, INFRA-6112, INFRA-6113, INFRA-6114, INFRA-6115, INFRA-6117]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6119
+  domain: INFRA
+  title: "INFRA: Update documentation for Harvester CLI (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`chump harvest --help` output matches documentation in docs/arsenal/HARVESTER.md"
+    - HARVESTER.md includes description of all subcommands, flags, and example usages
+    - CLAUDE.md references the new CLI alongside the slash command and agent integration
+  depends_on: [INFRA-6111, INFRA-6112, INFRA-6113, INFRA-6114, INFRA-6115, INFRA-6116, INFRA-6117, INFRA-6118]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
 - id: INFRA-635
   domain: INFRA
   title: "EFFECTIVE: 'chump gap rebalance' — auto-enforce P0 budget + ranking on every gap-file batch. Productizes the manual 'file batch → check P0 count → demote stale → commit' loop. Today operator/Mission-Driver does this manually after every multi-gap batch (e.g., the 9-gap chump-proprietary REQ batch). After this ships: 'chump gap rebalance' (or auto-trigger after 'chump gap reserve') runs the budget audit + demotion suggestion + (with --apply) does the demotion. Heuristic: P0 count >5 → demote oldest-P0 (or theoretical-only-no-corruption-now P0s like INFRA-538) with rationale logged. Pairs with INFRA-604 chump pillar-balance (already filed) and INFRA-586 chump gap audit-priorities. Composes into a coherent 'gap-store self-curates' loop. AC: src/main.rs subcommand 'chump gap rebalance [--apply]'; reads .chump/state.db, applies P0-budget rules from CLAUDE.md (≤5), pillar-balance rules (no <2, no >50%); outputs suggested actions; --apply executes; demotion notes include 'auto-demoted: P0 budget exceeded by N, oldest stale P0' rationale; test scripts/ci/test-gap-rebalance.sh covers 4 fixture scenarios (over-budget P0, pillar-skew, all-clean, no-action-needed)."
@@ -215506,6 +215985,8 @@ gaps:
     [2026-09-13T17:31:55Z] rot-reaper: PR #4621 auto-closed (required-check-red, 58h) 2026-09-13; RESPAWN CAP 3 reached (10 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T18:03:14Z] rot-reaper: PR #4621 auto-closed (required-check-red, 58h) 2026-09-13; RESPAWN CAP 3 reached (11 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T18:32:27Z] rot-reaper: PR #4621 auto-closed (required-check-red, 59h) 2026-09-13; RESPAWN CAP 3 reached (12 prior recycles) — NOT re-queued, escalating to operator.
+    [2026-09-13T19:02:14Z] rot-reaper: PR #4621 auto-closed (required-check-red, 59h) 2026-09-13; RESPAWN CAP 3 reached (13 prior recycles) — NOT re-queued, escalating to operator.
+    [2026-09-13T19:08:35Z] rot-reaper: PR #4621 auto-closed (required-check-red, 59h) 2026-09-13; RESPAWN CAP 3 reached (14 prior recycles) — NOT re-queued, escalating to operator.
 
 - id: RESILIENT-1108
   domain: RESILIENT
