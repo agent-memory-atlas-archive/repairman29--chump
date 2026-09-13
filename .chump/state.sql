@@ -6506,7 +6506,7 @@ gaps:
 - id: CREDIBLE-1157
   domain: CREDIBLE
   title: "CREDIBLE: Unpin test-gap-audit-ac-open.sh from hardcoded src/main.rs path (CREDIBLE-237 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -6528,6 +6528,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+  closed_date: '2026-09-13'
+  closed_pr: 4644
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4644 titled 'CREDIBLE-1157: ...' merged 2026-09-13; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: CREDIBLE-1158
   domain: CREDIBLE
@@ -203122,6 +203126,176 @@ gaps:
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
+- id: INFRA-6159
+  domain: INFRA
+  title: "INFRA: Sign up for BuildBuddy free tier and store API key in GitHub secrets (INFRA-2249 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Operator has a BuildBuddy free tier account
+    - BUILDBUDDY_API_KEY is added to the repository's GitHub Secrets
+    - Secret can be accessed by CI workflows
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6160
+  domain: INFRA
+  title: "INFRA: Update .cargo/config.toml with sccache wrapper and BuildBuddy URL (INFRA-2249 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - ".cargo/config.toml contains a [build] section with rustc-wrapper = \"sccache\""
+    - Environment variable SCCACHE_BUILDBUDDY_URL points to grpc.buildbuddy.io and includes the API key
+    - Configuration falls back to existing R2 backend when BuildBuddy is unreachable
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6161
+  domain: INFRA
+  title: "INFRA: Inject BUILDBUDDY_API_KEY into CI jobs (cargo-test, clippy, audit) (INFRA-2249 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - ci.yml cargo-test, clippy, and audit jobs expose BUILDBUDDY_API_KEY from GitHub Secrets
+    - sccache picks up the BuildBuddy remote cache during CI runs
+    - R2 remains configured as a warm fallback
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6162
+  domain: INFRA
+  title: "INFRA: Enable test-result caching in cargo-test job (INFRA-2249 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "cargo-test job runs with \"cargo nextest run --target-dir-strategy buildbuddy\" (or equivalent)"
+    - Test results are cached in BuildBuddy and skipped on unchanged source+dependency hashes
+    - CI logs show when tests are skipped due to cache hits
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6163
+  domain: INFRA
+  title: "INFRA: Create measurement plan for cache‑hit performance (INFRA-2249 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A list of 10 PRs is identified for post‑rollout measurement
+    - Median cargo-test wall‑clock time is recorded and compared against the R2‑only baseline
+    - Target reduction of ≥40% on cache‑hit runs is documented
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
 - id: INFRA-635
   domain: INFRA
   title: "EFFECTIVE: 'chump gap rebalance' — auto-enforce P0 budget + ranking on every gap-file batch. Productizes the manual 'file batch → check P0 count → demote stale → commit' loop. Today operator/Mission-Driver does this manually after every multi-gap batch (e.g., the 9-gap chump-proprietary REQ batch). After this ships: 'chump gap rebalance' (or auto-trigger after 'chump gap reserve') runs the budget audit + demotion suggestion + (with --apply) does the demotion. Heuristic: P0 count >5 → demote oldest-P0 (or theoretical-only-no-corruption-now P0s like INFRA-538) with rationale logged. Pairs with INFRA-604 chump pillar-balance (already filed) and INFRA-586 chump gap audit-priorities. Composes into a coherent 'gap-store self-curates' loop. AC: src/main.rs subcommand 'chump gap rebalance [--apply]'; reads .chump/state.db, applies P0-budget rules from CLAUDE.md (≤5), pillar-balance rules (no <2, no >50%); outputs suggested actions; --apply executes; demotion notes include 'auto-demoted: P0 budget exceeded by N, oldest stale P0' rationale; test scripts/ci/test-gap-rebalance.sh covers 4 fixture scenarios (over-budget P0, pillar-skew, all-clean, no-action-needed)."
@@ -220761,13 +220935,14 @@ gaps:
 - id: RESILIENT-1204
   domain: RESILIENT
   title: "node-orchestrator active but never auto-scales cj-worker2: CJ stuck at 1 worker despite 4 cores"
-  status: open
+  status: done
   priority: P2
   effort: m
   acceptance_criteria:
     - "The change described by \"CJ stuck at 1 worker despite 4 cores\" is implemented in the relevant RESILIENT code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  closed_pr: 4643
   evidence: |
     chump-node-orchestrator.service is active on CJ across multiple ticks, but chump-cj-worker2.service stays inactive - the orchestrator never scales a 2nd worker even though CJ is 4-core with spare capacity and the backlog is large. NODE_FABRIC (RESILIENT-291) says node-orchestrator auto-scales cj-worker2/3 off the base worker; it is not doing so. Throughput is capped at 1 worker. Fix: orchestrator must size worker count to nproc-1 and start/enable the extra chump-cj-worker@N units (and organ-reconcile must keep them enabled). Verify by systemctl is-active cj-worker2 after an orchestrator tick.
 
