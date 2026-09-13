@@ -4470,10 +4470,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update gap registration logic in `crates/chump-coord/src/rpc.rs` and gap generation utilities in `scripts/coord/code-reviewer-agent.sh` to remove tautological default placeholder values (e.g., "TODO" or "auto-filled") when creating gaps without explicit `--acceptance-criteria`. When criteria are omitted and `--no-ac-required` is not specified, store `acceptance_criteria` as an empty array or null so that audit tools like `audit-ac` accurately report missing criteria.
+    
+    Target file(s):
+    - crates/chump-coord/src/rpc.rs
+    - scripts/coord/code-reviewer-agent.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - When a gap is created without `--acceptance-criteria` (and without `--no-ac-required`), the stored `acceptance_criteria` field is empty/null, not a placeholder string.
-    - The audit tool `audit-ac` flags gaps with empty `acceptance_criteria` as missing.
-    - "No placeholder text such as \"TODO\", \"auto‑filled\", or any fake‑pass value appears in any new gap record."
+    - "Creating a gap without `--acceptance-criteria` stores an empty or null `acceptance_criteria` array in `crates/chump-coord/src/rpc.rs` instead of placeholder strings like \"TODO\" or \"auto-filled\"."
+    - Running `audit-ac` against gaps with empty `acceptance_criteria` reports them as missing acceptance criteria.
+    - New gap records emitted by `scripts/coord/code-reviewer-agent.sh` do not insert default placeholder text into `acceptance_criteria`.
   notes: |
     [chump harvest check 'reserve']
     === primitives_index match for 'reserve' ===
@@ -5996,6 +6004,194 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
 
+- id: CREDIBLE-1153
+  domain: CREDIBLE
+  title: "CREDIBLE: Audit and classify hardcoded file path greps in scripts/ci/ (CREDIBLE-237 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - All occurrences of hardcoded src/*.rs paths in scripts/ci/*.sh are inventoried
+    - Each occurrence is classified as behavior assertion vs location assertion
+    - Inventory identifies all negative greps lacking target existence checks
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1154
+  domain: CREDIBLE
+  title: "CREDIBLE: Implement CI target-existence helper for negative bash assertions (CREDIBLE-237 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - A reusable bash helper function is added to CI script libraries (e.g., scripts/ci/lib.sh)
+    - Helper fails explicitly if target file or symbol scope does not exist before running negative grep
+    - Unit test verifies the helper flags missing targets instead of passing vacuously
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1155
+  domain: CREDIBLE
+  title: "CREDIBLE: Unpin test-gap-impact-rating.sh from hardcoded src/main.rs path (CREDIBLE-237 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - test-gap-impact-rating.sh (FLEET-048) is updated to assert binary CLI behavior or fallback path dispatch
+    - Test passes when gap subcommand logic is in src/commands/gap.rs or src/main.rs
+    - Test fails cleanly if gap rate subcommand is genuinely missing from binary
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1156
+  domain: CREDIBLE
+  title: "CREDIBLE: Unpin test-open-pr-dup-detection.sh from hardcoded src/main.rs path (CREDIBLE-237 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - test-open-pr-dup-detection.sh (INFRA-1982) resolves target symbol dynamically across source tree or via fallback path dispatch
+    - Test passes when gap_reserve_similarity_warn is present in src/commands/gap.rs
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1157
+  domain: CREDIBLE
+  title: "CREDIBLE: Unpin test-gap-audit-ac-open.sh from hardcoded src/main.rs path (CREDIBLE-237 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - test-gap-audit-ac-open.sh (INFRA-936) dynamically checks Rust codebase for ticket tag rather than hardcoding src/main.rs
+    - Test passes regardless of whether audit logic is in src/main.rs or src/commands/gap.rs
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1158
+  domain: CREDIBLE
+  title: "CREDIBLE: Fix test-stale-binary-ship-blocked.sh to prevent vacuous pass on negative assertion (CREDIBLE-237 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Test 3 in test-stale-binary-ship-blocked.sh (INFRA-825) verifies search target existence before asserting absence
+    - Assertion checks binary execution behavior rather than unanchored source grep where feasible
+    - Deleting target file/symbol causes explicit precondition failure instead of silent pass
+  depends_on: [CREDIBLE-1154]
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1159
+  domain: CREDIBLE
+  title: "CREDIBLE: Remediate remaining positive location-pinned path greps identified in sweep (CREDIBLE-237 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Positive location-pinned path assertions in scripts/ci/ are converted to CLI behavior checks or dynamic path resolution
+    - Moving code between Rust modules does not break the affected CI gates
+  depends_on: [CREDIBLE-1153, CREDIBLE-1155, CREDIBLE-1156, CREDIBLE-1157]
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
 - id: CREDIBLE-116
   domain: CREDIBLE
   title: chump-desktop --doc — doctest never executed, rustdoc returns ENOENT on intermediate artifact dirs (proc-macro panic during workspace cargo-test)
@@ -6012,6 +6208,60 @@ gaps:
   closed_date: '2026-07-20'
   closed_pr: 1652
   outcome_id: CREDIBLE-000
+
+- id: CREDIBLE-1160
+  domain: CREDIBLE
+  title: "CREDIBLE: Apply target-existence precondition to all negative CI greps identified in sweep (CREDIBLE-237 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - All negative source greps in scripts/ci/*.sh use the target-existence precondition helper
+    - Target file or module relocation causes CI scripts to report missing precondition rather than passing vacuously
+  depends_on: [CREDIBLE-1153, CREDIBLE-1154, CREDIBLE-1158]
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1161
+  domain: CREDIBLE
+  title: "CREDIBLE: Add CI linter check for path-pinned assertions and unguarded negative greps (CREDIBLE-237 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A static lint script runs in CI to flag hardcoded src/*.rs file paths in scripts/ci/*.sh
+    - Linter fails build if negative grep commands are added without target-existence preconditions
+  depends_on: [CREDIBLE-1159, CREDIBLE-1160]
+  notes: |
+    [chump harvest check 'gates']
+    === primitives_index match for 'gates' ===
+    
+    === cluster keyword match for 'gates' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'gates' ===
+    
+    === repo-description match for 'gates' ===
+    
+    === HARVEST_ROADMAP.md mention of 'gates' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'gates' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
 
 - id: CREDIBLE-117
   domain: CREDIBLE
@@ -8131,7 +8381,7 @@ gaps:
     - "GUARD AGAINST THE VACUOUS-PASS CLASS SPECIFICALLY: any negative assertion (grep -q ... && fail) must first prove its search target EXISTS somewhere, else the test is asserting nothing. That precondition is what would have caught INFRA-825 Test 3 automatically"
     - "Filed from the fix session, not speculative: all four repairs and the vacuous-pass analysis are in PR #3499's commit 'unpin four CI gates from src/main.rs'"
   notes: |
-    Decomposed into 9 slices: CREDIBLE-1078, CREDIBLE-1079, CREDIBLE-1080, CREDIBLE-1081, CREDIBLE-1082, CREDIBLE-1083, CREDIBLE-1084, CREDIBLE-1085, CREDIBLE-1086
+    Decomposed into 9 slices: CREDIBLE-1153, CREDIBLE-1154, CREDIBLE-1155, CREDIBLE-1156, CREDIBLE-1157, CREDIBLE-1158, CREDIBLE-1159, CREDIBLE-1160, CREDIBLE-1161
   opened_date: '2026-08-19'
   outcome_id: MISSION-010
 
@@ -39196,10 +39446,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add `who: String`, `struggling_moment: String`, and `done_signal: String` fields to the JTBD vision intake data structures in `crates/chump-handoff/src/contracts.rs` (`VisionIntakeInput`) and `src/vision_intake.rs` (`IntakeJson`), updating parsing and test constructors to support these three fields.
+    
+    Target file(s):
+    - crates/chump-handoff/src/contracts.rs
+    - src/vision_intake.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "The JTBD intake struct includes new fields: `who: String`, `struggling_moment: String`, and `done_signal: String`."
-    - The code compiles with `cargo check` and `cargo fmt` without formatting changes.
-    - Running `cargo clippy --all-targets -D warnings` produces no new warnings.
+    - "The `VisionIntakeInput` struct in `crates/chump-handoff/src/contracts.rs` and `IntakeJson` struct in `src/vision_intake.rs` include `who: String`, `struggling_moment: String`, and `done_signal: String` fields."
+    - Unit tests in `src/vision_intake.rs` verify parsing and construction of JTBD intake payloads containing `who`, `struggling_moment`, and `done_signal`.
+    - Running `cargo check` succeeds and `cargo clippy --all-targets -D warnings` produces no new warnings.
   notes: |
     [chump harvest check 'capture']
     === primitives_index match for 'capture' ===
@@ -42690,9 +42948,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a new section titled "Merged Skeleton Emission Strategy" to docs/design-pass-stage.md that documents how architect components emit a single merged skeleton containing Rust traits, todo!() placeholders, and failing unit/integration tests.
+    
+    Target file(s):
+    - docs/design-pass-stage.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Design document outlines how the architect will emit a single merged skeleton containing traits, todo!() holes, and failing tests.
-    - Design is reviewed and approved by the team.
+    - docs/design-pass-stage.md contains a section titled 'Merged Skeleton Emission Strategy'.
+    - docs/design-pass-stage.md specifies conventions for combining trait definitions, todo!() implementation holes, and failing test cases within a single emitted skeleton artifact.
+    - docs/design-pass-stage.md includes a Rust code snippet illustrating a merged skeleton layout with traits, todo!() functions, and failing tests.
   notes: |
     [chump harvest check 'PILOT']
     === primitives_index match for 'PILOT' ===
@@ -42752,9 +43018,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update the generate function in scripts/ab-harness/gen-null-prose.py to emit todo!() macro placeholders for implementation stubs in generated Rust code skeletons. Update scripts/ci/test-scaffold-holes-apply.sh to assert that skeleton output contains todo!() placeholders and that Rust skeleton verification fails only at the todo!() macro invocations.
+    
+    Target file(s):
+    - scripts/ab-harness/gen-null-prose.py
+    - scripts/ci/test-scaffold-holes-apply.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Each required implementation point is replaced with a `todo!()` macro.
-    - The generated skeleton fails to compile only because of the `todo!()` placeholders.
+    - Running scripts/ab-harness/gen-null-prose.py emits Rust skeleton files containing todo!() in target function bodies.
+    - scripts/ci/test-scaffold-holes-apply.sh succeeds when running its verification suite against generated skeletons with todo!() placeholders.
+    - Running cargo check on the generated skeleton code yields no syntax or missing symbol errors outside of todo!() macros.
   depends_on: [EFFECTIVE-1209]
   notes: |
     [chump harvest check 'PILOT']
@@ -230721,7 +230996,7 @@ gaps:
 - id: RESILIENT-801
   domain: RESILIENT
   title: "RESILIENT: Implement INFRA‑3808 cooldown logic in worker code (RESILIENT-554 slice)"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
@@ -230748,6 +231023,7 @@ gaps:
     === cross-pollination briefs mentioning 'Pixel' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+    [2026-09-13T12:51:44Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=75, rc=75, cycle_log=5548B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: RESILIENT-802
   domain: RESILIENT
