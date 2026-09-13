@@ -199,7 +199,7 @@ pub fn check_ceiling() -> Result<bool, String> {
         ));
     }
 
-    if current >= warn {
+    if current > warn {
         return Ok(true);
     }
 
@@ -413,13 +413,27 @@ mod tests {
     }
 
     #[test]
-    fn check_ceiling_at_warn_returns_true() {
+    fn check_ceiling_above_warn_returns_true() {
         let _g = STATE_LOCK.lock().unwrap();
         fresh();
         std::env::set_var("CHUMP_COST_CEILING_USD", "5.00");
         std::env::set_var("CHUMP_COST_WARN_USD", "2.00");
-        add_session_cost_usd(2.00);
-        assert_eq!(check_ceiling(), Ok(true), "exactly at warn → soft warn");
+        add_session_cost_usd(2.01); // above the warn threshold
+        assert_eq!(check_ceiling(), Ok(true), "above warn → soft warn");
+    }
+
+    #[test]
+    fn check_ceiling_at_warn_returns_false() {
+        let _g = STATE_LOCK.lock().unwrap();
+        fresh();
+        std::env::set_var("CHUMP_COST_CEILING_USD", "5.00");
+        std::env::set_var("CHUMP_COST_WARN_USD", "2.00");
+        add_session_cost_usd(2.00); // exactly at warn
+        assert_eq!(
+            check_ceiling(),
+            Ok(false),
+            "at warn → no soft warn (must be above)"
+        );
     }
 
     #[test]
