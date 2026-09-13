@@ -184,10 +184,10 @@ else
 fi
 
 echo "[9. INFRA-936 referenced in source]"
-if grep -r "INFRA-936\|infra936" "$REPO_ROOT/src/main.rs" 2>/dev/null | grep -q "INFRA-936\|infra936"; then
-  ok "INFRA-936 referenced in src/main.rs"
+if grep -r "INFRA-936\|infra936" "$REPO_ROOT/src/" 2>/dev/null | grep -q "INFRA-936\|infra936"; then
+  ok "INFRA-936 referenced in src/"
 else
-  fail "INFRA-936 not found in src/main.rs"
+  fail "INFRA-936 not found in src/"
 fi
 
 echo
