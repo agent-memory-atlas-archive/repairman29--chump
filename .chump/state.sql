@@ -19615,10 +19615,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend the `main` function in `scripts/coord/gap-doctor.py` to load the raw drift JSON from the slice‑0 input file, invoke the existing normalization pipeline (slices 2‑4) and the filtering pipeline (slices 4‑6), then emit a CSV report (`flag,value,count,category`) containing only the remaining “real” drift flags. The implementation adds a deterministic filtering step based on the rule definitions and writes the report to the path supplied via `--output`, logging a summary line with the number of real flags processed.
+    
+    Target file(s):
+    - scripts/coord/gap-doctor.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Script consumes the raw drift JSON from slice 0, runs normalization (slices 2‑4) and filtering (slices 4‑6)
-    - Output report lists remaining `real` drift flags with counts matching the examples (e.g., BEAST_MODE_API 270 reads, BASE_URL variations, etc.)
-    - "Report format matches ROADMAP O2 expectations (CSV with columns: flag, value, count, category)"
+    - Running `python scripts/coord/gap-doctor.py --input tests/fixtures/drift_slice0.json --output tmp/report.csv` creates `tmp/report.csv` whose first line is exactly `flag,value,count,category`.
+    - The generated `tmp/report.csv` includes a row `BEAST_MODE_API,*,270,real` (the `value` column may be `*` for aggregated counts) confirming that the BEAST_MODE_API flag count matches the expected example.
+    - "The script prints to stdout a line matching the regex `Filtering complete: \\d+ real drift flags` and the numeric value equals the number of data rows (excluding the header) in `tmp/report.csv`."
+    - The process exits with exit code 0 after successful report generation.
   depends_on: [CREDIBLE-569, CREDIBLE-571, CREDIBLE-572, CREDIBLE-573, CREDIBLE-574, CREDIBLE-575]
   notes: |
     [chump harvest check 'almanac']
@@ -19709,10 +19717,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend the existing `#[cfg(test)] mod tests` block in `crates/ast-crawler/src/lib.rs` to add concrete unit tests for the `normalize_unset` and `normalize_path` functions and for each filter rule (`ANTHROPIC_API_KEY`, all `CARGO_*` keys, and `CHUMP_AMBIENT_LOG`). The tests verify the exact normalized values and filter decisions and are compiled into the crate’s test suite.
+    
+    Target file(s):
+    - crates/ast-crawler/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test suite covers `normalize_unset`, `normalize_path`, and each filter rule (ANTHROPIC_API_KEY, CARGO_*, CHUMP_AMBIENT_LOG)
-    - All tests pass with 100% coverage for the new modules
-    - Tests are integrated into the project's CI and run on every push
+    - Running `cargo test --package ast-crawler` executes the tests added in `crates/ast-crawler/src/lib.rs` for `normalize_unset`, `normalize_path`, and the three filter rules, and all of them pass.
+    - A coverage run (`cargo llvm-cov` or `cargo tarpaulin`) reports 100 % line coverage for the source files that implement `normalize_unset`, `normalize_path`, and the filter functions.
+    - The CI workflow file `.github/workflows/ci.yml` contains a step that runs `cargo test`, and the pipeline succeeds on every push after the new tests are present.
   depends_on: [CREDIBLE-571, CREDIBLE-572, CREDIBLE-573, CREDIBLE-574, CREDIBLE-575]
   notes: |
     [chump harvest check 'almanac']
@@ -19735,10 +19750,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a “Drift Triage Pipeline” section to the ROADMAP‑superseded markdown document that describes the triage workflow, normalization rules, and how to interpret the generated report, and extend the CI test script to verify that the O2 dashboard JSON now contains the filtered `verified_real_drift_count` metric.
+    
+    Target file(s):
+    - docs/archive/strategy-2026-04/ROADMAP-superseded.md
+    - scripts/ci/test-api-roadmap.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - README section added describing the drift triage pipeline, normalization rules, and how to interpret the report
-    - ROADMAP O2 dashboard is updated with the new verified real drift count after filtering
-    - Documentation includes instructions for future contributors to add new noise patterns
+    - "docs/archive/strategy-2026-04/ROADMAP-superseded.md contains a top‑level heading “## Drift Triage Pipeline” with subsections “### Normalization Rules” and “### Interpreting the Report”."
+    - scripts/ci/test-api-roadmap.sh includes a new test block that fetches the O2 dashboard endpoint, parses the JSON, and fails if the key `verified_real_drift_count` is missing or is not a non‑negative integer.
+    - Executing `bash scripts/ci/test-api-roadmap.sh` exits with status 0, confirming the new metric check passes.
   depends_on: [CREDIBLE-576, CREDIBLE-577]
   notes: |
     [chump harvest check 'almanac']
@@ -19780,10 +19803,19 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Extend the `info` function in `scripts/coord/code-reviewer-agent.sh` and the `emit_ambient` function in `scripts/dispatch/fix-trunk-dispatcher.sh` to accept a new optional `--tmp <path>` argument, store the supplied temporary path, and propagate it to any downstream commands or log messages that currently omit it.
+    
+    Target file(s):
+    - scripts/coord/code-reviewer-agent.sh
+    - scripts/dispatch/fix-trunk-dispatcher.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "Code modifications for \"tmp\" are merged into the relevant modules."
-    - Compilation succeeds without warnings.
-    - No existing functionality is broken (all current tests still pass).
+    - In `scripts/coord/code-reviewer-agent.sh`, the `info` function signature includes a `--tmp <path>` option and the function’s log output line contains the exact path string passed via this option.
+    - In `scripts/dispatch/fix-trunk-dispatcher.sh`, the `emit_ambient` function receives the `--tmp` value from its caller and forwards it to the ambient command invocation (e.g., as an environment variable or argument) without altering other parameters.
+    - Executing `bash scripts/coord/code-reviewer-agent.sh --tmp /tmp/example` prints a log line that includes the substring `/tmp/example`.
+    - Running the existing test harness for both scripts with their default arguments (no `--tmp` flag) produces the same exit codes and output as before the change.
   depends_on: [CREDIBLE-581]
 
 - id: CREDIBLE-583
@@ -19792,10 +19824,17 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Insert a new `#[test]` function named `test_tmp_behavior` inside the existing `open_pr_dup_tests` module of `crates/chump-atomic-claim/src/atomic_claim.rs` that exercises the newly introduced “tmp” behavior and asserts its expected result, following the crate’s test naming conventions.
+    
+    Target file(s):
+    - crates/chump-atomic-claim/src/atomic_claim.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "A new cargo test is added that asserts the expected outcome of the \"tmp\" change."
-    - The test fails on the pre‑change code base and passes after the implementation.
-    - Test is placed in the appropriate test module and follows project naming conventions.
+    - "The file `crates/chump-atomic-claim/src/atomic_claim.rs` contains a `#[test] fn test_tmp_behavior()` definition within the `mod open_pr_dup_tests` block."
+    - Executing `cargo test` reports `test_tmp_behavior` as a failing test on the current code base (non‑zero exit status and failure output).
+    - After the “tmp” behavior implementation is merged, running `cargo test` reports `test_tmp_behavior` as passing (zero exit status and success output).
   depends_on: [CREDIBLE-582]
 
 - id: CREDIBLE-584
@@ -102689,7 +102728,7 @@ gaps:
     - "Smoke test scripts/ci/test-local-merge-queue.sh: synth 3 pending merges, run local-merge-queue, assert all 3 merge into local main in order, no GitHub calls made"
     - Emit kind=local_merge_queued / kind=local_merge_landed / kind=local_merge_blocked ambient events
   notes: |
-    Decomposed into 8 slices: INFRA-5567, INFRA-5568, INFRA-5569, INFRA-5570, INFRA-5571, INFRA-5572, INFRA-5573, INFRA-5574
+    Decomposed into 8 slices: INFRA-6167, INFRA-6168, INFRA-6169, INFRA-6170, INFRA-6171, INFRA-6172, INFRA-6173, INFRA-6174
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -203443,6 +203482,231 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6167
+  domain: INFRA
+  title: "INFRA: INFRA-5567: Implement offline mode detection in local-merge-queue.sh and replace gh pr merge --auto (INFRA-2252 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When CHUMP_GITHUB_MODE=offline, local-merge-queue.sh runs instead of gh pr merge --auto
+    - Merges are applied to the local main branch
+    - No calls are made to the GitHub API during offline mode
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6168
+  domain: INFRA
+  title: "INFRA: INFRA-5568: Add NATS KV Compare‑And‑Set serialization for the merge queue (INFRA-2252 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Multiple workers can enqueue merge requests without race conditions
+    - The script uses NATS KV CAS to serialize access
+    - Successful CAS operations are logged
+  depends_on: [INFRA-6167]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6169
+  domain: INFRA
+  title: "INFRA: INFRA-5573: Implement file‑lock fallback when NATS is unavailable (INFRA-2252 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - If NATS connection fails, the script acquires a file lock at .chump-locks/local-merge-queue.lock
+    - Only one worker can hold the lock at a time
+    - Lock acquisition and release are logged
+  depends_on: [INFRA-6168]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6170
+  domain: INFRA
+  title: "INFRA: INFRA-5569: Persist pending merges using PersistentMission store (INFRA-2252 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Pending merge requests are saved as PersistentMission<MergeRequest> objects
+    - Data is stored in the file‑backed mission store introduced in INFRA-2247
+    - Pending merges survive node restarts and are re‑loaded on script start
+  depends_on: [INFRA-6167]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6171
+  domain: INFRA
+  title: "INFRA: INFRA-5570: Update bot-merge.sh to route offline merges to local-merge-queue.sh (INFRA-2252 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - bot-merge.sh detects CHUMP_GITHUB_MODE=offline
+    - In offline mode it invokes scripts/coord/local-merge-queue.sh
+    - The existing online path (gh pr merge --auto) remains unchanged
+  depends_on: [INFRA-6167, INFRA-6170]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6172
+  domain: INFRA
+  title: "INFRA: INFRA-5572: Emit ambient events for local merge lifecycle (INFRA-2252 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - When a merge is queued, an event kind=local_merge_queued is emitted
+    - When a merge lands, an event kind=local_merge_landed is emitted
+    - When a merge is blocked, an event kind=local_merge_blocked is emitted
+    - Events contain appropriate payload (merge ID, timestamp, status)
+  depends_on: [INFRA-6167]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6173
+  domain: INFRA
+  title: "INFRA: INFRA-5571: Add smoke test for local merge queue (INFRA-2252 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test script scripts/ci/test-local-merge-queue.sh creates three pending merges
+    - Runs local-merge-queue.sh and asserts all three merges are applied to local main in FIFO order
+    - Verifies no GitHub API calls are made during the run
+    - Confirms the three ambient events (queued, landed, blocked) are emitted
+  depends_on: [INFRA-6167, INFRA-6168, INFRA-6169, INFRA-6170, INFRA-6172]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6174
+  domain: INFRA
+  title: "INFRA: INFRA-5574: Update documentation for offline merge queue (INFRA-2252 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - OFFLINE_FIRST.md references scripts/coord/local-merge-queue.sh as the offline merge mechanism
+    - Documentation describes the CHUMP_GITHUB_MODE=offline flag, NATS fallback behavior, and how to run the smoke test
+    - Links to relevant INFRA tickets (INFRA-2252, INFRA-2246) are added
+  depends_on: [INFRA-6173]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
 - id: INFRA-635
   domain: INFRA
