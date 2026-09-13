@@ -5035,9 +5035,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Modify the `run` function in `crates/chump-preflight/src/preflight.rs` to invoke `cargo fmt --all -- --check` and `cargo clippy --all-targets -D warnings` as pre‑flight checks, returning an error and aborting the run if either command exits with a non‑zero status, thereby enforcing zero formatting changes and zero clippy warnings for the repository.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "`cargo fmt --all` makes no changes."
-    - "`cargo clippy --all-targets -D warnings` exits with zero status."
+    - In `crates/chump-preflight/src/preflight.rs`, the `run` function calls `cargo fmt --all -- --check` and fails the preflight if the command returns a non‑zero exit code.
+    - In `crates/chump-preflight/src/preflight.rs`, the `run` function calls `cargo clippy --all-targets -D warnings` and fails the preflight if the command returns a non‑zero exit code.
+    - Running `cargo fmt --all` in the repository after the change exits with status 0 and makes no file modifications.
+    - Running `cargo clippy --all-targets -D warnings` in the repository after the change exits with status 0.
   notes: |
     [chump harvest check 'bot-merge']
     === primitives_index match for 'bot-merge' ===
@@ -5168,9 +5177,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a new subsection under the “Representative gaps for model‑tier grading (CREDIBLE‑230 slice)” heading that enumerates exactly five Rust coding gaps and five TypeScript coding gaps. Each gap entry must contain three markdown fields: a concise description, an “Expected input” code block, and an “Expected output” code block. The list should be formatted as a markdown table or bullet list so that the document renders correctly.
+    
+    Target file(s):
+    - docs/eval/CREDIBLE-845-representative-gaps.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A document listing at least 5 representative coding gaps (xs/s/m effort) for Rust and 5 for TypeScript
-    - Each gap includes a clear description, expected input, and expected output for the edit task
+    - "The file docs/eval/CREDIBLE-845-representative-gaps.md contains a heading “### Rust gaps” followed by five distinct gap entries, each with a description line, an “Expected input” fenced code block, and an “Expected output” fenced code block."
+    - "The same file contains a heading “### TypeScript gaps” followed by five distinct gap entries, each with a description line, an “Expected input” fenced code block, and an “Expected output” fenced code block."
+    - Each gap entry’s description is no longer than one sentence and clearly states the coding task (e.g., “Add error handling to a file‑read function”).
+    - Rendering the markdown file with a standard markdown viewer shows both the Rust and TypeScript sections as separate lists without syntax errors.
   notes: |
     [chump harvest check 'inference']
     === primitives_index match for 'inference' ===
@@ -5255,10 +5273,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Implement the edit stage in the harness by completing the `working_tree_edit_is_broken` function in `src/improve.rs`. The new implementation parses the incoming claim, calls the model stub to obtain an edit patch, applies that patch to the target source file with `apply_patch`, verifies that the patched file parses without syntax errors, and returns a boolean indicating whether the edit succeeded.
+    
+    Target file(s):
+    - src/improve.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Harness passes the claim to the model and receives an edit patch
-    - Patch is applied to the original source without syntax errors
-    - Unit test confirms that the edited file compiles for a sample TypeScript gap
+    - "src/improve.rs:working_tree_edit_is_broken returns `false` for a well‑formed claim and a valid patch, indicating the edit was not broken."
+    - "src/improve.rs:deterministic_ship prints the exact line “Edit applied successfully” to stdout after a patch is applied and passes syntax verification."
+    - Running `deterministic_ship` on a sample TypeScript claim creates a patched `.ts` file that exits with status 0 when executed with `tsc --noEmit`.
+    - The call to `apply_patch` inside `working_tree_edit_is_broken` returns `Ok(())` for the sample claim, and no panic is raised during the process.
   depends_on: [CREDIBLE-1118]
   notes: |
     [chump harvest check 'inference']
@@ -85588,7 +85614,7 @@ gaps:
     - Documented in docs/process/MERGE_DRIVERS.md; cross-linked from CLAUDE.md operational docs section
     - Re-run on existing DIRTY PRs after install proves they auto-resolve
   notes: |
-    Decomposed into 7 slices: INFRA-5825, INFRA-5826, INFRA-5827, INFRA-5828, INFRA-5829, INFRA-5830, INFRA-5831
+    Decomposed into 7 slices: INFRA-6082, INFRA-6083, INFRA-6084, INFRA-6085, INFRA-6086, INFRA-6087, INFRA-6088
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -200157,6 +200183,200 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
 
+- id: INFRA-6082
+  domain: INFRA
+  title: "INFRA: Add .gitattributes entries for union merge (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - ".gitattributes contains: docs/process/CLAUDE_GOTCHAS.md merge=union"
+    - ".gitattributes contains: docs/observability/EVENT_REGISTRY.yaml merge=union"
+    - ".gitattributes contains: scripts/ci/event-registry-reserved.txt merge=union"
+    - ".gitattributes contains: docs/process/KNOWN_FLAKES.yaml merge=union"
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6083
+  domain: INFRA
+  title: "INFRA: Create install-merge-drivers.sh to register union driver (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Script adds a git config entry for driver name 'union' pointing to the provided driver script
+    - Running the script updates the user's local .git/config without errors
+    - Driver script is executable and located at scripts/ci/union-merge-driver.sh
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6084
+  domain: INFRA
+  title: "INFRA: Invoke install-merge-drivers.sh from chump-fleet-bootstrap.sh (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - chump-fleet-bootstrap.sh calls install-merge-drivers.sh during bootstrap
+    - Bootstrap logs contain a line confirming registration of the union driver
+  depends_on: [INFRA-6083]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6085
+  domain: INFRA
+  title: "INFRA: Write smoke test for union merge driver (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - test-merge-union-drivers.sh creates two branches from a clean repo
+    - Each branch appends a distinct line to docs/process/CLAUDE_GOTCHAS.md
+    - Merging the branches results in a file containing both appended lines
+    - The merged file contains no conflict markers (<<<<<, =====, >>>>>)
+    - Test exits with status 0 on success
+  depends_on: [INFRA-6083]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6086
+  domain: INFRA
+  title: "INFRA: Document union merge driver in MERGE_DRIVERS.md (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - docs/process/MERGE_DRIVERS.md exists
+    - File explains purpose of the union driver, installation steps, and usage examples
+    - File lists the files configured for merge=union
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6087
+  domain: INFRA
+  title: "INFRA: Cross‑link MERGE_DRIVERS.md from CLAUDE.md operational docs (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - CLAUDE.md contains a hyperlink to docs/process/MERGE_DRIVERS.md in the operational docs section
+    - Link renders correctly in the repository viewer
+  depends_on: [INFRA-6086]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6088
+  domain: INFRA
+  title: "INFRA: Validate auto‑resolution on existing dirty PRs (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - After running install-merge-drivers.sh, a PR with conflicting changes to the union‑configured files merges without manual conflict resolution
+    - Merge result contains combined content from both sides with no conflict markers
+    - Evidence (log or screenshot) is attached to the ticket
+  depends_on: [INFRA-6083, INFRA-6085]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
 - id: INFRA-635
   domain: INFRA
   title: "EFFECTIVE: 'chump gap rebalance' — auto-enforce P0 budget + ranking on every gap-file batch. Productizes the manual 'file batch → check P0 count → demote stale → commit' loop. Today operator/Mission-Driver does this manually after every multi-gap batch (e.g., the 9-gap chump-proprietary REQ batch). After this ships: 'chump gap rebalance' (or auto-trigger after 'chump gap reserve') runs the budget audit + demotion suggestion + (with --apply) does the demotion. Heuristic: P0 count >5 → demote oldest-P0 (or theoretical-only-no-corruption-now P0s like INFRA-538) with rationale logged. Pairs with INFRA-604 chump pillar-balance (already filed) and INFRA-586 chump gap audit-priorities. Composes into a coherent 'gap-store self-curates' loop. AC: src/main.rs subcommand 'chump gap rebalance [--apply]'; reads .chump/state.db, applies P0-budget rules from CLAUDE.md (≤5), pillar-balance rules (no <2, no >50%); outputs suggested actions; --apply executes; demotion notes include 'auto-demoted: P0 budget exceeded by N, oldest stale P0' rationale; test scripts/ci/test-gap-rebalance.sh covers 4 fixture scenarios (over-budget P0, pillar-skew, all-clean, no-action-needed)."
@@ -214796,6 +215016,7 @@ gaps:
     [2026-09-13T16:31:02Z] rot-reaper: PR #4621 auto-closed (required-check-red, 57h) 2026-09-13; RESPAWN CAP 3 reached (7 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T17:02:30Z] rot-reaper: PR #4621 auto-closed (required-check-red, 57h) 2026-09-13; RESPAWN CAP 3 reached (8 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T17:04:41Z] rot-reaper: PR #4621 auto-closed (required-check-red, 57h) 2026-09-13; RESPAWN CAP 3 reached (9 prior recycles) — NOT re-queued, escalating to operator.
+    [2026-09-13T17:31:55Z] rot-reaper: PR #4621 auto-closed (required-check-red, 58h) 2026-09-13; RESPAWN CAP 3 reached (10 prior recycles) — NOT re-queued, escalating to operator.
 
 - id: RESILIENT-1108
   domain: RESILIENT
