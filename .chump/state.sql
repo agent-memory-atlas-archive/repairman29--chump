@@ -6387,7 +6387,7 @@ gaps:
 - id: CREDIBLE-1153
   domain: CREDIBLE
   title: "CREDIBLE: Audit and classify hardcoded file path greps in scripts/ci/ (CREDIBLE-237 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   description: |
@@ -6418,6 +6418,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-13T23:32:59Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=75, rc=75, cycle_log=3278B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: CREDIBLE-1154
   domain: CREDIBLE
@@ -7068,7 +7069,7 @@ gaps:
 - id: CREDIBLE-1174
   domain: CREDIBLE
   title: "CREDIBLE: Implement summarized_pct >95% guard in CREDIBLE code path (CREDIBLE-300 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -7089,6 +7090,10 @@ gaps:
     === HARVEST_ROADMAP.md mention of 'Almanac' (deep-scan findings) ===
     
     === cross-pollination briefs mentioning 'Almanac' ===
+  closed_date: '2026-09-13'
+  closed_pr: 4646
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4646 titled 'CREDIBLE-1174: ...' merged 2026-09-13; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: CREDIBLE-1175
   domain: CREDIBLE
@@ -21044,10 +21049,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new Python script `scripts/aggregate_failure_map.py` that implements a `main()` function which reads the three tier result JSON files (`tier1_results.json`, `tier2_results.json`, `tier3_results.json`), computes a per‑stage failure count for each tier, and writes the consolidated map to `failure_map.json` matching the schema `{ tier: { stage: failureCount, ... }, ... }`.
+    
+    Target file(s):
+    - scripts/aggregate_failure_map.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "A script reads the three result JSON files and produces a consolidated failure map:"
-    - "{ tier: { stage: failureCount, ... }, ... }"
-    - The failure map is saved as `failure_map.json` and matches the expected schema.
+    - Running `python scripts/aggregate_failure_map.py` exits with status code 0 and creates a file `failure_map.json` at the repository root.
+    - The generated `failure_map.json` contains a top‑level key for each tier (`tier1`, `tier2`, `tier3`) present in the input files.
+    - "For every stage listed under a tier, the value equals the number of entries in that tier’s input JSON whose `\"status\"` field is `\"failed\"`."
+    - If any of the three input result files is missing or unreadable, the script prints an error message to stderr and exits with a non‑zero status code.
   depends_on: [CREDIBLE-615, CREDIBLE-616, CREDIBLE-617]
   notes: |
     [chump harvest check 'inference']
@@ -21074,10 +21087,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update the `build_report` function in `crates/chump-waste-tally/src/waste_tally.rs` to aggregate token usage from successful merges per model tier, compute the USD cost using the known pricing table, and emit a `cost_report.json` file containing `tier`, `successfulMerges`, `totalTokens`, and `totalCostUSD` fields while preserving existing token‑count logging.
+    
+    Target file(s):
+    - crates/chump-waste-tally/src/waste_tally.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - During each run, token counts returned by the model API are logged.
-    - Using the known pricing for each tier, the script computes total cost per successful merge.
-    - A `cost_report.json` file lists `tier`, `successfulMerges`, `totalTokens`, `totalCostUSD`.
+    - "crates/chump-waste-tally/src/waste_tally.rs::build_report aggregates token counts per tier and writes a `cost_report.json` file whose JSON objects include the keys `tier`, `successfulMerges`, `totalTokens`, and `totalCostUSD`."
+    - The `cost_report.json` file produced by running the waste‑tally script is valid JSON and can be parsed with `jq .` without error.
+    - For the supplied test fixture `tests/fixtures/merge_successes.json`, the `totalCostUSD` values in `cost_report.json` exactly match the manually calculated costs using the tier pricing map defined in `waste_tally.rs`.
+    - "The log output from `build_report` contains a line `Token usage for tier <tier>: <tokens>` for each tier, confirming that token counts are still logged during each run."
   depends_on: [CREDIBLE-618]
   notes: |
     [chump harvest check 'inference']
@@ -21134,10 +21155,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a public constant `ROUTING_POLICY` to `crates/chump-orchestrator/src/routing.rs` and modify the `discover_test_scripts` function in `crates/chump-preflight/src/preflight.rs` to filter discovered test scripts based on this policy, ensuring only scripts matching the "EFFECTIVE-409" policy are considered.
+    
+    Target file(s):
+    - crates/chump-orchestrator/src/routing.rs
+    - crates/chump-preflight/src/preflight.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The policy section is added to the existing EFFECTIVE‑409 documentation repository.
-    - A pull request is opened, reviewed, and merged.
-    - The CI for the documentation repo passes after the change.
+    - "In `crates/chump-orchestrator/src/routing.rs` a `pub const ROUTING_POLICY: = \"EFFECTIVE-409\";` line is present and compiled without warnings."
+    - The function `discover_test_scripts` in `crates/chump-preflight/src/preflight.rs` contains logic that checks each script’s metadata against `ROUTING_POLICY` and excludes non‑matching scripts.
+    - "Executing `cargo test -p chump-orchestrator` runs a test that asserts `ROUTING_POLICY` equals \"EFFECTIVE-409\" and passes."
+    - The repository’s CI pipeline (`cargo test` and `cargo clippy`) completes successfully after the change.
   depends_on: [CREDIBLE-620]
   notes: |
     [chump harvest check 'inference']
@@ -21218,10 +21248,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a module‑level atomic counter `ADMIN_MERGE_COUNT` and modify the `backdoor_adjustment` function in `src/counterfactual.rs` to increment this counter whenever it processes an admin‑merge event (identified by the `admin_merge` flag in its input). Expose a public getter for the counter and add a unit test that injects a single admin‑merge event and asserts the counter increments exactly once.
+    
+    Target file(s):
+    - src/counterfactual.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The pipeline increments a counter each time an admin performs a merge (admin‑merge count).
-    - A cargo test validates that when an admin merge event is injected, the counter increments exactly once.
-    - cargo fmt + clippy --all-targets -D warnings passes with no new warnings.
+    - "src/counterfactual.rs::backdoor_adjustment increments `ADMIN_MERGE_COUNT` when called with `admin_merge = true`."
+    - A new unit test `admin_merge_counter_increments` in `src/counterfactual.rs` verifies that after injecting one admin‑merge event the counter value increases by one.
+    - Running `cargo fmt` completes without formatting changes and `cargo clippy --all-targets -D warnings` reports zero warnings.
   notes: |
     [chump harvest check 'scoreboard']
     === primitives_index match for 'scoreboard' ===
@@ -21715,10 +21752,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a `#[cfg(test)]` module to `crates/chump-bench/src/bench.rs` that defines two concrete unit tests. The first test loads a known good manifest file (e.g., `tests/fixtures/valid_manifest.yaml`) using the existing `load_manifest` function, verifies that the returned `Manifest` struct contains the expected in‑memory data, and then calls `generate_routing_config(&manifest)` to assert the output matches a hard‑coded expected routing configuration string. The second test attempts to load a non‑existent or malformed manifest and asserts that `load_manifest` returns an `Err`. The module imports the fixture file and uses `assert_eq!` / `assert!(matches!(...))` for verification.
+    
+    Target file(s):
+    - crates/chump-bench/src/bench.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test verifies that loading a valid manifest yields correct in‑memory structures
-    - Test asserts that routing config derived from the manifest matches expected output
-    - Test fails when manifest is missing or malformed
+    - "Running `cargo test --package chump-bench` executes a test named `test_load_valid_manifest` that calls `load_manifest(\"tests/fixtures/valid_manifest.yaml\")` and asserts the returned `Manifest.services` vector is non‑empty."
+    - "? The same `test_load_valid_manifest` asserts that `generate_routing_config(&manifest)` returns exactly the string defined in the test (e.g., `\"route : /api/v1 -> service_a\"`)."
+    - "Running `cargo test --package chump-bench` executes a test named `test_load_missing_manifest` that calls `load_manifest(\"tests/fixtures/missing.yaml\")` and asserts the function returns an `Err` variant."
+    - "The test output includes `test result: ok. 2 passed; 0 failed` indicating both new tests compiled and ran successfully."
   depends_on: [CREDIBLE-645, CREDIBLE-646]
 
 - id: CREDIBLE-648
@@ -104511,7 +104556,7 @@ gaps:
   acceptance_criteria:
     - Running Claude Code sessions poll URGENT-INBOX mid-session and act on fix_trunk signals within a bounded interval; a test signal is picked up without a session restart.
   notes: |
-    Decomposed into 9 slices: INFRA-5615, INFRA-5616, INFRA-5617, INFRA-5618, INFRA-5619, INFRA-5620, INFRA-5621, INFRA-5622, INFRA-5623
+    Decomposed into 9 slices: INFRA-6192, INFRA-6193, INFRA-6194, INFRA-6195, INFRA-6196, INFRA-6197, INFRA-6198, INFRA-6199, INFRA-6200
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -149880,7 +149925,7 @@ gaps:
 - id: INFRA-4517
   domain: INFRA
   title: "INFRA: Implement deterministic comparator in `chump_coord::deliberate` (INFRA-1122 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -149903,6 +149948,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+    [2026-09-13T23:37:17Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=75, rc=75, cycle_log=7000B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-4518
   domain: INFRA
@@ -204328,6 +204374,231 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6192
+  domain: INFRA
+  title: "INFRA: Design polling interval and bounded window specification (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Polling interval and maximum bounded window are documented in a design spec
+    - Stakeholder sign‑off on the spec is recorded
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6193
+  domain: INFRA
+  title: "INFRA: Implement polling scheduler for active Claude sessions (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Scheduler triggers a poll at the defined interval for each active session
+    - Scheduler can be started and stopped via the session manager API
+  depends_on: [INFRA-6192]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6194
+  domain: INFRA
+  title: "INFRA: Create URGENT‑INBOX listener component (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Listener connects to the URGENT‑INBOX service and fetches messages
+    - Listener filters and forwards only fix_trunk signals
+  depends_on: [INFRA-6193]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6195
+  domain: INFRA
+  title: "INFRA: Integrate listener with session manager to deliver fix_trunk signals (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Session manager receives signals from the listener
+    - Signal payload is correctly mapped to the corresponding session context
+  depends_on: [INFRA-6194]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6196
+  domain: INFRA
+  title: "INFRA: Add handling logic for fix_trunk signal within a running session (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a fix_trunk signal is received, the session applies the trunk fix without requiring a restart
+    - The fix completes within the bounded interval defined in the design spec
+  depends_on: [INFRA-6195]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6197
+  domain: INFRA
+  title: "INFRA: Write unit tests for listener detection of test fix_trunk signal (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Unit test injects a test fix_trunk signal and asserts the listener receives it
+    - Test passes in the CI pipeline
+  depends_on: [INFRA-6195]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6198
+  domain: INFRA
+  title: "INFRA: Write integration test for end‑to‑end polling and signal handling without session restart (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Integration test runs a Claude session, sends a test fix_trunk signal, and verifies session state updates without a restart
+    - Test completes within the bounded time window
+  depends_on: [INFRA-6196, INFRA-6197]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6199
+  domain: INFRA
+  title: "INFRA: Add monitoring and logging for polling activity (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Polling activity is logged with timestamps for each poll
+    - Metrics are emitted for number of polls executed and fix_trunk signals processed
+  depends_on: [INFRA-6193]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6200
+  domain: INFRA
+  title: "INFRA: Deploy changes to staging and perform smoke test (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Staging deployment completes without errors
+    - Smoke test confirms polling runs and fix_trunk signals are handled without session restarts
+    - No regressions observed in existing session functionality
+  depends_on: [INFRA-6198, INFRA-6199]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
 
 - id: INFRA-635
   domain: INFRA
