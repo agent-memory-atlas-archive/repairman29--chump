@@ -12770,9 +12770,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new `dispatch-hygiene` subcommand to the chump fleet CLI by extending the command‑dispatch logic in `src/harvester_cli.rs`. Implement the handler in a new module `src/dispatch_hygiene.rs` that queries the `sub_agent_dispatched` table, emits an error to stderr and exits 1 when no rows exist, otherwise aggregates per‑curator `opus_only` and `sonnet_delegated` counts, computes the `ratio`, prints a formatted table with columns `curator_name`, `opus_only_count`, `sonnet_delegated_count`, `ratio`, and exits 0. Update the help output to list the new subcommand.
+    
+    Target file(s):
+    - src/harvester_cli.rs
+    - src/dispatch_hygiene.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Running `chump fleet dispatch-hygiene` when no sub_agent_dispatched entries are available outputs an error message to stderr and exits with code 1.
-    - Executing `chump fleet dispatch-hygiene` after at least two curators have dispatched tools prints a table with columns curator_name, opus_only_count, sonnet_delegated_count, ratio and exits with code 0.
+    - "? Running `chump fleet dispatch-hygiene` in an environment where `sub_agent_dispatched` contains zero rows writes the exact string `error : no dispatch records found` to stderr and the process exits with status code 1 (checked in `src/harvester_cli.rs`)."
+    - "When the database holds dispatch records for at least two distinct curators, executing `chump fleet dispatch-hygiene` prints a table whose header line is exactly `curator_name | opus_only_count | sonnet_delegated_count | ratio` and includes one data row per curator, then exits with status code 0 (validated by the output of `src/dispatch_hygiene.rs::run`)."
+    - "The new subcommand appears in the output of `chump fleet --help` under the “dispatch-hygiene” entry, confirming that `src/harvester_cli.rs::print_help` was updated."
+    - "The implementation compiles without adding new crate dependencies and uses the existing data‑access function `crate::db::get_sub_agent_dispatched()` (or its equivalent) to retrieve rows (verified by a successful `cargo test`)."
   depends_on: [CREDIBLE-359]
   notes: |
     [chump harvest check 'curator']
@@ -13613,9 +13623,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a concise comment block at the top of each identified source file that enumerates the function(s) requiring modification for the “tmp” change, and generate a short markdown document (`tmp_change_locations.md`) that lists these file‑path:line references for stakeholder review.
+    
+    Target file(s):
+    - crates/chump-handoff/src/contracts.rs
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "The source files and functions that need to be modified for the \"tmp\" change are listed in a short document or comment."
-    - Stakeholder (e.g., team lead) confirms the identified locations are correct.
+    - "crates/chump-handoff/src/contracts.rs: the function `prompt` (line 422) appears in the inserted comment block and in `tmp_change_locations.md`."
+    - "crates/chump-gap-store/src/lib.rs: the function `ship` (line 2434) appears in the inserted comment block and in `tmp_change_locations.md`."
+    - "A file named `tmp_change_locations.md` exists at the repository root and contains exactly the two identified file:line entries."
+    - "The team lead adds a verification line (`# verified by @teamlead`) to `tmp_change_locations.md`, confirming the locations are correct."
 
 - id: CREDIBLE-396
   domain: CREDIBLE
@@ -13645,9 +13665,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new test function `test_tmp_behavior` to `scripts/ci/test-docs-delta-worktree.sh` that invokes the Credible binary with the `--tmp` flag, captures its stdout, and asserts that the string “tmp mode active” appears; the function is hooked into the script’s main execution flow so the CI run exercises the changed code path.
+    
+    Target file(s):
+    - scripts/ci/test-docs-delta-worktree.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A new cargo test (or script in scripts/ci/test-*.sh) is added that exercises the changed code path.
-    - The test fails on the pre‑change code base and passes after the implementation.
+    - The file `scripts/ci/test-docs-delta-worktree.sh` contains a function named `test_tmp_behavior` that runs `cargo run --quiet --bin credible -- --tmp` and checks that its output includes the literal “tmp mode active”.
+    - Running `scripts/ci/test-docs-delta-worktree.sh` on the current (pre‑change) code base exits with a non‑zero status because the expected “tmp mode active” string is not present.
+    - After the implementation of the new `--tmp` behavior, the same script exits with status 0, indicating the test passes.
+    - CI logs show the line “test_tmp_behavior … ok” (or “FAIL”) when the script is executed, confirming the test is being executed as part of the CI suite.
   depends_on: [CREDIBLE-396]
 
 - id: CREDIBLE-398
@@ -13656,9 +13685,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Modify the `run_preflight` function in `scripts/coord/definition-of-ready-gate.sh` to invoke `cargo fmt --check` and `cargo clippy --all-targets -D warnings` after the existing pre‑flight checks, exiting with a non‑zero status and printing a clear error message if either command reports a problem.
+    
+    Target file(s):
+    - scripts/coord/definition-of-ready-gate.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Running `cargo fmt` makes no changes to the modified files.
-    - Running `cargo clippy --all-targets -D warnings` completes with zero warnings.
+    - Running `scripts/coord/definition-of-ready-gate.sh run_preflight` on a repository that is already formatted and has zero clippy warnings exits with status 0.
+    - If any Rust source file would be changed by `cargo fmt --check`, the same command prints “cargo fmt --check failed” and the script exits with a non‑zero status.
+    - If `cargo clippy --all-targets -D warnings` reports any warnings, the script prints “cargo clippy failed” and exits with a non‑zero status.
+    - The script still executes all original pre‑flight steps (e.g., help output, environment validation) unchanged, as verified by the unchanged output of those steps when formatting and clippy checks pass.
   depends_on: [CREDIBLE-396]
 
 - id: CREDIBLE-399
@@ -13892,10 +13930,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a validation step in the slot‑parsing logic (in contracts.rs) that checks each loaded slot for the presence of the required metadata fields RPM, TIER, PRIORITY, and CONTEXT_K; if any are missing the code logs a warning and marks the slot as invalid. Then update `first_valid_token` in onboard.rs to filter out slots flagged invalid, ensuring they are excluded from request routing while still being reported by the diagnostics endpoint.
+    
+    Target file(s):
+    - crates/chump-handoff/src/contracts.rs
+    - src/onboard.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Loader scans each slot during startup and identifies missing required fields
-    - If any required field is absent, loader logs a warning and marks the slot as invalid
-    - Invalid slots are excluded from request routing and are visible in a diagnostics endpoint
+    - In `crates/chump-handoff/src/contracts.rs`, the slot‑construction function now returns an error or sets an `is_valid` flag when RPM, TIER, PRIORITY, or CONTEXT_K is absent and emits a warning log containing the slot identifier.
+    - In `src/onboard.rs`, the function `first_valid_token` skips any slot whose `is_valid` flag is false and returns `None` if no valid slots remain.
+    - Starting the service with a slot missing one of the required fields produces a startup log entry matching the pattern `WARN.*Slot .* missing required field` and the diagnostics HTTP endpoint `/diagnostics/slots` lists that slot with a status of “invalid”.
+    - A request that would be routed to an invalid slot receives a 404 response (or is not routed), verified by an integration test that asserts the response code for such a request.
   notes: |
     [chump harvest check 'provider']
     === primitives_index match for 'provider' ===
@@ -49242,7 +49289,7 @@ gaps:
 - id: EFFECTIVE-1357
   domain: EFFECTIVE
   title: "EFFECTIVE: Implement `chump ship --manual <gap>` command (blessed manual fallback ship) (EFFECTIVE-178 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -49272,6 +49319,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-13T21:00:31Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=3037B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: EFFECTIVE-1358
   domain: EFFECTIVE
@@ -97137,7 +97185,7 @@ gaps:
   acceptance_criteria:
     - "Failure: 33,730 LOC of bash in scripts/coord/ + scripts/dispatch/ does the orchestration-critical work (bot-merge, queue-driver, pr-rescue, pr-auto-rearm, pr-auto-rebase, worker.sh). Bash + concurrent subshells + git lock contention = unprovable race conditions."
   notes: |
-    Decomposed into 10 slices: INFRA-5180, INFRA-5181, INFRA-5182, INFRA-5183, INFRA-5184, INFRA-5185, INFRA-5186, INFRA-5187, INFRA-5188, INFRA-5189
+    Decomposed into 10 slices: INFRA-6128, INFRA-6129, INFRA-6130, INFRA-6131, INFRA-6132, INFRA-6133, INFRA-6134, INFRA-6135, INFRA-6136, INFRA-6137
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -201680,6 +201728,469 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
 
+- id: INFRA-6128
+  domain: INFRA
+  title: "INFRA: Add detailed execution logging to orchestration scripts (bot-merge, queue-driver, pr-rescue, pr-auto-rearm, pr-auto-rebase, worker.sh) (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - All orchestrator scripts emit timestamped log entries for start, end, and each major step
+    - Logs are written to a central log file under /var/log/infra-orchestrator.log
+    - Log rotation is configured to keep 7 days of logs
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6129
+  domain: INFRA
+  title: "INFRA: Instrument git lock contention metrics in scripts (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Each script records the time spent waiting for git lock acquisition
+    - Metrics are appended to the central log with a 'git-lock-wait' tag
+    - Metrics can be queried via a simple grep command
+  depends_on: [INFRA-6128]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6130
+  domain: INFRA
+  title: "INFRA: Design and implement a file‑based lock primitive for bash scripts (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A reusable lock.sh library provides acquire_lock and release_lock functions
+    - Lock acquisition is atomic using mkdir or flock and respects a configurable timeout
+    - Library includes unit tests that verify mutual exclusion and timeout behavior
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6131
+  domain: INFRA
+  title: "INFRA: Refactor bot-merge script to use the lock primitive (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - bot-merge sources lock.sh and calls acquire_lock before any git operation
+    - Lock is released on normal exit and on any error path
+    - No new race condition warnings appear in static analysis
+  depends_on: [INFRA-6130, INFRA-6128]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6132
+  domain: INFRA
+  title: "INFRA: Refactor queue-driver script to use the lock primitive (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - queue-driver sources lock.sh and acquires lock before dispatching jobs
+    - Lock release is guaranteed via trap on EXIT and ERR
+    - Functional tests confirm that concurrent queue-driver instances do not interfere
+  depends_on: [INFRA-6130, INFRA-6128]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6133
+  domain: INFRA
+  title: "INFRA: Refactor pr-rescue script to use the lock primitive (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - pr-rescue sources lock.sh and wraps all git commands with lock acquisition
+    - Error handling ensures lock release on failure
+    - Log entries show lock acquisition and release timestamps
+  depends_on: [INFRA-6130, INFRA-6128]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6134
+  domain: INFRA
+  title: "INFRA: Create shunit2 unit tests for each orchestrator script (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test suite includes at least one test per script covering successful execution path
+    - Tests simulate concurrent runs and assert that only one instance holds the lock
+    - All tests pass locally with 100% coverage of lock‑related code
+  depends_on: [INFRA-6131, INFRA-6132, INFRA-6133]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6135
+  domain: INFRA
+  title: "INFRA: Integrate race‑detection tests into CI pipeline (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - CI pipeline runs the shunit2 test suite on every push
+    - Pipeline fails if any test detects lock contention or deadlock
+    - Build logs include summary of lock‑acquisition timings
+  depends_on: [INFRA-6134]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6136
+  domain: INFRA
+  title: "INFRA: Run performance benchmarks to ensure no regression (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Benchmark script measures end‑to‑end execution time of each orchestrator script
+    - Baseline times (pre‑change) are recorded and stored
+    - Post‑change times do not exceed baseline by more than 5%
+  depends_on: [INFRA-6135]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6137
+  domain: INFRA
+  title: "INFRA: Update documentation and deployment guide with new lock primitive usage (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README includes a section on the lock.sh library and how to use it
+    - Deployment guide notes the requirement for /var/lock/infra-orchestrator directory
+    - Documentation is reviewed and approved by the infra team
+  depends_on: [INFRA-6136]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6138
+  domain: INFRA
+  title: "INFRA: Add chump_cron_health_breach allowlist entry to event registry (INFRA-2046 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - scripts/ci/event-registry-reserved.txt contains a line allowing kind=chump_cron_health_breach with reason 'INFRA-2046 chump cron health audit, emitted by crates/chump-cron health subcommand'
+    - No duplicate entries exist and the file remains syntactically valid
+  notes: |
+    [chump harvest check 'chump']
+    === primitives_index match for 'chump' ===
+    
+    === cluster keyword match for 'chump' ===
+      cluster chump-engine (5 repos): chump, homebrew-chump, chump-proprietary, chump-chassis, chump-brain
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump' ===
+    
+    === repo-description match for 'chump' ===
+      homebrew-chump: Homebrew tap for chump — auto-generated formula via cargo-dist (INFRA-172)
+      chump-proprietary: Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
+      chump-chassis: Rust/Axum micro-SaaS boilerplate for Chump SaaS factory
+      chump-brain: Knowledge base for the Chump agent fleet — research notes, portfolio/project context, and self-knowledge docs.
+    
+    === HARVEST_ROADMAP.md mention of 'chump' (deep-scan findings) ===
+      1:# Harvest Roadmap for Chump
+      7:This document maps Chump's **stated current needs** (productization plan + Marcus arc + 50/hr push) onto **primitives that already exist** in the 76-repo arsenal. It is decisive: each row says "harvest this, this way, now" or "shelve" or "skip." No maybes.
+      13:| # | Source primitive | Target Chump initiative | Route | Why now |
+      16:| **2** | `chump-proprietary::crates/coord` (`Executor`, `consensus`, `mesh::MeshTransport`) | INFRA-1763 (predictive collision) + INFRA-1758 file-fallback layer | **Dependency** — extract `chump-coord-mesh` crate consumable from both private and public | Mesh + consensus are already production in proprietary; current public-Chump gaps are re-implementing them piecewise |
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      29:The scout found that **`echeo/src/shredder.rs`** already implements tree-sitter AST extraction for TypeScript, Rust, Python, and Go with authorship metadata. Chump just shipped [#2385](https://github.com/repairman29/chump/pull/2385) — `feat(INFRA-1719): tree-sitter AST crawler + decompose integration` — two days ago.
+      31:**This is exactly the failure mode the Harvester exists to prevent.** The investigation (INFRA-1812) confirmed the catalog *did* have a discovery-failure footprint — echeo was listed as a repo but `shredder.rs` was never indexed as a primitive — but the two implementations turned out to be fit-to-purpose for different consumers (INFRA-1719 feeds `chump gap decompose`'s LLM prompt context; echeo's shredder feeds a vector-embedding bounty matchmaker), with disjoint output schemas, incompatible tree-sitter ABI generations, and no code shared between them. Vendoring or merging would have cost more than it saved. The gap in the catalog itself is tracked as a follow-up: **INFRA-3526** (index per-file primitives, not just per-repo metadata, so this class of question surfaces automatically next time).
+      37:### chump-engine (5 repos — the engine itself)
+      40:| `chump` (this repo) | Active | n/a — target of harvests |
+    
+    === cross-pollination briefs mentioning 'chump' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
+- id: INFRA-6139
+  domain: INFRA
+  title: "INFRA: Implement --json flag handling for chump cron list (INFRA-2046 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Running `chump cron list --json` outputs a valid JSON array of scheduler objects
+    - "The JSON output includes fields: name, schedule, last_fire_ts, next_fire_eta, status, backend"
+  notes: |
+    [chump harvest check 'chump']
+    === primitives_index match for 'chump' ===
+    
+    === cluster keyword match for 'chump' ===
+      cluster chump-engine (5 repos): chump, homebrew-chump, chump-proprietary, chump-chassis, chump-brain
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump' ===
+    
+    === repo-description match for 'chump' ===
+      homebrew-chump: Homebrew tap for chump — auto-generated formula via cargo-dist (INFRA-172)
+      chump-proprietary: Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
+      chump-chassis: Rust/Axum micro-SaaS boilerplate for Chump SaaS factory
+      chump-brain: Knowledge base for the Chump agent fleet — research notes, portfolio/project context, and self-knowledge docs.
+    
+    === HARVEST_ROADMAP.md mention of 'chump' (deep-scan findings) ===
+      1:# Harvest Roadmap for Chump
+      7:This document maps Chump's **stated current needs** (productization plan + Marcus arc + 50/hr push) onto **primitives that already exist** in the 76-repo arsenal. It is decisive: each row says "harvest this, this way, now" or "shelve" or "skip." No maybes.
+      13:| # | Source primitive | Target Chump initiative | Route | Why now |
+      16:| **2** | `chump-proprietary::crates/coord` (`Executor`, `consensus`, `mesh::MeshTransport`) | INFRA-1763 (predictive collision) + INFRA-1758 file-fallback layer | **Dependency** — extract `chump-coord-mesh` crate consumable from both private and public | Mesh + consensus are already production in proprietary; current public-Chump gaps are re-implementing them piecewise |
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      29:The scout found that **`echeo/src/shredder.rs`** already implements tree-sitter AST extraction for TypeScript, Rust, Python, and Go with authorship metadata. Chump just shipped [#2385](https://github.com/repairman29/chump/pull/2385) — `feat(INFRA-1719): tree-sitter AST crawler + decompose integration` — two days ago.
+      31:**This is exactly the failure mode the Harvester exists to prevent.** The investigation (INFRA-1812) confirmed the catalog *did* have a discovery-failure footprint — echeo was listed as a repo but `shredder.rs` was never indexed as a primitive — but the two implementations turned out to be fit-to-purpose for different consumers (INFRA-1719 feeds `chump gap decompose`'s LLM prompt context; echeo's shredder feeds a vector-embedding bounty matchmaker), with disjoint output schemas, incompatible tree-sitter ABI generations, and no code shared between them. Vendoring or merging would have cost more than it saved. The gap in the catalog itself is tracked as a follow-up: **INFRA-3526** (index per-file primitives, not just per-repo metadata, so this class of question surfaces automatically next time).
+      37:### chump-engine (5 repos — the engine itself)
+      40:| `chump` (this repo) | Active | n/a — target of harvests |
+    
+    === cross-pollination briefs mentioning 'chump' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
+- id: INFRA-6140
+  domain: INFRA
+  title: "INFRA: Render human‑readable table for chump cron list (INFRA-2046 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`chump cron list` prints a table with columns: name, schedule, last‑fire‑ts, next‑fire‑eta, status, backend"
+    - Table aligns columns and truncates long values without panicking
+  notes: |
+    [chump harvest check 'chump']
+    === primitives_index match for 'chump' ===
+    
+    === cluster keyword match for 'chump' ===
+      cluster chump-engine (5 repos): chump, homebrew-chump, chump-proprietary, chump-chassis, chump-brain
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump' ===
+    
+    === repo-description match for 'chump' ===
+      homebrew-chump: Homebrew tap for chump — auto-generated formula via cargo-dist (INFRA-172)
+      chump-proprietary: Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
+      chump-chassis: Rust/Axum micro-SaaS boilerplate for Chump SaaS factory
+      chump-brain: Knowledge base for the Chump agent fleet — research notes, portfolio/project context, and self-knowledge docs.
+    
+    === HARVEST_ROADMAP.md mention of 'chump' (deep-scan findings) ===
+      1:# Harvest Roadmap for Chump
+      7:This document maps Chump's **stated current needs** (productization plan + Marcus arc + 50/hr push) onto **primitives that already exist** in the 76-repo arsenal. It is decisive: each row says "harvest this, this way, now" or "shelve" or "skip." No maybes.
+      13:| # | Source primitive | Target Chump initiative | Route | Why now |
+      16:| **2** | `chump-proprietary::crates/coord` (`Executor`, `consensus`, `mesh::MeshTransport`) | INFRA-1763 (predictive collision) + INFRA-1758 file-fallback layer | **Dependency** — extract `chump-coord-mesh` crate consumable from both private and public | Mesh + consensus are already production in proprietary; current public-Chump gaps are re-implementing them piecewise |
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      29:The scout found that **`echeo/src/shredder.rs`** already implements tree-sitter AST extraction for TypeScript, Rust, Python, and Go with authorship metadata. Chump just shipped [#2385](https://github.com/repairman29/chump/pull/2385) — `feat(INFRA-1719): tree-sitter AST crawler + decompose integration` — two days ago.
+      31:**This is exactly the failure mode the Harvester exists to prevent.** The investigation (INFRA-1812) confirmed the catalog *did* have a discovery-failure footprint — echeo was listed as a repo but `shredder.rs` was never indexed as a primitive — but the two implementations turned out to be fit-to-purpose for different consumers (INFRA-1719 feeds `chump gap decompose`'s LLM prompt context; echeo's shredder feeds a vector-embedding bounty matchmaker), with disjoint output schemas, incompatible tree-sitter ABI generations, and no code shared between them. Vendoring or merging would have cost more than it saved. The gap in the catalog itself is tracked as a follow-up: **INFRA-3526** (index per-file primitives, not just per-repo metadata, so this class of question surfaces automatically next time).
+      37:### chump-engine (5 repos — the engine itself)
+      40:| `chump` (this repo) | Active | n/a — target of harvests |
+    
+    === cross-pollination briefs mentioning 'chump' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
 - id: INFRA-635
   domain: INFRA
   title: "EFFECTIVE: 'chump gap rebalance' — auto-enforce P0 budget + ranking on every gap-file batch. Productizes the manual 'file batch → check P0 count → demote stale → commit' loop. Today operator/Mission-Driver does this manually after every multi-gap batch (e.g., the 9-gap chump-proprietary REQ batch). After this ships: 'chump gap rebalance' (or auto-trigger after 'chump gap reserve') runs the budget audit + demotion suggestion + (with --apply) does the demotion. Heuristic: P0 count >5 → demote oldest-P0 (or theoretical-only-no-corruption-now P0s like INFRA-538) with rationale logged. Pairs with INFRA-604 chump pillar-balance (already filed) and INFRA-586 chump gap audit-priorities. Composes into a coherent 'gap-store self-curates' loop. AC: src/main.rs subcommand 'chump gap rebalance [--apply]'; reads .chump/state.db, applies P0-budget rules from CLAUDE.md (≤5), pillar-balance rules (no <2, no >50%); outputs suggested actions; --apply executes; demotion notes include 'auto-demoted: P0 budget exceeded by N, oldest stale P0' rationale; test scripts/ci/test-gap-rebalance.sh covers 4 fixture scenarios (over-budget P0, pillar-skew, all-clean, no-action-needed)."
@@ -216326,6 +216837,7 @@ gaps:
     [2026-09-13T19:08:35Z] rot-reaper: PR #4621 auto-closed (required-check-red, 59h) 2026-09-13; RESPAWN CAP 3 reached (14 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T19:46:03Z] rot-reaper: PR #4621 auto-closed (required-check-red, 60h) 2026-09-13; RESPAWN CAP 3 reached (15 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T20:06:59Z] rot-reaper: PR #4621 auto-closed (required-check-red, 60h) 2026-09-13; RESPAWN CAP 3 reached (16 prior recycles) — NOT re-queued, escalating to operator.
+    [2026-09-13T20:46:30Z] rot-reaper: PR #4621 auto-closed (required-check-red, 61h) 2026-09-13; RESPAWN CAP 3 reached (17 prior recycles) — NOT re-queued, escalating to operator.
 
 - id: RESILIENT-1108
   domain: RESILIENT
