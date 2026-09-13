@@ -6449,7 +6449,7 @@ gaps:
 - id: CREDIBLE-1155
   domain: CREDIBLE
   title: "CREDIBLE: Unpin test-gap-impact-rating.sh from hardcoded src/main.rs path (CREDIBLE-237 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -6472,6 +6472,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+  closed_date: '2026-09-13'
+  closed_pr: 4642
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4642 titled 'CREDIBLE-1155: ...' merged 2026-09-13; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: CREDIBLE-1156
   domain: CREDIBLE
@@ -16120,10 +16124,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new `check_stale_zero_vote` function to `scripts/coord/fleet-doctor-strict.sh` that reads `feedback.jsonl`, filters proposals whose `total` field is zero and whose `timestamp` is older than a configurable threshold (default 6 hours, overridable via `STALE_THRESHOLD_HOURS`), and emits a warning line containing the proposal’s `corr_id`. Invoke this function from the script’s main execution path so the check runs automatically when the fleet‑doctor is executed.
+    
+    Target file(s):
+    - scripts/coord/fleet-doctor-strict.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Create a new `fleet-doctor` script that scans `feedback.jsonl` for proposals older than a configurable threshold (e.g., 6 hours) with `total=0`.
-    - The script must emit a warning containing the `corr_id` of each stale proposal.
-    - Run the script on a sample data set containing a known stale proposal and verify that the warning is produced.
+    - "? In `scripts/coord/fleet-doctor-strict.sh` a Bash function named `check_stale_zero_vote` is defined and parses `feedback.jsonl` to select rows with `total=0` and age > `$STALE_THRESHOLD_HOURS` (default 6) and prints `WARNING : stale zero‑vote proposal corr_id=<id>`."
+    - "? Running `scripts/coord/fleet-doctor-strict.sh` on a sample `feedback.jsonl` that contains a proposal older than the threshold with `total=0` produces a line matching `WARNING : stale zero‑vote proposal corr_id=` followed by the correct `corr_id`."
+    - Setting the environment variable `STALE_THRESHOLD_HOURS=1` before invoking the script causes a proposal that is 2 hours old and has `total=0` to be reported, confirming the threshold is configurable.
+    - The script exits with status 0 after completing the check, and no error messages are printed other than the expected warning line.
   depends_on: [CREDIBLE-470]
   notes: |
     [chump harvest check 'votes']
@@ -17452,10 +17464,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Modify the function `detect_long_undormant_substrate` in `crates/chump-inventory/src/inventory.rs` to inspect each reaper gate’s reported freed byte count; when the count is exactly zero, flag the gate as a false‑positive and annotate it for removal while leaving all other detection logic unchanged.
+    
+    Target file(s):
+    - crates/chump-inventory/src/inventory.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Reaper gates that free 0 bytes are detected as false‑positives.
-    - Detected gates are marked for removal.
-    - No regression for legitimate reaper behaviour.
+    - In `crates/chump-inventory/src/inventory.rs`, `detect_long_undormant_substrate` sets a `false_positive` field on a gate record when `freed_bytes == 0`.
+    - "? Running the inventory tool on a test fixture containing a reaper gate that frees 0 bytes produces a console line `False‑positive reaper detected : 0 bytes freed`."
+    - Running the same tool on a fixture where a reaper gate frees a positive number of bytes does **not** set the `false_positive` flag and logs the gate as a normal reaper.
+    - The CI script `scripts/ci/test-infra-705-stall-detector.sh` exits with status 0 after the change, confirming no regression in existing stall detection.
   depends_on: [CREDIBLE-504]
   notes: |
     [chump harvest check 'audit']
@@ -17890,9 +17910,18 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Modify `emit_health` in `scripts/setup/refresh-almanac-binary.sh` to compute the ship‑rate from the reported ship‑count and active‑worker metrics, and to emit a health line that reads “measurement failed / investigate” when ship‑count is missing or zero while active workers exist; also adjust the badge logic so the “looks healthy” badge is only included when the calculated ship‑rate is greater than zero. Add a corresponding test case in `scripts/ci/test-refresh-almanac-binary.sh` that verifies the new behavior with a mock payload.
+    
+    Target file(s):
+    - scripts/setup/refresh-almanac-binary.sh
+    - scripts/ci/test-refresh-almanac-binary.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "If ship‑count is unavailable or zero while active workers exist, the health line reads \"measurement failed / investigate\""
-    - "The \"looks healthy\" badge is only shown when ship‑rate > 0"
+    - In `scripts/setup/refresh-almanac-binary.sh`, the `emit_health` function outputs the exact string “measurement failed / investigate” when the JSON payload has `ship_count` absent or zero and `active_workers` > 0.
+    - In `scripts/setup/refresh-almanac-binary.sh`, the `emit_health` function includes the “looks healthy” badge only when the derived `ship_rate` (ship_count / active_workers) is > 0, and omits it otherwise.
+    - Running `scripts/ci/test-refresh-almanac-binary.sh` with a fabricated health payload where `ship_count=0` and `active_workers=5` exits with status 0 and prints a health line that matches the “measurement failed / investigate” format and does not contain the “looks healthy” badge.
   depends_on: [CREDIBLE-523]
   notes: |
     [chump harvest check 'fleet-brief']
@@ -18060,9 +18089,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a Rust doc comment to the `ship` function in `crates/chump-gap-store/src/lib.rs` that describes the new “unavailable” message, its health‑state interpretation, and how callers should treat it; also insert a comment block in `crates/chump-preflight/src/preflight.rs` titled “Ship‑count unavailable troubleshooting” that enumerates concrete steps to diagnose persistent ship‑count failures.
+    
+    Target file(s):
+    - crates/chump-gap-store/src/lib.rs
+    - crates/chump-preflight/src/preflight.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "README/ops guide includes a section describing the new \"unavailable\" message and health interpretation"
-    - Documentation lists steps to troubleshoot persistent ship‑count failures
+    - "In `crates/chump-gap-store/src/lib.rs`, the `ship` function’s doc comment contains the exact phrase “When ship count is unavailable, the function returns an `Unavailable` error with message `\\\"unavailable\\\"` and the health state is interpreted as degraded.”"
+    - Executing `cargo doc --open` produces HTML documentation for the `ship` function that includes the new “unavailable” section verbatim.
+    - In `crates/chump-preflight/src/preflight.rs`, a comment block beginning with `/// Ship‑count unavailable troubleshooting` lists at least three actionable steps (e.g., “1. Verify network connectivity to the ship‑count service; 2. Inspect fleet status via `fleetctl status`; 3. Restart the preflight daemon and re‑run discovery”).
+    - "The CI lint job `grep -R \"Ship‑count unavailable troubleshooting\" -n .` returns a zero exit code, confirming the comment block exists."
   depends_on: [CREDIBLE-523]
   notes: |
     [chump harvest check 'fleet-brief']
@@ -99837,7 +99876,7 @@ gaps:
     - "Sibling: META-070 + META-071 partially shipped this; this gap is the COMPLETION + parity-audit gate. Audit the 6+ already-shipped META-070 sub-gaps for coverage gaps"
     - "Smoke test: synth a fresh CI gate that always fails; assert chump preflight catches it; assert preflight-ci-parity-audit reports 0 delta"
   notes: |
-    Decomposed into 6 slices: INFRA-5519, INFRA-5520, INFRA-5521, INFRA-5522, INFRA-5523, INFRA-5524
+    Decomposed into 6 slices: INFRA-6153, INFRA-6154, INFRA-6155, INFRA-6156, INFRA-6157, INFRA-6158
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -202914,6 +202953,174 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
+- id: INFRA-6153
+  domain: INFRA
+  title: "INFRA: INFRA-5519: Implement inventory audit script (INFRA-2084 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - scripts/ci/preflight-vs-ci-parity-audit.sh exists and is executable
+    - "Running the script on a clean checkout prints three sections: (a) list of CI gates from .github/workflows/ci.yml, (b) list of gates in chump preflight, (c) DELTA list of gates present in CI but missing in preflight"
+    - The DELTA output matches the current known delta (~30% of gates) on the baseline repository
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6154
+  domain: INFRA
+  title: "INFRA: INFRA-5520: Close delta by adding gates or allowlisting (INFRA-2084 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - For every gate reported in the DELTA of INFRA-5519, either a corresponding entry is added to the chump preflight implementation or an entry is added to scripts/coord/preflight-vs-ci-parity-allowlist.txt with a non‑empty reason
+    - Running the inventory script again reports an empty DELTA list
+    - "Allowlist entries are formatted as `<gate-name> # <reason>` and are sorted alphabetically"
+  depends_on: [INFRA-6153]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6155
+  domain: INFRA
+  title: "INFRA: INFRA-5521: Add parity assertion script (INFRA-2084 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - scripts/ci/test-preflight-ci-parity.sh is added and executable
+    - The script exits with status 0 when all CI gates are covered (or allowlisted) and exits with non‑zero status when a gate is uncovered
+    - The script is invoked as part of the fast‑checks shard in CI and fails the CI run if parity is broken
+  depends_on: [INFRA-6154]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6156
+  domain: INFRA
+  title: "INFRA: INFRA-5522: Optimize chump preflight runtime (INFRA-2084 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Preflight execution time measured on a warm cache is < 60 seconds; cold cache time is < 120 seconds
+    - "If baseline runtime exceeds the warm limit, independent gate checks are parallelized using tokio::spawn or equivalent"
+    - Performance benchmarks are recorded and committed as part of the change
+  depends_on: [INFRA-6154, INFRA-6155]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6157
+  domain: INFRA
+  title: "INFRA: INFRA-5523: Verify trunk‑RED elimination (INFRA-2084 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - After the previous slices are merged, any CI failure introduced in a new commit is also reported by a local chump preflight run within 60 seconds
+    - A test matrix of representative CI wedges (e.g., lint failures, test failures, cargo‑check failures) is executed locally and all are caught by preflight
+    - No new CI‑only failures are observed in the CI pipeline for the next three runs
+  depends_on: [INFRA-6156]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6158
+  domain: INFRA
+  title: "INFRA: INFRA-5524: Smoke test synthetic failing CI gate (INFRA-2084 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A dummy CI gate that always fails is added to .github/workflows/ci.yml
+    - Running chump preflight locally fails and reports the dummy gate
+    - Running scripts/ci/preflight-vs-ci-parity-audit.sh after the dummy gate is added reports a DELTA of zero (gate is either covered or allowlisted)
+    - The CI pipeline fails on the dummy gate, confirming parity enforcement
+  depends_on: [INFRA-6157]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
 - id: INFRA-635
   domain: INFRA
