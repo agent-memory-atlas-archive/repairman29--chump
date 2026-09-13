@@ -6977,13 +6977,29 @@ events:
 
   - kind: node_remote_heal_attempted
     effect_metric: node_unreachable_duration
-    emitter: scripts/ops/apex-watchdog.sh (RESILIENT-1098)
-    trigger: opt-in (CHUMP_APEX_WATCHDOG_REMOTE_HEAL=1) — after a peer
-      crosses the node_unreachable threshold, the watchdog attempted a
-      best-effort remote revive (ssh reset-failed + restart the peer's own
-      chump-organ-watchdog.service) and this records the outcome.
+    emitter: scripts/ops/apex-watchdog.sh (RESILIENT-1098; on-by-default per
+      RESILIENT-1112)
+    trigger: on by default (CHUMP_APEX_WATCHDOG_REMOTE_HEAL=1, was opt-in
+      pre-RESILIENT-1112) — after a peer crosses the node_unreachable
+      threshold, the watchdog attempted a best-effort remote revive (ssh
+      reset-failed + restart the peer's own chump-organ-watchdog.service)
+      and this records the outcome.
     consumers: [fleet-brief, ops-audit]
     fields_required: [ts, kind, peer, tailnet_ip, result]
+
+  - kind: node_heal_exhausted_recall
+    effect_metric: node_unreachable_duration
+    emitter: scripts/ops/apex-watchdog.sh (RESILIENT-1112)
+    trigger: remote self-heal (node_remote_heal_attempted) failed
+      CHUMP_APEX_WATCHDOG_HEAL_ESCALATE (default 2) consecutive times for the
+      same peer — the watchdog calls operator-recall.sh
+      --condition NODE_UNREACHABLE_UNHEALED itself instead of leaving the
+      final catch to a human noticing node_unreachable in the ambient
+      stream. Closes DESIGN_GAPS_SELF_RUNNING.md Gap 2 for this loop: the
+      apex watchdog now attempts self-heal and pages automatically on
+      exhaustion, rather than the human being the first thing to notice.
+    consumers: [fleet-brief, ops-audit, operator-recall]
+    fields_required: [ts, kind, peer, tailnet_ip, consecutive_heal_failures, heal_escalate_threshold]
 
   - kind: process_organ_revived
     effect_metric: process_organ_heal_rate

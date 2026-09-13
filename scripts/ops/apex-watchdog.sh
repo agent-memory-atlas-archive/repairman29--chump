@@ -33,13 +33,29 @@
 #      memory; it is local to the watching node, not the watched one, so it
 #      survives the peer being unreachable.
 #   4. On threshold crossed: emit kind=node_unreachable (self-healer-visible
-#      escalation — the fleet-wide equivalent of organ_self_heal_failed) and,
-#      opt-in (CHUMP_APEX_WATCHDOG_REMOTE_HEAL=1), attempt a best-effort
-#      remote revive over ssh (reset-failed + restart the peer's own
-#      organ-watchdog unit) — the same "no human step" bar as organ-watchdog.
+#      escalation — the fleet-wide equivalent of organ_self_heal_failed) and
+#      attempt a best-effort remote revive over ssh (reset-failed + restart
+#      the peer's own organ-watchdog unit) — the same "no human step" bar as
+#      organ-watchdog. Remote heal is now ON BY DEFAULT (RESILIENT-1112):
+#      DESIGN_GAPS_SELF_RUNNING.md Gap 2 observed that every control loop,
+#      including this one, previously bottomed out in a human noticing the
+#      ambient event by hand — remote heal was opt-in (default 0) and nothing
+#      auto-escalated on repeated heal failure, so the apex layer's own catch
+#      WAS the operator scrolling logs. Set CHUMP_APEX_WATCHDOG_REMOTE_HEAL=0
+#      to restore the old opt-out behavior.
 #   5. On a peer recovering after prior misses: emit kind=node_reachable_again
-#      and reset the counter.
-#   6. Emit kind=apex_watchdog_tick every cycle (heartbeat) — mirrors
+#      and reset the counter (including the heal-failure counter below).
+#   6. Self-heal escalation ladder (RESILIENT-1112): each cycle the peer stays
+#      unreachable, a remote heal attempt is made and tracked per-peer in
+#      <peer>.healfail. Only after CHUMP_APEX_WATCHDOG_HEAL_ESCALATE (default
+#      2) *consecutive* failed heal attempts does the watchdog call
+#      operator-recall.sh --condition NODE_UNREACHABLE_UNHEALED itself — an
+#      automated page, not a human stumbling on the ambient line. A human is
+#      still the ultimate responder to the page (this cannot page itself out
+#      of existence), but the escalation trigger and the self-heal attempts
+#      preceding it are now fully automated: the loop tries to fix itself
+#      first, and pages only once self-heal is proven exhausted.
+#   7. Emit kind=apex_watchdog_tick every cycle (heartbeat) — mirrors
 #      organ-watchdog's own organ_watchdog_tick pattern, because the apex
 #      watchdog must itself be observable: a dead watchdog-of-the-watchdog is
 #      exactly the SPOF this gap exists to cure.
@@ -57,7 +73,9 @@
 #   CHUMP_APEX_WATCHDOG_MISS_THRESHOLD — consecutive misses before paging (default 3)
 #   CHUMP_APEX_WATCHDOG_HEALTH_PORT    — fleet-server health port (default 8080)
 #   CHUMP_APEX_WATCHDOG_TIMEOUT_S      — per-peer curl timeout seconds (default 5)
-#   CHUMP_APEX_WATCHDOG_REMOTE_HEAL    — 1 = attempt ssh remote revive on threshold trip
+#   CHUMP_APEX_WATCHDOG_REMOTE_HEAL    — 1 = attempt ssh remote revive on threshold trip (default 1, RESILIENT-1112)
+#   CHUMP_APEX_WATCHDOG_HEAL_ESCALATE  — consecutive failed heal attempts before auto-paging the operator (default 2, RESILIENT-1112)
+#   CHUMP_APEX_WATCHDOG_RECALL_SCRIPT  — path to operator-recall.sh (override for tests)
 #   CHUMP_AMBIENT_LOG                  — override ambient.jsonl path
 #
 # Exit codes:
@@ -83,7 +101,9 @@ STATE_DIR="${CHUMP_APEX_WATCHDOG_STATE_DIR:-$REPO_ROOT/.chump-locks/apex-watchdo
 MISS_THRESHOLD="${CHUMP_APEX_WATCHDOG_MISS_THRESHOLD:-3}"
 HEALTH_PORT="${CHUMP_APEX_WATCHDOG_HEALTH_PORT:-8080}"
 TIMEOUT_S="${CHUMP_APEX_WATCHDOG_TIMEOUT_S:-5}"
-REMOTE_HEAL="${CHUMP_APEX_WATCHDOG_REMOTE_HEAL:-0}"
+REMOTE_HEAL="${CHUMP_APEX_WATCHDOG_REMOTE_HEAL:-1}"
+HEAL_ESCALATE="${CHUMP_APEX_WATCHDOG_HEAL_ESCALATE:-2}"
+RECALL_SCRIPT="${CHUMP_APEX_WATCHDOG_RECALL_SCRIPT:-$REPO_ROOT/scripts/dispatch/operator-recall.sh}"
 AMBIENT_LOG="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 
 LIB_AMBIENT="$REPO_ROOT/scripts/coord/lib/ambient-write.sh"
@@ -159,6 +179,8 @@ for f in "${NODE_FILES[@]}"; do
     [[ -f "$count_file" ]] && prev_misses="$(cat "$count_file" 2>/dev/null || echo 0)"
     [[ "$prev_misses" =~ ^[0-9]+$ ]] || prev_misses=0
 
+    healfail_file="$STATE_DIR/${node_id}.healfail"
+
     if "$CURL_BIN" -sf -m "$TIMEOUT_S" "http://${tailnet_ip}:${HEALTH_PORT}/health" >/dev/null 2>&1; then
         # ── peer reachable ──────────────────────────────────────────────
         if [[ "$prev_misses" -ge "$MISS_THRESHOLD" ]]; then
@@ -168,6 +190,7 @@ for f in "${NODE_FILES[@]}"; do
             emit node_reachable_again "peer=$node_id" "tailnet_ip=$tailnet_ip" "prior_misses=$prev_misses"
         fi
         echo 0 > "$count_file" 2>/dev/null || true
+        rm -f "$healfail_file" 2>/dev/null || true
         continue
     fi
 
@@ -192,9 +215,36 @@ for f in "${NODE_FILES[@]}"; do
             >/dev/null 2>&1; then
             # scanner-anchor: "kind":"node_remote_heal_attempted"  (RESILIENT-1098; success case)
             emit node_remote_heal_attempted "peer=$node_id" "tailnet_ip=$tailnet_ip" "result=success"
+            rm -f "$healfail_file" 2>/dev/null || true
         else
             # scanner-anchor: "kind":"node_remote_heal_attempted"  (RESILIENT-1098; failure case)
             emit node_remote_heal_attempted "peer=$node_id" "tailnet_ip=$tailnet_ip" "result=failed"
+
+            new_healfails=1
+            prev_healfails=0
+            [[ -f "$healfail_file" ]] && prev_healfails="$(cat "$healfail_file" 2>/dev/null || echo 0)"
+            [[ "$prev_healfails" =~ ^[0-9]+$ ]] || prev_healfails=0
+            new_healfails=$((prev_healfails + 1))
+            echo "$new_healfails" > "$healfail_file" 2>/dev/null || true
+
+            if [[ "$new_healfails" -ge "$HEAL_ESCALATE" && -x "$RECALL_SCRIPT" ]]; then
+                # RESILIENT-1112: self-heal is exhausted (HEAL_ESCALATE
+                # consecutive failed remote-heal attempts) — page the
+                # operator automatically instead of relying on a human to
+                # notice node_unreachable in the ambient stream. This is the
+                # apex-human catch removed: the loop tries to fix itself
+                # first (above) and only reaches for the human once that is
+                # proven to have failed, and it reaches for the human itself
+                # rather than waiting to be noticed.
+                CHUMP_AMBIENT_LOG="$AMBIENT_LOG" "$RECALL_SCRIPT" --condition NODE_UNREACHABLE_UNHEALED \
+                    --reason "peer=$node_id ($tailnet_ip) unreachable for ${new_misses} cycles; remote self-heal failed ${new_healfails} consecutive times (>= ${HEAL_ESCALATE})" \
+                    >/dev/null 2>&1 || echo "[apex-watchdog]   WARN: operator-recall.sh NODE_UNREACHABLE_UNHEALED call failed" >&2
+                # scanner-anchor: "kind":"node_heal_exhausted_recall"  (RESILIENT-1112;
+                # fires when consecutive remote-heal failures cross HEAL_ESCALATE —
+                # proves the escalation to operator-recall happened automatically)
+                emit node_heal_exhausted_recall "peer=$node_id" "tailnet_ip=$tailnet_ip" \
+                    "consecutive_heal_failures=$new_healfails" "heal_escalate_threshold=$HEAL_ESCALATE"
+            fi
         fi
     fi
 done
