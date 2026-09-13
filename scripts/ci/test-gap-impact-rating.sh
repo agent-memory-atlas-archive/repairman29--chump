@@ -25,12 +25,14 @@ KPI_RS="$(find_rust_module kpi_report)"
 echo "=== FLEET-048: gap impact rating ==="
 echo
 
-# 1. gap rate arm in main.rs
-if grep -q '"rate"' "$REPO_ROOT/src/main.rs" 2>/dev/null && \
-   grep -q 'gap_impact_rated' "$REPO_ROOT/src/main.rs" 2>/dev/null; then
-    ok "main.rs: gap rate subcommand defined"
+# 1. gap rate arm in main.rs or gap.rs
+if (grep -q '"rate"' "$REPO_ROOT/src/main.rs" 2>/dev/null && \
+    grep -q 'gap_impact_rated' "$REPO_ROOT/src/main.rs" 2>/dev/null) || \
+   (grep -q '"rate"' "$REPO_ROOT/src/commands/gap.rs" 2>/dev/null && \
+    grep -q 'gap_impact_rated' "$REPO_ROOT/src/commands/gap.rs" 2>/dev/null); then
+    ok "gap rate subcommand defined in main.rs or gap.rs"
 else
-    fail "main.rs: gap rate subcommand missing"
+    fail "gap rate subcommand missing from both main.rs and gap.rs"
 fi
 
 # 2. ImpactRatingSection struct
