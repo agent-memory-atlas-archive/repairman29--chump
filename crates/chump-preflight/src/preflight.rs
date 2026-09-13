@@ -669,7 +669,7 @@ fn load_average_1m() -> f64 {
 /// Build the blocking `cargo check` step, scoped to the changed crate(s)
 /// when scoping is safe, falling back to `--workspace` otherwise. Always
 /// applies the jobs cap + `nice` (see `compute_check_jobs`).
-fn cargo_check_step(repo_root: &std::path::Path, paths: &[String]) -> Step {
+fn cargo_check_step(_repo_root: &std::path::Path, _paths: &[String]) -> Step {
     let jobs = compute_check_jobs(available_cpus(), load_average_1m());
     let mut argv: Vec<String> = vec![
         "nice".to_string(),
@@ -677,29 +677,13 @@ fn cargo_check_step(repo_root: &std::path::Path, paths: &[String]) -> Step {
         "10".to_string(),
         "cargo".to_string(),
         "check".to_string(),
+        "--workspace".to_string(),
+        "--all-targets".to_string(),
+        "--jobs".to_string(),
+        jobs.to_string(),
     ];
-    let name: &'static str = match changed_crate_names(repo_root, paths) {
-        Some(names) if !names.is_empty() => {
-            for n in &names {
-                argv.push("-p".to_string());
-                argv.push(n.clone());
-            }
-            eprintln!(
-                "[preflight] cargo check scoped to crate(s): {}",
-                names.join(", ")
-            );
-            "cargo check (scoped)"
-        }
-        _ => {
-            argv.push("--workspace".to_string());
-            "cargo check"
-        }
-    };
-    argv.push("--all-targets".to_string());
-    argv.push("--jobs".to_string());
-    argv.push(jobs.to_string());
     Step {
-        name,
+        name: "cargo check",
         argv,
         kind: GateKind::Rust,
     }
@@ -4051,24 +4035,25 @@ mod tests {
     }
 
     #[test]
-    fn cargo_check_step_scopes_argv_to_changed_crate_not_workspace() {
+    fn cargo_check_step_always_uses_workspace() {
         let fixture = make_fixture_workspace();
         let root = fixture.path();
         let paths = vec!["crates/foo/src/lib.rs".to_string()];
         let step = cargo_check_step(root, &paths);
+        // Always workspace, no scoping
         assert!(
-            step.argv.iter().any(|a| a == "-p"),
-            "scoped step must pass -p <crate>, argv={:?}",
+            step.argv.iter().any(|a| a == "--workspace"),
+            "expected --workspace in argv, got {:?}",
             step.argv
         );
         assert!(
-            step.argv.contains(&"chump-foo".to_string()),
-            "scoped step must target the changed crate's package name, argv={:?}",
+            !step.argv.iter().any(|a| a == "-p"),
+            "unexpected -p flag in argv (scoping disabled), got {:?}",
             step.argv
         );
         assert!(
-            !step.argv.iter().any(|a| a == "--workspace"),
-            "scoped step must NOT run the full workspace check, argv={:?}",
+            !step.argv.contains(&"chump-foo".to_string()),
+            "unexpected package name in argv (scoping disabled), got {:?}",
             step.argv
         );
     }
