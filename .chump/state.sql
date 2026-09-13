@@ -6866,9 +6866,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a new regression test function in `crates/chump-eval-harness/src/eval_harness.rs` that creates a gap whose text lists the same file paths modified by a bookkeeping‑only PR, invokes the false‑done detector (via `scripts/ops/false-done-sweep.py`), and asserts that the PR is flagged as a false‑done case, thereby covering the CREDIBLE‑175 edge case and preventing path‑overlap false negatives.
+    
+    Target file(s):
+    - crates/chump-eval-harness/src/eval_harness.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test fixture covers the CREDIBLE-175 edge case where gap text names the same files touched by a PR
-    - Test asserts that a bookkeeping-only PR closing a gap is FLAGGED even when gap text matches PR file paths
+    - A test function named `test_path_overlap_false_negative` is present in `crates/chump-eval-harness/src/eval_harness.rs` and is compiled without errors.
+    - Running `cargo test --test eval_harness` executes `test_path_overlap_false_negative` and the test passes only when the false‑done detector flags the PR.
+    - "Invoking `scripts/ops/false-done-sweep.py` on the test fixture produces output containing the string `\"FLAGGED\"` for the bookkeeping‑only PR, confirming the detector’s behavior."
   depends_on: [CREDIBLE-1168]
   notes: |
     [chump harvest check 'closed']
@@ -6911,10 +6919,19 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Modify `run_triage` in `src/pr_triage.rs` to detect bookkeeping‑closed gaps whose work has landed in a different PR and update the gap's `closed_pr` field to that PR; extend `reopen_respawned_gaps` in `scripts/ops/stuck-pr-filer.sh` to set the gap's status to “open” when no landed PR is found; and adjust `hand_off_to_conflict_consumer` in `scripts/ops/rot-reaper.sh` to emit a log entry when such a gap is reopened, thereby completing the triage of all 79 gaps.
+    
+    Target file(s):
+    - src/pr_triage.rs
+    - scripts/ops/stuck-pr-filer.sh
+    - scripts/ops/rot-reaper.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All 79 identified bookkeeping-closed gaps receive a documented verdict
-    - Gaps with work landing in another PR have closed_pr updated to point to the correct implementation PR
-    - Gaps with unlanded work are formally reopened in the gap registry
+    - "In `src/pr_triage.rs`, the function `run_triage` returns a `Verdict::UpdatedClosedPr(<new_pr>)` for a gap whose original `closed_pr` points to a PR that has been superseded, as verified by the unit test `test_update_closed_pr_alternate`."
+    - "In `scripts/ops/stuck-pr-filer.sh`, the function `reopen_respawned_gaps` writes the line `status: open` into the gap’s JSON entry when the gap has no associated landed PR, confirmed by grepping the registry file after running the script on a fixture gap."
+    - In `scripts/ops/rot-reaper.sh`, the function `hand_off_to_conflict_consumer` logs the exact string `gap <gap_id> reopened` to stdout when processing a gap that was reopened by `reopen_respawned_gaps`, verified by capturing script output for a test gap.
   depends_on: [CREDIBLE-1168]
   notes: |
     [chump harvest check 'closed']
@@ -7005,9 +7022,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend `scripts/ci/test-organ-watchdog.sh` by enhancing `mk_timer_stub` to emit a launchd plist that schedules the `audit-done` watchdog for periodic execution, and adjust the CI workflow to invoke this script so the timer is materialized during CI runs; simultaneously modify `scripts/ops/github-webhook-receiver.py` in the `_notify_operator_escalation` function to forward the watchdog’s audit‑done findings to the existing operator‑monitored dashboard via its HTTP endpoint, formatting the payload as required.
+    
+    Target file(s):
+    - scripts/ci/test-organ-watchdog.sh
+    - scripts/ops/github-webhook-receiver.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - audit-done watchdog is scheduled for automated execution via CI workflow or launchd
-    - Findings from audit runs are published to an existing operator-monitored dashboard or channel
+    - In `scripts/ci/test-organ-watchdog.sh`, the `mk_timer_stub` function creates a launchd plist at `./tmp/audit-done.timer.plist` containing a `<Label>` of `com.example.audit-done` and a `<StartInterval>` of 86400 seconds.
+    - Running the CI workflow executes `test-organ-watchdog.sh` and verifies that the plist file from the previous criterion exists and is loaded by `launchctl load` without error.
+    - "In `scripts/ops/github-webhook-receiver.py`, the `_notify_operator_escalation` function sends an HTTP POST to `https://ops.example.com/dashboard/audit` with a JSON body that includes the keys `status`, `timestamp`, and `details` derived from the watchdog output."
+    - When the `audit-done` watchdog runs and writes a findings file, the operator dashboard receives a POST request (observable via a mock server or log) containing the exact findings payload, confirming end‑to‑end delivery.
   depends_on: [CREDIBLE-1171]
   notes: |
     [chump harvest check 'closed']
@@ -7271,10 +7298,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a call to `compute_prune_ledger` inside the Debt Index calculation flow (in `compute_crown_gauge`), store the returned value in the `DebtIndex` result struct, and propagate that field through `build_debt_index_section` so the prune‑ledger value appears in the final KPI report payload.
+    
+    Target file(s):
+    - crates/chump-kpi-report/src/debt_index.rs
+    - crates/chump-kpi-report/src/kpi_report.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The Debt Index flow calls `compute_prune_ledger` and stores the result.
-    - Existing tests remain green.
-    - Prune ledger value is ready for emission.
+    - "In `crates/chump-kpi-report/src/debt_index.rs::compute_crown_gauge`, the returned `DebtIndex` struct includes a new `prune_ledger` field populated by the result of `compute_prune_ledger`."
+    - "In `crates/chump-kpi-report/src/kpi_report.rs::build_debt_index_section`, the generated JSON/report contains a top‑level `\"prune_ledger\"` key with the numeric value from `DebtIndex.prune_ledger`."
+    - Executing `cargo test --workspace` completes without failures, confirming that all pre‑existing tests remain green.
+    - "Running the KPI report binary (e.g., `cargo run --bin kpi_report -- --output json`) produces JSON that includes `\"prune_ledger\": <number>` (non‑null) in its output."
   depends_on: [CREDIBLE-1178]
   notes: |
     [chump harvest check 'Index']
@@ -7338,10 +7374,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend the `detect_event_kind_zero_emits` function in `crates/chump-inventory/src/inventory.rs` to include the three new metrics (live_pct, debt, prune_ledger) in the ambient‑kind payload, and modify the `emit_ambient_finding` routine in `scripts/audit/audit-launchd-installers.sh` so that it writes those metrics into the corresponding registry columns when persisting the finding.
+    
+    Target file(s):
+    - crates/chump-inventory/src/inventory.rs
+    - scripts/audit/audit-launchd-installers.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The Debt Index pipeline emits the three new metrics as an ambient kind.
-    - Values are persisted to the newly added registry columns.
-    - Emission format matches existing ambient kinds.
+    - In `crates/chump-inventory/src/inventory.rs`, the `detect_event_kind_zero_emits` function now adds `live_pct`, `debt`, and `prune_ledger` keys to the emitted ambient‑kind map.
+    - In `scripts/audit/audit-launchd-installers.sh`, the `emit_ambient_finding` command outputs a line that includes the three new columns (`live_pct`, `debt`, `prune_ledger`) in the registry CSV/DB format.
+    - Running the Debt Index pipeline produces a stdout JSON object under the ambient‑kind section that contains non‑null `live_pct`, `debt`, and `prune_ledger` fields.
+    - After pipeline execution, the registry storage (e.g., the generated registry file) contains populated values for the `live_pct`, `debt`, and `prune_ledger` columns for each processed record.
   depends_on: [CREDIBLE-1179, CREDIBLE-1180, CREDIBLE-1181, CREDIBLE-1182]
   notes: |
     [chump harvest check 'Index']
@@ -7406,11 +7451,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Modify the `_run_cargo_with_lock_detect` function in `scripts/coord/bot-merge.sh` to invoke `cargo fmt -- --check` and `cargo clippy --all-targets -D warnings` sequentially, causing the script (and thus CI) to fail with a non‑zero exit code if formatting changes are required or any clippy warnings are emitted, while preserving existing build and lock‑detection behavior.
+    
+    Target file(s):
+    - scripts/coord/bot-merge.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "`cargo fmt` runs with no changes needed."
-    - "`cargo clippy --all-targets -D warnings` passes without warnings."
-    - All existing and new tests pass.
-    - CI pipeline reports success.
+    - In `scripts/coord/bot-merge.sh`, the `_run_cargo_with_lock_detect` function runs `cargo fmt -- --check` and aborts with a non‑zero exit status when formatting changes are needed.
+    - In `scripts/coord/bot-merge.sh`, the script runs `cargo clippy --all-targets -D warnings` after building and aborts with a non‑zero exit status on any clippy warnings.
+    - Executing `scripts/coord/bot-merge.sh` on a clean repository exits with status 0 only when `cargo fmt --check` reports no changes, `cargo clippy` reports no warnings, and `cargo test` completes successfully.
+    - The script’s output includes the lines “cargo fmt --check passed”, “cargo clippy passed”, and “all tests passed” when it succeeds.
   depends_on: [CREDIBLE-1184]
   notes: |
     [chump harvest check 'Index']
@@ -30670,7 +30722,7 @@ gaps:
 - id: CREDIBLE-950
   domain: CREDIBLE
   title: "CREDIBLE: Triage 79 bookkeeping‑closed gaps (CREDIBLE-279 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -30698,6 +30750,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-13T20:30:18Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=75, rc=75, cycle_log=4144B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: CREDIBLE-951
   domain: CREDIBLE
@@ -40585,7 +40638,7 @@ gaps:
 - id: EFFECTIVE-1108
   domain: EFFECTIVE
   title: "EFFECTIVE: Add JTBD intake fields for who, struggling-moment, and done-signal (EFFECTIVE-443 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   description: |
@@ -40617,6 +40670,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-13T19:54:32Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=4783B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: EFFECTIVE-1109
   domain: EFFECTIVE
@@ -95090,7 +95144,7 @@ gaps:
     - "Telemetry: emit kind=claim_collision_avoided when role-scoped claim would have collided under old file-lease semantics; metric becomes the migration-success signal"
     - "Smoke: scripts/ci/test-role-scoped-claims.sh exercises 5 scenarios — same-role same-scope (block), same-role different-scope (allow), different-role same-file (allow + warn), broad-scope without flag (reject), append-only file in paths (exempt)"
   notes: |
-    Decomposed into 8 slices: INFRA-5773, INFRA-5774, INFRA-5775, INFRA-5776, INFRA-5777, INFRA-5778, INFRA-5779, INFRA-5780
+    Decomposed into 8 slices: INFRA-6120, INFRA-6121, INFRA-6122, INFRA-6123, INFRA-6124, INFRA-6125, INFRA-6126, INFRA-6127
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -200091,7 +200145,7 @@ gaps:
 - id: INFRA-6074
   domain: INFRA
   title: "INFRA: Locate bypass-var ceiling implementation in INFRA codebase (INFRA-6073 slice)"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
@@ -200111,6 +200165,7 @@ gaps:
     === cross-pollination briefs mentioning 'ceiling' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+    [2026-09-13T19:48:18Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=3910B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6075
   domain: INFRA
@@ -201342,6 +201397,288 @@ gaps:
       222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
     
     === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6120
+  domain: INFRA
+  title: "INFRA: Add --role and --scope flags to chump claim CLI (INFRA-1863 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - scripts/coord/chump-commit.sh parses new flags --role <role> and --scope <module-or-concern>
+    - CLI shows help text for the new flags
+    - Invalid flag usage returns a non‑zero exit code
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6121
+  domain: INFRA
+  title: "INFRA: Validate supplied role against AGENT_ROLES.yaml (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When --role is provided, the script loads docs/process/AGENT_ROLES.yaml
+    - Claim fails with clear error if role is not listed in the registry
+    - Valid roles pass validation
+  depends_on: [INFRA-6120]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6122
+  domain: INFRA
+  title: "INFRA: Implement scope handling and optional advisory paths (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Claim records both role and scope in its metadata
+    - If --paths is omitted, claim is advisory and only warns on overlap
+    - When --paths is provided, existing overlap logic is applied
+  depends_on: [INFRA-6120]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6123
+  domain: INFRA
+  title: "INFRA: Add append‑only file exemption logic (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Files scripts/ci/event-registry-reserved.txt, scripts/ci/env-vars-internal.txt, docs/observability/EVENT_REGISTRY.yaml are ignored when listed in --paths
+    - Exemption is logged at debug level
+    - No lease is created for exempted files
+  depends_on: [INFRA-6120]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6124
+  domain: INFRA
+  title: "INFRA: Broad‑scope guard with --broad and --reason (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - If --paths contains more than one directory, claim is rejected unless both --broad and --reason are present
+    - When rejected, script exits with error code and prints the missing flags
+    - If --broad is supplied, claim is accepted and stored with the provided reason
+  depends_on: [INFRA-6122]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6125
+  domain: INFRA
+  title: "INFRA: Wire conflict‑resolver into bot‑merge.sh and emit audit events (INFRA-1863 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - bot-merge.sh auto‑invokes the conflict‑resolver on every push that results in a merge conflict
+    - On auto‑resolution, an audit event kind=conflict_auto_resolved is emitted
+    - On escalation, an audit event kind=conflict_escalated is emitted
+    - Integration does not alter existing non‑conflict merges
+  depends_on: [INFRA-6120]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6126
+  domain: INFRA
+  title: "INFRA: Migration support for legacy path‑based claims and advisory default (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Existing path‑based claims continue to function unchanged
+    - Role‑based claims are opt‑in via the new --role flag
+    - After a configurable 2‑week window and ≥100 successful auto‑resolutions, new claims default to advisory (warn‑only) behavior
+    - Configuration flag for the window can be toggled in scripts/coord/chump-commit.sh
+  depends_on: [INFRA-6120, INFRA-6121, INFRA-6122, INFRA-6123, INFRA-6124]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6127
+  domain: INFRA
+  title: "INFRA: Telemetry emission and smoke‑test script for role‑scoped claims (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a role‑scoped claim would have collided under old lease semantics, metric kind=claim_collision_avoided is emitted
+    - Metric migration‑success increments after each successful auto‑resolution post‑window
+    - "scripts/ci/test-role-scoped-claims.sh runs five scenarios: same‑role same‑scope (block), same‑role different‑scope (allow), different‑role same‑file (allow + warn), broad‑scope without flag (reject), append‑only file exemption (allow)"
+    - All scenarios exit with expected status codes and log messages
+  depends_on: [INFRA-6125, INFRA-6126]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
 
 - id: INFRA-635
   domain: INFRA
@@ -215987,6 +216324,8 @@ gaps:
     [2026-09-13T18:32:27Z] rot-reaper: PR #4621 auto-closed (required-check-red, 59h) 2026-09-13; RESPAWN CAP 3 reached (12 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T19:02:14Z] rot-reaper: PR #4621 auto-closed (required-check-red, 59h) 2026-09-13; RESPAWN CAP 3 reached (13 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T19:08:35Z] rot-reaper: PR #4621 auto-closed (required-check-red, 59h) 2026-09-13; RESPAWN CAP 3 reached (14 prior recycles) — NOT re-queued, escalating to operator.
+    [2026-09-13T19:46:03Z] rot-reaper: PR #4621 auto-closed (required-check-red, 60h) 2026-09-13; RESPAWN CAP 3 reached (15 prior recycles) — NOT re-queued, escalating to operator.
+    [2026-09-13T20:06:59Z] rot-reaper: PR #4621 auto-closed (required-check-red, 60h) 2026-09-13; RESPAWN CAP 3 reached (16 prior recycles) — NOT re-queued, escalating to operator.
 
 - id: RESILIENT-1108
   domain: RESILIENT
@@ -218988,6 +219327,121 @@ gaps:
   evidence: |
     chump-node-orchestrator.service is active on CJ across multiple ticks, but chump-cj-worker2.service stays inactive - the orchestrator never scales a 2nd worker even though CJ is 4-core with spare capacity and the backlog is large. NODE_FABRIC (RESILIENT-291) says node-orchestrator auto-scales cj-worker2/3 off the base worker; it is not doing so. Throughput is capped at 1 worker. Fix: orchestrator must size worker count to nproc-1 and start/enable the extra chump-cj-worker@N units (and organ-reconcile must keep them enabled). Verify by systemctl is-active cj-worker2 after an orchestrator tick.
 
+- id: RESILIENT-1205
+  domain: RESILIENT
+  title: RESILIENT-1189 auto-converge organ merged+wired but wont install/fire on CJ; node checkout churns off main
+  status: open
+  priority: P2
+  effort: m
+  acceptance_criteria:
+    - "The change described by \"RESILIENT-1189 auto-converge organ merged+wired but wont install/fire on CJ; node checkout churns off main\" is implemented in the relevant RESILIENT code path(s)."
+    - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
+    - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  notes: |
+    Decomposed into 8 slices: RESILIENT-1206, RESILIENT-1207, RESILIENT-1208, RESILIENT-1209, RESILIENT-1210, RESILIENT-1211, RESILIENT-1212, RESILIENT-1213
+  outcome_id: MISSION-012
+  evidence: |
+    PR #4640 merged the node-converge organ AND wired it (git show origin/main: node-converge in organ-manifest.txt x2 + install-helsinki-atc.sh x4). But on CJ it will not run: (1) install-helsinki-atc.sh --auto + chump-organ-deploy both SKIP installing chump-node-converge.timer (stays inactive); (2) a hand-installed unit had literal /root/Projects/chump (the installers REPO_ROOT substitution was skipped) and User defaulted to root so bash -l hit /root/.bash_profile Permission denied; (3) organ-reconcile reaps any non-manifest unit. Worse: grepping the WORKING checkout for node-converge in those two files returns 0 even though HEAD=57d85ce13 and origin/main has them 2/4 - so the node source tree is being churned away from origin/main after a reset (instability; possibly a partial converge or another agent). Net: the auto-converge timer never fires, so merged!=deployed persists for bash organs (the very thing #4640 was meant to fix). NEEDS: make the organ deterministically install+enable+fire on a MUSCLE node via the normal organ-deploy path (role handling + REPO_ROOT/User substitution for a non-helsinki node), and stabilize the node checkout so it stays == origin/main. Verify by systemctl is-active chump-node-converge.timer + a real converge on CJ.
+
+- id: RESILIENT-1206
+  domain: RESILIENT
+  title: "RESILIENT: Set up reproducible test environment for RESILIENT-1189 failure (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - A local development environment can be started that runs the same steps as CI and reproduces the original failure.
+    - The failure logs are captured and can be referenced for debugging.
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1207
+  domain: RESILIENT
+  title: "RESILIENT: Analyze code path causing auto‑converge organ merge failure on CJ (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - The function(s) and module(s) responsible for organ merge and wired install/fire on CJ are identified.
+    - A short design note documents the root cause and the intended fix.
+  depends_on: [RESILIENT-1206]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1208
+  domain: RESILIENT
+  title: "RESILIENT: Implement fix to allow organ merge and wired install/fire on CJ (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Code changes compile without errors.
+    - Running the reproducer from slice 0 no longer shows the original failure.
+  depends_on: [RESILIENT-1207]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1209
+  domain: RESILIENT
+  title: "RESILIENT: Add unit test verifying organ merge behavior on CJ (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - "A new `#[test]` in the RESILIENT crate exercises the CJ code path and asserts successful install/fire."
+    - The test passes with the fix and fails when the fix is reverted.
+  depends_on: [RESILIENT-1208]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
 - id: RESILIENT-121
   domain: RESILIENT
   title: "RESILIENT: git pre-commit/pre-push hooks block on stdin in headless/non-tty (stomp y/N prompt) → forces agents to --no-verify (the band-aid CREDIBLE-105 forbids); hooks must detect non-tty (! -t 0) + auto-proceed safe default + a regression test that a headless commit does not hang without CHUMP_STOMP_WARN=0"
@@ -219002,6 +219456,106 @@ gaps:
   closed_date: '2026-07-21'
   closed_pr: 3022
   outcome_id: RESILIENT-000
+
+- id: RESILIENT-1210
+  domain: RESILIENT
+  title: "RESILIENT: Add CI script test (scripts/ci/test‑resilient‑1189.sh) to validate behavior (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - A new script under `scripts/ci/` runs the CJ scenario and exits with status 0 on success.
+    - The CI pipeline can invoke the script and it reports success only when the fix is present.
+  depends_on: [RESILIENT-1208]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1211
+  domain: RESILIENT
+  title: "RESILIENT: Run cargo fmt and clippy, fix any warnings introduced (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - "`cargo fmt` makes no changes to the repository."
+    - "`cargo clippy --all-targets -D warnings` completes without any warnings."
+  depends_on: [RESILIENT-1208]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1212
+  domain: RESILIENT
+  title: "RESILIENT: Execute full test suite to confirm no regressions (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - All existing cargo tests pass.
+    - All CI test scripts (including the new one) pass.
+  depends_on: [RESILIENT-1208, RESILIENT-1211]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1213
+  domain: RESILIENT
+  title: "RESILIENT: Update RESILIENT changelog with description of RESILIENT‑1189 fix (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Changelog entry includes the ticket ID, a brief description of the fix, and any migration notes.
+    - The changelog file is committed and passes lint checks.
+  depends_on: [RESILIENT-1208]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
 
 - id: RESILIENT-122
   domain: RESILIENT
