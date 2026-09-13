@@ -7,7 +7,13 @@
 #   • BLOCKED-but-mergeable, no
 #     required-check failure        → left (needs CI/approval)           [324]
 #   • MERGEABLE + REQUIRED check
-#     FAILED + old                  → REAP (the raw-gh/bypass rot class) [311]
+#     FAILED (completed HARD-fail on
+#     a blocking gate) + old         → REAP (the raw-gh/bypass rot class) [311]
+#     NB: a required-red PR is now classified before reap (verified-red spare);
+#     only a genuine hard_fail reaps — green-underneath / pending / cancelled /
+#     flake are SPARED. The reap fixtures below carry a COMPLETED FAILURE on a
+#     blocking (`*-required`) gate so they are genuine hard_fails. The spare
+#     path is proven in test-rot-reaper-verified-red-spare.sh.
 #   • MERGEABLE + REQUIRED check
 #     FAILED + fresh                → left (may be a flake, give it time)[311]
 #   • MERGEABLE + green + UNARMED
@@ -68,8 +74,8 @@ cat > "$FIX" <<EOF
   {"number":203,"title":"RESILIENT-902: blocked but mergeable, only pending CI (no required FAILURE)","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-902","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":null,"status":"IN_PROGRESS"}]},
   {"number":204,"title":"RESILIENT-903: clean, green, UNARMED","mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-903","isDraft":false,"autoMergeRequest":null,"statusCheckRollup":[{"name":"audit-required","conclusion":"SUCCESS"}]},
   {"number":205,"title":"chore(gaps): file RESILIENT-904","mergeStateStatus":"DIRTY","mergeable":"CONFLICTING","createdAt":"$OLD","headRefName":"file-rs904","isDraft":false,"autoMergeRequest":null,"statusCheckRollup":[]},
-  {"number":206,"title":"RESILIENT-905: mergeable but required check RED, old","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-905","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":"FAILURE"}]},
-  {"number":207,"title":"RESILIENT-906: mergeable but required check RED, still fresh","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$MID","headRefName":"rs-906","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":"FAILURE"}]},
+  {"number":206,"title":"RESILIENT-905: mergeable but required check RED, old","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-905","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":"FAILURE","status":"COMPLETED"}]},
+  {"number":207,"title":"RESILIENT-906: mergeable but required check RED, still fresh","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$MID","headRefName":"rs-906","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":"FAILURE","status":"COMPLETED"}]},
   {"number":208,"title":"RESILIENT-907: an ADVISORY (non-required) check is red — must NOT reap","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-907","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"PWA visual diff (advisory)","conclusion":"FAILURE"},{"name":"audit-required","conclusion":"SUCCESS"}]},
   {"number":211,"title":"RESILIENT-908: conflicting, old, resolution EXHAUSTED by consumer","mergeStateStatus":"DIRTY","mergeable":"CONFLICTING","createdAt":"$OLD","headRefName":"rs-911","isDraft":false,"autoMergeRequest":null,"statusCheckRollup":[]}
 ]
@@ -98,7 +104,7 @@ echo "$out" | grep -qE 'would ARM green-unarmed PR #204' && ok "#204 green-unarm
 # #205: filing PR → skipped even though CONFLICTING+old
 echo "$out" | grep -q 'PR #205 — filing PR, skipping' && ok "#205 filing PR skipped" || bad "#205 filing PR not skipped"
 # #206: mergeable + required RED + old → REAPED
-echo "$out" | grep -qE 'PR #206 — MERGEABLE but REQUIRED check RED, [0-9]+h old → REAP' && ok "#206 required-red reaped" || bad "#206 not reaped"
+echo "$out" | grep -qE 'PR #206 — MERGEABLE but REQUIRED check RED .*[0-9]+h old → REAP' && ok "#206 required-red (hard-fail) reaped" || bad "#206 not reaped"
 # #207: mergeable + required RED but fresh → left
 echo "$out" | grep -q 'PR #207 — failing a required check but only' && ok "#207 fresh required-red skipped" || bad "#207 not skipped"
 echo "$out" | grep -qE 'PR #207 .*→ REAP' && bad "#207 wrongly reaped" || ok "#207 not reaped"
@@ -149,8 +155,8 @@ chmod +x "$STUB2"/*
 FIX2="$TMP/prs2.json"
 cat > "$FIX2" <<EOF
 [
-  {"number":209,"title":"RESILIENT-950: mergeable but required check RED, old, fresh gap","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-950","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":"FAILURE"}]},
-  {"number":210,"title":"RESILIENT-951: mergeable but required check RED, old, gap already recycled twice","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-951","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":"FAILURE"}]}
+  {"number":209,"title":"RESILIENT-950: mergeable but required check RED, old, fresh gap","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-950","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":"FAILURE","status":"COMPLETED"}]},
+  {"number":210,"title":"RESILIENT-951: mergeable but required check RED, old, gap already recycled twice","mergeStateStatus":"BLOCKED","mergeable":"MERGEABLE","createdAt":"$OLD","headRefName":"rs-951","isDraft":false,"autoMergeRequest":{"enabledAt":"x"},"statusCheckRollup":[{"name":"audit-required","conclusion":"FAILURE","status":"COMPLETED"}]}
 ]
 EOF
 

@@ -155,7 +155,7 @@ info()  { printf '  %s\n' "$*"; }
 warn()  { printf '\033[0;33m  WARN: %s\033[0m\n' "$*"; }
 dry()   { printf '  [dry-run] %s\n' "$*"; }
 
-green "=== rot-reaper / no-abandon janitor (conflict≥${MIN_AGE_HOURS}h, required-red≥${REALFAIL_AGE_HOURS}h, arm≥${ARM_AGE_MIN}m, max=${MAX_CLOSE}) ==="
+green "=== rot-reaper / no-abandon janitor (conflict≥${MIN_AGE_HOURS}h, required-red≥${REALFAIL_AGE_HOURS}h, arm≥${ARM_AGE_MIN}m, max=${MAX_CLOSE}, spare-recoverable=always) ==="
 [[ $DRY_RUN -eq 1 ]] && info "Dry-run mode — no PRs will be closed and no gaps re-queued."
 
 ME="$(gh api user --jq .login 2>/dev/null || echo repairman29)"
@@ -254,6 +254,157 @@ BACKLOG_PRS=""
 AMBIENT_LOG="${NODE_AMBIENT:-$(cd "$(dirname "$0")/../.." && pwd)/.chump-locks/ambient.jsonl}"
 mkdir -p "$(dirname "$AMBIENT_LOG")" 2>/dev/null || true
 
+# ── VERIFIED-RED SPARE (RESILIENT-311 completion, this change) ────────────────
+# CLASS 2 closes a MERGEABLE PR whose branch-protection-required check `verified`
+# has been RED past the deadline. But `verified` is a SLOW AGGREGATE over the
+# real gates (cargo-test/clippy/audit/fast-checks/parity). An aggregate going red
+# does NOT prove the work is dead: it goes red when a parity mirror reports late,
+# a sub-job is CI-cancelled, a known flake trips, or CI is simply still finishing.
+# Closing that PR destroys correct work that only needs a re-run (the
+# #4598/#4615/#4618 incident: a 22-min-late parity gate, a flake, a CI-cancel —
+# all reaped as if dead). Before any CLASS 2 close we now classify WHY verified
+# is red, REUSING the green-underneath classifier from #4606
+# (scripts/ops/lib/classify-blocked-pr.py), and SPARE the recoverable verdicts
+# (green_underneath / pending / cancelled / blocked_no_failure / flake_exhausted)
+# — re-arming the auto-merge backstop or the flake budget, and escalating to the
+# operator past a bound rather than fighting forever. Only genuinely-dead PRs
+# (hard_fail / conflict) fall through to the close.
+#
+# The green-underneath spare is UNCONDITIONAL: the reaper always spares
+# recoverable/green-underneath PRs. There is no toggle to disable it — a switch
+# that restores close-good-PRs behavior is exactly the safety-fix-off escape
+# hatch the bypass-debt ceiling forbids, so it does not exist.
+# The classifier is a sibling of THIS script (resolved relative to the reaper's
+# own dir, not any operated-repo root).
+CLASSIFY_HELPER="$(cd "$(dirname "$0")" && pwd)/lib/classify-blocked-pr.py"
+# The REAL gate checks the aggregate `verified` is built over. Deliberately does
+# NOT include `^verified$` — verified is the aggregate we are looking underneath.
+# FIXED POLICY, not operator-tunable: an override of WHICH checks count as
+# "blocking" is a soft-bypass seam (it could make the reaper ignore a real red
+# gate), so there is no env knob — the blocking-check set is hardcoded.
+BLOCKING_CHECK_RE='-required$|^audit-shard|^fast-checks$'
+# INFRA-304 flake-budget markers (same dir ci-flake-rerun.sh writes).
+FLAKE_COOLDOWN_DIR="${CHUMP_ROT_REAPER_FLAKE_COOLDOWN_DIR:-$(dirname "$AMBIENT_LOG")/ci-flake-cooldown}"
+# Bounded spare bookkeeping — never spare-forever. Past the cap the reaper still
+# does NOT close (the work is not dead) but escalates to the operator once so a
+# perpetually-red aggregate (e.g. an unregistered parity gate) gets a human.
+SPARE_STATE_DIR="${CHUMP_ROT_REAPER_SPARE_STATE_DIR:-$(dirname "$AMBIENT_LOG")/rot-reaper-spare-state}"
+SPARE_ESCALATE_CAP="${CHUMP_ROT_REAPER_SPARE_ESCALATE_CAP:-8}"
+FLAKE_REARM_MAX="${CHUMP_ROT_REAPER_FLAKE_REARM_MAX:-1}"
+SPARED=0
+
+# classify_verified_red PR_NUM — reuse classify-blocked-pr.py against this PR's
+# already-fetched statusCheckRollup + mergeable (from PR_JSON, so it works for
+# both the live `gh pr list` and the CHUMP_ROT_REAPER_PR_JSON test fixture).
+# Echoes one verdict: pending | flake_exhausted | blocked_no_failure |
+# green_underneath | cancelled | hard_fail | conflict.
+# Fail-safe: any missing helper / unparseable input echoes green_underneath
+# (a spare verdict) so a fetch error NEVER causes a destructive close.
+classify_verified_red() {  # <pr_num>
+    local pr="$1"
+    [[ -f "$CLASSIFY_HELPER" ]] || { echo "green_underneath"; return; }
+    local rollup_file mergeable
+    rollup_file="$(mktemp "${TMPDIR:-/tmp}/rot-rollup-XXXXXX" 2>/dev/null || echo "")"
+    [[ -z "$rollup_file" ]] && { echo "green_underneath"; return; }
+    mergeable="$(printf '%s' "$PR_JSON" | PR="$pr" python3 -c '
+import json, os, sys
+pr = os.environ.get("PR", "")
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    rows = []
+row = {}
+for r in rows:
+    if str(r.get("number", "")) == str(pr):
+        row = r; break
+json.dump(row.get("statusCheckRollup") or [], open(sys.argv[1], "w"))
+print((row.get("mergeable") or ""))
+' "$rollup_file" 2>/dev/null || echo "")"
+    python3 "$CLASSIFY_HELPER" \
+        --rollup-file "$rollup_file" \
+        --mergeable "$mergeable" \
+        --pr "$pr" \
+        --cooldown-dir "$FLAKE_COOLDOWN_DIR" \
+        --blocking-check="$BLOCKING_CHECK_RE" \
+        --flake-budget "${CHUMP_FLAKE_BUDGET:-3}" 2>/dev/null \
+        || echo "green_underneath"
+    rm -f "$rollup_file" 2>/dev/null || true
+}
+
+# rearm_flake_budget PR_NUM — reset the INFRA-304 per-PR flake budget so
+# ci-flake-rerun.sh may retry the known flake. Deletes the count + comment
+# markers only (same as stale-pr-reaper's re-arm).
+rearm_flake_budget() {  # <pr_num>
+    rm -f "$FLAKE_COOLDOWN_DIR/pr-${1}.count" \
+          "$FLAKE_COOLDOWN_DIR/pr-${1}.commented" 2>/dev/null || true
+}
+
+# bump_spare_count PR_NUM — increment + echo this PR's cumulative spare count
+# (a simple counter file). Used to bound sparing so a perpetually-red aggregate
+# escalates to the operator instead of being spared silently forever.
+bump_spare_count() {  # <pr_num>
+    local pr="$1" f n
+    mkdir -p "$SPARE_STATE_DIR" 2>/dev/null || true
+    f="$SPARE_STATE_DIR/${pr}.count"
+    n="$(cat "$f" 2>/dev/null || echo 0)"; n=$((n + 1))
+    echo "$n" > "$f" 2>/dev/null || true
+    echo "$n"
+}
+
+# arm_backstop PR_NUM — best-effort re-arm of auto-merge so the merge-serializer
+# drives the spared PR to land once `verified` finally goes green. Non-fatal.
+arm_backstop() {  # <pr_num>
+    local armer; armer="$(dirname "$0")/../coord/auto-merge-armer.sh"
+    [[ -x "$armer" ]] || return 0
+    bash "$armer" --pr "$1" >/dev/null 2>&1 || true
+}
+
+# emit_spare_event PR_NUM VERDICT COUNT — board-visible spare signal. The kind
+# is a LITERAL (not a %s) so the event-registry coverage scanner can grep it:
+# emits {"kind":"pr_reap_spared"} — registered in docs/observability/EVENT_REGISTRY.yaml.
+emit_spare_event() {  # <pr> <verdict> <count>
+    printf '{"ts":"%s","kind":"pr_reap_spared","source":"rot-reaper","pr":%s,"verdict":"%s","spare_count":%s}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" \
+        >> "$AMBIENT_LOG" 2>/dev/null || true
+}
+
+# spare_verified_red PR_NUM VERDICT AGE TITLE — the SPARE action for a CLASS 2
+# PR whose verified-red is recoverable. Re-arms (auto-merge backstop, and the
+# flake budget for flake_exhausted), records a bounded spare count, escalates to
+# the operator ONCE past the cap, and NEVER closes. Returns 0 always (the caller
+# `continue`s afterward).
+spare_verified_red() {  # <pr_num> <verdict> <age_h> <title>
+    local pr="$1" verdict="$2" age="$3" title="$4" n
+    if [[ $DRY_RUN -eq 1 ]]; then
+        dry "would SPARE PR #$pr (verified-red but $verdict — recoverable; re-arm, never close)"
+        SPARED=$((SPARED + 1)); return 0
+    fi
+    n="$(bump_spare_count "$pr")"
+    case "$verdict" in
+        flake_exhausted)
+            if [[ "$n" -le "$FLAKE_REARM_MAX" ]]; then
+                rearm_flake_budget "$pr"
+                green "  SPARE PR #$pr — verified-red is a budget-spent known flake; re-armed flake budget (spare $n), NOT closing."
+            else
+                warn "  PR #$pr — flake re-exhausted after ${FLAKE_REARM_MAX} re-arm(s); escalating to operator, still NOT closing (anti-memento: keep correct work)."
+                notify_operator "$(printf '⚠️ **PR #%s verified-red persists as a flake after re-arm** — rot-reaper is sparing it, NOT closing (its work is green underneath). It has been spared %s time(s); a human should look at why the known flake keeps recurring.' "$pr" "$n")" || true
+            fi
+            arm_backstop "$pr"
+            ;;
+        *)
+            green "  SPARE PR #$pr — verified-red but $verdict (real gates green / transient); re-armed auto-merge backstop (spare $n), NOT closing."
+            arm_backstop "$pr"
+            if [[ "$n" -ge "$SPARE_ESCALATE_CAP" ]]; then
+                warn "  PR #$pr — spared ${n} times (>= cap ${SPARE_ESCALATE_CAP}); escalating to operator, still NOT closing."
+                notify_operator "$(printf '⚠️ **PR #%s has been spared %s times by rot-reaper** (verdict: %s, %sh old).\n\nIts required verified aggregate is stuck RED while the real gates look green/transient — likely an unregistered parity gate or a wedged aggregate. The reaper will NOT close it (the work is not dead), but it needs a human to clear the aggregate.' "$pr" "$n" "$verdict" "$age")" || true
+            fi
+            ;;
+    esac
+    emit_spare_event "$pr" "$verdict" "$n"
+    SPARED=$((SPARED + 1))
+    return 0
+}
+
 # ── NO-ABANDON METRIC ─────────────────────────────────────────────────────────
 # The count of open PRs past the deadline still in a non-terminal state. The
 # guarantee's health gauge — target 0. A persistent non-zero here means a rot
@@ -282,7 +433,7 @@ emit_respawn_cap_event() {  # <gap_id> <pr_num> <respawn_count>
 if [[ -z "$ROWS" ]]; then
     info "No open PRs found — nothing to reap."
     emit_backlog_metric 0 ""
-    reaper_finish ok '{"closed":0,"requeued":0,"skipped":0,"armed":0,"backlog":0}'
+    reaper_finish ok '{"closed":0,"requeued":0,"skipped":0,"armed":0,"spared":0,"backlog":0}'
     exit 0
 fi
 
@@ -464,11 +615,36 @@ while IFS=$'\t' read -r PR_NUM MERGEABLE CREATED TITLE MSTATE ISDRAFT HASAM REQF
             info "PR #$PR_NUM — failing a required check but only ${AGE}h old (< ${REALFAIL_AGE_HOURS}h); leaving for a fix/rerun."
             SKIPPED=$((SKIPPED + 1)); continue
         fi
+        # ── VERIFIED-RED SPARE: classify WHY verified is red before closing ───
+        # The required check that is red is the slow `verified` AGGREGATE. Do NOT
+        # close a PR whose real gates are green underneath (parity-late / aggregate
+        # glitch), whose red is a CI-cancel, a still-pending run, or a known flake.
+        # Reuse the #4606 green-underneath classifier; only hard_fail / conflict
+        # fall through to the close. (RESILIENT-311 completion — spares
+        # #4598/#4615/#4618-class PRs the reaper was destroying.)
+        SPARE_VERDICT="$(classify_verified_red "$PR_NUM")"
+        case "$SPARE_VERDICT" in
+            pending|blocked_no_failure|green_underneath|cancelled|flake_exhausted)
+                info "PR #$PR_NUM — required(verified)-red ${AGE}h but RECOVERABLE ($SPARE_VERDICT) → SPARE (re-arm / escalate, never close)."
+                spare_verified_red "$PR_NUM" "$SPARE_VERDICT" "$AGE" "$TITLE"
+                continue
+                ;;
+            conflict)
+                # Shouldn't happen here (CLASS 1 handles CONFLICTING), but if
+                # the rollup says conflict, let CLASS 1's resolve-first path own
+                # it next beat rather than reaping from the required-red class.
+                info "PR #$PR_NUM — required-red classified as conflict; deferring to CLASS 1 resolve-first next beat."
+                SKIPPED=$((SKIPPED + 1)); continue
+                ;;
+            hard_fail|*)
+                : # genuinely dead → fall through to the close below.
+                ;;
+        esac
         if [[ "$CLOSED" -ge "$MAX_CLOSE" ]]; then
             warn "Reached MAX_CLOSE=$MAX_CLOSE this run; deferring the rest."
             BACKLOG=$((BACKLOG + 1)); BACKLOG_PRS+="${PR_NUM} "; continue
         fi
-        red "PR #$PR_NUM — MERGEABLE but REQUIRED check RED, ${AGE}h old → REAP"
+        red "PR #$PR_NUM — MERGEABLE but REQUIRED check RED (hard-fail, not recoverable), ${AGE}h old → REAP"
         info "  title: $TITLE"
         requeue_gaps "$PR_NUM" "$AGE" "required-check-red" "$TITLE"
         MSG="Auto-closing (rot-reaper / RESILIENT-311 no-abandon janitor): this PR is mergeable but a **branch-protection-required check has been RED for ${AGE}h** (≥ ${REALFAIL_AGE_HOURS}h) and no fix/rerun organ cleared it — it would sit BLOCKED forever. Required set: \`${REQUIRED_CHECKS}\`. The cited gap(s) have been re-queued to be re-done cleanly on fresh \`${BASE}\`. If that check is actually a flake that is now green on main, reopen and re-run. Labeled \`${LABEL}\`. (RESILIENT-311)"
@@ -523,5 +699,5 @@ done <<< "$ROWS"
 # ── NO-ABANDON METRIC ─────────────────────────────────────────────────────────
 emit_backlog_metric "$BACKLOG" "$BACKLOG_PRS"
 
-green "=== rot-reaper done: closed=$CLOSED requeued=$REQUEUED armed=$ARMED skipped=$SKIPPED backlog=$BACKLOG ==="
-reaper_finish ok "{\"closed\":$CLOSED,\"requeued\":$REQUEUED,\"armed\":$ARMED,\"skipped\":$SKIPPED,\"backlog\":$BACKLOG}"
+green "=== rot-reaper done: closed=$CLOSED requeued=$REQUEUED armed=$ARMED spared=$SPARED skipped=$SKIPPED backlog=$BACKLOG ==="
+reaper_finish ok "{\"closed\":$CLOSED,\"requeued\":$REQUEUED,\"armed\":$ARMED,\"spared\":$SPARED,\"skipped\":$SKIPPED,\"backlog\":$BACKLOG}"

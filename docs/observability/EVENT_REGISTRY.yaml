@@ -1416,6 +1416,13 @@ events:
     consumers: [board-cycle, fleet-brief, operator-recall]
     fields_required: [ts, kind, gap, pr, respawn_count, cap]
 
+  - kind: pr_reap_spared
+    effect_metric: self
+    emitter: scripts/ops/rot-reaper.sh (RESILIENT-311 verified-red spare)
+    trigger: the rot-reaper's CLASS 2 was about to close a PR whose required `verified` aggregate is RED past the deadline, but the green-underneath classifier (scripts/ops/lib/classify-blocked-pr.py, reused from #4606) found the redness RECOVERABLE (green_underneath / pending / cancelled / blocked_no_failure / flake_exhausted) — so the reaper re-armed the auto-merge backstop (or the flake budget) and SPARED the PR instead of closing it; carries the verdict and the per-PR spare_count (escalates to the operator, never closes, past the bound)
+    consumers: [board-cycle, fleet-brief]
+    fields_required: [ts, kind, pr, verdict, spare_count]
+
   - kind: reaper_silent
     effect_metric: self
     emitter: scripts/ops/reaper-heartbeat-watchdog.sh (INFRA-120)
