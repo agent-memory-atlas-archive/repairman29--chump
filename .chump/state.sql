@@ -5963,10 +5963,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update the Debt Index pipeline by modifying `compute_crown_gauge` in `crates/chump-kpi-report/src/debt_index.rs` to incorporate each registry entry's `crit` field into the gauge calculation, and adjust `build_debt_index_section` in `crates/chump-kpi-report/src/kpi_report.rs` to display the crit‑adjusted index value in the generated KPI report.
+    
+    Target file(s):
+    - crates/chump-kpi-report/src/debt_index.rs
+    - crates/chump-kpi-report/src/kpi_report.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The Debt Index computation now incorporates the `crit` field of each registry entry.
-    - Running the full suite of existing Cargo tests still passes.
-    - A new snapshot test shows the Debt Index value changes as expected when Crit scores differ.
+    - Running `cargo test` in the repository completes with exit code 0 and all pre‑existing tests still pass.
+    - The function `compute_crown_gauge` in `crates/chump-kpi-report/src/debt_index.rs` returns a different numeric result when the `crit` field of a registry entry is changed in a test fixture.
+    - The snapshot file `crates/chump-kpi-report/tests/__snapshots__/debt_index_snapshot.snap` is updated to show the new Debt Index value reflecting the altered `crit` scores.
+    - The function `build_debt_index_section` in `crates/chump-kpi-report/src/kpi_report.rs` includes the crit‑adjusted Debt Index value in its output string.
   depends_on: [CREDIBLE-1135, CREDIBLE-1140]
   notes: |
     [chump harvest check 'Index']
@@ -5997,9 +6006,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a new `#[test] fn test_fan_in_centrality()` inside the existing `mod tests` block of `src/hooks.rs`. The test will construct a small fixture graph (hard‑coded or loaded from a test resource), invoke the `fan_in_centrality` function on that graph, and assert that the returned centrality matches the expected numeric value, thereby providing the missing unit test for the CREDIBLE‑355 slice.
+    
+    Target file(s):
+    - src/hooks.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test `test_fan_in_centrality` loads a fixture graph and asserts the correct centrality value.
-    - The test fails before slice 2 is implemented and passes after implementation.
+    - "src/hooks.rs contains a `#[test] fn test_fan_in_centrality()` that compiles without errors and calls `fan_in_centrality` with a fixture graph."
+    - The test includes an `assert_eq!` (or `assert!` with tolerance) comparing the function’s output to the exact expected centrality value (e.g., `assert_eq!(result, 2.0_f64)`).
+    - Running `cargo test` reports the `test_fan_in_centrality` test as FAILED before the slice 2 implementation of `fan_in_centrality` is added.
+    - After the slice 2 implementation is merged, the same `cargo test` run reports the `test_fan_in_centrality` test as PASSED, confirming the correct centrality computation.
   depends_on: [CREDIBLE-1136]
   notes: |
     [chump harvest check 'Index']
@@ -6030,9 +6048,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a `#[cfg(test)]` module into `src/audit.rs` that defines a new unit test `test_ambient_emission_freq`. The test loads a static fixture dataset (e.g., a JSON file placed alongside the source), calls `ambient_kind_counts` (or the relevant function that computes the ambient emission frequency), and asserts that the returned frequency matches the expected constant value for that fixture. No production code is altered; only the test module and its imports are added.
+    
+    Target file(s):
+    - src/audit.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test `test_ambient_emission_freq` loads a fixture dataset and asserts the correct frequency value.
-    - The test fails before slice 3 is implemented and passes after implementation.
+    - "Running `cargo test --test audit` executes `src/audit.rs::tests::test_ambient_emission_freq` and the test fails (panics) before slice 3 is implemented."
+    - After slice 3 is implemented, the same command passes, confirming that `ambient_kind_counts` returns the expected frequency (e.g., `EXPECTED_FREQ = 42`) for the fixture dataset.
+    - The test compiles without adding new crate dependencies; it only uses the existing `serde_json` (already a dev‑dependency) to parse the fixture.
+    - The test output includes the line `assert_eq!(result, EXPECTED_FREQ)` showing the exact value being verified.
   depends_on: [CREDIBLE-1137]
   notes: |
     [chump harvest check 'Index']
@@ -30292,7 +30319,7 @@ gaps:
 - id: CREDIBLE-938
   domain: CREDIBLE
   title: "CREDIBLE: Create utility for runtime dispatch source with fallback to old path (CREDIBLE-237 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -30315,6 +30342,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-13T18:41:16Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=948B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: CREDIBLE-939
   domain: CREDIBLE
@@ -80453,13 +80481,15 @@ gaps:
 - id: FLEET-BUILD-SPEED-001
   domain: FLEET-BUILD-SPEED
   title: "CJ /tmp is a 1.7GB tmpfs but preflight clippy needs 5GB: every clippy-triggering push fails on disk-pressure"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
     - "The change described by \"every clippy-triggering push fails on disk-pressure\" is implemented in the relevant FLEET-BUILD-SPEED code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  notes: |
+    [2026-09-13T18:49:27Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1447B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
   outcome_id: FLEET-BUILD-SPEED
   evidence: |
     CJ / has 54GB free but /tmp is a 3.6GB tmpfs; pre-push-test-gate spawns clippy in /tmp needing 5GB -> disk pressure BLOCK on every push (#4635/#4612 failed repeatedly until TMPDIR was pointed at the big disk). A fresh Linux box with a small /tmp tmpfs hits this on first push (clean-OOTB blocker). Fix: preflight + chump-node-install set TMPDIR/CARGO scratch to a big-disk path, or size /tmp appropriately; do not assume /tmp has 5GB.
@@ -89089,7 +89119,7 @@ gaps:
     - Migration shipped in 3-4 PRs (not one mega-PR), each ≤800 LOC of CSS moved
   depends_on: [INFRA-1591]
   notes: |
-    Decomposed into 4 slices: INFRA-5583, INFRA-5584, INFRA-5585, INFRA-5586
+    Decomposed into 5 slices: INFRA-6099, INFRA-6100, INFRA-6101, INFRA-6102, INFRA-6103
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -200680,6 +200710,160 @@ gaps:
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
+- id: INFRA-6099
+  domain: INFRA
+  title: "INFRA: Add visual snapshot test harness for CSS migration (INFRA-1587 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Visual snapshot test suite is added to the CI pipeline and can be executed locally
+    - Baseline snapshots exist for all chump-* components referenced in the migration
+    - Tests fail when any visual change is introduced, ensuring zero‑pixel delta detection
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6100
+  domain: INFRA
+  title: "INFRA: Migrate first‑run wizard, status‑footer, and tool‑approval‑tray CSS to shadow DOM (INFRA-1587 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - CSS for <chump-first-run-wizard>, <chump-status-footer>, and <chump-tool-approval-tray> is moved into their respective JS files as a shadow‑DOM <style> or constructed stylesheet
+    - Each migrated component retains its original PRODUCT‑/INFRA‑ comment as a JSDoc block above the class definition
+    - Corresponding CSS is removed from web/v2/index.html <style> block
+    - Index.html style block LOC is reduced by at least 400 lines
+    - Visual snapshot tests (from slice 0) pass with zero pixel delta for the three components
+    - No computed‑style regression for the three components at 375 px, 768 px, and 1440 px viewports
+    - PR size does not exceed 800 LOC of moved CSS
+  depends_on: [INFRA-6099]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6101
+  domain: INFRA
+  title: "INFRA: Migrate cost‑meter, PR‑card, and workflow‑timeline CSS to shadow DOM (INFRA-1587 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - CSS for ChumpCostMeter, ChumpPrCard, and ChumpWorkflowTimeline is moved into their respective JS files (cost-meter.js, pr-card.js, workflow-timeline.js) as a shadow‑DOM <style> or constructed stylesheet
+    - All original PRODUCT‑/INFRA‑ comments are preserved as JSDoc above each class
+    - Removed CSS is no longer present in web/v2/index.html <style> block
+    - Index.html style block LOC is reduced by an additional 350‑400 lines
+    - Visual snapshot tests (from slice 0) pass with zero pixel delta for the three components
+    - No computed‑style regression for the three components at 375 px, 768 px, and 1440 px viewports
+    - PR size does not exceed 800 LOC of moved CSS
+  depends_on: [INFRA-6099]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6102
+  domain: INFRA
+  title: "INFRA: Migrate per‑view list CSS and remaining cross‑cutting component CSS to shadow DOM (INFRA-1587 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - CSS for task‑list, gap‑list, agents‑list views and for components ChumpMenu, ConfigDials, RepoSwitcher, DoctorBanner, AuthToast, AmbientViewer is moved into their respective JS files as shadow‑DOM <style> blocks or constructed stylesheets
+    - All PRODUCT‑/INFRA‑ comments are kept as JSDoc above the related class definitions
+    - All migrated CSS is removed from web/v2/index.html <style> block
+    - Index.html style block LOC is reduced to ≤300 lines overall
+    - Visual snapshot tests (from slice 0) pass with zero pixel delta for every affected view and component
+    - No computed‑style regression for any migrated element at 375 px, 768 px, and 1440 px viewports
+    - PR size does not exceed 800 LOC of moved CSS
+  depends_on: [INFRA-6099]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6103
+  domain: INFRA
+  title: "INFRA: Validate final index.html style block size and allowed content (INFRA-1587 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - web/v2/index.html <style> block is ≤300 LOC
+    - "The remaining style block contains ONLY: :root tokens, theme overrides, global reset, html/body layout, #app-header layout, #app-body / chump‑nav / #main‑content grid layout, shell‑only mobile media queries, and cross‑cutting toast/offline‑banner/status‑pill styles"
+    - All component‑specific CSS resides in component JS files' shadow‑DOM styles
+    - Visual snapshot tests (slice 0) still pass with zero pixel delta across all components
+    - No regression in DevTools Computed Styles for any chump‑* element at 375 px, 768 px, and 1440 px
+    - All migration PRs (slices 1‑3) are merged without conflicts
+  depends_on: [INFRA-6100, INFRA-6101, INFRA-6102]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
 - id: INFRA-635
   domain: INFRA
   title: "EFFECTIVE: 'chump gap rebalance' — auto-enforce P0 budget + ranking on every gap-file batch. Productizes the manual 'file batch → check P0 count → demote stale → commit' loop. Today operator/Mission-Driver does this manually after every multi-gap batch (e.g., the 9-gap chump-proprietary REQ batch). After this ships: 'chump gap rebalance' (or auto-trigger after 'chump gap reserve') runs the budget audit + demotion suggestion + (with --apply) does the demotion. Heuristic: P0 count >5 → demote oldest-P0 (or theoretical-only-no-corruption-now P0s like INFRA-538) with rationale logged. Pairs with INFRA-604 chump pillar-balance (already filed) and INFRA-586 chump gap audit-priorities. Composes into a coherent 'gap-store self-curates' loop. AC: src/main.rs subcommand 'chump gap rebalance [--apply]'; reads .chump/state.db, applies P0-budget rules from CLAUDE.md (≤5), pillar-balance rules (no <2, no >50%); outputs suggested actions; --apply executes; demotion notes include 'auto-demoted: P0 budget exceeded by N, oldest stale P0' rationale; test scripts/ci/test-gap-rebalance.sh covers 4 fixture scenarios (over-budget P0, pillar-skew, all-clean, no-action-needed)."
@@ -215321,6 +215505,7 @@ gaps:
     [2026-09-13T17:04:41Z] rot-reaper: PR #4621 auto-closed (required-check-red, 57h) 2026-09-13; RESPAWN CAP 3 reached (9 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T17:31:55Z] rot-reaper: PR #4621 auto-closed (required-check-red, 58h) 2026-09-13; RESPAWN CAP 3 reached (10 prior recycles) — NOT re-queued, escalating to operator.
     [2026-09-13T18:03:14Z] rot-reaper: PR #4621 auto-closed (required-check-red, 58h) 2026-09-13; RESPAWN CAP 3 reached (11 prior recycles) — NOT re-queued, escalating to operator.
+    [2026-09-13T18:32:27Z] rot-reaper: PR #4621 auto-closed (required-check-red, 59h) 2026-09-13; RESPAWN CAP 3 reached (12 prior recycles) — NOT re-queued, escalating to operator.
 
 - id: RESILIENT-1108
   domain: RESILIENT
