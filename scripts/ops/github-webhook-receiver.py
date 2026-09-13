@@ -191,10 +191,13 @@ def _notify_operator_escalation(kind: str, message: str) -> None:
 
 
 def _extract_gap_ids(pr: dict) -> list[str]:
-    """Extract gap IDs from PR title + body.
+    """Extract gap IDs from PR title and explicit Closes:/Fixes:/Resolves: trailers in the body.
 
-    Looks for patterns like 'INFRA-1234' or 'CREDIBLE-001' anywhere in the
-    PR title or body. Returns a deduped list preserving first-seen order.
+    Looks for patterns like 'INFRA-1234' or 'CREDIBLE-001' in the PR title.
+    In the PR body, only lines that start with (case-insensitive) 'Closes:', 'Fixes:', or 'Resolves:'
+    are considered as trailers and gap IDs are extracted from them.
+
+    Returns a deduped list preserving first-seen order.
 
     Used by _auto_release_sibling_leases (lease release is non-destructive —
     freeing a lease that cites a gap in passing is harmless). NOT used by
@@ -204,14 +207,24 @@ def _extract_gap_ids(pr: dict) -> list[str]:
     import re
 
     pattern = re.compile(r"\b([A-Z][A-Z-]+-\d+)\b")
+    trailer_pattern = re.compile(r"(?im)^(?:Closes|Fixes|Resolves):\s*(.+)$")
+
     seen: set[str] = set()
     ordered: list[str] = []
-    for field in ("title", "body"):
-        text = pr.get(field) or ""
-        for match in pattern.findall(text):
+
+    title = pr.get("title") or ""
+    for match in pattern.findall(title):
+        if match not in seen:
+            seen.add(match)
+            ordered.append(match)
+
+    body = pr.get("body") or ""
+    for trailer_line in trailer_pattern.findall(body):
+        for match in pattern.findall(trailer_line):
             if match not in seen:
                 seen.add(match)
                 ordered.append(match)
+
     return ordered
 
 
