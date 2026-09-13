@@ -43,8 +43,13 @@
 #   CHUMP_AMBIENT_LOG                    — override ambient.jsonl path
 #
 # Exit codes:
-#   0  normal (whether or not anything needed healing/paging)
+#   0  normal (coverage at/above floor, or check skipped)
 #   1  internal failure (coverage report unreadable and not a plain skip)
+#   2  CREDIBLE-1174: coverage guard tripped — at least one served repo is
+#      below the summarized-coverage floor (default 95%). The operator page
+#      already fires unconditionally (see below); this non-zero exit lets a
+#      calling supervisor (launchd condition, CI gate, chained script) react
+#      to the guard without having to grep ambient.jsonl.
 
 set -uo pipefail
 
@@ -178,4 +183,12 @@ fi
 emit almanac_summarize_watchdog_tick "\"restarted\":$restarted,\"coverage_status\":\"$coverage_status\",\"below_count\":${below_count:-0},\"dry_run\":$DRY_RUN"
 
 echo "[almanac-summarize-watchdog] cycle complete: restarted=$restarted coverage_status=$coverage_status below_count=${below_count:-0} dry_run=$DRY_RUN"
+
+# CREDIBLE-1174: the 95%-floor guard must be enforceable by a caller, not
+# just visible in ambient.jsonl. A non-zero exit here is the "returning an
+# error ... when below this threshold" half of the guard; the operator page
+# above is the "notify" half. Dry-run never enforces (report-only by design).
+if [[ "${below_count:-0}" -gt 0 && "$DRY_RUN" != "1" ]]; then
+    exit 2
+fi
 exit 0
