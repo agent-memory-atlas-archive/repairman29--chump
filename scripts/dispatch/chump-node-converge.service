@@ -1,0 +1,34 @@
+# RESILIENT-1189 — the node auto-converge organ. Runs scripts/ops/node-converge.sh:
+# fetch origin/main and `converge_mirror_hard_reset origin/main` so the node's
+# SOURCE checkout is byte-for-byte current with main. Closes the "merged !=
+# deployed" loop for BASH organs — the class node-refresh-chump.sh's binary-SHA
+# idempotency short-circuit silently skips (a bash-only merge never bumps the
+# binary SHA, so node-refresh treats the node as current and never resets the
+# source, leaving every `bash scripts/…/foo.sh` organ running a stale script).
+#
+# Auth-independent by design: a public-repo fetch needs no gh/creds, so this
+# path can never degrade the way node-refresh's gh-dependent green-lookup can.
+# Active-worker-safe: resets only the main checkout; worker gap worktrees under
+# .claude/worktrees/* (separate HEADs, gitignored) are untouched, and gitignored
+# runtime state (.chump/state.db, .chump-locks/) survives the reset. Defers if a
+# rebase/merge is in progress.
+#
+# CHUMP_REPO_ROOT / paths mirror chump-rot-reaper.service (primary node =
+# helsinki, root; owned non-root nodes are handled by install-helsinki-atc.sh's
+# host de-privilege rewrite). Non-root nodes: adjust per
+# docs/process/LINUX_NODE_ONBOARDING.md.
+[Unit]
+Description=Chump node auto-converge — keep the SOURCE checkout current with origin/main so merged bash-organ fixes reach the iron (RESILIENT-1189)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+Environment=CHUMP_REPO_ROOT=/root/Projects/chump
+Environment=CHUMP_NODE_REPO=/root/Projects/chump
+# TimeoutStartSec bounds a wedged fetch (network hang) — the converge itself is
+# a fetch + reset, seconds of work, never a build. 300s is generous headroom.
+TimeoutStartSec=300
+Nice=10
+ExecStart=/bin/bash -lc 'cd /root/Projects/chump; exec bash scripts/ops/node-converge.sh'

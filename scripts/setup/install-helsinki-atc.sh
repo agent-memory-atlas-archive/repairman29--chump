@@ -254,8 +254,20 @@ SYSTEM_UNITS=(
   # Same both-rosters-required discipline applies.
   chump-effect-verifier.service
   chump-effect-verifier.timer
+  # chump-node-converge (RESILIENT-1189): the node auto-converge organ — every
+  # 10 min it hard-resets this node's SOURCE checkout to origin/main so a merged
+  # BASH-organ fix actually reaches the iron. THE fix for the #1 systemic wound
+  # (merged != deployed): node-refresh-chump.sh's binary-SHA idempotency skip
+  # never resets the source when the binary is already current, so a bash-only
+  # merge (which never bumps the binary SHA) leaves every `bash scripts/…/foo.sh`
+  # organ running a stale script. Rostered here AND declared `enabled` in
+  # organ-manifest.txt — both-rosters-required (a unit in only ONE is either
+  # never installed or never revivable); the RESILIENT-366 Roll-Call test
+  # enforces it.
+  chump-node-converge.service
+  chump-node-converge.timer
 )
-SYSTEM_TIMERS=(chump-pr-lander.timer chump-board-cycle.timer chump-duty-officer.timer chump-sla-scorecard.timer chump-organ-watchdog.timer chump-apex-watchdog.timer chump-board-ceo-briefing.timer chump-organ-reconcile.timer chump-pr-approval.timer chump-farmer.timer chump-rot-reaper.timer chump-integrator.timer chump-backlog-sync-writer.timer chump-race-control.timer chump-conflict-resolution-consumer.timer chump-merge-serializer.timer chump-gap-drain.timer chump-gap-closure-reconcile.timer chump-nba-dispatch.timer chump-digest.timer chump-almanac-liveness.timer chump-rca-reflex.timer chump-cascade-unblock-detector.timer chump-gap-store-single-source-check.timer chump-organ-success-verifier.timer chump-effect-verifier.timer)
+SYSTEM_TIMERS=(chump-pr-lander.timer chump-board-cycle.timer chump-duty-officer.timer chump-sla-scorecard.timer chump-organ-watchdog.timer chump-apex-watchdog.timer chump-board-ceo-briefing.timer chump-organ-reconcile.timer chump-pr-approval.timer chump-farmer.timer chump-rot-reaper.timer chump-integrator.timer chump-backlog-sync-writer.timer chump-race-control.timer chump-conflict-resolution-consumer.timer chump-merge-serializer.timer chump-gap-drain.timer chump-gap-closure-reconcile.timer chump-nba-dispatch.timer chump-digest.timer chump-almanac-liveness.timer chump-rca-reflex.timer chump-cascade-unblock-detector.timer chump-gap-store-single-source-check.timer chump-organ-success-verifier.timer chump-effect-verifier.timer chump-node-converge.timer)
 
 # ── --check mode ─────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--check" ]]; then

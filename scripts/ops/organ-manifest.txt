@@ -334,6 +334,31 @@ enabled     chump-postgrest.service  role=data requires=bin:postgrest
 # safe by construction (lease/lsof/log-freshness/age-min guards + .chump-no-reap).
 enabled     chump-stale-worktree-reaper.timer  role=muscle requires=bin:git
 enabled     chump-cargo-target-reaper.timer  role=muscle requires=bin:git
+
+# chump-node-converge.timer: RESILIENT-1189 — the node auto-converge organ. Every
+# 10 min it fetches origin/main and `converge_mirror_hard_reset origin/main` so
+# this node's SOURCE checkout is byte-for-byte current with main. THE fix for the
+# #1 systemic wound (merged != deployed): node-refresh-chump.sh's binary-SHA
+# idempotency short-circuit (RESILIENT-200) `exit 0`s BEFORE the source converge
+# whenever the installed `chump` binary already matches green-main — so a merged
+# BASH-only fix (the rot-reaper fix #4637, any scripts/*.sh edit) that never bumps
+# the binary SHA is treated as "already current" and the source checkout is never
+# reset, leaving every `bash scripts/…/foo.sh` organ running a stale script (CJ's
+# /home/jeff/Projects/chump had to be hand `git reset --hard`'d for exactly this).
+# Auth-INDEPENDENT (a public-repo fetch needs no gh/creds, so it can never degrade
+# the way node-refresh's gh-dependent green-lookup does) and active-worker-safe (it
+# resets only the main checkout; worker gap worktrees under .claude/worktrees/*
+# have their own HEAD + are gitignored, and gitignored runtime state survives the
+# reset; it DEFERS if a rebase/merge is in progress). Tagged role=muscle for the
+# same reason as the reapers above: the muscle nodes (CJ, mugman) are the
+# documented victims of stale-bash organs, so a fresh muscle bring-up must get it,
+# while an unfiltered brain/primary reconcile enables every `enabled` line
+# regardless of role so it lands on the coordination node too. requires=bin:git
+# (NOT gh — the whole point is gh-independence). Declared here so organ-reconcile
+# re-arms it if it drifts and Roll-Call (scripts/ci/test-resilient-366-organ-roll-
+# call.sh) never lets it rot silently.
+enabled     chump-node-converge.timer  role=muscle requires=bin:git
+
 # chump-fleet-server (INFRA-2175): the metric-gauge API + bat-phone intake.
 # Serves /api/dashboard-summary etc on 127.0.0.1:7070 from the local repo
 # data (github_cache.db, ambient.jsonl, claim leases). ~48 gauges stayed

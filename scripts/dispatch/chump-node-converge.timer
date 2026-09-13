@@ -1,0 +1,19 @@
+# RESILIENT-1189 — pairs with chump-node-converge.service. Fires every 10 min.
+# Cheap + safe (a fetch + idempotent reset), so it runs on a tight cadence: the
+# faster the source checkout converges, the smaller the merged-but-not-deployed
+# window for bash organs. Enable: systemctl enable --now chump-node-converge.timer
+[Unit]
+Description=Run the Chump node auto-converge every 10 minutes (RESILIENT-1189)
+
+[Timer]
+# OnCalendar is wall-clock and self-anchoring, so this beat cannot silently die
+# the way an OnUnitActiveSec chain does on a daemon-reload / unit re-create
+# (RESILIENT-413: NextElapse resolves to infinity, timer sits 'active' but never
+# fires again). Persistent=true (meaningful with OnCalendar) catches a run
+# missed while the node was down. Same conversion as chump-rot-reaper.timer.
+OnBootSec=3min
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target
