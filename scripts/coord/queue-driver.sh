@@ -35,6 +35,11 @@ source "$(dirname "$0")/lib/github.sh"
 # shellcheck disable=SC1091
 source "$(dirname "$0")/lib/ambient-write.sh"
 export CHUMP_GH_SCRIPT="queue-driver.sh"
+# shellcheck source=../lib/orchestrator-log.sh
+# shellcheck disable=SC1091
+source "$(dirname "$0")/../lib/orchestrator-log.sh"
+orch_log_start "queue-driver.sh" "$@"
+trap 'orch_log_end "queue-driver.sh" "$?"' EXIT
 
 DRY_RUN=0
 MAX=1
@@ -671,6 +676,7 @@ for pr in $behind_candidates; do
     echo "queue-driver: (dry-run) would refresh PR #$pr (BEHIND)"
   else
     echo "queue-driver: refreshing PR #$pr (BEHIND)"
+    orch_log_step "refreshing PR #$pr (BEHIND)"
     if chump_gh pr update-branch "$pr" 2>&1; then
       echo "queue-driver: ✓ #$pr refreshed"
     else
@@ -690,6 +696,7 @@ for pr in $dirty_candidates; do
     break
   fi
   echo "queue-driver: attempting DIRTY auto-resolve for PR #$pr"
+  orch_log_step "attempting DIRTY auto-resolve for PR #$pr"
   if resolve_dirty_pr "$pr"; then
     # success — count toward MAX budget
     count=$((count + 1))
@@ -707,3 +714,4 @@ for pr in $dirty_candidates; do
 done
 
 echo "queue-driver: processed $count PR(s), skipped $skipped semantic-conflict PR(s)"
+orch_log_step "done — processed $count PR(s), skipped $skipped semantic-conflict PR(s)"

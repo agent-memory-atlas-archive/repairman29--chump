@@ -45,6 +45,11 @@
 
 set -uo pipefail
 
+# shellcheck source=../lib/orchestrator-log.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/orchestrator-log.sh"
+orch_log_start "pr-auto-rebase.sh" "$@"
+trap 'orch_log_end "pr-auto-rebase.sh" "$?"' EXIT
+
 LOCAL_REBASE_TIMEOUT_S="${CHUMP_PR_AUTO_REBASE_LOCAL_TIMEOUT_S:-120}"
 
 # Given a whitespace-separated list of changed file paths, return the sorted,
@@ -192,7 +197,7 @@ fi
 # in parallel via background jobs, capped with `wait -n`.
 MAX_CONCURRENT="${CHUMP_PR_AUTO_REBASE_MAX_CONCURRENT:-5}"
 RESULTS_DIR="$(mktemp -d -t chump-rebase-results-XXXXXX)"
-trap 'rm -rf "$RESULTS_DIR"' EXIT
+trap 'rm -rf "$RESULTS_DIR"; orch_log_end "pr-auto-rebase.sh" "$?"' EXIT
 
 # Runs the full per-PR rebase flow (cooldown already checked by caller) and
 # writes a one-word verdict (rebased|skipped|failed|deferred) to
@@ -202,6 +207,7 @@ trap 'rm -rf "$RESULTS_DIR"' EXIT
 process_pr() {
     local PR="$1" STATE="$2"
     local RESULT_FILE="$RESULTS_DIR/$PR"
+    orch_log_step "processing PR #$PR state=$STATE"
 
     # INFRA-1974 (H5 critique fix): per-branch advisory lock. Prevents this
     # daemon from racing an operator-initiated `git rebase origin/main` on
@@ -408,4 +414,5 @@ for f in "$RESULTS_DIR"/*; do
 done
 
 echo "[pr-auto-rebase] done — rebased=$REBASED skipped=$SKIPPED failed=$FAILED deferred=$DEFERRED concurrency=$MAX_CONCURRENT throttle=$THROTTLE_MODE"
+orch_log_step "done rebased=$REBASED skipped=$SKIPPED failed=$FAILED deferred=$DEFERRED"
 exit 0
