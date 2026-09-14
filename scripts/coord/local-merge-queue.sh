@@ -220,7 +220,10 @@ _process_one() {
             failed=1; reason="branch_missing"
         fi
         if [[ $failed -eq 0 ]]; then
-            git fetch origin main >/dev/null 2>&1 || true  # best-effort; airplane-mode safe
+            # Only fetch if we are not in offline mode (i.e., we are allowed to make network calls)
+            if [[ "${CHUMP_GITHUB_MODE:-}" != "offline" ]]; then
+                git fetch origin main >/dev/null 2>&1 || true
+            fi
             git checkout main >/dev/null 2>&1 || { failed=1; reason="checkout_main_failed"; }
         fi
         if [[ $failed -eq 0 ]] && ! git merge --squash "$branch" >/dev/null 2>&1; then
