@@ -44625,10 +44625,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new `generateLinkedInDraft(releaseId: string, content: string): string` function to `draft.ts` that composes a plain‑text LinkedIn post in Jeff’s voice, truncates the result to LinkedIn’s 1,300‑character limit, applies required line‑break formatting, and writes the output to `drafts/linkedin/<release-id>.txt`. Extend the existing draft test suite in `draft.test.ts` with tests that invoke this function and verify file creation and content constraints.
+    
+    Target file(s):
+    - web/v2/lib/publisher/draft.ts
+    - web/v2/lib/publisher/draft.test.ts
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A plain‑text draft suitable for manual copy‑paste into LinkedIn is produced
-    - Draft is stored at `drafts/linkedin/<release-id>.txt`
-    - Draft respects LinkedIn character limits and formatting guidelines
+    - In `web/v2/lib/publisher/draft.ts` the `generateLinkedInDraft` function returns a string no longer than 1300 characters.
+    - In `web/v2/lib/publisher/draft.ts` the function creates a file at `drafts/linkedin/<release-id>.txt` containing the exact string it returns.
+    - In `web/v2/lib/publisher/draft.test.ts` a test asserts that calling `generateLinkedInDraft` with a sample release ID produces a file at the expected path and that the file’s content matches the expected LinkedIn‑formatted draft.
+    - In `web/v2/lib/publisher/draft.test.ts` a test verifies that the generated draft includes at least one line break and respects LinkedIn formatting guidelines (e.g., no markdown headers).
   depends_on: [EFFECTIVE-1166]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -44706,10 +44715,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new GET endpoint `/publisher/approval-queue` in `src/web_server.rs` by extending `build_api_router` to register an `approval_queue_handler` function; implement `approval_queue_handler` to require Jeff's authentication, fetch pending draft records via a new `fn get_pending_drafts()` added to `crates/chump-gap-store/src/lib.rs`, and render an HTML table showing platform, title, and creation timestamp with View/Edit/Bless/Reject action links.
+    
+    Target file(s):
+    - src/web_server.rs
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A web UI lists all pending drafts with platform, title, and creation timestamp
-    - "Each entry has actions: View, Edit, Bless (approve), Reject"
-    - UI is reachable at `/publisher/approval-queue` and requires Jeff's authentication
+    - "src/web_server.rs:build_api_router registers the `/publisher/approval-queue` route and returns HTTP 200 for authenticated requests."
+    - "src/web_server.rs:approval_queue_handler returns an HTML page containing a table with columns “Platform”, “Title”, and “Created” for each pending draft."
+    - "crates/chump-gap-store/src/lib.rs:get_pending_drafts returns a non‑empty list of draft structs when pending drafts exist in the store."
+    - Accessing `/publisher/approval-queue` without Jeff’s authentication yields HTTP 401, while an authenticated session displays at least one draft entry with correct data.
   depends_on: [EFFECTIVE-1166]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -100412,7 +100430,7 @@ gaps:
   acceptance_criteria:
     - "Failure: 33,730 LOC of bash in scripts/coord/ + scripts/dispatch/ does the orchestration-critical work (bot-merge, queue-driver, pr-rescue, pr-auto-rearm, pr-auto-rebase, worker.sh). Bash + concurrent subshells + git lock contention = unprovable race conditions."
   notes: |
-    Decomposed into 10 slices: INFRA-6128, INFRA-6129, INFRA-6130, INFRA-6131, INFRA-6132, INFRA-6133, INFRA-6134, INFRA-6135, INFRA-6136, INFRA-6137
+    Decomposed into 10 slices: INFRA-6387, INFRA-6388, INFRA-6389, INFRA-6390, INFRA-6391, INFRA-6392, INFRA-6393, INFRA-6394, INFRA-6395, INFRA-6396
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -213887,6 +213905,291 @@ gaps:
     - Full binary rebuild time under defined threshold (e.g., < 30 seconds)
     - All existing unit and integration tests pass
   depends_on: [INFRA-6385]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6387
+  domain: INFRA
+  title: "INFRA: Create centralized lock primitive library for bash orchestrator scripts (INFRA-1966 slice)"
+  status: closed
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - A new lock.sh script is added under scripts/lib/ with acquire and release functions
+    - Lock acquisition returns 0 on success and non‑zero on failure
+    - Lock release always succeeds and removes the lock file
+    - The lock implementation works across multiple processes on the same repository
+  notes: |
+    Duplicate: implemented and shipped under INFRA-6130 (PR #4663) — scripts/lib/lock.sh already exists with acquire_lock/release_lock, mkdir-based, cross-process safe, covered by scripts/ci/test-lock-lib.sh (5/5 passing). All 4 AC already satisfied. No code change needed.
+
+- id: INFRA-6388
+  domain: INFRA
+  title: "INFRA: Instrument bot-merge script to use the lock primitive (INFRA-1966 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - bot-merge calls lock.sh acquire at start and release at end
+    - If lock acquisition fails, bot-merge exits with a clear error code
+    - No functional change to bot-merge behavior besides locking
+  depends_on: [INFRA-6387]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6389
+  domain: INFRA
+  title: "INFRA: Instrument queue-driver script to use the lock primitive (INFRA-1966 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - queue-driver calls lock.sh acquire before any git operations and releases at completion
+    - Failure to acquire lock causes graceful exit with log entry
+    - Existing queue-driver functionality remains unchanged
+  depends_on: [INFRA-6387]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6390
+  domain: INFRA
+  title: "INFRA: Instrument pr-rescue script to use the lock primitive (INFRA-1966 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - pr-rescue integrates lock.sh acquire/release around critical sections
+    - Lock contention is logged and script exits cleanly if lock cannot be obtained
+    - Behavior of pr-rescue remains functionally identical when lock is obtained
+  depends_on: [INFRA-6387]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6391
+  domain: INFRA
+  title: "INFRA: Add unit tests for lock primitive (acquire, release, contention) (INFRA-1966 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Test suite verifies that acquire creates a lock file and returns 0
+    - Test suite verifies that a second concurrent acquire fails
+    - Test suite verifies that release removes the lock file and returns 0
+    - All tests pass in CI on a fresh checkout
+  depends_on: [INFRA-6387]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6392
+  domain: INFRA
+  title: "INFRA: Add integration test for concurrent execution of bot-merge and queue-driver (INFRA-1966 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Test launches bot-merge and queue-driver in parallel on the same repo
+    - Only one script holds the lock at a time; the other waits or exits with expected code
+    - No git lock contention errors are observed
+    - Test passes in CI environment
+  depends_on: [INFRA-6388, INFRA-6389, INFRA-6391]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6393
+  domain: INFRA
+  title: "INFRA: Add detailed logging of lock acquisition and release in all orchestrator scripts (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Each script logs timestamp, script name, lock action (acquire/release), and result
+    - Logs are written to a common log file under logs/infra-orchestrator.log
+    - Log entries are searchable and include process ID
+  depends_on: [INFRA-6388, INFRA-6389, INFRA-6390]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6394
+  domain: INFRA
+  title: "INFRA: Refactor common bash functions into a shared library (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Common utilities (e.g., git wrappers, error handling) are moved to scripts/lib/common.sh
+    - All orchestrator scripts source common.sh and retain original behavior
+    - Static analysis shows no duplicate code across scripts/coord and scripts/dispatch
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6395
+  domain: INFRA
+  title: "INFRA: Replace ad‑hoc subshell concurrency with background jobs using lock wrapper (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - All existing background subshell patterns are rewritten to use `lock.sh` and `&` for job control
+    - Race conditions identified in the original code are eliminated (verified by integration tests)
+    - Scripts still complete within expected time bounds
+  depends_on: [INFRA-6394, INFRA-6387]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6396
+  domain: INFRA
+  title: "INFRA: Document concurrency model and lock usage in README (INFRA-1966 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README includes a section describing the lock primitive, when to use it, and failure handling
+    - Examples show usage in bot-merge, queue-driver, and pr-rescue
+    - Documentation is reviewed and approved by the infra team
+  depends_on: [INFRA-6387, INFRA-6388, INFRA-6389, INFRA-6390, INFRA-6393]
   notes: |
     [chump harvest check 'CRITICAL']
     === primitives_index match for 'CRITICAL' ===
