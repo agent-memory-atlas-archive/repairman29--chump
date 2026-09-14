@@ -98419,7 +98419,7 @@ gaps:
     - "Telemetry: emit kind=claim_collision_avoided when role-scoped claim would have collided under old file-lease semantics; metric becomes the migration-success signal"
     - "Smoke: scripts/ci/test-role-scoped-claims.sh exercises 5 scenarios — same-role same-scope (block), same-role different-scope (allow), different-role same-file (allow + warn), broad-scope without flag (reject), append-only file in paths (exempt)"
   notes: |
-    Decomposed into 8 slices: INFRA-6120, INFRA-6121, INFRA-6122, INFRA-6123, INFRA-6124, INFRA-6125, INFRA-6126, INFRA-6127
+    Decomposed into 8 slices: INFRA-6369, INFRA-6370, INFRA-6371, INFRA-6372, INFRA-6373, INFRA-6374, INFRA-6375, INFRA-6376
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -213130,7 +213130,7 @@ gaps:
 - id: INFRA-6362
   domain: INFRA
   title: "INFRA: Implement `chump harvest check` action (INFRA-1823 slice)"
-  status: closed
+  status: already_satisfied
   priority: P2
   effort: s
   acceptance_criteria:
@@ -213140,6 +213140,7 @@ gaps:
   depends_on: [INFRA-6360]
   notes: |
     Already shipped in PR #3698 (INFRA-1823): src/harvester_cli.rs 'check' subcommand fully implements all 3 AC — reads GLOBAL_ARSENAL.json + primitives_index (AC1), emits file:line citations via extracted_primitives_by_file (AC2), exit 0 on report / exit 2 on malformed input verified (AC3). Covered by scripts/ci/test-harvester-cli.sh lines 82-96. Closing as duplicate of already-shipped work, no code change needed.
+  closed_pr: 3698
 
 - id: INFRA-6363
   domain: INFRA
@@ -213304,6 +213305,40 @@ gaps:
     
     === cross-pollination briefs mentioning 'INFRA-1823' ===
 
+- id: INFRA-6369
+  domain: INFRA
+  title: "INFRA: Add --role and --scope flags parsing to chump-commit.sh (INFRA-1863 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - CLI accepts new flags --role <role> and --scope <module-or-concern>
+    - Existing flags continue to work unchanged
+    - When flags are omitted, command behaves as before
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
 - id: INFRA-637
   domain: INFRA
   title: "EFFECTIVE: nightly gap-store self-curate cron"
@@ -213323,6 +213358,256 @@ gaps:
     - gap_store_curated registered in EVENT_REGISTRY.yaml
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
+
+- id: INFRA-6370
+  domain: INFRA
+  title: "INFRA: Validate role against AGENT_ROLES.yaml registry (INFRA-1863 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Provided role must exist in docs/process/AGENT_ROLES.yaml
+    - If role is unknown, command exits with error code 1 and descriptive message
+    - Validation is only performed when --role flag is present
+  depends_on: [INFRA-6369]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6371
+  domain: INFRA
+  title: "INFRA: Implement append‑only file exemption logic (INFRA-1863 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Files scripts/ci/event-registry-reserved.txt, scripts/ci/env-vars-internal.txt, docs/observability/EVENT_REGISTRY.yaml are ignored when listed in --paths CSV
+    - Exempt files do not trigger warnings or blocks
+    - Exemption works for both role‑scoped and legacy path‑based claims
+  depends_on: [INFRA-6369]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6372
+  domain: INFRA
+  title: "INFRA: Add broad‑scope guard with --broad and --reason flags (INFRA-1863 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - If --paths contains entries from more than one directory and --broad is not supplied, command exits with error code 1
+    - When --broad is supplied, a non‑empty --reason text must be provided
+    - If claim is auto‑narrowed, the narrowed path is logged
+  depends_on: [INFRA-6369]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6373
+  domain: INFRA
+  title: "INFRA: Wire conflict‑resolver auto‑invoke into bot-merge.sh (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - bot-merge.sh calls the conflict‑resolver after a push that results in a merge conflict
+    - When auto‑resolved, an audit event kind=conflict_auto_resolved is emitted
+    - When not auto‑resolved, an audit event kind=conflict_escalated is emitted
+  depends_on: [INFRA-6369]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6374
+  domain: INFRA
+  title: "INFRA: Migration support for legacy path‑based claims and advisory default (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Existing path‑based claims continue to function unchanged
+    - New role‑scoped claims are opt‑in via the --role flag
+    - After a simulated Week‑2 window with ≥100 successful auto‑resolutions, role‑scoped claims become advisory‑by‑default (warnings only)
+    - Configuration flag to toggle advisory mode is persisted
+  depends_on: [INFRA-6369, INFRA-6370, INFRA-6371, INFRA-6372]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6375
+  domain: INFRA
+  title: "INFRA: Emit telemetry for avoided claim collisions (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - When a role‑scoped claim would have collided under old file‑lease semantics, an event kind=claim_collision_avoided is emitted
+    - Telemetry includes role, scope, and affected paths
+    - Metrics can be aggregated to show migration‑success signal
+  depends_on: [INFRA-6369, INFRA-6374]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6376
+  domain: INFRA
+  title: "INFRA: Add smoke‑test script for role‑scoped claim scenarios (INFRA-1863 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "scripts/ci/test-role-scoped-claims.sh executes five scenarios:"
+    - "  1) same‑role same‑scope blocks"
+    - "  2) same‑role different‑scope allows"
+    - "  3) different‑role same‑file allows with warning"
+    - "  4) broad‑scope without flag rejects"
+    - "  5) append‑only file in paths is exempt"
+    - Script exits with code 0 only when all scenarios pass
+  depends_on: [INFRA-6369, INFRA-6370, INFRA-6371, INFRA-6372, INFRA-6373, INFRA-6374, INFRA-6375]
+  notes: |
+    [chump harvest check 'replace']
+    === primitives_index match for 'replace' ===
+    
+    === cluster keyword match for 'replace' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'replace' ===
+    
+    === repo-description match for 'replace' ===
+    
+    === HARVEST_ROADMAP.md mention of 'replace' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      175:| **3** | `mock-services` (smugglers-rpg) | 4 production-grade containerized mock servers (Anthropic, OpenAI, Stripe, Supabase) — not the "testing utilities" stub the description implied | **HIGH** — directly injectable into Chump CI; replaces ad-hoc fixtures for LLM-call tests |
+    
+    === cross-pollination briefs mentioning 'replace' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
 
 - id: INFRA-650
   domain: INFRA
