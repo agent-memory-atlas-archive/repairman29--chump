@@ -26,19 +26,20 @@
 
 set -euo pipefail
 
-die() { printf '[chump-edit-wrap] ERROR: %s\n' "$1" >&2; exit 1; }
+# Resolve the main-repo root (the stable tree, not the /tmp worktree).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+SCRIPT_NAME="chump-edit-wrap"
+# shellcheck source=../lib/common.sh
+source "$SCRIPT_DIR/../lib/common.sh"
 
 [[ $# -ge 2 ]] || die "Usage: chump-edit-wrap.sh <GAP-ID> <WORKTREE-FILE-PATH>"
 GAP_ID="$1"
 FILE_PATH="$2"
 shift 2
 
-# Resolve the main-repo root (the stable tree, not the /tmp worktree).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-
-PLANS_DIR="${CHUMP_PLANS_DIR:-$REPO_ROOT/.chump-plans}"
-GAP_DIR="$PLANS_DIR/$GAP_ID"
+GAP_DIR="$(common_gap_dir "$REPO_ROOT" "$GAP_ID")"
 mkdir -p "$GAP_DIR"
 
 # Assign the next seq number (zero-padded 5 digits).
