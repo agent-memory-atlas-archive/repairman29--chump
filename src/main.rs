@@ -226,6 +226,7 @@ mod resume_cmd; // INFRA-1456: chump resume <gap-id> — reattach wedged gap
 mod revert_pr;
 mod review_dispatch; // CREDIBLE-181: `chump review` — structurally review-only agent dispatch
 mod review_handoff;
+mod roadmap_pillar_score; // META-409 (META-152 slice): roadmap-bottleneck-pillar alignment scoring
 mod roadmap_status;
 mod rollup_cmd; // INFRA-1455: chump rollup --semantic (Marcus M-B converge)
 mod routes;
@@ -1063,6 +1064,7 @@ fn print_help() {
     println!("  waste-tally        % of compute spent on closed-without-merge PRs");
     println!("  ship-quality       post-merge signal: pass rate, revert rate");
     println!("  roadmap-status     milestone completion %");
+    println!("  roadmap-pillar-score  rank lanes by bottleneck-pillar alignment");
     println!(
         "  mission-grade      current pillar grades (EFFECTIVE/CREDIBLE/RESILIENT/ZERO-WASTE)"
     );
@@ -4857,6 +4859,34 @@ async fn main() -> Result<()> {
                 report.untraced_p0.len()
             );
             std::process::exit(1);
+        }
+        return Ok(());
+    }
+
+    // `chump roadmap-pillar-score [--json]` (META-409, META-152 slice)
+    // Parses docs/ROADMAP.md into lanes (## sections), counts pillar
+    // mentions per lane, and ranks lanes by alignment with the pillar(s)
+    // most starved of open gaps (the "bottleneck" pillars).
+    if args.get(1).map(String::as_str) == Some("roadmap-pillar-score") {
+        if args.iter().any(|a| a == "--help" || a == "help") {
+            println!("Usage: chump roadmap-pillar-score [--json]");
+            println!();
+            println!("Parses docs/ROADMAP.md into lanes (## sections) and scores each lane");
+            println!("by how strongly it aligns with the pillar(s) currently most starved");
+            println!("of open gaps (per roadmap-status pillar_coverage).");
+            println!();
+            println!("Options:");
+            println!("  --json   output in JSON format");
+            return Ok(());
+        }
+        let want_json = args.iter().any(|a| a == "--json");
+        let repo_root = repo_path::repo_root();
+        let scores = roadmap_pillar_score::build_report(&repo_root);
+
+        if want_json {
+            println!("{}", roadmap_pillar_score::render_json(&scores));
+        } else {
+            print!("{}", roadmap_pillar_score::render_text(&scores));
         }
         return Ok(());
     }
