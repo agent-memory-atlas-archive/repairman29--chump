@@ -772,6 +772,24 @@ pub fn run_claim(args: ClaimArgs) -> Result<ClaimReport> {
         )?;
     }
 
+    // INFRA-4996 (INFRA-2434 slice): basic path-overlap detection against
+    // open PRs. The gap-ID-only dedup gates above (INFRA-1982, INFRA-1970)
+    // miss the case where two DIFFERENT gap IDs both touch the same file —
+    // check declared --paths directly against every open PR's real file
+    // list via `gh pr list --json files`.
+    if let Some(paths_csv) = &args.paths {
+        if let Some((pr_num, other_gap, overlap_paths)) =
+            check_paths_overlap_open_prs(&args.repo_root, paths_csv)
+        {
+            bail!(
+                "[claim] paths overlap with open PR #{} (gap {}, paths: {})",
+                pr_num,
+                other_gap,
+                overlap_paths.join(", "),
+            );
+        }
+    }
+
     // INFRA-1970: Gap-ID uniqueness check — primary lease key is (gap_id, session_id),
     // NOT paths. Reject the claim if any live lease already holds this exact gap_id
     // from a different session, regardless of which paths those sessions declared.
@@ -2215,6 +2233,85 @@ pub fn check_open_pr_for_gap(repo_root: &Path, gap_id: &str) -> Option<(u64, Str
         }
     }
     None
+}
+
+/// INFRA-4996 (INFRA-2434 slice): check whether any file in `paths_csv`
+/// appears in the file list of a currently open PR. Returns the first
+/// overlapping PR as (pr_number, gap_id_parsed_from_title, overlap_paths).
+///
+/// Complements [`check_open_pr_for_gap`] (which matches on gap ID) by
+/// matching on actual file paths — catches two *different* gap IDs whose
+/// declared `--paths` collide on the same file.
+///
+/// Best-effort: `gh` failures or an empty/absent `paths_csv` return None.
+pub fn check_paths_overlap_open_prs(
+    repo_root: &Path,
+    paths_csv: &str,
+) -> Option<(u64, String, Vec<String>)> {
+    let claim_paths: Vec<&str> = paths_csv
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if claim_paths.is_empty() {
+        return None;
+    }
+
+    let out = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "number,title,files",
+            "--limit",
+            "50",
+        ])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let arr: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    for v in &arr {
+        let Some(num) = v["number"].as_u64() else {
+            continue;
+        };
+        let title = v["title"].as_str().unwrap_or("");
+        let pr_paths: Vec<&str> = v["files"]
+            .as_array()
+            .map(|files| files.iter().filter_map(|f| f["path"].as_str()).collect())
+            .unwrap_or_default();
+        let overlap: Vec<String> = claim_paths
+            .iter()
+            .filter(|p| pr_paths.contains(p))
+            .map(|s| s.to_string())
+            .collect();
+        if !overlap.is_empty() {
+            let other_gap =
+                extract_gap_id_from_title(title).unwrap_or_else(|| "unknown".to_string());
+            return Some((num, other_gap, overlap));
+        }
+    }
+    None
+}
+
+/// Pull the first `LETTERS-DIGITS` token (e.g. `INFRA-1234`) out of a PR
+/// title. Gap-ID conventions in this repo are all-uppercase domain prefix
+/// + hyphen + digits (see `docs/gaps/*.yaml`).
+fn extract_gap_id_from_title(title: &str) -> Option<String> {
+    title
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .find_map(|token| {
+            let (prefix, suffix) = token.split_once('-')?;
+            let is_gap_id = prefix.len() >= 2
+                && prefix.chars().all(|c| c.is_ascii_uppercase())
+                && !suffix.is_empty()
+                && suffix.chars().all(|c| c.is_ascii_digit());
+            is_gap_id.then(|| token.to_string())
+        })
 }
 
 /// Emit kind=claim_open_pr_dup_blocked to ambient.jsonl (INFRA-1982).
