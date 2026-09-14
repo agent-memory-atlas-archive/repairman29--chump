@@ -1033,6 +1033,9 @@ fn print_help() {
     println!("GAP MANAGEMENT");
     println!("  gap <sub>  (alias: g)  list, show, reserve, ship, audit-priorities …");
     println!("  claim <GAP-ID>  (alias: c)  atomic worktree + lease + preflight in one call");
+    println!(
+        "                              [--role ROLE] tag the claiming session with a role hint"
+    );
     println!("  ship <GAP-ID>   (alias: s)  shorthand for 'gap ship <GAP-ID>'");
     println!("  onboard <repo-url-or-path>  first-touch external-repo scanner (INFRA-2108)");
     println!("  improve <owner/repo> [--gap <ID>] [--apply] [--clone-dir <path>]");
