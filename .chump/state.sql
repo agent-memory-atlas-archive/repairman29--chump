@@ -203389,7 +203389,7 @@ gaps:
 - id: INFRA-6155
   domain: INFRA
   title: "INFRA: INFRA-5521: Add parity assertion script (INFRA-2084 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -203413,6 +203413,10 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+  closed_date: '2026-09-14'
+  closed_pr: 4664
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4664 titled 'INFRA-6155: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6156
   domain: INFRA
