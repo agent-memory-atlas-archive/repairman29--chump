@@ -28776,9 +28776,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    In the `run` function of `crates/chump-bench/src/bench.rs`, wrap the invocation of the AC‑coverage advisory script with a `|| true` (or equivalent error‑ignore) construct, capture any non‑zero exit status, and emit an INFO‑level log entry describing the failure without allowing the script’s error to cause the surrounding shell or process to exit.
+    
+    Target file(s):
+    - crates/chump-bench/src/bench.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The advisory script is wrapped in a `|| true` construct or equivalent error‑ignore logic
-    - Any failure is logged with level INFO and does not cause the shell to exit
+    - "In `crates/chump-bench/src/bench.rs`, the command string that runs the advisory script now ends with `|| true` (or uses `Command::status` with `.ok()` handling) instead of the original bare invocation."
+    - When the advisory script exits with a non‑zero status, `run` logs an INFO‑level message that includes the script name and its exit code.
+    - The `run` function returns a success result (or continues execution) even if the advisory script fails, i.e., it does not propagate an error that would terminate the process.
+    - A unit test in the `mod tests` section of `crates/chump-bench/src/bench.rs` simulates a failing advisory script and asserts that an INFO log is produced and that `run` completes without panicking or returning an error.
   depends_on: [CREDIBLE-870]
   notes: |
     [chump harvest check 'bot-merge']
@@ -28803,9 +28812,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Introduce a lightweight “best_effort” context manager in gen-longitudinal-fixture.py and wrap all non‑critical auto‑close steps with `with best_effort():`. The manager catches any exception, logs a warning, and suppresses propagation, then restores normal exception handling after the block, ensuring only genuine merge‑failure exceptions abort the script.
+    
+    Target file(s):
+    - scripts/ab-harness/gen-longitudinal-fixture.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All best‑effort steps in the auto‑close stage are executed with `set +e` and restored afterwards
-    - No step in the stage can cause the script to exit with a non‑zero status unless a genuine merge failure occurs
+    - The file scripts/ab-harness/gen-longitudinal-fixture.py defines a context manager named `best_effort` that uses `try/except Exception as e` to log the exception and continue execution.
+    - "The auto‑close stage in gen-longitudinal-fixture.py (identified by the comment `# Auto‑close stage` or the function `run_auto_close_stage`) is updated to enclose its best‑effort steps inside `with best_effort():` blocks."
+    - Executing `python scripts/ab-harness/gen-longitudinal-fixture.py --simulate-failure best_effort` exits with status code 0 while printing a warning that includes the word “best‑effort”.
+    - Executing `python scripts/ab-harness/gen-longitudinal-fixture.py --simulate-failure merge` exits with a non‑zero status code (e.g., 1) and prints an error message containing the phrase “genuine merge failure”.
   depends_on: [CREDIBLE-871, CREDIBLE-872, CREDIBLE-873]
   notes: |
     [chump harvest check 'bot-merge']
