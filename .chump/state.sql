@@ -206731,7 +206731,7 @@ gaps:
 - id: INFRA-6253
   domain: INFRA
   title: "INFRA: INFRA-5407: Implement write_node_env to emit canonical store env file (INFRA-3632 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -206766,6 +206766,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-14T09:42:46Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1569B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6254
   domain: INFRA
@@ -227194,7 +227195,7 @@ gaps:
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
   notes: |
-    Decomposed into 8 slices: RESILIENT-1206, RESILIENT-1207, RESILIENT-1208, RESILIENT-1209, RESILIENT-1210, RESILIENT-1211, RESILIENT-1212, RESILIENT-1213
+    Decomposed into 8 slices: RESILIENT-1214, RESILIENT-1215, RESILIENT-1216, RESILIENT-1217, RESILIENT-1218, RESILIENT-1219, RESILIENT-1220, RESILIENT-1221
   outcome_id: MISSION-012
   evidence: |
     PR #4640 merged the node-converge organ AND wired it (git show origin/main: node-converge in organ-manifest.txt x2 + install-helsinki-atc.sh x4). But on CJ it will not run: (1) install-helsinki-atc.sh --auto + chump-organ-deploy both SKIP installing chump-node-converge.timer (stays inactive); (2) a hand-installed unit had literal /root/Projects/chump (the installers REPO_ROOT substitution was skipped) and User defaulted to root so bash -l hit /root/.bash_profile Permission denied; (3) organ-reconcile reaps any non-manifest unit. Worse: grepping the WORKING checkout for node-converge in those two files returns 0 even though HEAD=57d85ce13 and origin/main has them 2/4 - so the node source tree is being churned away from origin/main after a reset (instability; possibly a partial converge or another agent). Net: the auto-converge timer never fires, so merged!=deployed persists for bash organs (the very thing #4640 was meant to fix). NEEDS: make the organ deterministically install+enable+fire on a MUSCLE node via the normal organ-deploy path (role handling + REPO_ROOT/User substitution for a non-helsinki node), and stabilize the node checkout so it stays == origin/main. Verify by systemctl is-active chump-node-converge.timer + a real converge on CJ.
@@ -227417,6 +227418,161 @@ gaps:
     === cross-pollination briefs mentioning 'organ' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
 
+- id: RESILIENT-1214
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1206: Reproduce failure of auto‑converge organ merge on CJ (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Running the current RESILIENT code on a CJ environment reproduces the missing install/fire behavior.
+    - Relevant log output shows the organ merge is performed but the install step is skipped.
+    - A failing test (e.g., a temporary cargo test) is added to capture the reproduced failure.
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1215
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1207: Wire organ merge into the auto‑converge code path (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - The organ merge is correctly invoked during the auto‑converge flow.
+    - Compilation succeeds with no warnings related to the new wiring.
+    - Manual verification shows the merge step executes without panics.
+  depends_on: [RESILIENT-1214]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1216
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1208: Enable installation and fire step on CJ (RESILIENT-1205 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - The install command is triggered after a successful organ merge when running on CJ.
+    - The fire step runs and reports success in CJ logs.
+    - No regression is introduced in existing install‑fire tests.
+  depends_on: [RESILIENT-1214]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1217
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1209: Prevent node checkout from leaving the main branch (RESILIENT-1205 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - After a node checkout operation the repository remains on the main branch.
+    - A unit test verifies that the checkout routine does not switch branches unintentionally.
+    - Existing branch‑related tests continue to pass.
+  depends_on: [RESILIENT-1214]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1218
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1210: Add unit test for auto‑converge organ merge (RESILIENT-1205 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A cargo test validates that the organ merge occurs and returns the expected state.
+    - The test fails on the baseline code (pre‑change) and passes after slices 1‑3 are merged.
+    - Test runs in CI without flakiness.
+  depends_on: [RESILIENT-1215, RESILIENT-1216, RESILIENT-1217]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1219
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1211: Add integration test script for CJ install/fire (RESILIENT-1205 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A script under scripts/ci/test‑cj‑install.sh executes the full install/fire flow on a CJ sandbox.
+    - The script exits with status 0 only when the new behavior is present.
+    - The script is added to the CI matrix and runs in under 5 minutes.
+  depends_on: [RESILIENT-1216, RESILIENT-1217]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
 - id: RESILIENT-122
   domain: RESILIENT
   title: "RESILIENT: bot-merge wall-clock budget not enforced + no lease heartbeat during long ship"
@@ -227436,6 +227592,58 @@ gaps:
   closed_date: '2026-07-21'
   closed_pr: 3127
   outcome_id: RESILIENT-000
+
+- id: RESILIENT-1220
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1212: Run cargo fmt, clippy and enforce no warnings (RESILIENT-1205 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Running `cargo fmt --all -- --check` passes without changes.
+    - Running `cargo clippy --all-targets -- -D warnings` passes with zero warnings.
+    - The CI job for linting succeeds.
+  depends_on: [RESILIENT-1218, RESILIENT-1219]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1221
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1213: Update CI pipeline to execute new tests (RESILIENT-1205 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - The CI configuration includes the new unit test (RESILIENT-1210) and integration script (RESILIENT-1211).
+    - A CI run after merging all slices reports all tests passing.
+    - No existing CI jobs are broken by the configuration change.
+  depends_on: [RESILIENT-1218, RESILIENT-1219]
+  notes: |
+    [chump harvest check 'organ']
+    === primitives_index match for 'organ' ===
+    
+    === cluster keyword match for 'organ' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'organ' ===
+    
+    === repo-description match for 'organ' ===
+    
+    === HARVEST_ROADMAP.md mention of 'organ' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'organ' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
 
 - id: RESILIENT-123
   domain: RESILIENT
