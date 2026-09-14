@@ -25,11 +25,14 @@
 
 set -euo pipefail
 
-# In linked worktrees, git rev-parse --show-toplevel returns the main worktree.
-# We use the main repo root for shared state (.chump/, docs/gaps/) and the
-# script's parent directory for the local worktree's gaps.yaml.
-REPO_ROOT="$(git rev-parse --show-toplevel)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=scripts/lib/common.sh
+# In linked worktrees, git rev-parse --show-toplevel returns the main worktree.
+# We use the main repo root (REPO_ROOT, from common.sh) for shared state
+# (.chump/, docs/gaps/) and the script's parent directory for the local
+# worktree's gaps.yaml.
+source "$SCRIPT_DIR/../lib/common.sh"
 WT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 GAPS_DIR="$REPO_ROOT/docs/gaps"
@@ -42,7 +45,7 @@ GAPS_YAML="$WT_ROOT/docs/gaps.yaml"
 [[ -f "$GAPS_YAML" ]] || GAPS_YAML="$REPO_ROOT/docs/gaps.yaml"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-die()   { echo "ERROR: $*" >&2; exit 1; }
+# die() comes from common.sh (sourced above).
 info()  { echo "  $*"; }
 green() { printf '\033[0;32m%s\033[0m\n' "$*"; }
 

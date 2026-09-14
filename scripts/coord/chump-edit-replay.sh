@@ -17,16 +17,15 @@
 
 set -euo pipefail
 
-die() { printf '[chump-edit-replay] ERROR: %s\n' "$1" >&2; exit 1; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/../lib/common.sh"
 
 [[ $# -ge 2 ]] || die "Usage: chump-edit-replay.sh <GAP-ID> <WORKTREE-ROOT>"
 GAP_ID="$1"
 WORKTREE_ROOT="$2"
 
 [[ -d "$WORKTREE_ROOT" ]] || die "Worktree root does not exist: $WORKTREE_ROOT"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 PLANS_DIR="${CHUMP_PLANS_DIR:-$REPO_ROOT/.chump-plans}"
 GAP_DIR="$PLANS_DIR/$GAP_ID"
