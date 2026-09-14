@@ -65,6 +65,20 @@ row (`docs/strategy/STRANGER_GATE_AND_FLEET_RADIO_2026-08-06.md`), status
 "at-limit behavior" column for beast-mode.dev-fronted surfaces must be
 re-verified by hand each time a surface changes.
 
+**Honest degradation shipped (EFFECTIVE-1643, EFFECTIVE-370 slice).** A
+vendorable reference implementation for `games:shared/leaderboard.js` and
+`games:shared/feedback-widget.js` lives at
+[`patterns/arcade-honest-degradation/`](../patterns/arcade-honest-degradation/)
+in this repo, CI-verified by
+[`scripts/ci/test-arcade-honest-degradation.sh`](../scripts/ci/test-arcade-honest-degradation.sh)
+against a simulated down/quota-exhausted (500/429/connection-refused)
+backend: the leaderboard degrades to a "scores are napping" banner, the
+feedback widget degrades to a non-blocking notice, neither path throws or
+surfaces a raw 5xx, and the primary game loop is never gated on either
+resolving successfully. Vendoring this into the live `games` repo (replacing
+the current `shared/leaderboard.js` / `shared/feedback-widget.js`) is the
+remaining step to close the at-limit-behavior gap on the Supabase row above.
+
 **BEAST_MODE_API / BEAST_MODE_API_URL / BEAST_MODE_URL flag-drift triage
 (PRODUCT-190, 2026-09-01).** The almanac flagmap drift report (2026-08-05)
 flagged three env-var names for the same endpoint across 356 reads in

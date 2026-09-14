@@ -170,6 +170,7 @@ jobs:
               - 'migrations/**'
               - 'org/**'
               - 'path/**'
+              - 'patterns/**'
               - 'projects/**'
               - 'recipes/**'
               - 'registry-submission/**'
