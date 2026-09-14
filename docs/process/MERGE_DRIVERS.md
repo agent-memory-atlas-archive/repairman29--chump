@@ -26,6 +26,77 @@ automatically, keeping PRs green without human intervention.
 | `web/v2/app.js` | `js-append` (→ `merge-driver-append-only.sh`) | Pure-append + dedup |
 | `src/main.rs` | `rust-main-append` (→ `merge-driver-append-only.sh`) | Pure-append + dedup |
 
+## The `union` driver (git built-in)
+
+`union` ships with git core — no custom script, no entry in
+`install-merge-drivers.sh`, no `%O %A %B %L` wiring. It's the right tool when
+a file is a **flat, order-insensitive list** (one entry per line) that many
+PRs append to concurrently: `git merge-file --union` concatenates both sides
+and drops duplicate lines, so two branches that each add a distinct line
+merge cleanly with zero conflict markers.
+
+**When to reach for `union` instead of the custom append-only driver:**
+`union` doesn't validate structure — it just concatenates and dedupes lines.
+Use it for flat allowlist/registry files where every line stands alone (no
+multi-line records, no ordering requirement). If a file has multi-line
+records or ordering matters (e.g. `Cargo.toml` sections, `web/v2/app.js`
+component blocks), use the custom `merge-driver-append-only.sh` instead (see
+below) — it validates the pure-append precondition before merging, which
+`union` does not.
+
+### Installation
+
+None required beyond the `.gitattributes` entry — `union` is a strategy name
+git recognizes natively (`git help gitattributes`, search "union"). There is
+no `git config merge.union.driver` step and no `install-merge-drivers.sh`
+registration, unlike the custom drivers in this doc.
+
+### Usage example
+
+Add one line to `.gitattributes`:
+
+```
+scripts/ci/my-new-allowlist.txt merge=union
+```
+
+That's it. Verify with a synthetic conflict:
+
+```bash
+git checkout -b test-union-a main
+echo "entry-a" >> scripts/ci/my-new-allowlist.txt
+git commit -am "add entry-a"
+
+git checkout -b test-union-b main
+echo "entry-b" >> scripts/ci/my-new-allowlist.txt
+git commit -am "add entry-b"
+
+git checkout test-union-a
+git merge test-union-b   # expect: clean merge, both entry-a and entry-b present, no conflict markers
+```
+
+### Files configured for `merge=union`
+
+| File | Reason (gap ref) |
+|---|---|
+| `docs/observability/EVENT_REGISTRY.yaml` | INFRA-949 |
+| `scripts/ci/env-vars-internal.txt` | INFRA-949 |
+| `web/v2/index.html` | INFRA-1201 |
+| `scripts/ci/event-registry-reserved.txt` | RESILIENT-344 |
+| `scripts/ci/ambient-emit-allowlist.txt` | RESILIENT-344 |
+| `scripts/ci/bypass-env-var-allowlist.txt` | RESILIENT-344 |
+| `scripts/ci/coord-shell-allowlist.txt` | RESILIENT-344 |
+| `scripts/ci/cross-pr-allowlist.txt` | RESILIENT-344 |
+| `scripts/ci/legacy-bypass-trailer-allowlist.txt` | RESILIENT-344 |
+| `scripts/ci/raw-gh-allowlist.txt` | RESILIENT-344 |
+| `scripts/ci/research-integrity-phantom-allowlist.txt` | RESILIENT-344 |
+| `scripts/ci/shell-test-allowlist.txt` | RESILIENT-344 |
+| `scripts/ops/organ-manifest.txt` | INFRA-1688 |
+| `scripts/setup/optional-installers-allowlist.txt` | INFRA-1688 |
+| `scripts/ci/preflight-ci-parity-exceptions.txt` | INFRA-1688 |
+
+This list is derived from `.gitattributes` — that file remains the source of
+truth; re-grep it (`grep 'merge=union' .gitattributes`) if this table drifts.
+
 ## How the append-only driver works
 
 `scripts/git/merge-driver-append-only.sh` handles all three INFRA-1389 files:
