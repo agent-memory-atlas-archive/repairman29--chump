@@ -201127,7 +201127,7 @@ gaps:
 - id: INFRA-6093
   domain: INFRA
   title: "INFRA: Investigate CI app‑init failure in headless Xvfb/D‑Bus environment (INFRA-1433 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -201150,6 +201150,10 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+  closed_date: '2026-09-14'
+  closed_pr: 4659
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4659 titled 'INFRA-6093: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6094
   domain: INFRA
