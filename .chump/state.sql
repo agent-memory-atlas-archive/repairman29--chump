@@ -23794,10 +23794,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new HTTP POST route “/ship” to the API router in `src/web_server.rs::build_api_router` that invokes `crates/chump-gap-store/src/lib.rs::ship` and returns a JSON payload indicating success; adjust `ship` to return a serializable `ShipResult` with a `status` field and propagate errors as HTTP 500.
+    
+    Target file(s):
+    - crates/chump-gap-store/src/lib.rs
+    - src/web_server.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All CI test suites (`cargo test` and `scripts/ci/test-*.sh`) pass
-    - No regression is detected in existing tests
-    - Change is merged to the main branch after successful verification
+    - "Running `cargo test` exits with status 0 and includes a passing test `test_ship_endpoint` that calls the new `/ship` route and asserts a 200 response with body `{\"status\":\"shipped\"}`."
+    - Executing `scripts/ci/test-integration.sh` completes without errors and reports the new integration test for the `/ship` endpoint as passed.
+    - "The function `src/web_server.rs::build_api_router` contains a line registering the POST route `\"/ship\"` that maps to a handler invoking `crate::chump_gap_store::ship`."
+    - "The function `crates/chump-gap-store/src/lib.rs::ship` returns a `ShipResult` struct serialized to JSON with a field `status` equal to `\"shipped\"` on success."
   depends_on: [CREDIBLE-718, CREDIBLE-719]
 
 - id: CREDIBLE-721
