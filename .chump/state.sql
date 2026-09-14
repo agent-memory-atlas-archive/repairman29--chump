@@ -97512,7 +97512,7 @@ gaps:
     - Smoke test scripts/ci/test-harvester-cli.sh exercises scan, check, brief, deep-scan; each subcommand exits 0 on synthetic happy path and exit 2 on bad input
     - "Documentation: chump harvest --help, docs/arsenal/HARVESTER.md updated with CLI surface, CLAUDE.md references the CLI in addition to the slash command and agent"
   notes: |
-    Decomposed into 9 slices: INFRA-6111, INFRA-6112, INFRA-6113, INFRA-6114, INFRA-6115, INFRA-6116, INFRA-6117, INFRA-6118, INFRA-6119
+    Decomposed into 9 slices: INFRA-6360, INFRA-6361, INFRA-6362, INFRA-6363, INFRA-6364, INFRA-6365, INFRA-6366, INFRA-6367, INFRA-6368
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -213074,6 +213074,235 @@ gaps:
     - test scripts/ci/test-gap-import-spec.sh on fixture docs/test-fixtures/import-spec/sample-spec.md
   closed_pr: 1541
   outcome_id: MISSION-010
+
+- id: INFRA-6360
+  domain: INFRA
+  title: "INFRA: Create chump harvest CLI entry point with subcommand scaffolding (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "Running `chump harvest --help` displays a help message listing subcommands: scan, check, brief, deep-scan"
+    - CLI returns exit code 0 for `--help` and unknown subcommand returns exit code 2
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6361
+  domain: INFRA
+  title: "INFRA: Implement `chump harvest scan` action (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "`chump harvest scan` refreshes `docs/arsenal/raw/github_repos.json` by invoking `scripts/arsenal/build.py`"
+    - Command exits with code 0 on successful build and with a non‑zero code when any high‑severity alerts are present
+    - A log entry is written indicating number of repos processed
+  depends_on: [INFRA-6360]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6362
+  domain: INFRA
+  title: "INFRA: Implement `chump harvest check` action (INFRA-1823 slice)"
+  status: closed
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "`chump harvest check <GAP-ID>` or `chump harvest check \"free form topic\"` reads `docs/arsenal/GLOBAL_ARSENAL.json` and `primitives_index`"
+    - "Command outputs an overlap report that includes file:line citations for each matching primitive"
+    - Command exits with code 0 when report is generated, code 2 for malformed input
+  depends_on: [INFRA-6360]
+  notes: |
+    Already shipped in PR #3698 (INFRA-1823): src/harvester_cli.rs 'check' subcommand fully implements all 3 AC — reads GLOBAL_ARSENAL.json + primitives_index (AC1), emits file:line citations via extracted_primitives_by_file (AC2), exit 0 on report / exit 2 on malformed input verified (AC3). Covered by scripts/ci/test-harvester-cli.sh lines 82-96. Closing as duplicate of already-shipped work, no code change needed.
+
+- id: INFRA-6363
+  domain: INFRA
+  title: "INFRA: Implement `chump harvest brief` action (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`chump harvest brief SOURCE TARGET` prints a concise summary of the relationship between SOURCE and TARGET"
+    - Help text for the subcommand appears in `chump harvest --help`
+    - Command exits with code 0 on success, code 2 on missing arguments
+  depends_on: [INFRA-6360]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6364
+  domain: INFRA
+  title: "INFRA: Implement `chump harvest deep-scan` action (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "`chump harvest deep-scan CLUSTER` runs the deep‑scan pipeline for the specified CLUSTER"
+    - Extracted primitives are written to `docs/arsenal/GLOBAL_ARSENAL.json` under the appropriate repo entry
+    - Command exits with code 0 on success, non‑zero on failure
+  depends_on: [INFRA-6360]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6365
+  domain: INFRA
+  title: "INFRA: Add scheduled weekly rebuild via launchd plist (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "`scripts/launchd/com.chump.harvester-scan.plist` is created and loads without errors"
+    - When triggered, it runs `python3 scripts/arsenal/build.py` weekly
+    - After successful run, an ambient event `kind=arsenal_rebuilt` is emitted with counts of repos, clusters, duplicates, and alerts
+  depends_on: [INFRA-6361]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6366
+  domain: INFRA
+  title: "INFRA: Register `arsenal_rebuilt` event in observability registry (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`docs/observability/EVENT_REGISTRY.yaml` contains an entry for `arsenal_rebuilt` with description and payload schema (repoCount, clusterCount, dupCount, alertCount)"
+    - Documentation build validates the new event entry without errors
+  depends_on: [INFRA-6365]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6367
+  domain: INFRA
+  title: "INFRA: Perform one‑time coverage push: deep‑scan remaining fleet repos (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A parallel explorer runs `chump harvest deep-scan` against the 45 unreached repos out of the 76‑repo fleet
+    - All processed repos are reflected in `GLOBAL_ARSENAL.json` with `extracted_primitives` populated
+    - Run completes within the allotted time window and exits with code 0
+  depends_on: [INFRA-6364]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
+
+- id: INFRA-6368
+  domain: INFRA
+  title: "INFRA: Create smoke‑test script and update documentation (INFRA-1823 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "`scripts/ci/test-harvester-cli.sh` executes `scan`, `check`, `brief`, and `deep-scan` with synthetic happy‑path inputs and asserts exit code 0"
+    - The script also verifies that each command returns exit code 2 for deliberately bad input
+    - "`chump harvest --help` includes up‑to‑date usage examples for all subcommands"
+    - "`docs/arsenal/HARVESTER.md` is updated with CLI surface description and cross‑referenced in `CLAUDE.md`"
+    - All CI runs pass the new smoke‑test script
+  depends_on: [INFRA-6360, INFRA-6361, INFRA-6362, INFRA-6363, INFRA-6364]
+  notes: |
+    [chump harvest check 'INFRA-1823']
+    === primitives_index match for 'INFRA-1823' ===
+    
+    === cluster keyword match for 'INFRA-1823' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1823' ===
+    
+    === repo-description match for 'INFRA-1823' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1823' (deep-scan findings) ===
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      222:## Wave 4 — INFRA-1823 AC7 close-out (2026-08-13)
+    
+    === cross-pollination briefs mentioning 'INFRA-1823' ===
 
 - id: INFRA-637
   domain: INFRA
