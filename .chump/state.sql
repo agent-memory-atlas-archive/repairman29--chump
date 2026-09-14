@@ -205705,7 +205705,7 @@ gaps:
 - id: INFRA-6226
   domain: INFRA
   title: "INFRA: INFRA-5354: Implement effective priority propagation in picker (INFRA-3612 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -205726,6 +205726,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'Picker' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+    [2026-09-14T09:06:14Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1419B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6227
   domain: INFRA
@@ -208096,7 +208097,7 @@ gaps:
 - id: INFRA-6287
   domain: INFRA
   title: "INFRA: Wire FileBackedMissionStore into chump trek run execution path (INFRA-3658 slice)"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
@@ -208130,6 +208131,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-14T09:03:31Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1258B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6288
   domain: INFRA
@@ -209234,6 +209236,202 @@ gaps:
     
     === cross-pollination briefs mentioning 'ZERO-WASTE' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6321
+  domain: INFRA
+  title: "INFRA: Investigate current gap allocation logic and worktree creation flow (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Source files that read/write .chump/state.db are identified
+    - Worktree creation scripts that copy or ignore .chump/state.db are listed
+    - Current allocation path (worktree‑local vs canonical) is documented
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6322
+  domain: INFRA
+  title: "INFRA: Document decision: choose symlink approach for .chump/state.db (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Decision memo created in INFRA-3834 notes
+    - Rationale (simplicity, precedent from INFRA-1733) is recorded
+    - Stakeholder sign‑off captured
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6323
+  domain: INFRA
+  title: "INFRA: Add symlink creation for .chump/state.db during worktree initialization (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a new worktree is created, .chump/state.db is a symlink pointing to the canonical state.db in the main checkout
+    - Symlink is created only if the target file exists
+    - No existing worktree‑local state.db files are left behind
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6324
+  domain: INFRA
+  title: "INFRA: Update worktree creation script to include the new symlink step (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Script runs without errors on a fresh repository clone
+    - Resulting worktree contains .chump/state.db as a symlink
+    - Existing CI pipelines that create worktrees still succeed
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6325
+  domain: INFRA
+  title: "INFRA: Modify `chump gap reserve` to fallback to canonical DB if symlink is missing (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Command resolves the canonical .chump/state.db path when .chump/state.db is not a symlink
+    - Allocation uses the same counter as the main checkout
+    - Behavior is logged for debugging
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6326
+  domain: INFRA
+  title: "INFRA: Unit test: ID uniqueness when reserving a gap in a fresh worktree vs main checkout (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test creates a temporary worktree, runs `chump gap reserve` there, then runs it in the main checkout
+    - Assert that the two allocated IDs are different
+    - Test passes on local developer machines and CI
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6327
+  domain: INFRA
+  title: "INFRA: Integration regression test for gap reservation collision scenario (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test sets up a fresh worktree, reserves a gap, then reserves a gap in the main checkout
+    - Test asserts no ID collision even when both counters start from the same baseline
+    - Test is added to the infra test suite and runs on every CI build
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
 
 - id: INFRA-635
   domain: INFRA
