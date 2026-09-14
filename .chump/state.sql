@@ -216307,6 +216307,8 @@ gaps:
   effort: m
   acceptance_criteria:
     - the ~30 fast-checks test-*.sh run as a CI matrix rather than sequentially; total fast-checks wall-clock drops measurably; all checks still report to the aggregator.
+  notes: |
+    Decomposed into 3 slices: META-428, META-429, META-430
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -221350,7 +221352,7 @@ gaps:
 - id: META-418
   domain: META
   title: "META: Create CI gate script test-chump-playbook-freshness.sh with all assertions (META-172 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -221378,6 +221380,10 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+  closed_date: '2026-09-14'
+  closed_pr: 4673
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4673 titled 'META-418: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: META-419
   domain: META
@@ -221634,6 +221640,40 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-428
+  domain: META
+  title: "META: Define fast-check test discovery script for CI matrix generation (META-202 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - A script or command dynamically discovers all `test-*.sh` fast-check scripts.
+    - Output format is formatted as a JSON array suitable for CI matrix job inputs.
+
+- id: META-429
+  domain: META
+  title: "META: Configure CI workflow to execute fast-checks in parallel matrix jobs (META-202 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - CI workflow definition uses matrix strategy to execute `test-*.sh` scripts concurrently.
+    - Fast-check step runs matrix jobs in parallel instead of sequentially in a single job execution.
+    - Fast-check total wall-clock execution time decreases compared to sequential baseline.
+  depends_on: [META-428]
+
+- id: META-430
+  domain: META
+  title: "META: Update aggregator to collect and report results from parallel matrix jobs (META-202 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Matrix job status and artifacts from all parallel runs are collected by the central aggregator.
+    - A single aggregated fast-checks status report is produced in the final CI summary.
+    - Any individual matrix job failure properly marks the overall fast-checks run as failed.
+  depends_on: [META-429]
 
 - id: MISSION-001
   domain: MISSION
