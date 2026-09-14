@@ -5621,10 +5621,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new entry‑point function `run_best_tier_on_all_gaps` in `credible/harness.py` that iterates over the repository’s defined gap list, invokes the best‑tier model for each gap, collects the model’s output, and writes a JSON file `best_tier_results.json` containing one result object per gap; also expose this function via a CLI sub‑command `run_best_tier`.
+    
+    Target file(s):
+    - credible/harness.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All gaps are processed with the best‑tier model
-    - Results are saved to `best_tier_results.json`
-    - At least one gap completes all stages successfully
+    - Running `python -m credible.harness run_best_tier` creates a file `best_tier_results.json` in the project root containing a JSON array with an entry for every defined gap.
+    - "The function `run_best_tier_on_all_gaps` defined in `credible/harness.py` returns a dictionary whose keys are gap IDs and whose values include a `\"status\"` field set to `\"completed\"` for at least one gap."
+    - The CLI invocation `python -m credible.harness run_best_tier` exits with exit code 0.
   depends_on: [CREDIBLE-1124]
   notes: |
     [chump harvest check 'inference']
@@ -5681,10 +5688,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend `src/commands/swe.rs::run` to capture the number of tokens consumed and the API dollar cost for each model call, attaching these metrics to the merge result; then augment `chump-waste-tally/src/waste_tally.rs` by adding token and dollar fields to `WasteReport`, updating `build_report` to aggregate these metrics per tier and emit a `cost_summary.json` file containing the totals.
+    
+    Target file(s):
+    - src/commands/swe.rs
+    - .claude/worktrees/infra-3643-fleet-1-20260822-081649/crates/chump-waste-tally/src/waste_tally.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Cost data (tokens used, API dollars) is collected during each model call
-    - Aggregated cost per successful merge is written to `cost_summary.json`
-    - Test confirms that cost for at least one successful merge is non‑zero and correctly attributed to its tier
+    - In `src/commands/swe.rs`, the `run` function records `token_usage` and `dollar_cost` for every model invocation and stores them on the merge result struct.
+    - In `chump-waste-tally/src/waste_tally.rs`, `struct WasteReport` includes `token_cost` and `dollar_cost` fields, and `build_report` writes a JSON file `cost_summary.json` that aggregates these values per tier.
+    - Executing the `swe` command (`cargo run -- swe`) creates a `cost_summary.json` file whose entry for at least one tier has a non‑zero `token_cost` and correctly reflects the tier of the successful merge.
   depends_on: [CREDIBLE-1128]
   notes: |
     [chump harvest check 'inference']
