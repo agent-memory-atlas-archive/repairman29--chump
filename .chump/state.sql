@@ -213836,7 +213836,7 @@ gaps:
 - id: INFRA-6384
   domain: INFRA
   title: "INFRA: Integrate INFRA-825 staleness gate with rebuild checks (INFRA-1965 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -213862,6 +213862,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+  closed_date: '2026-09-14'
+  closed_pr: 4676
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4676 titled 'INFRA-6384: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6385
   domain: INFRA
@@ -213927,7 +213931,7 @@ gaps:
 - id: INFRA-6387
   domain: INFRA
   title: "INFRA: Create centralized lock primitive library for bash orchestrator scripts (INFRA-1966 slice)"
-  status: closed
+  status: already_satisfied
   priority: P1
   effort: s
   acceptance_criteria:
@@ -213937,6 +213941,7 @@ gaps:
     - The lock implementation works across multiple processes on the same repository
   notes: |
     Duplicate: implemented and shipped under INFRA-6130 (PR #4663) — scripts/lib/lock.sh already exists with acquire_lock/release_lock, mkdir-based, cross-process safe, covered by scripts/ci/test-lock-lib.sh (5/5 passing). All 4 AC already satisfied. No code change needed.
+  closed_pr: 4663
 
 - id: INFRA-6388
   domain: INFRA
