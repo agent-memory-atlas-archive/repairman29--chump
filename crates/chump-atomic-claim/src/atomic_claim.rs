@@ -83,6 +83,10 @@ pub struct ClaimArgs {
     /// when `--resume` is also passed (`--resume` wins: same branch, reset
     /// to remote tip).
     pub rename: bool,
+    /// INFRA-5162 (INFRA-1863 slice): optional role hint for the claiming
+    /// session (e.g. "shepherd", "target"). Stored for later validation;
+    /// not yet enforced against a role registry.
+    pub role: Option<String>,
 }
 
 impl ClaimArgs {
@@ -107,7 +111,8 @@ impl ClaimArgs {
                        --allow-duplicate-pr  Bypass open-PR-in-flight abort (INFRA-1503; rescue scenarios)\n  \
                        -h, --help       Show this help
                        --check-only  Run all preflight gates without creating worktree or lease\n  \
-                       --json        Output JSON format (use with --check-only)"
+                       --json        Output JSON format (use with --check-only)\n  \
+                       --role ROLE   Role hint for the claiming session (e.g. shepherd, target)"
                 );
                 std::process::exit(0);
             }
@@ -152,6 +157,7 @@ impl ClaimArgs {
         let mut json = false;
         let mut discard_wip = false;
         let mut rename = false;
+        let mut role: Option<String> = None;
 
         let mut i = 2;
         while i < args.len() {
@@ -216,6 +222,14 @@ impl ClaimArgs {
                     rename = true;
                     i += 1;
                 }
+                "--role" => {
+                    role = Some(
+                        args.get(i + 1)
+                            .ok_or_else(|| anyhow!("--role needs a value"))?
+                            .to_string(),
+                    );
+                    i += 2;
+                }
                 other => bail!("unknown flag: {other}"),
             }
         }
@@ -245,6 +259,7 @@ impl ClaimArgs {
             json,
             discard_wip,
             rename,
+            role,
         })
     }
 }
