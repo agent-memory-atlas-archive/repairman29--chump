@@ -2475,6 +2475,20 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
 
+        // EFFECTIVE-1666 (EFFECTIVE-414 slice): bin-bloat-guard mirror.
+        // Pure `git diff` + `wc -c` over new top-level src/*.rs files —
+        // hermetic, <1s, no cargo build. Mirrors the ci.yml step above.
+        steps.push(step(
+            "bin-bloat-guard",
+            &[
+                "bash",
+                "scripts/ci/bin-bloat-guard.sh",
+                "--base",
+                "origin/main",
+            ],
+            GateKind::Scripts,
+        ));
+
         // INFRA-5000 (META-070/INFRA-3373 slice): cli_observability_misc
         // gate — mirrors the 41 remaining cli-observability-misc cluster
         // scripts from docs/process/AUDIT_JOB_DECOMPOSITION.md.
