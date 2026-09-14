@@ -1,27 +1,27 @@
 # Global Arsenal — Chump Fleet Codex
 
-_Generated 2026-08-13T05:12:34Z by scripts/arsenal/build.py v0_
+_Generated 2026-09-14T04:13:23Z by scripts/arsenal/build.py v0_
 
 **Operator:** repairman29 (Jeff Adkins)
 **GitHub repos:** 101  
 **Cloned locally:** 2  
-**Unmatched local roots:** 0
+**Unmatched local roots:** 1
 
 ## Clusters
 
 | Cluster | Count | Active (30d) | Languages |
 |---|---:|---:|---|
-| `misc` | 28 | 22 | JavaScript:10, HTML:6, TypeScript:5, ?:3, Rust:1, Shell:1, Lua:1, Python:1 |
-| `smugglers-rpg` | 25 | 4 | JavaScript:21, TypeScript:2, CSS:2 |
-| `content-apps` | 13 | 5 | TypeScript:7, JavaScript:3, Python:2, HTML:1 |
+| `misc` | 28 | 0 | JavaScript:10, HTML:6, TypeScript:5, ?:3, Rust:1, Shell:1, Lua:1, Python:1 |
+| `smugglers-rpg` | 25 | 0 | JavaScript:21, TypeScript:2, CSS:2 |
+| `content-apps` | 13 | 0 | TypeScript:7, JavaScript:3, Python:2, HTML:1 |
 | `tools-platform` | 9 | 0 | JavaScript:5, Kotlin:1, Python:1, TypeScript:1, ?:1 |
-| `echeo-resonant` | 8 | 2 | TypeScript:5, Rust:2, JavaScript:1 |
-| `chump-engine` | 5 | 1 | Rust:2, Shell:1, Ruby:1, ?:1 |
-| `jarvis-assistant` | 4 | 1 | JavaScript:2, Shell:1, ?:1 |
-| `political-strat` | 4 | 3 | Python:3, HTML:1 |
-| `beast-mode-qi` | 2 | 1 | JavaScript:1, HTML:1 |
+| `echeo-resonant` | 8 | 0 | TypeScript:5, Rust:2, JavaScript:1 |
+| `chump-engine` | 5 | 0 | Rust:2, Shell:1, Ruby:1, ?:1 |
+| `jarvis-assistant` | 4 | 0 | JavaScript:2, Shell:1, ?:1 |
+| `political-strat` | 4 | 0 | Python:3, HTML:1 |
+| `beast-mode-qi` | 2 | 0 | JavaScript:1, HTML:1 |
 | `marketing-sites` | 2 | 0 | TypeScript:1, HTML:1 |
-| `upshift-deps` | 1 | 1 | JavaScript:1 |
+| `upshift-deps` | 1 | 0 | JavaScript:1 |
 
 ## Duplication Findings (DRY violations)
 
@@ -70,7 +70,7 @@ _Generated 2026-08-13T05:12:34Z by scripts/arsenal/build.py v0_
 
 ### misc
 - **workspace-docs** [JavaScript] 
-- **almanac** [Rust] A grounded, persistent knowledge index over a massive codebase that agents query over MCP instead of doing their own file-by-file research. Every answer carries a file:line receipt.
+- **almanac** [Rust] A grounded, persistent knowledge index over a massive codebase that agents query over MCP instead of doing their own file-by-file research. Every answer carries a file:line receipt. 📁 `/home/jeff/Projects/almanac`
 - **games-workspace** [JavaScript] 
 - **machine-substrate** [Shell] What makes this machine this machine: 117 launchd jobs, crontab, package inventory. Secrets redacted on write.
 - **grave-dancer** [JavaScript] 
@@ -155,14 +155,14 @@ _Generated 2026-08-13T05:12:34Z by scripts/arsenal/build.py v0_
 - **echeo_old** [TypeScript] Legacy Echeo generation — contextual intelligence platform (superseded; kept for reference).
 - **echeo-web** [TypeScript] Echeo Landing Page - The Resonant Engine
 - **echeovid** [TypeScript] Video content creation platform with 7 personas, YouTube publishing, FFmpeg integration - React/TypeScript frontend with Firebase backend
-- **echeo** [Rust] Echeo CLI - The Resonant Engine. Find where your code resonates with market needs. 📁 `/root/Projects/echeo`
+- **echeo** [Rust] Echeo CLI - The Resonant Engine. Find where your code resonates with market needs.
 - **echeo-internal** [Rust] Echeo - The Resonant Engine. Find where your code resonates with market needs.
 - **echeo-archived** [JavaScript] Archived early-generation Echeo prototype (code-to-market resonance engine).
 - **echeodev** [TypeScript] ARCHIVED · 
 - **echeo-dev** [TypeScript] ARCHIVED · 
 
 ### chump-engine
-- **chump** [Shell] PUBLIC · Self-hosted AI coding agent with persistent memory and bounded autonomy. Local-first, your keys, your data. Written in Rust. 📁 `/root/Projects/chump`
+- **chump** [Shell] PUBLIC · Self-hosted AI coding agent with persistent memory and bounded autonomy. Local-first, your keys, your data. Written in Rust. 📁 `/home/jeff/Projects/.nba-dispatch-clone` (dir renamed → `.nba-dispatch-clone`)
 - **homebrew-chump** [Ruby] PUBLIC · Homebrew tap for chump — auto-generated formula via cargo-dist (INFRA-172)
 - **chump-proprietary** [Rust] Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
 - **chump-chassis** [Rust] ARCHIVED · Rust/Axum micro-SaaS boilerplate for Chump SaaS factory
@@ -193,3 +193,4 @@ _Generated 2026-08-13T05:12:34Z by scripts/arsenal/build.py v0_
 
 ## Unmatched Local Git Roots (no GitHub origin / third-party / accidental)
 
+- `/home/jeff/Projects/chump` → git@github.com:repairman29/chump.git

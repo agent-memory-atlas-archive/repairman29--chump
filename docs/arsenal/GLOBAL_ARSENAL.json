@@ -1,11 +1,11 @@
 {
   "metadata": {
-    "generated_at": "2026-08-13T05:12:34Z",
+    "generated_at": "2026-09-14T04:13:23Z",
     "generator": "scripts/arsenal/build.py v0",
     "operator": "repairman29 (Jeff Adkins)",
     "fleet_size_github": 101,
     "fleet_size_local_clones": 2,
-    "fleet_size_unmatched_local_roots": 0
+    "fleet_size_unmatched_local_roots": 1
   },
   "clusters": {
     "chump-engine": {
@@ -23,7 +23,7 @@
         "Rust": 2,
         "?": 1
       },
-      "active_last_30d": 1
+      "active_last_30d": 0
     },
     "content-apps": {
       "count": 13,
@@ -48,7 +48,7 @@
         "Python": 2,
         "HTML": 1
       },
-      "active_last_30d": 5
+      "active_last_30d": 0
     },
     "misc": {
       "count": 28,
@@ -92,7 +92,7 @@
         "Lua": 1,
         "Python": 1
       },
-      "active_last_30d": 22
+      "active_last_30d": 0
     },
     "upshift-deps": {
       "count": 1,
@@ -102,7 +102,7 @@
       "languages": {
         "JavaScript": 1
       },
-      "active_last_30d": 1
+      "active_last_30d": 0
     },
     "jarvis-assistant": {
       "count": 4,
@@ -117,7 +117,7 @@
         "Shell": 1,
         "?": 1
       },
-      "active_last_30d": 1
+      "active_last_30d": 0
     },
     "smugglers-rpg": {
       "count": 25,
@@ -153,7 +153,7 @@
         "TypeScript": 2,
         "CSS": 2
       },
-      "active_last_30d": 4
+      "active_last_30d": 0
     },
     "echeo-resonant": {
       "count": 8,
@@ -172,7 +172,7 @@
         "Rust": 2,
         "JavaScript": 1
       },
-      "active_last_30d": 2
+      "active_last_30d": 0
     },
     "beast-mode-qi": {
       "count": 2,
@@ -184,7 +184,7 @@
         "JavaScript": 1,
         "HTML": 1
       },
-      "active_last_30d": 1
+      "active_last_30d": 0
     },
     "political-strat": {
       "count": 4,
@@ -198,7 +198,7 @@
         "HTML": 1,
         "Python": 3
       },
-      "active_last_30d": 3
+      "active_last_30d": 0
     },
     "tools-platform": {
       "count": 9,
@@ -388,10 +388,17 @@
       "cluster": "chump-engine",
       "primitives": [],
       "extracted_primitives": [
+        "llm_router: src/inference_provider.rs:17 (//! bicameral router (CP-011); intra-chain resilience only, tier selection is)",
         "llm_router: src/inference_router.rs:8 (//! See docs/arsenal/cross-pollination/CP-011-bicameral-mind.md for the)",
         "llm_router: src/sourcing_resolver.rs:65 (/// resilience-library precedent from COTG-S.3: \"don't build, cockatiel/LiteLLM)"
       ],
       "extracted_primitives_by_file": [
+        {
+          "file": "src/inference_provider.rs",
+          "line": 17,
+          "primitive": "llm_router",
+          "match": "//! bicameral router (CP-011); intra-chain resilience only, tier selection is"
+        },
         {
           "file": "src/inference_router.rs",
           "line": 8,
@@ -406,9 +413,9 @@
         }
       ],
       "local_clone": {
-        "path": "/root/Projects/chump",
-        "dir_name_matches_repo": true,
-        "actual_dir_name": "chump",
+        "path": "/home/jeff/Projects/.nba-dispatch-clone",
+        "dir_name_matches_repo": false,
+        "actual_dir_name": ".nba-dispatch-clone",
         "nested_in_chump": false
       }
     },
@@ -427,7 +434,11 @@
       "primitives": [
         "list-mgmt"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Bounded tool-calling LLM orchestrator loop with honesty-rail/human-gate guarantees (src/lib/agent/orchestrator.ts)",
+        "Deterministic fallback-narration generator for degraded LLM turns (src/lib/agent/fallback.ts)",
+        "Kroger pricing/catalog engine (src/lib/kroger/engine.ts, priceList.ts)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -444,7 +455,9 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Prose voice-fingerprinting statistical analyzer comparing draft text against a ground-truth corpus by register (content/voice-fingerprint.mjs) with companion corpus-builder (content/voice-corpus.mjs)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -472,9 +485,32 @@
       ],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
-      "extracted_primitives_by_file": [],
-      "local_clone": null
+      "extracted_primitives": [
+        "Reciprocal Rank Fusion multi-retriever hybrid search (crates/almanac-core/src/fusion.rs)",
+        "Cross-encoder reranker HTTP client with multi-schema response parsing (crates/almanac-core/src/rerank.rs)",
+        "vector_embedding: crates/almanac-core/src/registry.rs:5 (//! local tier of the scaling plan (see ROADMAP.md); the fleet pgvector tier is)",
+        "ast: crates/ast-crawler/src/lib.rs:47 (use tree_sitter::{Node, Parser, Tree};)"
+      ],
+      "extracted_primitives_by_file": [
+        {
+          "file": "crates/almanac-core/src/registry.rs",
+          "line": 5,
+          "primitive": "vector_embedding",
+          "match": "//! local tier of the scaling plan (see ROADMAP.md); the fleet pgvector tier is"
+        },
+        {
+          "file": "crates/ast-crawler/src/lib.rs",
+          "line": 47,
+          "primitive": "ast",
+          "match": "use tree_sitter::{Node, Parser, Tree};"
+        }
+      ],
+      "local_clone": {
+        "path": "/home/jeff/Projects/almanac",
+        "dir_name_matches_repo": true,
+        "actual_dir_name": "almanac",
+        "nested_in_chump": false
+      }
     },
     "upshift": {
       "name": "upshift",
@@ -524,7 +560,11 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Time-windowed combo/multiplier scoring system (extractions/neon-shmup/ComboManager.ts)",
+        "Pixi.js particle-emitter system with lifecycle management (extractions/neon-shmup/ParticleSystem.ts)",
+        "Shared leaderboard/feedback-widget modules (shared/leaderboard.js, shared/feedback-widget.js)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -560,7 +600,9 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Pure, unit-testable horizontal movement/physics stepper decoupled from the game engine (src/lib/movement.js: stepHorizontalVelocity with accel/friction/clamp logic)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -594,7 +636,10 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Self-contained feedback-widget library with offline retry queue distinguishing permanent (4xx) vs transient (429/5xx) failures and deduped error capture (holler.js)",
+        "CLI triage/inbox tool with since-last-run diffing (inbox.mjs)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -611,7 +656,9 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Deterministic capability-need tracker/chart generator that separates mechanical bookkeeping from AI judgment, emits a portable cross-harness launch prompt (voyage.mjs)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -652,7 +699,9 @@
       ],
       "cluster": "jarvis-assistant",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Modular skill-plugin architecture with per-skill index.js entrypoints (jarvis/skills/*/index.js pattern, e.g. clipboard-history, window-manager, workflow-automation)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -691,7 +740,9 @@
       "topics": [],
       "cluster": "echeo-resonant",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Generic paginated CRUD base repository over Prisma (apps/notification-service/src/repositories/BaseRepository.ts \u2014 abstract class with findWithPagination, typed PaginatedResult<T>, DatabaseError wrapper)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -747,7 +798,10 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Headless-browser autonomous playtest bot with hazard-learning/stall-detection heuristics (bot.mjs)",
+        "Deterministic world-graph edge-coverage surveyor with verdict classification (surveyor.mjs, NO_TRANSITION/WRONG_TARGET/SPAWN_MISMATCH logic)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -764,7 +818,9 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Real-time combat system with hitstop/parry/attack-cooldown state machine (src/systems/CombatSystem.js)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -786,7 +842,10 @@
       ],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Timestamped backup/rollback manager for filesystem changes with interactive restore flow (src/lib/rollback.ts)",
+        "Commander-based CLI command pattern with zod-style input validation (src/commands/fix.ts + src/lib/validate.ts)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -820,7 +879,9 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "PIXI.js entity classes with hand-drawn vector sprite composition and animation state (src/entities.js Player class)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -879,7 +940,9 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Async Roblox Open Cloud API client wrapper with typed HTTP verb dispatch and error handling (roblox_api_manager.py RobloxAPIManager class)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -896,7 +959,9 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Gmail OAuth token-refresh + AI-driven email auto-processing pipeline (lib/token-refresh.ts, lib/ai-email-processor.ts, app/api/ai-email-manager/auto-process/route.ts)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -953,7 +1018,10 @@
       "primitives": [
         "rpg-mechanic"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Typed combat engine with encounter/turn/event-handler state machine (src/services/combatEngine.ts, class CombatEngine)",
+        "D&D5e rules engine with typed Spell/Character/Monster models driving spell/monster JSON data (src/services/rulesEngine.ts)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -1140,7 +1208,12 @@
         "chat",
         "rpg-mechanic"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "d100 outcome-band dice resolver with canon success/failure tiers (src/dice.js)",
+        "Session budget-cap surfacing with warn/degrade thresholds (src/budget.js)",
+        "Discord channel/thread topology builder for session play (src/channelTopology.js)",
+        "Layered ephemeral character-picker flow with TTL'd custom IDs (src/picker.js)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -1185,7 +1258,12 @@
       "primitives": [
         "calendar"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "CircuitBreaker state machine CLOSED/OPEN/HALF_OPEN (src/circuit-breaker.js)",
+        "Token-bucket RateLimiter with refill+block (src/rate-limiter.js)",
+        "Exponential-backoff RetryHandler with retryable-error classification (src/retry-patterns.js)",
+        "ResilientClient composing rate-limit+circuit-breaker+retry (src/resilience.js)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -1386,7 +1464,9 @@
       "primitives": [
         "rpg-mechanic"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Pure game-logic core modules: d100 dice with advantage/disadvantage (core/dice.js), heat threshold/consequence system (core/heat.js), plus core/combat.js, core/economy.js, core/reputation.js, core/ships.js"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -1462,7 +1542,10 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "ElectroDB entity + service + tRPC router CRUD pattern with real game-lifecycle business logic \u2014 roster/guild validation, scenario slug-collision suffixing (packages/backend/db/services/game.service.ts)",
+        "Ownership-checked tRPC mutation pattern for creator/admin authorization (packages/backend/lambda/api/scenario.router.ts)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -1500,23 +1583,10 @@
       "primitives": [],
       "extracted_primitives": [
         "Matchmaker::calculate_ship_velocity_score() (cosine sim + language/type boosts, 0-1.0)",
-        "src/shredder.rs tree-sitter AST extraction (TS/Rust/Python/Go, authorship metadata)",
-        "ast: src/shredder.rs:5 (use tree_sitter::Parser;)"
+        "src/shredder.rs tree-sitter AST extraction (TS/Rust/Python/Go, authorship metadata)"
       ],
-      "extracted_primitives_by_file": [
-        {
-          "file": "src/shredder.rs",
-          "line": 5,
-          "primitive": "ast",
-          "match": "use tree_sitter::Parser;"
-        }
-      ],
-      "local_clone": {
-        "path": "/root/Projects/echeo",
-        "dir_name_matches_repo": true,
-        "actual_dir_name": "echeo",
-        "nested_in_chump": false
-      }
+      "extracted_primitives_by_file": [],
+      "local_clone": null
     },
     "chump-chassis": {
       "name": "chump-chassis",
@@ -1638,7 +1708,9 @@
       "primitives": [
         "list-mgmt"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Configurable multi-mode (spinner/progress/skeleton) loading overlay component (frontend/src/components/LoadingOverlay.tsx)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -1843,7 +1915,9 @@
       "primitives": [
         "rpg-mechanic"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "SmugglerOSLoader \u2014 configurable, timed-message boot/loading-screen class with options-merge constructor and DOM lifecycle (create/progress/complete) (js/components/SmugglerOSLoader.js)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -1862,7 +1936,9 @@
       "primitives": [
         "rpg-mechanic"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "SmugglerOSLoader class (duplicate of services-dashboard's) across sub-apps (ai-gm/js/components/SmugglerOSLoader.js, character-system/js/components/SmugglerOSLoader.js) \u2014 candidate for de-duplication into a shared package"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -1948,7 +2024,9 @@
         "payment",
         "rpg-mechanic"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Game-economy monetization engine with CAC/LTV/ARPU/ROI calculators, black-market pricing + listing-risk scoring, and smuggling-route risk/toll calculators (server.js, calculateCAC/calculateLTV/calculateBlackMarketPrice/calculateListingRisk/calculateRouteRisk)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2071,7 +2149,10 @@
       "primitives": [
         "chat"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Rule-based multi-category toxicity/content moderation engine with regex pattern banks and contextual escalation/de-escalation tracking (src/services/AIChatModerationService.js)",
+        "Multi-language translation config/quality-scoring + language-family grouping for pair selection (src/services/RealtimeTranslationService.js)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2090,7 +2171,10 @@
       "primitives": [
         "payment"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Fraud-detection rule engine with velocity checks, geographic-anomaly thresholds, and typed fraud/risk taxonomies (src/services/AIFraudDetectionService.js)",
+        "Dynamic regional pricing engine combining GDP/purchasing-power/exchange-rate data with market-demand/competition weighting (src/services/RegionalPricingService.js)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2130,7 +2214,9 @@
       "primitives": [
         "marketplace"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Cross-game/NFT trading service with real async escrow, trade-fee/NFT-fee/complexity calculators, and multi-chain NFT mint/transfer flow (src/services/CrossGameTradingService.js: createTradeOffer/executeTrade/initializeEscrow/calculateTradeFees)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2149,7 +2235,9 @@
       "primitives": [
         "ai-generation"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Multi-language code generation/refactor/convert/test/doc pipeline with per-language ecosystem metadata and post-processing stages (src/services/MultiLanguageCodeGenerator.js: generateCode/refactorCode/convertCode/generateTests/generateDocumentation)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2248,7 +2336,9 @@
       "primitives": [
         "rpg-mechanic"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Full game implementation (1.2M+ size) \u2014 tree-level scan only; flagged for a dedicated follow-up deep-scan pass rather than a verified per-file citation"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2285,7 +2375,9 @@
       "topics": [],
       "cluster": "tools-platform",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Raw Node http-based CLI-to-server client with config management, integration setup flows, and parallel-crawl dispatcher (cli/code-roach.js: crawlParallel/parseArgs/commands.quality)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2340,7 +2432,9 @@
       "topics": [],
       "cluster": "echeo-resonant",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Typed error-handling hierarchy (AppError/ValidationError) with structured logging + singleton controller pattern in an OKR/goals backend auth flow (backend/src/controllers/AuthController.ts)"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2377,7 +2471,9 @@
       "topics": [],
       "cluster": "echeo-resonant",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "Same AuthController.ts primitives as echeodev (byte-identical auth controller header) \u2014 earlier duplicate/fork; echeodev is the canonical citation"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -2401,5 +2497,12 @@
       "local_clone": null
     }
   },
-  "unmatched_local_roots": []
+  "unmatched_local_roots": [
+    {
+      "path": "/home/jeff/Projects/chump",
+      "remote": "git@github.com:repairman29/chump.git",
+      "has_embedded_token": false,
+      "is_primary_clone": false
+    }
+  ]
 }
