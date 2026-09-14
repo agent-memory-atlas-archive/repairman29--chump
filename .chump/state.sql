@@ -100399,7 +100399,7 @@ gaps:
   acceptance_criteria:
     - "Failure: src/main.rs is 14,450 LOC with 231 `mod` declarations (verified via wc -l + grep -c '^mod '). Every code change triggers full-binary recompile. INFRA-825 staleness gate then blocks destructive ops until rebuild."
   notes: |
-    Decomposed into 10 slices: INFRA-5494, INFRA-5495, INFRA-5496, INFRA-5497, INFRA-5498, INFRA-5499, INFRA-5500, INFRA-5501, INFRA-5502, INFRA-5503
+    Decomposed into 10 slices: INFRA-6377, INFRA-6378, INFRA-6379, INFRA-6380, INFRA-6381, INFRA-6382, INFRA-6383, INFRA-6384, INFRA-6385, INFRA-6386
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -213646,6 +213646,7 @@ gaps:
   acceptance_criteria:
     - Script exits with non‑zero status when `grep -c '^mod '` > 200
     - Script is added to the repository and can be executed via `cargo run-script lint-mod-count`
+  depends_on: [INFRA-6377]
   notes: |
     [chump harvest check 'CRITICAL']
     === primitives_index match for 'CRITICAL' ===
@@ -213675,6 +213676,7 @@ gaps:
     - All shared functions/types are compiled from src/lib.rs
     - "src/main.rs builds successfully after `use crate::...` imports"
     - Existing unit tests pass
+  depends_on: [INFRA-6378]
   notes: |
     [chump harvest check 'CRITICAL']
     === primitives_index match for 'CRITICAL' ===
@@ -213704,6 +213706,7 @@ gaps:
     - Each `mod foo;` declaration points to a file under src/foo/mod.rs or src/foo.rs
     - "`cargo build` succeeds with no warnings about duplicate modules"
     - Directory structure mirrors module hierarchy
+  depends_on: [INFRA-6379]
   notes: |
     [chump harvest check 'CRITICAL']
     === primitives_index match for 'CRITICAL' ===
@@ -213733,6 +213736,7 @@ gaps:
     - A feature flag `incremental` is added to Cargo.toml
     - Building with `cargo build --features incremental` recompiles only changed modules after a small edit
     - Build time reduction of at least 30% compared to full rebuild is measured
+  depends_on: [INFRA-6380]
   notes: |
     [chump harvest check 'CRITICAL']
     === primitives_index match for 'CRITICAL' ===
@@ -213762,6 +213766,127 @@ gaps:
     - CI job runs `cargo build --features incremental` and records build duration
     - Job fails if incremental build time exceeds threshold (e.g., 1.5× previous successful run)
     - Pipeline badge shows incremental build status
+  depends_on: [INFRA-6381]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6383
+  domain: INFRA
+  title: "INFRA: Document module organization guidelines (INFRA-1965 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Guidelines are added to `docs/architecture.md` describing module placement, naming, and feature usage
+    - Documentation linter (`markdownlint`) passes without errors
+  depends_on: [INFRA-6380]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6384
+  domain: INFRA
+  title: "INFRA: Integrate INFRA-825 staleness gate with rebuild checks (INFRA-1965 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Staleness gate blocks destructive operations when binary timestamp is older than source timestamp
+    - Automated test confirms gate blocks when a dummy change is made without rebuilding
+    - Gate logs appropriate warning messages
+  depends_on: [INFRA-6381]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6385
+  domain: INFRA
+  title: "INFRA: Write integration tests for incremental compilation behavior (INFRA-1965 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test modifies a single module and asserts that only that module's artifact is rebuilt (checked via `cargo build -vv` output)
+    - Test passes in CI after the incremental feature flag is enabled
+    - Test suite runs in under 5 minutes
+  depends_on: [INFRA-6384]
+  notes: |
+    [chump harvest check 'CRITICAL']
+    === primitives_index match for 'CRITICAL' ===
+    
+    === cluster keyword match for 'CRITICAL' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'CRITICAL' ===
+    
+    === repo-description match for 'CRITICAL' ===
+    
+    === HARVEST_ROADMAP.md mention of 'CRITICAL' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'CRITICAL' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: INFRA-6386
+  domain: INFRA
+  title: "INFRA: Finalize refactor and clean up legacy mods (INFRA-1965 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - src/main.rs LOC reduced to < 5000 lines
+    - Number of `mod` declarations reduced to < 100
+    - Full binary rebuild time under defined threshold (e.g., < 30 seconds)
+    - All existing unit and integration tests pass
+  depends_on: [INFRA-6385]
   notes: |
     [chump harvest check 'CRITICAL']
     === primitives_index match for 'CRITICAL' ===
