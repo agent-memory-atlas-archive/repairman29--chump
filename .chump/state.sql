@@ -43666,10 +43666,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Create a new markdown file at `docs/cli/chump_verbs.md` that enumerates every newly added `chump` verb with its synopsis, flags, usage examples, and error‑handling notes, add a markdown link to this file from the main `chump` README, and insert a single comment in the `spawn_chump_local` function (in `crates/chump-orchestrator/src/dispatch.rs`) that points developers to the new documentation.
+    
+    Target file(s):
+    - docs/cli/chump_verbs.md
+    - crates/chump-orchestrator/src/dispatch.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Markdown docs under `docs/cli` list each new verb with synopsis, flags, examples, and error handling notes
-    - Docs are linked from the main `chump` README and pass spell‑check
-    - Generated docs are included in the release artefact
+    - The file `docs/cli/chump_verbs.md` contains a distinct markdown section for each verb defined in the codebase (e.g., `spawn_chump_local`) and each section includes non‑empty **Synopsis**, **Flags**, **Example**, and **Error Handling** subsections.
+    - The top‑level `README.md` includes the exact line `[chump verbs](docs/cli/chump_verbs.md)` under its Documentation heading.
+    - "The function `spawn_chump_local` in `crates/chump-orchestrator/src/dispatch.rs` contains the comment `// Docs: docs/cli/chump_verbs.md` immediately above its definition."
+    - "Running `grep -q \"\\[chump verbs\\](docs/cli/chump_verbs.md)\" README.md` exits with status 0, confirming the link is present."
   depends_on: [EFFECTIVE-1130, EFFECTIVE-1131, EFFECTIVE-1132, EFFECTIVE-1133, EFFECTIVE-1134, EFFECTIVE-1135, EFFECTIVE-1136, EFFECTIVE-1137, EFFECTIVE-1138, EFFECTIVE-1139, EFFECTIVE-1140, EFFECTIVE-1141]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -89263,7 +89272,7 @@ gaps:
     - "Eliminates the 60-second Selenium timeout that wastes 4+ min per failed run + every PR's CI bucket; root cause behind 8+ PR-blocking failures observed today (#2138, #2127, #2120, #2119, #2069 etc.)"
   depends_on: [INFRA-1425]
   notes: |
-    Decomposed into 10 slices: INFRA-6089, INFRA-6090, INFRA-6091, INFRA-6092, INFRA-6093, INFRA-6094, INFRA-6095, INFRA-6096, INFRA-6097, INFRA-6098
+    Decomposed into 10 slices: INFRA-6338, INFRA-6339, INFRA-6340, INFRA-6341, INFRA-6342, INFRA-6343, INFRA-6344, INFRA-6345, INFRA-6346, INFRA-6347
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -212392,7 +212401,7 @@ gaps:
 - id: INFRA-6338
   domain: INFRA
   title: "INFRA: Investigate why the 'chump-chat' CSS selector never appears (INFRA-1433 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -212416,6 +212425,10 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+  closed_date: '2026-09-14'
+  closed_pr: 4675
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4675 titled 'INFRA-6338: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6339
   domain: INFRA
@@ -212427,6 +212440,7 @@ gaps:
     - Test file references the current selector (e.g., 'chat-room' or verified selector)
     - Local test run passes without timeout
     - Commit includes updated selector comment
+  depends_on: [INFRA-6338]
   notes: |
     [chump harvest check 'RESILIENT']
     === primitives_index match for 'RESILIENT' ===
@@ -212454,6 +212468,7 @@ gaps:
     - Test asserts that the selector resolves to an existing custom element in web/v2/
     - Fails if the element is missing or renamed
     - Regression check runs as part of the e2e test suite
+  depends_on: [INFRA-6339]
   notes: |
     [chump harvest check 'RESILIENT']
     === primitives_index match for 'RESILIENT' ===
@@ -212481,6 +212496,7 @@ gaps:
     - Test setup waits for the app to signal readiness before proceeding
     - No Selenium timeout occurs when the app mounts correctly
     - CI logs show the wait completed successfully
+  depends_on: [INFRA-6338]
   notes: |
     [chump harvest check 'RESILIENT']
     === primitives_index match for 'RESILIENT' ===
@@ -212508,6 +212524,7 @@ gaps:
     - CI configuration runs the test only on nightly builds
     - PR CI pipelines no longer include the flaky test
     - Documentation updated to reflect the change
+  depends_on: [INFRA-6341]
   notes: |
     [chump harvest check 'RESILIENT']
     === primitives_index match for 'RESILIENT' ===
@@ -212536,6 +212553,119 @@ gaps:
     - Script asserts that the e2e selector points at an existing element
     - Script exits with status 0 on success and non‑zero on failure
     - Script is added to the repo with executable permissions
+  depends_on: [INFRA-6340]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6344
+  domain: INFRA
+  title: "INFRA: Integrate smoke test into CI pipeline (INFRA-1433 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - CI runs the smoke test before the full e2e suite
+    - Pipeline fails early if the selector is missing
+    - Job logs clearly show smoke test results
+  depends_on: [INFRA-6343]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6345
+  domain: INFRA
+  title: "INFRA: Verify elimination of the 60‑second Selenium timeout (INFRA-1433 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - CI runs complete without the 60‑second timeout
+    - Total CI time for the affected job is reduced by at least 4 minutes
+    - All related PRs pass CI without blocking failures
+  depends_on: [INFRA-6341, INFRA-6343]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6346
+  domain: INFRA
+  title: "INFRA: Document root cause and mitigation steps in project wiki (INFRA-1433 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Wiki page includes investigation summary, selector update, wait‑for‑ready fix, and smoke test details
+    - "Links to relevant tickets (#2138, #2127, #2120, #2119, #2069) are added"
+    - Team members acknowledge the documentation
+  depends_on: [INFRA-6338, INFRA-6345]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6347
+  domain: INFRA
+  title: "INFRA: Run regression suite across recent PRs to confirm no blocking failures (INFRA-1433 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - All PRs from the last two weeks pass CI without the previous selector timeout
+    - No new failures related to chump‑chat selector are introduced
+    - Results are recorded and shared with the team
+  depends_on: [INFRA-6345]
   notes: |
     [chump harvest check 'RESILIENT']
     === primitives_index match for 'RESILIENT' ===
