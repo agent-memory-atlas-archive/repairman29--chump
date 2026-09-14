@@ -216,4 +216,32 @@ grep -q '"worst_repo":"noreport(missing_pct_field)"' "$AMB6" \
     || fail "expected worst_repo to flag the missing-pct entry; ambient: $(cat "$AMB6")"
 pass "repo entry missing pct field -> treated as coverage violation, not silently 100%, exit 2"
 
+# ── 8. FLOOR CLAMP: a below-95 MIN_PCT override cannot weaken the guard ────
+# CREDIBLE-1210: CHUMP_ALMANAC_SUMMARIZE_MIN_PCT must never lower the guard
+# below the 95% mission floor. A repo at 80% would pass an (unclamped) 50%
+# override but must still trip the guard once clamped back to 95%.
+echo "--- 8: MIN_PCT below 95 is clamped to 95 ---"
+COVERAGE_80="$TMP/coverage-80.sh"
+cat > "$COVERAGE_80" <<'EOF'
+#!/usr/bin/env bash
+echo '{"repos":[{"repo":"holler","pct":80.0}]}'
+EOF
+chmod +x "$COVERAGE_80"
+
+AMB7="$TMP/ambient7.jsonl"
+: > "$AMB7"
+: > "$RECALL_CALL_LOG"
+out="$(CHUMP_ALMANAC_WATCHDOG_PGREP_BIN="$PGREP_ALIVE" \
+    CHUMP_ALMANAC_WATCHDOG_COVERAGE_BIN="$COVERAGE_80" \
+    CHUMP_ALMANAC_WATCHDOG_RECALL_SCRIPT="$RECALL_STUB" \
+    CHUMP_ALMANAC_SUMMARIZE_MIN_PCT=50 \
+    CHUMP_AMBIENT_LOG="$AMB7" "$WATCHDOG" 2>&1)"
+rc=$?
+[[ "$rc" -eq 2 ]] || fail "expected exit 2 — a 50% override must be clamped to the 95% floor; got $rc; output: $out"
+grep -q -- "--condition ALMANAC_SUMMARIZE_COVERAGE_DROP" "$RECALL_CALL_LOG" \
+    || fail "expected clamped floor to still page operator-recall; calls: $(cat "$RECALL_CALL_LOG")"
+grep -q '"floor":95' "$AMB7" \
+    || fail "expected coverage_drop event to record the clamped floor of 95; ambient: $(cat "$AMB7")"
+pass "MIN_PCT override below 95 is clamped to 95 -> guard still trips, floor recorded as 95"
+
 echo "=== all almanac-summarize-watchdog tests passed ==="
