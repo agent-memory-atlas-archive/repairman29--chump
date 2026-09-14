@@ -38493,9 +38493,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Verify test execution integrity for the EFFECTIVE slice by running `scripts/ci/test-ambient-schema-consistency.sh` and ensuring unit test assertions in `src/agent_loop/prompt_assembler.rs` (`mod tests`) execute and pass cleanly under cargo test.
+    
+    Target file(s):
+    - scripts/ci/test-ambient-schema-consistency.sh
+    - src/agent_loop/prompt_assembler.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "`cargo test` runs without failures"
-    - No regression is observed in previously passing test suites
+    - Running `bash scripts/ci/test-ambient-schema-consistency.sh` executes the `check` function and exits with code 0.
+    - "`cargo test --lib` passes all tests in `src/agent_loop/prompt_assembler.rs` under `mod tests` with zero failures."
+    - "`cargo test` completes across the workspace with zero failing test cases."
   depends_on: [EFFECTIVE-1028]
 
 - id: EFFECTIVE-103
@@ -208492,7 +208501,7 @@ gaps:
 - id: INFRA-6297
   domain: INFRA
   title: "INFRA: INFRA-3900: Determine default SCCACHE_DIR based on free space in /home (INFRA-3661 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -208521,6 +208530,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+  closed_date: '2026-09-14'
+  closed_pr: 4668
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4668 titled 'INFRA-6297: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6298
   domain: INFRA
@@ -227864,7 +227877,7 @@ gaps:
 - id: RESILIENT-1205
   domain: RESILIENT
   title: RESILIENT-1189 auto-converge organ merged+wired but wont install/fire on CJ; node checkout churns off main
-  status: open
+  status: blocked
   priority: P2
   effort: m
   acceptance_criteria:
@@ -227873,6 +227886,7 @@ gaps:
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
   notes: |
     Decomposed into 8 slices: RESILIENT-1214, RESILIENT-1215, RESILIENT-1216, RESILIENT-1217, RESILIENT-1218, RESILIENT-1219, RESILIENT-1220, RESILIENT-1221
+    [2026-09-14T10:38:18Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=2441B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
   outcome_id: MISSION-012
   evidence: |
     PR #4640 merged the node-converge organ AND wired it (git show origin/main: node-converge in organ-manifest.txt x2 + install-helsinki-atc.sh x4). But on CJ it will not run: (1) install-helsinki-atc.sh --auto + chump-organ-deploy both SKIP installing chump-node-converge.timer (stays inactive); (2) a hand-installed unit had literal /root/Projects/chump (the installers REPO_ROOT substitution was skipped) and User defaulted to root so bash -l hit /root/.bash_profile Permission denied; (3) organ-reconcile reaps any non-manifest unit. Worse: grepping the WORKING checkout for node-converge in those two files returns 0 even though HEAD=57d85ce13 and origin/main has them 2/4 - so the node source tree is being churned away from origin/main after a reset (instability; possibly a partial converge or another agent). Net: the auto-converge timer never fires, so merged!=deployed persists for bash organs (the very thing #4640 was meant to fix). NEEDS: make the organ deterministically install+enable+fire on a MUSCLE node via the normal organ-deploy path (role handling + REPO_ROOT/User substitution for a non-helsinki node), and stabilize the node checkout so it stays == origin/main. Verify by systemctl is-active chump-node-converge.timer + a real converge on CJ.
