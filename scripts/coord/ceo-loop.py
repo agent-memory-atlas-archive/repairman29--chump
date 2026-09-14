@@ -95,10 +95,25 @@ def dm_channel_id():
     return cid
 
 
+def _autopost_dm_enabled():
+    """Operator kill-switch for automated operator DMs (Jeff, 2026-09-13:
+    'kill everything automated'). Default OFF; set CHUMP_OPERATOR_AUTOPOST_DM
+    to 1/true/on/yes to restore briefing DMs. Plain descriptive name (not a
+    *_BYPASS/_SKIP var) so it doesn't count against the bypass-var ceiling."""
+    return os.environ.get("CHUMP_OPERATOR_AUTOPOST_DM", "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+
+
 def discord_send(text):
     """DM the CTO. Never raises; returns a status string for the record."""
     if not (DISCORD_TOKEN and CTO_USER_ID):
         return "disabled"
+    # The CEO briefing is a scheduled autopost, not a reply to a message Jeff
+    # sent — suppressed unless the operator re-enables automated DMs. The
+    # briefing still computes and records; only the outbound DM is withheld.
+    if not _autopost_dm_enabled():
+        return "suppressed-autoposts-off"
     try:
         _discord_req("POST", f"/channels/{dm_channel_id()}/messages",
                      {"content": text[:1900]})

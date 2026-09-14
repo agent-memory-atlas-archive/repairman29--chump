@@ -313,9 +313,46 @@ notify_operator() {
 # _notify_deliver — the actual Discord REST send, extracted out of
 # notify_operator so discord-curator-flush.sh can deliver ONE combined message
 # without re-running the per-signal escalation classification above.
+# CHUMP_OPERATOR_AUTOPOST_DM — operator kill-switch for AUTOMATED operator DMs
+# (Jeff, 2026-09-13: "kill everything automated"). Default (unset/empty/0/false/
+# off/no) = automated DMs OFF. Set to 1/true/on/yes to restore the pre-2026-09-13
+# behavior where pages, digests and briefings DM the operator again. Deliberately
+# a plain descriptive name (not a *_BYPASS/_SKIP/_IGNORE var) so it neither reads
+# as a gate-bypass nor counts against the bypass-var debt ceiling.
+_notify_autopost_dm_enabled() {
+    case "$(printf '%s' "${CHUMP_OPERATOR_AUTOPOST_DM:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|on|yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# The ONLY DMs that still leave the fleet when autoposts are off are REPLIES to a
+# message Jeff sent: the two-way command gateway's answer (discord_command_reply)
+# and the Advisor's answer to a Jeff DM (discord_advisor_reply). Everything else —
+# pages, digests (chump_digest), briefings (board_ceo_briefing), halt-class
+# incidents, curated batches, an unset kind — is an automated send and is
+# withheld unless the operator re-enables it. Classification, ambient events and
+# buffering all still run upstream; only the outbound Discord call is gated, so
+# no functional organ is disabled — it just stops DMing.
+_notify_is_command_reply_kind() {
+    case "${1:-}" in
+        discord_command_reply|discord_advisor_reply) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 _notify_deliver() {
     local content="${1:-}"
     [[ -n "${content//[[:space:]]/}" ]] || return 0
+
+    # Automated-DM kill-switch (Jeff, 2026-09-13). Command-replies always deliver;
+    # every other kind is suppressed unless CHUMP_OPERATOR_AUTOPOST_DM re-enables it.
+    if ! _notify_is_command_reply_kind "${CHUMP_NOTIFY_KIND:-}" && ! _notify_autopost_dm_enabled; then
+        _notify_emit "operator_notify_suppressed" \
+            ",\"signal\":\"${CHUMP_NOTIFY_KIND:-none}\",\"reason\":\"autoposts-off\""
+        echo "[notify-operator] SUPPRESSED (automated operator DMs are off; set CHUMP_OPERATOR_AUTOPOST_DM=1 to re-enable): kind=${CHUMP_NOTIFY_KIND:-<none>}" >&2
+        return 0
+    fi
 
     local token uid
     token="$(_notify_env DISCORD_TOKEN)"
@@ -431,6 +468,16 @@ for i, chunk in enumerate(out, 1):
 notify_operator_buttons() {
     local content="${1:-}" components="${2:-[]}"
     [[ -n "${content//[[:space:]]/}" ]] || return 0
+
+    # Automated-DM kill-switch (Jeff, 2026-09-13). An approval prompt is a
+    # fleet-initiated page, never a reply to a message Jeff sent, so it is
+    # withheld unless CHUMP_OPERATOR_AUTOPOST_DM re-enables automated DMs.
+    if ! _notify_autopost_dm_enabled; then
+        _notify_emit "operator_notify_suppressed" \
+            ",\"signal\":\"${CHUMP_NOTIFY_KIND:-buttons}\",\"reason\":\"autoposts-off\""
+        echo "[notify-operator] SUPPRESSED (buttons): automated operator DMs are off; set CHUMP_OPERATOR_AUTOPOST_DM=1 to re-enable" >&2
+        return 0
+    fi
 
     local token uid
     token="$(_notify_env DISCORD_TOKEN)"

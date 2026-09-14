@@ -2798,3 +2798,7 @@ CHUMP_SELF_MODEL_SYSTEMCTL_BIN
 CHUMP_APEX_WATCHDOG_HEAL_ESCALATE
 # detected in: (standard input)
 CHUMP_APEX_WATCHDOG_RECALL_SCRIPT
+
+# Operator kill-switch for automated operator DMs (Jeff, 2026-09-13).
+# Default OFF; set to 1/true/on/yes to re-enable pages/digests/briefings DMs.
+CHUMP_OPERATOR_AUTOPOST_DM

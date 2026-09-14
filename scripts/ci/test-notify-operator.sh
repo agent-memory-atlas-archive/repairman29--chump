@@ -22,6 +22,13 @@ PASS=0; FAIL=0
 ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
 bad()  { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 
+# This suite exercises the delivery/escalation MACHINERY (rate ceiling, halt
+# bypass, buffering). Since 2026-09-13 that machinery is gated OFF by default
+# (Jeff's "kill everything automated" order — see test-kill-autopost-dms.sh,
+# which owns the default-off policy). Enable it here so the machinery is under
+# test; the kill-switch policy is asserted by the dedicated test.
+export CHUMP_OPERATOR_AUTOPOST_DM=1
+
 echo "=== RESILIENT-263: operator escalation channel ==="
 
 LIB="$REPO_ROOT/scripts/coord/lib/notify-operator.sh"

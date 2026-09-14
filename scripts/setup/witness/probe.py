@@ -52,6 +52,13 @@ def dm(env, text):
     tok, uid = env.get("DISCORD_TOKEN"), env.get("CHUMP_READY_DM_USER_ID")
     if not (tok and uid):
         return "no-creds"
+    # Operator kill-switch (Jeff, 2026-09-13): the witness probe is an automated
+    # dead-man's-switch page, not a reply to a message Jeff sent — suppressed
+    # unless CHUMP_OPERATOR_AUTOPOST_DM re-enables automated operator DMs.
+    if os.environ.get("CHUMP_OPERATOR_AUTOPOST_DM", "").strip().lower() not in (
+        "1", "true", "on", "yes",
+    ):
+        return "suppressed-autoposts-off"
     try:
         def req(path, body):
             r = urllib.request.Request(

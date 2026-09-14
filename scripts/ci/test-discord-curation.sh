@@ -16,6 +16,14 @@
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# This suite exercises the curation MACHINERY (batch N page-worthy signals into
+# ONE combined send). Since 2026-09-13 outbound automated DMs are gated OFF by
+# default (Jeff's "kill everything automated" order — the default-off policy is
+# asserted by test-kill-autopost-dms.sh). Enable delivery here so the batching
+# behavior is actually under test rather than short-circuited by the kill-switch.
+export CHUMP_OPERATOR_AUTOPOST_DM=1
+
 PASS=0; FAIL=0
 ok()  { echo "  PASS: $1"; PASS=$((PASS+1)); }
 bad() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }

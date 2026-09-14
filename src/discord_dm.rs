@@ -12,6 +12,22 @@ const DISCORD_API: &str = "https://discord.com/api/v10";
 /// If DISCORD_TOKEN and CHUMP_READY_DM_USER_ID are set, send the message as a DM to that user.
 /// No-op if message is empty or env vars are missing. Logs errors but does not fail the process.
 pub async fn send_dm_if_configured(message: &str) {
+    // Operator standing order (Jeff, 2026-09-13): the fleet must NOT auto-DM
+    // the operator anymore — not heartbeat rounds, not `--notify` pipes from
+    // watchdog/farmer/morning-briefing scripts, not shim approval prompts, not
+    // even halt-class pages. Every caller of THIS function is an automated
+    // (scheduled or event-driven) send to the operator, so the whole helper is
+    // gated off by default. The one thing kept — the two-way command gateway's
+    // REPLIES to a message Jeff sent — never flows through here (the Python
+    // gateway sends via its own path, and the command/advisor agents reply via
+    // notify-operator.sh's command-reply allowlist). This is reversible by
+    // design: set CHUMP_OPERATOR_AUTOPOST_DM=1 (also true/on/yes) to restore
+    // the pre-2026-09-13 behavior. Deliberately a plain descriptive name (not a
+    // *_BYPASS/_SKIP/_IGNORE var) so it neither reads as a gate-bypass nor
+    // counts against the bypass-var debt ceiling.
+    if !autopost_dm_enabled() {
+        return;
+    }
     // RESILIENT-287: never fire a real operator DM from inside a test run.
     // A fleet node runs `cargo test` with providers.env sourced, so
     // DISCORD_TOKEN + CHUMP_READY_DM_USER_ID are set and the "no-op in test
@@ -46,6 +62,21 @@ pub async fn send_dm_if_configured(message: &str) {
             "Notify DM (CLI): {}",
             crate::chump_log::redact(&e.to_string())
         );
+    }
+}
+
+/// True when the operator has re-enabled automated operator DMs via
+/// `CHUMP_OPERATOR_AUTOPOST_DM` (1/true/on/yes, case-insensitive). Default
+/// (unset/empty/anything else) is OFF — automated DMs are suppressed. This
+/// gates only `send_dm_if_configured` (the operator-DM path); a2a peer
+/// messaging (`send_dm_to_user` / `send_channel_message`) is unaffected.
+pub fn autopost_dm_enabled() -> bool {
+    match std::env::var("CHUMP_OPERATOR_AUTOPOST_DM") {
+        Ok(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "on" | "yes"
+        ),
+        Err(_) => false,
     }
 }
 
