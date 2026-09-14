@@ -177,7 +177,7 @@ jobs:
 
       - name: Upload golden path timing log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: golden-path-timing
           path: logs/golden-path-timing-*.jsonl
