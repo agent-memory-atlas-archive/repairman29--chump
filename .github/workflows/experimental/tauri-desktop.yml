@@ -15,7 +15,7 @@ jobs:
   bundle-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -41,7 +41,7 @@ jobs:
           echo "app=$APP" >> "$GITHUB_OUTPUT"
           test -n "$APP"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: chump-desktop-macos-app-unsigned
           path: ${{ steps.bundle.outputs.app }}
