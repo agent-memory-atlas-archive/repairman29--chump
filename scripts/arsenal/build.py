@@ -134,6 +134,85 @@ EXTRACTED_PRIMITIVES: dict[str, list[str]] = {
     ],
     "oracle": ["Vector-embeddings semantic search service (with unified-embeddings + echeo fallback chain) in scripts/oracle-vector-embeddings.js"],
     "project_forge": ["Express + Objection.js OKR/KeyResult REST controller with transaction support in backend/src/controllers/OKRController.ts"],
+    # INFRA-6117: coverage push, wave 5 (2026-09-14) — deep-scan of the 50 repos
+    # added to the fleet since Wave 4 (fleet_size grew 76 -> 101). Findings via
+    # gh api (no local clones), per-repo verify-at-source discipline.
+    "olive": [
+        "Bounded tool-calling LLM orchestrator loop with honesty-rail/human-gate guarantees (src/lib/agent/orchestrator.ts)",
+        "Deterministic fallback-narration generator for degraded LLM turns (src/lib/agent/fallback.ts)",
+        "Kroger pricing/catalog engine (src/lib/kroger/engine.ts, priceList.ts)",
+    ],
+    "workspace-docs": ["Prose voice-fingerprinting statistical analyzer comparing draft text against a ground-truth corpus by register (content/voice-fingerprint.mjs) with companion corpus-builder (content/voice-corpus.mjs)"],
+    "almanac": [
+        "Reciprocal Rank Fusion multi-retriever hybrid search (crates/almanac-core/src/fusion.rs)",
+        "Cross-encoder reranker HTTP client with multi-schema response parsing (crates/almanac-core/src/rerank.rs)",
+    ],
+    "games-workspace": [
+        "Time-windowed combo/multiplier scoring system (extractions/neon-shmup/ComboManager.ts)",
+        "Pixi.js particle-emitter system with lifecycle management (extractions/neon-shmup/ParticleSystem.ts)",
+        "Shared leaderboard/feedback-widget modules (shared/leaderboard.js, shared/feedback-widget.js)",
+    ],
+    "grave-dancer": ["Pure, unit-testable horizontal movement/physics stepper decoupled from the game engine (src/lib/movement.js: stepHorizontalVelocity with accel/friction/clamp logic)"],
+    "holler": [
+        "Self-contained feedback-widget library with offline retry queue distinguishing permanent (4xx) vs transient (429/5xx) failures and deduped error capture (holler.js)",
+        "CLI triage/inbox tool with since-last-run diffing (inbox.mjs)",
+    ],
+    "privateer": ["Deterministic capability-need tracker/chart generator that separates mechanical bookkeeping from AI judgment, emits a portable cross-harness launch prompt (voyage.mjs)"],
+    "jarvis-rog-ed": ["Modular skill-plugin architecture with per-skill index.js entrypoints (jarvis/skills/*/index.js pattern, e.g. clipboard-history, window-manager, workflow-automation)"],
+    "echeo_old": ["Generic paginated CRUD base repository over Prisma (apps/notification-service/src/repositories/BaseRepository.ts — abstract class with findWithPagination, typed PaginatedResult<T>, DatabaseError wrapper)"],
+    "posse": [
+        "Headless-browser autonomous playtest bot with hazard-learning/stall-detection heuristics (bot.mjs)",
+        "Deterministic world-graph edge-coverage surveyor with verdict classification (surveyor.mjs, NO_TRANSITION/WRONG_TARGET/SPAWN_MISMATCH logic)",
+    ],
+    "realm-of-shadows": ["Real-time combat system with hitstop/parry/attack-cooldown state machine (src/systems/CombatSystem.js)"],
+    "upshift-cli": [
+        "Timestamped backup/rollback manager for filesystem changes with interactive restore flow (src/lib/rollback.ts)",
+        "Commander-based CLI command pattern with zod-style input validation (src/commands/fix.ts + src/lib/validate.ts)",
+    ],
+    "crystal-rush": ["PIXI.js entity classes with hand-drawn vector sprite composition and animation state (src/entities.js Player class)"],
+    "roblox-game-manager": ["Async Roblox Open Cloud API client wrapper with typed HTTP verb dispatch and error handling (roblox_api_manager.py RobloxAPIManager class)"],
+    "kosmos": ["Gmail OAuth token-refresh + AI-driven email auto-processing pipeline (lib/token-refresh.ts, lib/ai-email-processor.ts, app/api/ai-email-manager/auto-process/route.ts)"],
+    "MythSeeker": [
+        "Typed combat engine with encounter/turn/event-handler state machine (src/services/combatEngine.ts, class CombatEngine)",
+        "D&D5e rules engine with typed Spell/Character/Monster models driving spell/monster JSON data (src/services/rulesEngine.ts)",
+    ],
+    "smuggler-discord-bot": [
+        "d100 outcome-band dice resolver with canon success/failure tiers (src/dice.js)",
+        "Session budget-cap surfacing with warn/degrade thresholds (src/budget.js)",
+        "Discord channel/thread topology builder for session play (src/channelTopology.js)",
+        "Layered ephemeral character-picker flow with TTL'd custom IDs (src/picker.js)",
+    ],
+    "bulwark": [
+        "CircuitBreaker state machine CLOSED/OPEN/HALF_OPEN (src/circuit-breaker.js)",
+        "Token-bucket RateLimiter with refill+block (src/rate-limiter.js)",
+        "Exponential-backoff RetryHandler with retryable-error classification (src/retry-patterns.js)",
+        "ResilientClient composing rate-limit+circuit-breaker+retry (src/resilience.js)",
+    ],
+    "smuggler": [
+        "Pure game-logic core modules: d100 dice with advantage/disadvantage (core/dice.js), heat threshold/consequence system (core/heat.js), plus core/combat.js, core/economy.js, core/reputation.js, core/ships.js",
+    ],
+    "derelict": [
+        "ElectroDB entity + service + tRPC router CRUD pattern with real game-lifecycle business logic — roster/guild validation, scenario slug-collision suffixing (packages/backend/db/services/game.service.ts)",
+        "Ownership-checked tRPC mutation pattern for creator/admin authorization (packages/backend/lambda/api/scenario.router.ts)",
+    ],
+    "trove-app": ["Configurable multi-mode (spinner/progress/skeleton) loading overlay component (frontend/src/components/LoadingOverlay.tsx)"],
+    "services-dashboard": ["SmugglerOSLoader — configurable, timed-message boot/loading-screen class with options-merge constructor and DOM lifecycle (create/progress/complete) (js/components/SmugglerOSLoader.js)"],
+    "service-frontends": ["SmugglerOSLoader class (duplicate of services-dashboard's) across sub-apps (ai-gm/js/components/SmugglerOSLoader.js, character-system/js/components/SmugglerOSLoader.js) — candidate for de-duplication into a shared package"],
+    "commercial-platform": ["Game-economy monetization engine with CAC/LTV/ARPU/ROI calculators, black-market pricing + listing-risk scoring, and smuggling-route risk/toll calculators (server.js, calculateCAC/calculateLTV/calculateBlackMarketPrice/calculateListingRisk/calculateRouteRisk)"],
+    "chat-platform-service": [
+        "Rule-based multi-category toxicity/content moderation engine with regex pattern banks and contextual escalation/de-escalation tracking (src/services/AIChatModerationService.js)",
+        "Multi-language translation config/quality-scoring + language-family grouping for pair selection (src/services/RealtimeTranslationService.js)",
+    ],
+    "payment-platform-service": [
+        "Fraud-detection rule engine with velocity checks, geographic-anomaly thresholds, and typed fraud/risk taxonomies (src/services/AIFraudDetectionService.js)",
+        "Dynamic regional pricing engine combining GDP/purchasing-power/exchange-rate data with market-demand/competition weighting (src/services/RegionalPricingService.js)",
+    ],
+    "marketplace-system-service": ["Cross-game/NFT trading service with real async escrow, trade-fee/NFT-fee/complexity calculators, and multi-chain NFT mint/transfer flow (src/services/CrossGameTradingService.js: createTradeOffer/executeTrade/initializeEscrow/calculateTradeFees)"],
+    "code-generation-service": ["Multi-language code generation/refactor/convert/test/doc pipeline with per-language ecosystem metadata and post-processing stages (src/services/MultiLanguageCodeGenerator.js: generateCode/refactorCode/convertCode/generateTests/generateDocumentation)"],
+    "smugglers": ["Full game implementation (1.2M+ size) — tree-level scan only; flagged for a dedicated follow-up deep-scan pass rather than a verified per-file citation"],
+    "code-roach": ["Raw Node http-based CLI-to-server client with config management, integration setup flows, and parallel-crawl dispatcher (cli/code-roach.js: crawlParallel/parseArgs/commands.quality)"],
+    "echeodev": ["Typed error-handling hierarchy (AppError/ValidationError) with structured logging + singleton controller pattern in an OKR/goals backend auth flow (backend/src/controllers/AuthController.ts)"],
+    "echeo-dev": ["Same AuthController.ts primitives as echeodev (byte-identical auth controller header) — earlier duplicate/fork; echeodev is the canonical citation"],
 }
 
 

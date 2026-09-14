@@ -233,6 +233,24 @@ entries; 11 confirmed scanned-but-empty** (`chump` self-excluded; `chump-brain`,
 consistent with the Wave-3 archive-candidate list above). All 45 were read; "scanned and found
 nothing" is a valid outcome, not a gap in coverage.
 
+## Wave 5 — INFRA-6117 coverage push (2026-09-14)
+
+The fleet grew from 76 to 101 GitHub repos since Wave 4 (`gh repo list` count), leaving 50 repos
+with no `extracted_primitives` entry — the new "remaining 45" that INFRA-6117 targeted. Dispatched
+5 parallel Explore-style subagents via `gh api` (no local clones) covering all 50 (exceeds the
+45-repo AC). Added 52 primitives across **32 repos** to `EXTRACTED_PRIMITIVES` in
+`scripts/arsenal/build.py`; the remaining **18 confirmed scanned-but-empty**
+(`machine-substrate`, `jeffadkins-dev`, `opportunity-library`, `space-shooter`, `inversion`,
+`fulcrum`, `okr`, `project-2026-case`, `pixi-game`, `jeffadkins-me`, `homebrew-chump`, `choose`,
+`chump-brain`, `repairman29-website`, `2029`, `messaging-demo`, `slides`, `beast-mode-website`)
+are static/markdown/config/backup snapshots with no source logic. Notably, re-scanning
+`jarvis-rog-ed`, `echeo_old`, `code-roach`, `echeodev`, and `echeo-dev` — flagged empty in Wave 4
+— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+CLI crawl dispatcher, and a shared typed-error/auth-controller pattern respectively); Wave 4's
+"scanned but empty" verdict on those five should be treated as superseded, not authoritative.
+Ran `python3 scripts/arsenal/build.py` to regenerate `GLOBAL_ARSENAL.json`/`.md` — exit 0, fleet
+size 101 GH repos / 2 cloned locally, 11 clusters / 7 duplications / 0 alerts.
+
 ## Closing note — Discovery is the win
 
 The single most important finding from this entire pass isn't any individual primitive. It's the **echeo tree-sitter DRY catch**. We just shipped a tree-sitter crawler in INFRA-1719 (Sonnet's work, 2 days ago) while an existing one sat in echeo. Whether it was harvested-but-unacknowledged or reinvented, **the Harvester catalog would have flagged it at decompose time** if it had been live.
