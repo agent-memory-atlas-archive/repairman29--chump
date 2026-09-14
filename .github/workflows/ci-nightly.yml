@@ -46,6 +46,13 @@ jobs:
             libayatana-appindicator3-dev \
             build-essential pkg-config libssl-dev \
             libgtk-3-dev librsvg2-dev xvfb
+          # INFRA-6093: the apt package that provides WebKitWebDriver was
+          # renamed from webkit2gtk-driver -> webkitgtk-webdriver on newer
+          # Ubuntu bases (verified against Ubuntu 26.04 "resolute"); without
+          # it, run-tauri-e2e.sh's `command -v WebKitWebDriver` check fails
+          # before xvfb/D-Bus ever come into play. Try both names.
+          sudo apt-get install -y --no-install-recommends webkit2gtk-driver \
+            || sudo apt-get install -y --no-install-recommends webkitgtk-webdriver
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -55,8 +62,18 @@ jobs:
         with:
           shared-key: ci-nightly-tauri
 
+      - name: Install tauri-driver
+        # INFRA-6093: this job never installed the tauri-driver binary, so
+        # run-tauri-e2e.sh's `command -v tauri-driver` guard failed on every
+        # nightly run before the app was ever built or mounted headlessly.
+        # continue-on-error: true (below) masked this silently.
+        run: cargo install tauri-driver --locked
+
       - name: Tauri cowork E2E suite
-        run: bash scripts/ci/run-tauri-cowork-e2e.sh
+        # INFRA-6093: was scripts/ci/run-tauri-cowork-e2e.sh, which does not
+        # exist in this repo (the real script is run-tauri-e2e.sh) — this
+        # job has been failing at "No such file or directory" every night.
+        run: bash scripts/ci/run-tauri-e2e.sh
 
   # ── Shard B: Battle sim ───────────────────────────────────────────────────
   e2e-battle-sim:

@@ -323,7 +323,6 @@ jobs:
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
-            webkit2gtk-driver \
             xvfb \
             build-essential \
             pkg-config \
@@ -331,6 +330,12 @@ jobs:
             libgtk-3-dev \
             librsvg2-dev \
             util-linux
+          # INFRA-6093: the apt package providing WebKitWebDriver was renamed
+          # from webkit2gtk-driver -> webkitgtk-webdriver on newer Ubuntu
+          # bases (verified against Ubuntu 26.04 "resolute"); try both so
+          # this step doesn't die outright whenever ubuntu-latest advances.
+          sudo apt-get install -y webkit2gtk-driver \
+            || sudo apt-get install -y webkitgtk-webdriver
 
       - name: Cache tauri-driver binary
         id: tauri-driver-cache
