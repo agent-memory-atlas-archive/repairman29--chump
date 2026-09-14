@@ -29992,9 +29992,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a new unit test function `test_prune_ledger_removes_low_crit_entries` inside the existing `tests` module of `src/hooks.rs`. The test will construct a ledger containing both low‑Crit and high‑Crit entries, invoke the `prune_ledger` function on it, and assert that low‑Crit entries are removed while high‑Crit entries remain, thereby providing concrete verification for the CREDIBLE‑356 slice.
+    
+    Target file(s):
+    - src/hooks.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test confirms low‑Crit dormant entries are removed while high‑Crit entries remain
-    - Test fails before `prune_ledger` exists and passes after
+    - "src/hooks.rs contains a `#[test] fn test_prune_ledger_removes_low_crit_entries()` that compiles without errors."
+    - The test creates a ledger with mixed criticality entries, calls `prune_ledger(&mut ledger)`, and asserts that all low‑Crit entries are absent and all high‑Crit entries are still present after pruning.
+    - Running `cargo test` reports the new test as `ok` and the overall test suite exits with status 0.
+    - If the `prune_ledger` function is removed or its signature changes, the test fails to compile or panics, causing `cargo test` to report a failure.
   depends_on: [CREDIBLE-909]
   notes: |
     [chump harvest check 'Index']
@@ -30025,9 +30034,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update the `emit_ambient` function in `src/commands/claim_lint.rs` to add three new metric fields—`live_pct`, `debt`, and `pruned_entries`—by invoking `compute_live_pct`, `compute_debt`, and `prune_ledger` respectively, and adjust the ambient‑kind schema test in `scripts/ci/test-ambient-kind-schema.sh` to assert that these fields are present and correctly typed in the emitted output.
+    
+    Target file(s):
+    - src/commands/claim_lint.rs
+    - scripts/ci/test-ambient-kind-schema.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Ambient kind emission includes new columns `live_pct`, `debt`, and `pruned_entries`
-    - Values correspond to outputs of `compute_live_pct`, `compute_debt`, and `prune_ledger`
+    - In `src/commands/claim_lint.rs`, the `emit_ambient` function now writes JSON/YAML keys `live_pct`, `debt`, and `pruned_entries` alongside existing ambient metrics.
+    - The values assigned to `live_pct`, `debt`, and `pruned_entries` are the direct results of calling `compute_live_pct`, `compute_debt`, and `prune_ledger` within the same command flow.
+    - The `emit` test in `scripts/ci/test-ambient-kind-schema.sh` checks that the emitted ambient metric contains the three new keys and that each key’s value matches the expected type (numeric for `live_pct` and `debt`, integer for `pruned_entries`).
+    - Running the full CI suite (including `scripts/ci/test-fleet-metrics-snapshot.sh`) completes without failures, confirming that the ambient‑kind emission now includes the new columns.
   depends_on: [CREDIBLE-905, CREDIBLE-907, CREDIBLE-909]
   notes: |
     [chump harvest check 'Index']
@@ -204329,7 +204348,7 @@ gaps:
 - id: INFRA-6184
   domain: INFRA
   title: "INFRA: Correct bogus action versions in ci-advisory workflow (INFRA-2321 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -204353,6 +204372,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+  closed_date: '2026-09-14'
+  closed_pr: 4665
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4665 titled 'INFRA-6184: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6185
   domain: INFRA
