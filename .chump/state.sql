@@ -130327,6 +130327,8 @@ gaps:
     - chump gap reserve run inside any linked worktree allocates an ID that is guaranteed unique against the canonical main-checkout state.db (not just the worktree-local copy)
     - "regression test: reserve a gap in a fresh worktree, reserve a gap in main checkout, assert IDs never collide even when both counters start from the same baseline"
     - either .chump/state.db is symlinked into fresh worktrees (mirroring INFRA-1733's github_cache.db symlink) or chump gap reserve/set resolve the canonical db path independent of cwd
+  notes: |
+    Decomposed into 10 slices: INFRA-6321, INFRA-6322, INFRA-6323, INFRA-6324, INFRA-6325, INFRA-6326, INFRA-6327, INFRA-6328, INFRA-6329, INFRA-6330
 
 - id: INFRA-3835
   domain: INFRA
@@ -209275,6 +209277,7 @@ gaps:
     - Decision memo created in INFRA-3834 notes
     - Rationale (simplicity, precedent from INFRA-1733) is recorded
     - Stakeholder sign‑off captured
+  depends_on: [INFRA-6321]
   notes: |
     [chump harvest check 'chump/state.db']
     === primitives_index match for 'chump/state.db' ===
@@ -209303,6 +209306,7 @@ gaps:
     - When a new worktree is created, .chump/state.db is a symlink pointing to the canonical state.db in the main checkout
     - Symlink is created only if the target file exists
     - No existing worktree‑local state.db files are left behind
+  depends_on: [INFRA-6322]
   notes: |
     [chump harvest check 'chump/state.db']
     === primitives_index match for 'chump/state.db' ===
@@ -209331,6 +209335,7 @@ gaps:
     - Script runs without errors on a fresh repository clone
     - Resulting worktree contains .chump/state.db as a symlink
     - Existing CI pipelines that create worktrees still succeed
+  depends_on: [INFRA-6323]
   notes: |
     [chump harvest check 'chump/state.db']
     === primitives_index match for 'chump/state.db' ===
@@ -209359,6 +209364,7 @@ gaps:
     - Command resolves the canonical .chump/state.db path when .chump/state.db is not a symlink
     - Allocation uses the same counter as the main checkout
     - Behavior is logged for debugging
+  depends_on: [INFRA-6323]
   notes: |
     [chump harvest check 'chump/state.db']
     === primitives_index match for 'chump/state.db' ===
@@ -209387,6 +209393,7 @@ gaps:
     - Test creates a temporary worktree, runs `chump gap reserve` there, then runs it in the main checkout
     - Assert that the two allocated IDs are different
     - Test passes on local developer machines and CI
+  depends_on: [INFRA-6324, INFRA-6325]
   notes: |
     [chump harvest check 'chump/state.db']
     === primitives_index match for 'chump/state.db' ===
@@ -209415,6 +209422,93 @@ gaps:
     - Test sets up a fresh worktree, reserves a gap, then reserves a gap in the main checkout
     - Test asserts no ID collision even when both counters start from the same baseline
     - Test is added to the infra test suite and runs on every CI build
+  depends_on: [INFRA-6326]
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6328
+  domain: INFRA
+  title: "INFRA: Update documentation to describe new .chump/state.db handling (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README/infra docs include a section on the symlinked state.db
+    - Instructions for manual worktree creation mention the symlink
+    - Changelog entry for INFRA-3834 added
+  depends_on: [INFRA-6324, INFRA-6325]
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6329
+  domain: INFRA
+  title: "INFRA: Add CI check to verify .chump/state.db is a symlink in created worktrees (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - CI job fails if a newly created worktree contains a regular file instead of a symlink for .chump/state.db
+    - Job runs after worktree creation step in the pipeline
+  depends_on: [INFRA-6324]
+  notes: |
+    [chump harvest check 'chump/state.db']
+    === primitives_index match for 'chump/state.db' ===
+    
+    === cluster keyword match for 'chump/state.db' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'chump/state.db' ===
+    
+    === repo-description match for 'chump/state.db' ===
+    
+    === HARVEST_ROADMAP.md mention of 'chump/state.db' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'chump/state.db' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6330
+  domain: INFRA
+  title: "INFRA: Cleanup deprecated worktree‑local state.db handling code (INFRA-3834 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - All references to copying .chump/state.db into worktrees are removed
+    - No lint or build warnings remain related to the old logic
+    - Code coverage remains unchanged
+  depends_on: [INFRA-6325, INFRA-6329]
   notes: |
     [chump harvest check 'chump/state.db']
     === primitives_index match for 'chump/state.db' ===
