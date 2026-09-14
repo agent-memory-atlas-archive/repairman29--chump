@@ -31263,10 +31263,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update the `audit` function in `src/done_auditor.rs` to fetch gaps ordered by their `closed_at` timestamp (instead of alphabetical prefix), persist a resume cursor (the last processed `closed_at` value) to a state file, and on each run process only gaps newer than the cursor; adjust `crates/chump-gap-store/src/lib.rs::list` to accept an optional `order_by` argument and return gaps sorted by `closed_at` when requested.
+    
+    Target file(s):
+    - src/done_auditor.rs
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "done_auditor::audit no longer relies on an alphabetical prefix; it orders gaps by closed_at (or uses a persisted resume cursor) and processes the next batch on each run"
-    - Two consecutive audit runs examine disjoint sets of gaps, proving that the cursor or ordering advances correctly
-    - After two runs, the audit coverage increases from 5.5% to >95% of gaps
+    - "src/done_auditor.rs::audit must invoke `gap_store::list` with an argument that requests ordering by `closed_at` and must assert that the returned iterator is sorted ascending by `closed_at`."
+    - "src/done_auditor.rs::audit must read a cursor value from `audit_state.json` at start, skip any gap with `closed_at` ≤ cursor, and write the highest processed `closed_at` back to `audit_state.json` after the run."
+    - Running `cargo run --bin done_auditor` twice on the same gap store must produce two disjoint sets of gap IDs (no ID appears in both runs) and the union of processed gaps must cover at least 95 % of all gaps present in the store.
   notes: |
     [chump harvest check 'closed']
     === primitives_index match for 'closed' ===
@@ -31294,10 +31302,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a new subsection titled “Audit‑done scheduling and reporting” into docs/process/SELF_HOSTED_RUNNERS.md that (1) provides a launchd plist snippet (label com.example.audit‑done) to run the audit‑done binary on macOS, (2) adds a CI pipeline YAML fragment that invokes audit‑done on every commit to the main branch, (3) documents the HTTP POST endpoint used to surface findings to the operator dashboard, and (4) describes the visible dashboard alert shown to operators when audit‑done reports a problem.
+    
+    Target file(s):
+    - docs/process/SELF_HOSTED_RUNNERS.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - audit‑done is invoked automatically via launchd (macOS) or CI pipeline on each commit to the main branch
-    - Findings are posted to the operator‑visible dashboard/logs used for daily monitoring
-    - Operators receive a visible signal when audit‑done reports a problem
+    - docs/process/SELF_HOSTED_RUNNERS.md includes a launchd plist snippet with a `<key>Label</key>` value of `com.example.audit-done` and a `<key>ProgramArguments</key>` array referencing the audit‑done executable.
+    - docs/process/SELF_HOSTED_RUNNERS.md includes a CI pipeline YAML fragment that contains a step named `audit-done` triggered on pushes to the `main` branch.
+    - docs/process/SELF_HOSTED_RUNNERS.md specifies that audit‑done findings are posted via an HTTP POST to the endpoint `/api/audit/findings` on the operator dashboard service.
+    - docs/process/SELF_HOSTED_RUNNERS.md describes that operators see a visible “Audit Issues” banner/alert on the dashboard when audit‑done reports a problem.
   notes: |
     [chump harvest check 'closed']
     === primitives_index match for 'closed' ===
@@ -202218,7 +202234,7 @@ gaps:
 - id: INFRA-6128
   domain: INFRA
   title: "INFRA: Add detailed execution logging to orchestration scripts (bot-merge, queue-driver, pr-rescue, pr-auto-rearm, pr-auto-rebase, worker.sh) (INFRA-1966 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -202243,6 +202259,12 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+    [2026-09-14T06:34:30Z] EFFECTIVE-441: escalated required_model -> opus after 3 consecutive unverified_ship attempts
+  closed_date: '2026-09-14'
+  closed_pr: 4666
+  required_model: opus
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4666 titled 'INFRA-6128: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6129
   domain: INFRA
