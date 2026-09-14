@@ -1,7 +1,7 @@
 ---
 doc_tag: canonical
 owner_gap: DOC-058
-last_audited: 2026-05-29
+last_audited: 2026-06-15
 ---
 
 # Scheduling Layers — Session-Bound vs Fleet-Durable
