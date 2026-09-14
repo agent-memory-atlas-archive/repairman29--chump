@@ -38182,10 +38182,18 @@ gaps:
   status: open
   priority: P1
   effort: xs
+  description: |
+    Extend the `spawn_claude_cli` function in `crates/chump-orchestrator/src/dispatch.rs` to recognize a new top‑level subcommand `loop` that parses the flags `--interval` (seconds) and `--max-iters` (optional integer), validates them, and forwards the command string together with these parameters to the existing scheduler library (slice 9) for periodic execution.
+    
+    Target file(s):
+    - crates/chump-orchestrator/src/dispatch.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The wrapper parses ‘--interval’, ‘--max-iters’, and the command to run, then delegates to the scheduler library (slice 9).
-    - Running ‘chump loop <cmd> --interval 10’ executes <cmd> every 10 seconds until the process is stopped.
-    - The command returns exit code 0 on successful start and logs scheduling details.
+    - "? Running `chump loop \"date\" --interval 2` invokes `spawn_claude_cli` with a parsed interval of 2 seconds and an unlimited max‑iters, and the scheduler logs a line `Scheduled loop : cmd=\"date\", interval=2s, max_iters=∞`."
+    - The CLI process exits with status code 0 immediately after the scheduling call for the `loop` subcommand.
+    - Providing `--max-iters 3` results in exactly three executions of the command, observable by three distinct scheduler log entries `Executed loop iteration 1/3`, `Executed loop iteration 2/3`, and `Executed loop iteration 3/3`.
+    - "? Invalid values for `--interval` (e.g., non‑numeric) cause `spawn_claude_cli` to return a non‑zero exit code and emit an error message `Error : --interval must be a positive integer`."
   depends_on: [EFFECTIVE-1015]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -211040,7 +211048,7 @@ gaps:
     - children INFRA-467/468/469/470 all shipped
     - "after all 4 land, run a 5-PR sample session and measure: (a) time from claim to first edit, (b) % of shell scripts touched per PR vs. coordination scripts, (c) shell-script lines deleted from scripts/coord/ + scripts/dispatch/. Target: 40% reduction in coord-script touch rate."
   notes: |
-    demoted P1->P2 by 2026-05-11 pillar audit: UMBRELLA gap with no concrete next-action
+    Decomposed into 10 slices: META-348, META-349, META-350, META-351, META-352, META-353, META-354, META-355, META-356, META-357
   opened_date: '2026-05-05'
   outcome_id: MISSION-010
 
@@ -216521,6 +216529,7 @@ gaps:
   acceptance_criteria:
     - Lease acquisition and release timestamps are logged to a structured file
     - Logs can be correlated with the baseline script output
+  depends_on: [META-348]
   notes: |
     [chump harvest check 'collapse']
     === primitives_index match for 'collapse' ===
@@ -216547,6 +216556,7 @@ gaps:
     - Lease acquisition latency reduced by at least 20% in automated tests
     - All existing lease unit tests pass
     - No regression in lease correctness
+  depends_on: [META-349]
   notes: |
     [chump harvest check 'collapse']
     === primitives_index match for 'collapse' ===
@@ -216573,6 +216583,7 @@ gaps:
     - Worktree setup time reduced by at least 15% in benchmark suite
     - All worktree integration tests pass
     - No new file‑system errors introduced
+  depends_on: [META-350]
   notes: |
     [chump harvest check 'collapse']
     === primitives_index match for 'collapse' ===
@@ -216599,6 +216610,7 @@ gaps:
     - State.db read/write latency reduced by at least 25% in performance tests
     - State.db schema remains backward compatible
     - All state.db unit tests pass
+  depends_on: [META-350]
   notes: |
     [chump harvest check 'collapse']
     === primitives_index match for 'collapse' ===
@@ -216625,6 +216637,115 @@ gaps:
     - Binary‑wedge processing time reduced by at least 20% in profiling runs
     - No change in binary‑wedge output correctness
     - All binary‑wedge regression tests pass
+  depends_on: [META-350]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-354
+  domain: META
+  title: "META: Reduce shell‑script touch in coordination scripts (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Shell‑script touch rate per PR decreased by at least 30% compared to baseline
+    - All modified scripts pass existing lint and unit tests
+    - No new runtime errors in coordination layer
+  depends_on: [META-351, META-352, META-353]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-355
+  domain: META
+  title: "META: Minimize edits in dispatch scripts (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Dispatch script modifications reduced by at least 30% per PR
+    - Dispatch functionality verified with integration test suite
+    - No regression in PR dispatch flow
+  depends_on: [META-354]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-356
+  domain: META
+  title: "META: Execute 5‑PR sample session and evaluate metrics (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Run a 5‑PR sample session after all refactors are merged
+    - Collect (a) claim‑to‑first‑edit time, (b) % of shell scripts touched per PR, (c) lines deleted in scripts/coord and scripts/dispatch
+    - Achieve ≥40% reduction in shell‑script touch rate versus baseline
+  depends_on: [META-348, META-350, META-351, META-352, META-353, META-354, META-355]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-357
+  domain: META
+  title: "META: Document changes and rollout plan (META-038 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Documentation includes updated coordination layer architecture, migration steps, and performance impact summary
+    - Rollout checklist reviewed and approved by the META team
+    - All documentation links are reachable from the project wiki
+  depends_on: [META-356]
   notes: |
     [chump harvest check 'collapse']
     === primitives_index match for 'collapse' ===
@@ -227289,7 +227410,7 @@ gaps:
 - id: RESILIENT-1189
   domain: RESILIENT
   title: "No node auto-converge on CJ: merged fixes never reach the node (merged != deployed)"
-  status: open
+  status: blocked
   priority: P2
   effort: m
   acceptance_criteria:
@@ -227297,7 +227418,8 @@ gaps:
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
   notes: |
-    Decomposed into 7 slices: RESILIENT-1197, RESILIENT-1198, RESILIENT-1199, RESILIENT-1200, RESILIENT-1201, RESILIENT-1202, RESILIENT-1203
+    Decomposed into 7 slices: RESILIENT-1222, RESILIENT-1223, RESILIENT-1224, RESILIENT-1225, RESILIENT-1226, RESILIENT-1227, RESILIENT-1228
+    [2026-09-14T10:22:53Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=948B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
   outcome_id: MISSION-012
   evidence: |
     CJ /home/jeff/Projects/chump had to be hand git-reset to origin/main; no timer/organ converges the node source tree, so merged bash-organ fixes (reaper, converge-mirror) never deploy - the reaper fix had to be hand-copied to the live checkout. converge-mirror.sh (PR #4627) is not deployed. Fix: a node-converge organ that hard-resets each node mirror to origin/main on a timer, preserving gitignored state.db; verify by the PULL not a status.
@@ -228199,6 +228321,198 @@ gaps:
     
     === cross-pollination briefs mentioning 'organ' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: RESILIENT-1222
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1197: Reproduce merged‑vs‑deployed discrepancy locally (RESILIENT-1189 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A local test harness can trigger a node auto‑converge scenario where a fix is merged but not deployed.
+    - Logs or console output clearly show the merged state differs from the deployed state before any code changes.
+  notes: |
+    [chump harvest check 'merged']
+    === primitives_index match for 'merged' ===
+    
+    === cluster keyword match for 'merged' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'merged' ===
+    
+    === repo-description match for 'merged' ===
+    
+    === HARVEST_ROADMAP.md mention of 'merged' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'merged' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: RESILIENT-1223
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1198: Add diagnostic logging to auto‑converge path (RESILIENT-1189 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - The auto‑converge code emits structured logs for the merged revision ID and the revision ID being deployed.
+    - Running the harness from RESILIENT-1197 now records both IDs in the log output.
+  depends_on: [RESILIENT-1222]
+  notes: |
+    [chump harvest check 'merged']
+    === primitives_index match for 'merged' ===
+    
+    === cluster keyword match for 'merged' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'merged' ===
+    
+    === repo-description match for 'merged' ===
+    
+    === HARVEST_ROADMAP.md mention of 'merged' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'merged' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: RESILIENT-1224
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1199: Fix propagation of merged revision to node deployment (RESILIENT-1189 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The code path that selects the revision for deployment now uses the merged revision when appropriate.
+    - Running the harness from RESILIENT-1197 shows the node receives the merged revision ID.
+    - No new compiler warnings are introduced.
+  depends_on: [RESILIENT-1223]
+  notes: |
+    [chump harvest check 'merged']
+    === primitives_index match for 'merged' ===
+    
+    === cluster keyword match for 'merged' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'merged' ===
+    
+    === repo-description match for 'merged' ===
+    
+    === HARVEST_ROADMAP.md mention of 'merged' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'merged' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: RESILIENT-1225
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1200: Add unit test for merged‑revision deployment (RESILIENT-1189 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A new `cargo test` case reproduces the scenario and asserts that the deployed revision equals the merged revision after the fix.
+    - The test fails on the pre‑fix codebase and passes after RESILIENT-1199 is merged.
+  depends_on: [RESILIENT-1224]
+  notes: |
+    [chump harvest check 'merged']
+    === primitives_index match for 'merged' ===
+    
+    === cluster keyword match for 'merged' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'merged' ===
+    
+    === repo-description match for 'merged' ===
+    
+    === HARVEST_ROADMAP.md mention of 'merged' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'merged' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: RESILIENT-1226
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1201: Add CI integration test script (scripts/ci/test‑auto‑converge.sh) (RESILIENT-1189 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A shell script invokes the same harness used in RESILIENT-1197 and validates the merged‑revision deployment.
+    - The script exits with status 0 only when the fix is present; CI can run it as part of `scripts/ci/test-*.sh`.
+    - The script is added to the CI test suite and is executed on every push.
+  depends_on: [RESILIENT-1225]
+  notes: |
+    [chump harvest check 'merged']
+    === primitives_index match for 'merged' ===
+    
+    === cluster keyword match for 'merged' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'merged' ===
+    
+    === repo-description match for 'merged' ===
+    
+    === HARVEST_ROADMAP.md mention of 'merged' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'merged' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: RESILIENT-1227
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1202: Run cargo fmt and clippy, fix warnings (RESILIENT-1189 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`cargo fmt --all` runs with no changes pending."
+    - "`cargo clippy --all-targets -- -D warnings` completes without any warnings."
+    - All changes introduced in RESILIENT-1199 are compliant with formatting and lint rules.
+  depends_on: [RESILIENT-1224]
+  notes: |
+    [chump harvest check 'merged']
+    === primitives_index match for 'merged' ===
+    
+    === cluster keyword match for 'merged' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'merged' ===
+    
+    === repo-description match for 'merged' ===
+    
+    === HARVEST_ROADMAP.md mention of 'merged' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'merged' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: RESILIENT-1228
+  domain: RESILIENT
+  title: "RESILIENT: RESILIENT-1203: Verify full test suite passes and no regressions (RESILIENT-1189 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Running `cargo test` executes all existing tests and the new unit test from RESILIENT-1200 with all passing.
+    - The CI integration test script from RESILIENT-1201 runs successfully in the CI pipeline.
+    - No existing test failures are introduced by the changes.
+  depends_on: [RESILIENT-1226, RESILIENT-1227]
+  notes: |
+    [chump harvest check 'merged']
+    === primitives_index match for 'merged' ===
+    
+    === cluster keyword match for 'merged' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'merged' ===
+    
+    === repo-description match for 'merged' ===
+    
+    === HARVEST_ROADMAP.md mention of 'merged' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'merged' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
 
 - id: RESILIENT-123
   domain: RESILIENT
