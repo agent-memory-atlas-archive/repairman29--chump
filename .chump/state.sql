@@ -4095,9 +4095,18 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Add a new function `audit_src_paths` to `scripts/ci/test-cli-integration.sh` that iterates over all files in `scripts/ci/`, extracts any hard‑coded references matching the pattern `src/*.rs`, classifies each reference as a behavior‑based check, a positive location check, or a negative location check, and writes a line‑by‑line report to `ci_src_path_inventory.txt` in the repository root. The function is invoked when the script is called with the `--audit-src-paths` flag, and it returns exit code 0 on success.
+    
+    Target file(s):
+    - scripts/ci/test-cli-integration.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - All script files under scripts/ci/ are scanned for direct references to src/*.rs files.
-    - A report or inventory is created classifying each reference as behavior-based check, positive location check, or negative location check.
+    - Running `scripts/ci/test-cli-integration.sh --audit-src-paths` creates a file `ci_src_path_inventory.txt` at the repository root.
+    - "The generated `ci_src_path_inventory.txt` contains a line for each hard‑coded `src/*.rs` reference found in any `scripts/ci/` file, formatted as `<script_path>:<line_number>:<src_path>:<classification>`."
+    - For the known reference `src/main.rs` present in `scripts/ci/test-broadcast-urgency-routing.sh` line 39, the inventory records the classification `positive location check`.
+    - The script exits with status 0 after completing the audit and all existing test functions (e.g., `check_json` in `test-cli-integration.sh`) continue to behave unchanged.
   notes: |
     [chump harvest check 'gates']
     === primitives_index match for 'gates' ===
