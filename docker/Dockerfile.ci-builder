@@ -1,0 +1,45 @@
+# Dockerfile.ci-builder — INFRA-6435 (INFRA-2287 slice)
+#
+# Standalone builder image for chump-rust-builder: Rust 1.82 + sccache + mold
+# + cranelift codegen backend + cargo-nextest + jq + gh + python3.
+#
+# Usage:
+#   docker build -f docker/Dockerfile.ci-builder -t chump-rust-builder .
+
+FROM rust:1.82-bookworm
+
+# rustc's cranelift codegen backend ships as a rustup component on nightly;
+# add nightly alongside the default 1.82 toolchain so `-Zcodegen-backend=cranelift`
+# is available without disturbing the stable default.
+RUN rustup toolchain install nightly \
+    && rustup component add rustc-codegen-cranelift-preview --toolchain nightly
+
+RUN cargo install --locked cargo-binstall \
+    && cargo binstall -y --no-confirm sccache cargo-nextest \
+        || cargo install --locked sccache cargo-nextest
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git curl jq sqlite3 ca-certificates gnupg \
+        build-essential pkg-config libssl-dev \
+        mold python3 \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH \
+    RUSTC_WRAPPER=sccache \
+    SCCACHE_DIR=/sccache
+
+RUN rustc --version && cargo --version \
+    && cargo nextest --version && sccache --version \
+    && jq --version && git --version && gh --version && python3 --version \
+    && mold --version
+
+LABEL org.opencontainers.image.source="https://github.com/repairman29/chump"
+LABEL org.opencontainers.image.description="Chump Rust builder image (Rust 1.82 + sccache + mold + cranelift + cargo-nextest + jq + gh + python3)"
+LABEL org.opencontainers.image.licenses="MIT"
