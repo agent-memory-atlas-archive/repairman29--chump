@@ -18,8 +18,23 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); FAILS+=("$1"); }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SRC="$REPO_ROOT/crates/chump-atomic-claim/src/atomic_claim.rs"
-MAIN="$REPO_ROOT/src/main.rs"
 REGISTRY="$REPO_ROOT/docs/observability/EVENT_REGISTRY.yaml"
+
+# CREDIBLE-1156: resolve the gap-reserve-similarity source file dynamically
+# instead of hardcoding src/main.rs — the similarity check may be relocated
+# (e.g. to src/commands/gap.rs) by a future refactor without this test
+# needing an update. Prefer the conventional new home, fall back to any
+# file under src/ that actually contains the anchor comment, and finally
+# fall back to the historical src/main.rs path so a fresh clone still works.
+MAIN_CANDIDATE="$REPO_ROOT/src/commands/gap.rs"
+if [[ -f "$MAIN_CANDIDATE" ]] && grep -q "INFRA-1149: reserve-time title similarity check" "$MAIN_CANDIDATE"; then
+    MAIN="$MAIN_CANDIDATE"
+else
+    MAIN="$(grep -rl "INFRA-1149: reserve-time title similarity check" "$REPO_ROOT/src" 2>/dev/null | head -1)"
+    if [[ -z "$MAIN" ]]; then
+        MAIN="$REPO_ROOT/src/main.rs"
+    fi
+fi
 
 echo "=== INFRA-1982 open-PR dedup detection tests ==="
 
