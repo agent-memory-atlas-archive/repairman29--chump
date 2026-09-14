@@ -1,0 +1,16 @@
+# RESILIENT-1190 — pairs with chump-trunk-recovery-reviver.service. Fires every
+# 15 min. The reviver is bounded + idempotent (a state file records revived PRs
+# per recovery), so a 15m cadence catches a recovery promptly without any risk
+# of double-reviving. OnCalendar is wall-clock + self-anchoring (never silently
+# dies the way a self-chaining OnUnitActiveSec timer can — see RESILIENT-413);
+# Persistent=true catches a run missed while the node was down.
+[Unit]
+Description=Run the Chump trunk-recovery reviver every 15 minutes (RESILIENT-1190)
+
+[Timer]
+OnBootSec=6min
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -135,6 +135,15 @@ enabled     chump-farmer.timer  role=brain requires=bin:chump
 # 2026-08-14 hours-long deadlock). Declared here so organ-reconcile re-arms it if
 # it drifts or fails.
 enabled     chump-rot-reaper.timer  role=brain requires=bin:gh
+# chump-trunk-recovery-reviver.timer: the RECOVERY counterpart to the rot-reaper's
+# RESILIENT-1188 systemic-red HOLD. On a trunk RED→GREEN recovery it reopens the
+# PRs that were reaped as victims of the just-ended trunk-red window (closed
+# in-window, reaper-marked `rot-reaped` / pr_reaped, green-underneath NOW) and
+# re-arms their auto-merge — legacy trunk-red victims + any non-trunk-aware
+# closer's casualties the 1188 hold could not have spared. Bounded (cap per run)
+# + idempotent (state file). Declared here so organ-reconcile re-arms it if it
+# drifts or fails, and so it survives reconcile (non-manifest units are reaped).
+enabled     chump-trunk-recovery-reviver.timer  role=brain requires=bin:gh
 # chump-integrator.timer: the Batched Merge Train (RESILIENT-318 / INFRA-2130).
 # Batches up to 5 ready_to_ship gaps through a preflight gate into ONE
 # integration branch so CI runs once per batch instead of once per gap

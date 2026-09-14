@@ -785,6 +785,10 @@ jobs:
         if: matrix.shard == 3
         run: bash scripts/ci/test-pr-failure-auto-rescue.sh
 
+      - name: Trunk-recovery reviver (RESILIENT-1190)
+        if: matrix.shard == 3
+        run: bash scripts/ci/test-trunk-recovery-reviver.sh
+
       - name: PR auto-rescue active audit-handler (INFRA-1618)
         if: matrix.shard == 3
         run: bash scripts/ci/test-pr-rescue-audit-handler.sh

@@ -1436,6 +1436,39 @@ events:
     consumers: [board-cycle, fleet-brief]
     fields_required: [ts, kind, pr, gates, reason]
 
+  - kind: pr_revived_post_trunk_recovery
+    effect_metric: self
+    emitter: scripts/coord/trunk-recovery-reviver.sh (RESILIENT-1190)
+    # scanner-anchor: "kind":"pr_revived_post_trunk_recovery"
+    trigger: >
+      The RECOVERY counterpart to RESILIENT-1188's systemic-red HOLD. On a trunk
+      RED→GREEN recovery (consumed from the trunk-sentinel's trunk_recovered /
+      trunk_state_change→GREEN events), the reviver found a PR that was reaped as
+      a victim of the just-ended trunk-red window — closed-not-merged inside the
+      window, reaper-marked (rot-reaped label / pr_reaped event), and
+      green-underneath NOW (classify-blocked-pr.py verdict not hard_fail/
+      conflict) — and reopened it (method=reopen), or on GitHub reopen-limbo
+      opened a fresh PR for the same branch (method=fresh_pr), then re-armed
+      auto-merge. method=failed = neither path worked (branch likely gone),
+      surfaced only. Bounded (CHUMP_TRUNK_REVIVE_MAX_PER_RUN) + idempotent.
+    consumers: [board-cycle, fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, branch, method, recovered_at]
+    expected_volume: "very low; only after a trunk recovery that had reaped victims"
+    status: stable
+
+  - kind: trunk_recovery_reviver_tick
+    effect_metric: self
+    emitter: scripts/coord/trunk-recovery-reviver.sh (RESILIENT-1190)
+    # scanner-anchor: "kind":"trunk_recovery_reviver_tick"
+    trigger: >
+      Emitted once per reviver beat (liveness + audit): actionable=false when
+      there is no fresh trunk-recovery window to act on, else actionable=true
+      with the count examined and revived this beat.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, actionable, revived]
+    expected_volume: "one per beat (every 15 min)"
+    status: stable
+
   - kind: reaper_silent
     effect_metric: self
     emitter: scripts/ops/reaper-heartbeat-watchdog.sh (INFRA-120)

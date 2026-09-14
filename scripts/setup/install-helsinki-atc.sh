@@ -148,6 +148,14 @@ SYSTEM_UNITS=(
   # boots a fresh node WITH auto-draining (RUN-INSTALL mission).
   chump-rot-reaper.service
   chump-rot-reaper.timer
+  # RESILIENT-1190: the trunk-recovery reviver — the RECOVERY counterpart to
+  # RESILIENT-1188's systemic-red HOLD. On a trunk RED→GREEN recovery it reopens
+  # the PRs that were reaped as victims of the just-ended trunk-red (closed
+  # in-window, reaper-marked, green-underneath now) and re-arms their
+  # auto-merge. Both-rosters-required: reconcile reaps non-manifest units, so a
+  # SYSTEM_UNITS entry without the matching organ-manifest line would be undone.
+  chump-trunk-recovery-reviver.service
+  chump-trunk-recovery-reviver.timer
   # RESILIENT-318 / INFRA-2130: the Batched Merge Train (chump-integrator) — a
   # Mac-launchd-only organ ported to systemd. Batches up to 5 ready_to_ship gaps
   # through a preflight gate into ONE integration branch so CI runs once per
@@ -267,7 +275,7 @@ SYSTEM_UNITS=(
   chump-node-converge.service
   chump-node-converge.timer
 )
-SYSTEM_TIMERS=(chump-pr-lander.timer chump-board-cycle.timer chump-duty-officer.timer chump-sla-scorecard.timer chump-organ-watchdog.timer chump-apex-watchdog.timer chump-board-ceo-briefing.timer chump-organ-reconcile.timer chump-pr-approval.timer chump-farmer.timer chump-rot-reaper.timer chump-integrator.timer chump-backlog-sync-writer.timer chump-race-control.timer chump-conflict-resolution-consumer.timer chump-merge-serializer.timer chump-gap-drain.timer chump-gap-closure-reconcile.timer chump-nba-dispatch.timer chump-digest.timer chump-almanac-liveness.timer chump-rca-reflex.timer chump-cascade-unblock-detector.timer chump-gap-store-single-source-check.timer chump-organ-success-verifier.timer chump-effect-verifier.timer chump-node-converge.timer)
+SYSTEM_TIMERS=(chump-pr-lander.timer chump-board-cycle.timer chump-duty-officer.timer chump-sla-scorecard.timer chump-organ-watchdog.timer chump-apex-watchdog.timer chump-board-ceo-briefing.timer chump-organ-reconcile.timer chump-pr-approval.timer chump-farmer.timer chump-rot-reaper.timer chump-trunk-recovery-reviver.timer chump-integrator.timer chump-backlog-sync-writer.timer chump-race-control.timer chump-conflict-resolution-consumer.timer chump-merge-serializer.timer chump-gap-drain.timer chump-gap-closure-reconcile.timer chump-nba-dispatch.timer chump-digest.timer chump-almanac-liveness.timer chump-rca-reflex.timer chump-cascade-unblock-detector.timer chump-gap-store-single-source-check.timer chump-organ-success-verifier.timer chump-effect-verifier.timer chump-node-converge.timer)
 
 # ── --check mode ─────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--check" ]]; then

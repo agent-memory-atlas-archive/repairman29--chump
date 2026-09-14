@@ -1,0 +1,20 @@
+# RESILIENT-1190 — the trunk-recovery reviver organ. Runs
+# scripts/coord/trunk-recovery-reviver.sh: on a trunk RECOVERY (RED→GREEN per the
+# trunk-sentinel), reopens the PRs that were reaped as victims of the just-ended
+# trunk-red window (closed in-window, reaper-marked, green-underneath now) and
+# re-arms their auto-merge. The recovery counterpart to RESILIENT-1188 (which
+# HOLDS PRs during trunk-red so no NEW victims are created); this reopens the
+# ones legacy trunk-reds (and non-trunk-aware closers) already killed.
+#
+# CHUMP_REPO_ROOT / paths mirror chump-rot-reaper.service (primary node =
+# helsinki, root). Non-root nodes: adjust per docs/process/LINUX_NODE_ONBOARDING.md.
+[Unit]
+Description=Chump trunk-recovery reviver — reopen trunk-red victim PRs on recovery (RESILIENT-1190)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+Environment=CHUMP_REPO_ROOT=/root/Projects/chump
+ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; cd /root/Projects/chump; exec bash scripts/coord/trunk-recovery-reviver.sh'
