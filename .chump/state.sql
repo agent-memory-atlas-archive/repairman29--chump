@@ -27420,10 +27420,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new integration test function `test_debt_index_includes_crit_scorer` inside the `mod tests` block of `crates/chump-kpi-report/src/debt_index.rs`. The test builds a synthetic mixed dataset, invokes the full debt‑index pipeline (via `build_debt_index_section`), and asserts that records with a high `crit` score receive a higher weight in the resulting index than records with a low `crit` score, thereby failing if the Crit scorer is omitted from the pipeline.
+    
+    Target file(s):
+    - crates/chump-kpi-report/src/debt_index.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Integration test runs the full debt index pipeline on a mixed dataset
-    - Resulting index reflects higher weight for high‑Crit entries and lower weight for low‑Crit entries
-    - Test fails if Crit scorer is omitted
+    - Running `cargo test --test debt_index` reports the test `test_debt_index_includes_crit_scorer` defined in `crates/chump-kpi-report/src/debt_index.rs` as passed.
+    - The test `test_debt_index_includes_crit_scorer` asserts that the computed index weight for a record with `crit` = 5 is greater than the weight for a record with `crit` = 1 in the output produced by `build_debt_index_section`.
+    - If the call to the Crit scorer is removed from `build_debt_index_section` in `crates/chump-kpi-report/src/kpi_report.rs`, the same test fails with an assertion message containing “Crit scorer missing”.
   depends_on: [CREDIBLE-829, CREDIBLE-830]
   notes: |
     [chump harvest check 'Index']
