@@ -124778,7 +124778,7 @@ gaps:
     - The 9 live CJ organs (cargo-sweep-gc, disk-monitor, main-health-watchdog, node-orchestrator, pr-lander, pr-stuck-live-scan, reviver, rot-reaper, worktree-reaper) each get a registry line with a working pgrep detector, verified against live pgrep -f on closetjunky.
     - "DEPTH: happy-path + one adversarial (a launched organ missing from the registry); gaps named."
   notes: |
-    Decomposed into 3 slices: INFRA-5654, INFRA-5655, INFRA-5656
+    Decomposed into 3 slices: INFRA-6268, INFRA-6269, INFRA-6270
   opened_date: '2026-08-21'
 
 - id: INFRA-3649
@@ -202249,7 +202249,7 @@ gaps:
 - id: INFRA-6130
   domain: INFRA
   title: "INFRA: Design and implement a file‑based lock primitive for bash scripts (INFRA-1966 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -202274,6 +202274,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+  closed_date: '2026-09-14'
+  closed_pr: 4663
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4663 titled 'INFRA-6130: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6131
   domain: INFRA
@@ -207141,6 +207145,129 @@ gaps:
     - The test fails if the binary is not rebuilt or the index remains empty, and passes otherwise.
     - Test is runnable via `./run-selfheal-test.sh` and exits with status 0 on success.
   depends_on: [INFRA-6266]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6268
+  domain: INFRA
+  title: "INFRA: Add process-organ revivable registry loader (INFRA-3648 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A function `load_organ_registry` is added to `scripts/ops/organ-reconcile.sh` that reads a repo‑declared registry file (e.g., `organ-manifest.txt`) and returns a data structure mapping organ name → {launcher_path, detector_cmd, heartbeat_file?, max_age?}.
+    - "The registry format matches the description: organ name, launcher path, pgrep detector, optional heartbeat file and max‑age, mirroring the enabled/paging_off fields of `node-organ-manifest.txt`."
+    - The loader validates that each line contains at least organ name, launcher path, and detector; malformed lines cause the function to exit with a non‑zero status and emit a clear error message.
+    - Unit tests (via existing test framework) confirm that a sample registry with 3 entries is parsed correctly and that missing required fields are reported as errors.
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6269
+  domain: INFRA
+  title: "INFRA: Extend roll‑call test to validate registry entries (INFRA-3648 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`scripts/ci/test-resilient-366-organ-roll-call.sh` is updated to source the new `load_organ_registry` function and retrieve the registry."
+    - For each wrapper script found under `~/.chump/organs/`, the test asserts that the wrapper's organ name exists as a key in the loaded registry; if not, the test calls `fail` with a descriptive message.
+    - The test also verifies that the registry contains entries for all 9 live CJ organs (cargo‑sweep‑gc, disk‑monitor, main‑health‑watchdog, node‑orchestrator, pr‑lander, pr‑stuck‑live‑scan, reviver, rot‑reaper, worktree‑reaper) and that each entry's detector matches the output of `pgrep -f <organ>` on the current node.
+    - "An adversarial scenario is added: a launched organ is deliberately removed from the registry, and the test must FAIL, confirming the detection of the mismatch."
+  depends_on: [INFRA-6268]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6270
+  domain: INFRA
+  title: "INFRA: Implement `--check` mode for organ health reporting (INFRA-3648 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A new `--check` flag is added to `scripts/ops/node-orchestrator.sh` (or a dedicated helper script) that iterates over the loaded registry.
+    - "For each organ, the detector command is executed; the script reports `DETECTED-ALIVE`, `DEAD`, or `UNKNOWN` for the organ and prints a concise line `organ_name: status`."
+    - If any required organ reports `DEAD` or `UNKNOWN`, the script exits with a non‑zero status; otherwise it exits 0.
+    - The implementation does not invoke `systemctl` or any systemd‑specific checks; it relies solely on the pgrep detector (and optional heartbeat file when present).
+    - Automated verification confirms that on a healthy node the command exits 0 with all organs `DETECTED-ALIVE`, and that removing an organ from the process list causes a non‑zero exit and correct `DEAD` reporting.
+  depends_on: [INFRA-6268]
   notes: |
     [chump harvest check 'MISSION']
     === primitives_index match for 'MISSION' ===
