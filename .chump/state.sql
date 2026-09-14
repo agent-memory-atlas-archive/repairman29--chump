@@ -32711,9 +32711,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Implement the pure function `compute_debt` in `crates/chump-handoff/src/contracts.rs` to aggregate technical debt as the sum of `criticality * stages_short` for high-criticality dormant entries, and add unit test coverage in the same module.
+    
+    Target file(s):
+    - crates/chump-handoff/src/contracts.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A pure function `compute_debt` returns the sum of (Crit × stages‑short) for high‑Crit dormant entries
-    - Unit test covers multiple scenarios and fails before the implementation
+    - Function `compute_debt` is implemented in `crates/chump-handoff/src/contracts.rs` and returns the sum of `(crit * stages_short)` for entries matching high criticality and dormant status.
+    - Unit tests in `crates/chump-handoff/src/contracts.rs` verify `compute_debt` across scenarios including zero matching entries, non-dormant entries, and multiple high-criticality dormant entries.
+    - Running `cargo test --package chump-handoff` succeeds and executes the new debt calculation tests.
   depends_on: [CREDIBLE-992]
   notes: |
     [chump harvest check 'Index']
@@ -204590,7 +204598,7 @@ gaps:
 - id: INFRA-6189
   domain: INFRA
   title: "INFRA: Correct bogus action versions in experimental/test workflow (INFRA-2321 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -204614,6 +204622,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+    [2026-09-14T08:27:59Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1105B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6190
   domain: INFRA
