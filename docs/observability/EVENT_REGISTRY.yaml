@@ -91,6 +91,12 @@ events:
     trigger: any chump session begins (fleet worker, operator, reaper)
     consumers: [fleet-brief, ambient-context-inject]
 
+  - kind: urgent_inbox_session_start_poll_active
+    effect_metric: self
+    emitter: scripts/setup/session-start-urgent-inbox-poll.sh (INFRA-4987, claude SessionStart hook)
+    trigger: any Claude session begins; confirms the URGENT-INBOX polling hook registered and ran, independent of whether unread messages were found
+    consumers: [ambient.jsonl audit trail]
+
   - kind: collision_prediction
     effect_metric: self
     emitter: src/collision_prediction.rs (META-076, first implementation of docs/design/COLLISION_PREDICTION_SCHEMA.md)
