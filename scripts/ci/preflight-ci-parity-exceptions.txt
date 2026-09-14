@@ -100,159 +100,159 @@ test-markdown-intra-doc-links.sh      # reason: Tier-C; gap: INFRA-1790
 #  tests that exercise individual chump features. They are NOT candidates for
 #  preflight mirroring because preflight targets the <60s fast-feedback loop.
 #  Each would need a dedicated analysis. Tracked as a group under INFRA-1861.)
-coord-surfaces-smoke.sh
-precommit-strict-replay.sh
-test-agent-throughput.sh
-test-alert-classifier.sh
+coord-surfaces-smoke.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+precommit-strict-replay.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-agent-throughput.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-alert-classifier.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 test-almanac-summarize-watchdog.sh  # reason: RESILIENT-354 — launchd-supervisor test spawning stub pgrep/coverage/recall binaries via env-var hooks (same shape as test-stale-process-watchdog.sh above); mirroring in preflight would just duplicate the stub harness with no additional coverage since the watchdog itself is a macOS launchd organ, not a preflight-relevant gate
-test-auto-arm-sweeper.sh
-test-autonomous-ship-rate.sh
-test-autoscale-decisions.sh
+test-auto-arm-sweeper.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-autonomous-ship-rate.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-autoscale-decisions.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 test-bot-merge-conflict-integration.sh  # reason: INFRA-3767 — same shape as test-bot-merge-conflict-wiring.sh/test-conflict-resolver.sh below (runtime git-conflict fixture harness, not preflight-relevant)
-test-bot-merge-conflict-wiring.sh
-test-bot-merge-exit-codes.sh
-test-bot-merge-exit-phases.sh
-test-bot-merge-graphql-preflight.sh
-test-bot-merge-stacked-rebase.sh
-test-bot-merge-watchdog.sh
-test-bounced-pr-detector.sh
-test-cache-event-emission.sh
-test-cache-mergestatestatus.sh
-test-cargo-target-reaper.sh
-test-change-approval.sh
-test-ci-flake-rerun.sh
-test-claude-reaper.sh
-test-cockpit-wake-fleet.sh
-test-conflict-resolver.sh
+test-bot-merge-conflict-wiring.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-bot-merge-exit-codes.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-bot-merge-exit-phases.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-bot-merge-graphql-preflight.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-bot-merge-stacked-rebase.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-bot-merge-watchdog.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-bounced-pr-detector.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-cache-event-emission.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-cache-mergestatestatus.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-cargo-target-reaper.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-change-approval.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-ci-flake-rerun.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-claude-reaper.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-cockpit-wake-fleet.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-conflict-resolver.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 test-conflict-resolver-scenarios.sh  # reason: INFRA-3768 — synthetic git-conflict fixture harness, same shape as test-conflict-resolver.sh above (not preflight-relevant)
-test-cost-enforcement.sh
-test-credential-lifecycle.sh
-test-curator-auto-decompose.sh
-test-curator-decision-logging.sh
-test-curator-freshness.sh
-test-curator-p0-demotion.sh
-test-error-path-coverage.sh
-test-flake-autorerun.sh
-test-fleet-bootstrap.sh
-test-fleet-brief-pillar-table.sh
-test-fleet-fanout.sh
+test-cost-enforcement.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-credential-lifecycle.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-curator-auto-decompose.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-curator-decision-logging.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-curator-freshness.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-curator-p0-demotion.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-error-path-coverage.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-flake-autorerun.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-fleet-bootstrap.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-fleet-brief-pillar-table.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-fleet-fanout.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 test-fleet-kill-switch.sh       # reason: requires compiled chump binary + live bot-merge.sh invocation; cannot mirror in cargo-only preflight (RESILIENT-073)
-test-fleet-metrics-snapshot.sh
-test-fleet-race-loss.sh
-test-fleet-spec.sh
-test-fleet-starve-auto-action.sh
-test-fleet-state-mutex.sh
-test-fleet-status-rate-limit.sh
-test-gap-ac-requirement.sh
-test-gap-closure-consistency-fixture.sh
-test-gap-divergence-guard.sh
-test-gap-doctor-safe-sweep.sh
-test-gap-impact-rating.sh
-test-gap-lifecycle-manager.sh
-test-gap-list-since-json-schema.sh
-test-gap-profiling.sh
-test-gap-quality-gate.sh
-test-gap-rebalance.sh
-test-gap-run-now.sh
-test-gap-status-flip.sh
-test-gap-templates.sh
-test-gap-workflow-status.sh
-test-gh-api-probe.sh
-test-gh-shim-script-attribution.sh
-test-infra-109-worktree-boundary.sh
-test-infra-119-bot-merge-hang.sh
-test-inspect-resume-scrap.sh
-test-install-gh-shim-worktree-safe.sh
-test-install-pr-auto-rebase.sh
-test-keystone-cascade.sh
-test-known-flakes-gate.sh
-test-lint-handoff-comment.sh
-test-mcp-coord-smoke.sh
+test-fleet-metrics-snapshot.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-fleet-race-loss.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-fleet-spec.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-fleet-starve-auto-action.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-fleet-state-mutex.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-fleet-status-rate-limit.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-ac-requirement.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-closure-consistency-fixture.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-divergence-guard.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-doctor-safe-sweep.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-impact-rating.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-lifecycle-manager.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-list-since-json-schema.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-profiling.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-quality-gate.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-rebalance.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-run-now.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-status-flip.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-templates.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gap-workflow-status.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gh-api-probe.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-gh-shim-script-attribution.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-infra-109-worktree-boundary.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-infra-119-bot-merge-hang.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-inspect-resume-scrap.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-install-gh-shim-worktree-safe.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-install-pr-auto-rebase.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-keystone-cascade.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-known-flakes-gate.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-lint-handoff-comment.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-mcp-coord-smoke.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 test-merge-group-coverage.sh  # reason: INFRA-2095 — merge-queue trigger coverage gate (advisory; gh-api driven, queries branch protection); not preflight-shaped because it requires GitHub repo context
-test-no-manual-ship-bypass.sh
-test-orphan-pr-closer.sh
-test-orphan-worktree-prune.sh
-test-per-worktree-target-guard.sh
+test-no-manual-ship-bypass.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-orphan-pr-closer.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-orphan-worktree-prune.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-per-worktree-target-guard.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 # INFRA-2741: test-mission-picker.sh now mirrored as Scripts-scope
 # always-on gate ("mission-picker" in preflight.rs). Pure-Python unit test
 # (MISSION-011), no network, <2s — belongs in the local fast loop.
 # (entry removed)
-test-picker-priority.sh
-test-pillar-balance.sh
+test-picker-priority.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pillar-balance.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 # INFRA-2350: test-pipefail-race-sweep.sh now mirrored as Scripts-scope
 # always-on gate ("pipefail-race-sweep" in preflight.rs).
 # (entry removed)
-test-pr-auto-rebase.sh
-test-pr-blocked-watch.sh
-test-pr-explain-block.sh
-test-pr-failure-auto-rescue.sh
-test-pr-rescue-audit-handler.sh
+test-pr-auto-rebase.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pr-blocked-watch.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pr-explain-block.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pr-failure-auto-rescue.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pr-rescue-audit-handler.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 test-trunk-recovery-reviver.sh               # reason: RESILIENT-1190 test-only sibling of the rescuer tests above — exercises the trunk-recovery reviver's victim-decision + ambient-window logic hermetically (no gh/net/root); the reviver is a daemon-side coord organ (systemd timer), not a preflight-shaped ship gate, so there is no CI-side counterpart for preflight to mirror.
-test-pr-triage-bot.sh
-test-pr-watch-auto-resolve.sh
-test-pr-watch-shepherd-smoke.sh
-test-pre-push-preflight-hook.sh
-test-pre-push-rebase-allow.sh
-test-pre-push-test-gate.sh
-test-precommit-guard-audit.sh
-test-precommit-strict-replay.sh
-test-prepush-worktree-cd.sh
-test-required-model.sh
-test-review-handoff-reengage.sh
-test-rollback-gap.sh
-test-rollup-cascade-cancel.sh
-test-root-service-is-sandbox-guard.sh
-test-run-consolidation.sh
-test-run-fleet-cross-repo.sh
-test-sandbox-isolation.sh
-test-speculative-on-speculative-guard.sh
-test-spike-isolation.sh
-test-stale-binary-ship-blocked.sh
-test-stale-branch-rebase.sh
-test-stale-process-watchdog.sh
-test-status-flip-proof-of-merge.sh
-test-tool-normalize.sh
-test-triage-test-failure.sh
-test-velocity-trending.sh
-test-worker-circuit-breaker.sh
-test-worker-first-output-watchdog.sh
-test-worker-timeout-no-commit.sh
-test-worktree-contamination-check.sh
-test-worktree-prune-protects-live-edits.sh
-test-worktree-show-toplevel.sh
+test-pr-triage-bot.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pr-watch-auto-resolve.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pr-watch-shepherd-smoke.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pre-push-preflight-hook.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pre-push-rebase-allow.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-pre-push-test-gate.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-precommit-guard-audit.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-precommit-strict-replay.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-prepush-worktree-cd.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-required-model.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-review-handoff-reengage.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-rollback-gap.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-rollup-cascade-cancel.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-root-service-is-sandbox-guard.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-run-consolidation.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-run-fleet-cross-repo.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-sandbox-isolation.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-speculative-on-speculative-guard.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-spike-isolation.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-stale-binary-ship-blocked.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-stale-branch-rebase.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-stale-process-watchdog.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-status-flip-proof-of-merge.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-tool-normalize.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-triage-test-failure.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-velocity-trending.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-worker-circuit-breaker.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-worker-first-output-watchdog.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-worker-timeout-no-commit.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-worktree-contamination-check.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-worktree-prune-protects-live-edits.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
+test-worktree-show-toplevel.sh  # reason: functional/integration test script; not preflight-shaped (exceeds <60s fast-feedback budget or exercises daemon/fleet runtime behavior); tracked under INFRA-1861 group audit
 
 # ── Audit job steps (builds + test runners requiring chump binary) ────────────
 # These use CHUMP_BIN and cargo build — expensive; not in preflight fast path
-test-gap-list-domain-summary.sh
-test-gap-list-done-format.sh
-test-infra-779-gitdir-repair.sh
-test-known-flake-skip.sh
-test-pr-scope-title-fallback.sh
-test-bot-merge-arm-ship-order.sh
-test-operator-recovery.sh
-test-pillar-dashboard.sh
-test-edit-replay.sh
-test-pwa-auth-toast-stream.sh
-test-pillar-balance-guard.sh
-test-cargo-mutex-isolation.sh
-test-system-integration.sh
-test-gap-consolidate.sh
-test-audit-log.sh
-test-gap-audit-ac-open.sh
-test-gap-add-note.sh
-test-gap-list-since.sh
-test-api-gap-queue-shape.sh
-test-gap-show-ac-render.sh
-test-gap-closure-consistency-fixture.sh
-test-state-db-restore.sh
-test-pwa-e2e-gap-workflow.sh
-test-pwa-security.sh
-test-bot-merge-auto-close.sh
-test-cli-fleet-coord.sh
-test-cli-output-format.sh
-test-orchestrate-session-summary.sh
-test-fleet-brief.sh
-test-fleet-brief-ship-count-unavailable.sh
+test-gap-list-domain-summary.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-gap-list-done-format.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-infra-779-gitdir-repair.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-known-flake-skip.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-pr-scope-title-fallback.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-bot-merge-arm-ship-order.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-operator-recovery.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-pillar-dashboard.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-edit-replay.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-pwa-auth-toast-stream.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-pillar-balance-guard.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-cargo-mutex-isolation.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-system-integration.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-gap-consolidate.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-audit-log.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-gap-audit-ac-open.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-gap-add-note.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-gap-list-since.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-api-gap-queue-shape.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-gap-show-ac-render.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-gap-closure-consistency-fixture.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-state-db-restore.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-pwa-e2e-gap-workflow.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-pwa-security.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-bot-merge-auto-close.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-cli-fleet-coord.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-cli-output-format.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-orchestrate-session-summary.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-fleet-brief.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-fleet-brief-ship-count-unavailable.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
 
 # ── Standalone build steps (not a test gate) ─────────────────────────────────
 apalis-poc                 # reason: standalone example workspace build; not a functional gate
