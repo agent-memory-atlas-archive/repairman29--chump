@@ -26,7 +26,7 @@ mkdir -p "$(dirname "$AMBIENT")" 2>/dev/null || true
 # scanner-anchor: "kind":"urgent_inbox_session_start_poll_active"
 printf '{"ts":"%s","kind":"urgent_inbox_session_start_poll_active","source":"session_start_urgent_inbox_poll"}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AMBIENT" 2>/dev/null || true
-echo "[session-start] URGENT-INBOX polling hook active" >&2
+echo "[session-start] URGENT-INBOX polling hook active (INFRA-4987)" >&2
 
 INNER="$REPO_ROOT/scripts/coord/inbox-check-urgent.sh"
 if [[ -x "$INNER" ]]; then
