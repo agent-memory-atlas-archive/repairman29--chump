@@ -689,6 +689,13 @@ jobs:
       - name: Fleet-health sentinel gate (RESILIENT-1052)
         run: bash scripts/ci/test-fleet-health-sentinel.sh
 
+      # CREDIBLE-1201: false-done-sweep.py's BOOKKEEPING tier (a closing PR
+      # whose diff contains zero implementation files cannot have shipped the
+      # work it's credited with) had a fixture-based test on disk since
+      # CREDIBLE-336/459 but was never wired into CI — this closes that gap.
+      - name: false-done-sweep BOOKKEEPING tier gate (CREDIBLE-1201)
+        run: bash scripts/ci/test-false-done-sweep.sh
+
       # RESILIENT-001: the mirror-converge jam. A node's working tree
       # accumulates generated files (untracked docs/gaps/*.yaml mirrors, local
       # chore(backlog) autocommits); a merge-based advance (`git pull`) then
