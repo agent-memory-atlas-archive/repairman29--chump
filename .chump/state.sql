@@ -21931,9 +21931,18 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Update the `final_verdict` function in `scripts/ci/test-code-reviewer-grounding.sh` to compute its result deterministically by normalising the diff input (e.g., sorting lines, stripping nondeterministic metadata) and using a stable hash algorithm, eliminating any reliance on timestamps, random seeds, or other mutable global state.
+    
+    Target file(s):
+    - scripts/ci/test-code-reviewer-grounding.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Given the same diff input, the reviewer-agent returns the same verdict on repeated runs
-    - Determinism is enforced without introducing global mutable state
+    - Running `scripts/ci/test-code-reviewer-grounding.sh` with the same diff file twice produces identical stdout verdict strings on both runs.
+    - The exit code of `scripts/ci/test-code-reviewer-grounding.sh` is unchanged and matches the expected value for the given diff after the deterministic change.
+    - The `final_verdict` implementation no longer reads or writes any global mutable state (e.g., no use of `$RANDOM`, `date`, or temporary files that affect the result).
+    - A unit test in `scripts/ci/test-code-reviewer-grounding.sh` (or an added test harness) asserts that two invocations with an identical diff input yield the same hash/verdict value.
   depends_on: [CREDIBLE-657]
 
 - id: CREDIBLE-659
@@ -21942,9 +21951,18 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Modify the `merge_preserve_unknown_fields` function in `crates/chump-gap-store/src/lib.rs` so that every `Concern` it creates is populated with an `evidence` struct containing the literal file path `"crates/chump-gap-store/src/lib.rs"` and the exact line number of the `Concern` construction site, thereby satisfying the CREDIBLE‑659 requirement.
+    
+    Target file(s):
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Every concern object includes a non‑empty `evidence` field with a `file` and `line` entry
-    - Evidence points to the exact source location that triggered the concern
+    - "In `crates/chump-gap-store/src/lib.rs`, after the edit, each `Concern` instantiated inside `merge_preserve_unknown_fields` has `evidence.file == \"crates/chump-gap-store/src/lib.rs\"`."
+    - "Each such `Concern` has `evidence.line` equal to the line number where the `Concern::new` (or equivalent) call occurs (e.g., line 3403) and a unit test `merge_preserve_unknown_fields_evidence` asserts this exact value."
+    - Running `cargo test --package chump-gap-store` passes a new test that checks all concerns returned by `merge_preserve_unknown_fields` contain a non‑empty `evidence` field with the correct file and line values.
+    - "? Executing `scripts/coord/code-reviewer-agent.sh info` on a repository that triggers a concern from `merge_preserve_unknown_fields` prints a line containing `evidence : crates/chump-gap-store/src/lib.rs:3403`."
   depends_on: [CREDIBLE-658]
 
 - id: CREDIBLE-660
@@ -22012,9 +22030,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add explicit `cargo test` invocations to `scripts/ci/test-subagent-epilogue-ref.sh` that run the newly introduced unit tests in `crates/chump-gap-store/src/sync.rs` and the new integration tests in `crates/chump-gap-store/src/maintenance/enricher.rs`, and make the script fail the CI job if any of those tests fail.
+    
+    Target file(s):
+    - scripts/ci/test-subagent-epilogue-ref.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - scripts/ci/test-*.sh includes commands to run the new unit and integration tests
-    - CI pipeline reports success when the new tests pass
+    - "The script `scripts/ci/test-subagent-epilogue-ref.sh` includes a line `echo \"Running new unit tests\"` followed by `cargo test --package chump-gap-store --lib --test sync` and exits with a non‑zero status if this command fails."
+    - "The script `scripts/ci/test-subagent-epilogue-ref.sh` includes a line `echo \"Running new integration tests\"` followed by `cargo test --package chump-gap-store --test enricher_integration` and exits with a non‑zero status if this command fails."
+    - CI pipeline logs contain the exact strings `Running new unit tests` and `Running new integration tests` emitted by the script, and the CI step reports success only when both `cargo test` commands return exit code 0.
   depends_on: [CREDIBLE-661, CREDIBLE-662]
 
 - id: CREDIBLE-664
@@ -22023,9 +22049,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Refactor the `run` function in `crates/chump-preflight/src/preflight.rs` to eliminate all Clippy warnings (e.g., replace `unwrap`/`expect`, remove unnecessary clones, simplify match arms) and apply Rustfmt formatting so the file conforms to the project's style guidelines.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "`cargo fmt --all` makes no changes"
-    - "`cargo clippy --all-targets -D warnings` completes without warnings"
+    - Running `cargo fmt --all` reports no files need formatting.
+    - Running `cargo clippy --all-targets -D warnings` completes with exit code 0 and produces no warnings for the `chump-preflight` crate.
+    - The `run` function in `crates/chump-preflight/src/preflight.rs` compiles without any Clippy warnings.
+    - Executing `scripts/coord/definition-of-ready-gate.sh` returns exit code 0, indicating the script still runs successfully.
   depends_on: [CREDIBLE-658, CREDIBLE-659, CREDIBLE-660]
 
 - id: CREDIBLE-665
@@ -22034,9 +22069,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Insert a new top‑level documentation section titled “## Evidence Requirement” into docs/audits/RED_LETTER.md, placed immediately after the existing “## The Opportunity Cost” heading (line 2137), containing a concise paragraph that states concerns must include a `file:line` reference to the exact code location.
+    
+    Target file(s):
+    - docs/audits/RED_LETTER.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "README or CONTRIBUTING file contains a section explaining that concerns must include `file:line` evidence"
-    - Documentation change is reviewed and merged
+    - "docs/audits/RED_LETTER.md contains a level‑2 heading `## Evidence Requirement`."
+    - "The new section includes the exact sentence “All concerns must include `file:line` evidence pointing to the exact location of the issue.”"
+    - "The `## Evidence Requirement` heading appears directly after the `## The Opportunity Cost` heading (original line 2137) in the file."
   depends_on: [CREDIBLE-659]
 
 - id: CREDIBLE-666
@@ -22045,9 +22088,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Modify the `fail` function in `scripts/ci/test-credible-959-autoclose-else-branch-logging.sh` to wrap the auto‑close else‑branch with an error‑logging block that records any non‑zero exit code via `logger.error` (or equivalent) and then returns control without terminating the script, thereby preventing a `bot_merge_uncaught_error` from being emitted.
+    
+    Target file(s):
+    - scripts/ci/test-credible-959-autoclose-else-branch-logging.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Else-branch logs any non-zero exit code without exiting the script
-    - No bot_merge_uncaught_error is emitted when the else-branch fails
+    - In `scripts/ci/test-credible-959-autoclose-else-branch-logging.sh`, the `fail` function logs the non‑zero exit code using an error‑level logger call before returning.
+    - Executing the script with a deliberately failing command in the else‑branch produces a CI log line containing the text “auto‑close failed with exit code” followed by the actual non‑zero code.
+    - The script’s stdout/stderr contain no line matching `bot_merge_uncaught_error` when the else‑branch fails.
+    - The script exits with status 0 even when the else‑branch command returns a non‑zero exit code.
   notes: |
     [chump harvest check 'bot-merge']
     === primitives_index match for 'bot-merge' ===
@@ -106194,7 +106246,7 @@ gaps:
     - "[\"chump claim INFRA-X --paths foo.sh,bar.rs scans every currently-open PR (gh pr list --json files) for path overlap\",\"On any overlap with an open PR: refuse claim with clear message: [claim] paths overlap with open PR #N (gap INFRA-Y, paths: foo.sh). Options: (a) coordinate with #N author and merge into that PR, (b) wait for #N to land then rebase, (c) --allow-overlap to proceed anyway (audit-logged via kind=claim_path_overlap_allowed).\",\"Auto-detection of same-region work (not just same-file): when same file overlaps, run git diff to extract modified line-ranges; only flag as collision if the proposed claim would touch the same line-range. Single-file with disjoint line-ranges still allowed.\",\"Operator-mode: when CHUMP_CLAIM_PATH_OVERLAP_OPERATOR=1 (operator-only env, source-controlled), claim proceeds without check (operator may know they want to ship 2 PRs touching same file)\",\"Emit kind=claim_path_overlap_blocked (and recovered) to ambient.jsonl with {claimed_gap, blocking_pr, blocking_gap, overlapping_paths}\",\"Smoke test scripts/ci/test-claim-path-overlap.sh: mock 1 open PR with file [a.sh]; claim with --paths a.sh exits non-zero with redirect message; claim with --paths b.sh succeeds\",\"Today trigger 2026-06-02: INFRA-2343 (PR #2924, 37h old) and INFRA-2347 both fixed the same 3 printf"
     - "grep -q patterns in scripts/coord/trunk-sentinel-daemon.sh. Different gap IDs, different titles, same code. Bypassed every existing dedup gate.\",\"Filing-time companion follow-up (separate gap if scope grows): chump gap reserve also checks title-similarity against OPEN PR titles (not just other gaps). Catches the case where 2 authors independently file 2 gaps for the same problem.\"]"
   notes: |
-    Decomposed into 4 slices: INFRA-5624, INFRA-5625, INFRA-5626, INFRA-5627
+    Decomposed into 4 slices: INFRA-6201, INFRA-6202, INFRA-6203, INFRA-6204
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -204599,6 +204651,120 @@ gaps:
     
     === cross-pollination briefs mentioning 'polling' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6201
+  domain: INFRA
+  title: "INFRA: INFRA-5624: Implement basic path overlap detection against open PRs (INFRA-2434 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The `chump claim` command runs `gh pr list --json files` to retrieve currently open PRs.
+    - If any file in the `--paths` argument matches a file listed in an open PR, the claim is refused.
+    - "Refused claim outputs a clear error message: \"[claim] paths overlap with open PR #N (gap INFRA-Y, paths: <file>)\"."
+    - The command exits with a non‑zero status code on overlap detection.
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6202
+  domain: INFRA
+  title: "INFRA: INFRA-5625: Add line‑range overlap detection for same‑file claims (INFRA-2434 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a claimed path overlaps a file already present in an open PR, the system runs `git diff` between the PR head and base to extract modified line ranges.
+    - The claim is blocked only if the proposed claim would modify a line range that intersects any of the PR's modified line ranges.
+    - If the line ranges are disjoint, the claim proceeds successfully.
+    - Blocked claims produce the same error message format as in INFRA-5624, including the overlapping line range details.
+  depends_on: [INFRA-6201]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6203
+  domain: INFRA
+  title: "INFRA: INFRA-5626: Operator‑mode bypass for path‑overlap checks (INFRA-2434 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - If the environment variable `CHUMP_CLAIM_PATH_OVERLAP_OPERATOR=1` is set, the claim proceeds without performing any path‑overlap checks.
+    - When bypassed, the claim behaves as if no overlap exists and returns a zero exit code.
+    - The bypass does not emit any `claim_path_overlap_blocked` audit events.
+  depends_on: [INFRA-6201]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6204
+  domain: INFRA
+  title: "INFRA: INFRA-5627: Audit logging and --allow-overlap flag (INFRA-2434 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a claim is blocked due to path or line‑range overlap, a JSON line is appended to `ambient.jsonl` with `kind=claim_path_overlap_blocked` and fields `{claimed_gap, blocking_pr, blocking_gap, overlapping_paths}`.
+    - If the user supplies `--allow-overlap`, the claim proceeds despite the overlap and a JSON line with `kind=claim_path_overlap_allowed` is emitted, containing the same fields as above.
+    - Both blocked and allowed events are also emitted with a corresponding `recovered` event when the claim later succeeds after the blocking PR is merged or closed.
+    - "A smoke test script `scripts/ci/test-claim-path-overlap.sh` is added that: (a) mocks an open PR containing `a.sh` and verifies that `chump claim --paths a.sh` exits non‑zero with the correct message; (b) verifies that `chump claim --paths b.sh` succeeds."
+  depends_on: [INFRA-6201, INFRA-6202, INFRA-6203]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
 
 - id: INFRA-635
   domain: INFRA
