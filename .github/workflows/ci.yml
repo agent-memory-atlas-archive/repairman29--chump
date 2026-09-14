@@ -951,6 +951,12 @@ jobs:
         continue-on-error: true
         run: bash scripts/ci/check-capabilities-freshness.sh
 
+      - name: bin-bloat-guard (EFFECTIVE-1666, warn-only)
+        # File-size detection for the build pipeline: scans new top-level
+        # src/*.rs files for size in KB, warns above threshold (crate-first
+        # signal per WHEN_TO_CRATE.md). Advisory — does not fail the build.
+        run: bash scripts/ci/bin-bloat-guard.sh --base origin/main
+
       - name: no-claude-leak audit (INFRA-1051, warn-only, changed-only)
         # Prevents NEW Claude-specific references from leaking into product-
         # layer code (src/, scripts/coord/, scripts/dispatch/, scripts/ops/).
