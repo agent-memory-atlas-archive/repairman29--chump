@@ -105,6 +105,10 @@ source "${SCRIPT_DIR}/lib/github.sh"
 # shellcheck source=lib/ambient-write.sh
 source "${SCRIPT_DIR}/lib/ambient-write.sh"
 export CHUMP_GH_SCRIPT="pr-rescue.sh"
+# shellcheck source=../lib/orchestrator-log.sh
+source "${SCRIPT_DIR}/../lib/orchestrator-log.sh"
+orch_log_start "pr-rescue.sh" "$@"
+trap 'orch_log_end "pr-rescue.sh" "$?"' EXIT
 REPO="${GITHUB_REPOSITORY:-}"
 TARGET_PR=""
 
@@ -119,7 +123,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-log() { echo "[pr-rescue] $*" >&2; }
+log() { echo "[pr-rescue] $*" >&2; orch_log_step "$*"; }
 
 emit_ambient() {
     local kind="$1" pr_num="$2" detail="${3:-}"

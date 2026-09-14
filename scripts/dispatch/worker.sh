@@ -243,7 +243,12 @@ _stall_threshold_default="${CHUMP_STALL_THRESHOLD_S:-120}"
 
 mkdir -p "$FLEET_LOG_DIR"
 
-log() { printf '[worker:%s %s] %s\n' "$AGENT_ID" "$(date -u +%H:%M:%S)" "$*"; }
+# INFRA-6128: shared execution logging (start/end/step) to a central log.
+# shellcheck source=../lib/orchestrator-log.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/orchestrator-log.sh"
+orch_log_start "worker.sh" "$@"
+
+log() { printf '[worker:%s %s] %s\n' "$AGENT_ID" "$(date -u +%H:%M:%S)" "$*"; orch_log_step "$*"; }
 
 # ── INFRA-3832: reap a hung cycle's WHOLE process tree ─────────────────────────
 # The first-output watchdog and stall detector used to `kill $_claude_pid`, but
@@ -339,7 +344,7 @@ remove_heartbeat_and_daemon() {
     rm -f "$_hb_gapid_file" 2>/dev/null || true
     remove_heartbeat
 }
-trap remove_heartbeat_and_daemon EXIT
+trap 'remove_heartbeat_and_daemon; orch_log_end "worker.sh" "$?"' EXIT
 
 # INFRA-620: re-read CLAUDE_CODE_OAUTH_TOKEN from ~/.chump/oauth-token.json
 # before each claude -p spawn. Prevents auth_storm when the inherited token

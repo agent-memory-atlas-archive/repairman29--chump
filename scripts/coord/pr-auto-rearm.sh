@@ -31,6 +31,11 @@ set -uo pipefail
 # Quick bypass
 [[ "${CHUMP_PR_AUTO_REARM_DISABLED:-0}" == "1" ]] && exit 0
 
+# shellcheck source=../lib/orchestrator-log.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/orchestrator-log.sh"
+orch_log_start "pr-auto-rearm.sh" "$@"
+trap 'orch_log_end "pr-auto-rearm.sh" "$?"' EXIT
+
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 STATE="${CHUMP_PR_AUTO_REARM_STATE:-$REPO_ROOT/.chump-locks/pr-auto-rearm-state.jsonl}"
@@ -106,6 +111,7 @@ PRS_JSON="$(gh pr list --state open --limit 60 \
 
 if [[ -z "$PRS_JSON" || "$PRS_JSON" == "[]" ]]; then
     echo "[pr-auto-rearm] no open PRs (or gh unavailable)"
+    orch_log_step "no open PRs (or gh unavailable) — exiting"
     exit 0
 fi
 
@@ -119,6 +125,7 @@ TARGETS="$(printf '%s' "$PRS_JSON" | jq -r '
 
 if [[ -z "$TARGETS" ]]; then
     echo "[pr-auto-rearm] no disarmed BLOCKED PRs (queue healthy)"
+    orch_log_step "no disarmed BLOCKED PRs (queue healthy) — exiting"
     exit 0
 fi
 
@@ -149,16 +156,20 @@ while IFS= read -r PR; do
         continue
     fi
     echo "[pr-auto-rearm] re-arming #$PR..."
+    orch_log_step "re-arming #$PR"
     if gh pr merge "$PR" --auto --squash >/dev/null 2>&1; then
         echo "[pr-auto-rearm] OK #$PR"
+        orch_log_step "re-armed #$PR OK"
         emit "$PR" "blocked_disarmed_safety_sweep"
         record "$PR"
         REARMED=$((REARMED + 1))
     else
         echo "[pr-auto-rearm] FAIL #$PR — gh pr merge --auto returned non-zero"
+        orch_log_step "re-arm FAILED #$PR"
         FAILED=$((FAILED + 1))
     fi
 done <<< "$TARGETS"
 
 echo "[pr-auto-rearm] done — rearmed=$REARMED throttled=$THROTTLED failed=$FAILED deferred=$DEFERRED"
+orch_log_step "done rearmed=$REARMED throttled=$THROTTLED failed=$FAILED deferred=$DEFERRED"
 exit 0

@@ -933,6 +933,11 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# INFRA-6128: shared execution logging (start/end/step) to a central log.
+# shellcheck source=../lib/orchestrator-log.sh
+source "$SCRIPT_DIR/../lib/orchestrator-log.sh"
+orch_log_start "bot-merge.sh" "$@"
+
 # ── INFRA-305: hot-file rebase-loop expectation list ─────────────────────────
 # Files that every parallel agent appends to (CI test list, pre-commit guard
 # list, coordination scripts, top-level docs). PRs touching these almost
@@ -1000,11 +1005,11 @@ fi
 # Long stages use `stage_start <label>` → `stage_done` which prints the
 # elapsed seconds. Silent intervals >30s are the symptom INFRA-026 was
 # filed about; banners make them attributable.
-green()  { printf '\033[0;32m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; }
-red()    { printf '\033[0;31m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; }
-yellow() { printf '\033[0;33m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; }
+green()  { printf '\033[0;32m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }
+red()    { printf '\033[0;31m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }
+yellow() { printf '\033[0;33m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }
 warn()   { yellow "$*"; }
-info()   { printf '[bot-merge %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+info()   { printf '[bot-merge %s] %s\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }
 
 # INFRA-590: print error + doc link, then exit 1.
 die_with_help() {
@@ -1708,7 +1713,7 @@ fi
 # _BM_TIMEOUT_EXIT is set so the lease survives and a retry can resume the
 # same claim instead of re-claiming from scratch (root cause of the
 # worktree/branch-exists + ghost-NATS-KV-claim cascade in this gap).
-trap '_bm_cleanup; [[ "${DRY_RUN:-0}" -eq 0 && "${_BM_TIMEOUT_EXIT:-0}" != "1" && -n "${CHUMP_SESSION_ID:-}" ]] && rm -f "${LOCK_DIR:-$REPO_ROOT/.chump-locks}/${CHUMP_SESSION_ID}.json" 2>/dev/null || true' EXIT
+trap '_bm_cleanup; [[ "${DRY_RUN:-0}" -eq 0 && "${_BM_TIMEOUT_EXIT:-0}" != "1" && -n "${CHUMP_SESSION_ID:-}" ]] && rm -f "${LOCK_DIR:-$REPO_ROOT/.chump-locks}/${CHUMP_SESSION_ID}.json" 2>/dev/null || true; orch_log_end "bot-merge.sh" "$?"' EXIT
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$BRANCH" == "HEAD" ]]; then
