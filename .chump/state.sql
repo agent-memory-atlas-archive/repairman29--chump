@@ -5295,10 +5295,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a claim‑generation stage to the CI harness by extending the `build_harness` function in `test-bot-merge-recovery-pr-create.sh` and the `_run_strict_gate_harness` function in `test-pr-shepherd-daemon.sh` to invoke the selected model, capture its output, write it to a temporary claim file, and log the file path for later verification.
+    
+    Target file(s):
+    - scripts/ci/test-bot-merge-recovery-pr-create.sh
+    - scripts/ci/test-pr-shepherd-daemon.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Harness invokes the selected model to generate a claim for a given gap
-    - The claim output is saved to a temporary file and logged
-    - Test verifies that a non‑empty claim string is produced for a sample Rust gap
+    - In `scripts/ci/test-bot-merge-recovery-pr-create.sh`, the `build_harness` function creates a temporary file (e.g., `/tmp/claim_*.txt`) and writes the model’s claim output to it.
+    - In `scripts/ci/test-pr-shepherd-daemon.sh`, the `_run_strict_gate_harness` function reads the temporary claim file, logs its absolute path, and asserts that the claim string is non‑empty.
+    - Executing the harness with a sample Rust gap file results in a non‑empty claim string being printed to stdout by the harness script.
+    - After the harness finishes, the temporary claim file is removed and no residual claim file remains in the filesystem.
   depends_on: [CREDIBLE-1117]
   notes: |
     [chump harvest check 'inference']
@@ -89013,7 +89022,7 @@ gaps:
     - Documented in docs/process/MERGE_DRIVERS.md; cross-linked from CLAUDE.md operational docs section
     - Re-run on existing DIRTY PRs after install proves they auto-resolve
   notes: |
-    Decomposed into 7 slices: INFRA-6082, INFRA-6083, INFRA-6084, INFRA-6085, INFRA-6086, INFRA-6087, INFRA-6088
+    Decomposed into 7 slices: INFRA-6331, INFRA-6332, INFRA-6333, INFRA-6334, INFRA-6335, INFRA-6336, INFRA-6337
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -212176,6 +212185,205 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-6331
+  domain: INFRA
+  title: "INFRA: Add .gitattributes entries for union merge (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - ".gitattributes contains entry \"docs/process/CLAUDE_GOTCHAS.md merge=union\""
+    - ".gitattributes contains entry \"docs/observability/EVENT_REGISTRY.yaml merge=union\""
+    - ".gitattributes contains entry \"scripts/ci/event-registry-reserved.txt merge=union\""
+    - ".gitattributes contains entry \"docs/process/KNOWN_FLAKES.yaml merge=union\""
+    - Changes are committed to the repository without errors
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6332
+  domain: INFRA
+  title: "INFRA: Create union merge driver registration script (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - scripts/setup/install-merge-drivers.sh exists and is executable
+    - "Script adds a \"union\" driver to the local git config with \"git config --global merge.union.name \\\"union merge driver\\\"\" and appropriate command"
+    - Running the script prints a success message and exits with code 0
+  depends_on: [INFRA-6331]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6333
+  domain: INFRA
+  title: "INFRA: Invoke driver registration from fleet bootstrap (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - chump-fleet-bootstrap.sh calls scripts/setup/install-merge-drivers.sh
+    - Bootstrap script logs that the merge driver registration was attempted
+    - Bootstrap execution does not fail if the driver is already registered
+  depends_on: [INFRA-6332]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6334
+  domain: INFRA
+  title: "INFRA: Implement smoke‑test for union merge driver (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - scripts/ci/test-merge-union-drivers.sh creates two branches diverging on CLAUDE_GOTCHAS.md
+    - Each branch appends a distinct line to the file
+    - The script merges the branches and asserts the resulting file contains both appended lines in any order and no conflict markers (<<<<<<<, =======, >>>>>>>)
+    - Script exits with code 0 on success and prints a clear PASS message
+  depends_on: [INFRA-6332]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6335
+  domain: INFRA
+  title: "INFRA: Document union merge driver usage (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - docs/process/MERGE_DRIVERS.md exists
+    - "File includes a section titled \"Union merge driver\" describing purpose, installation steps, and how to verify"
+    - Section references the .gitattributes entries and the install‑merge‑drivers.sh script
+  depends_on: [INFRA-6331, INFRA-6332]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6336
+  domain: INFRA
+  title: "INFRA: Cross‑link documentation from CLAUDE operational docs (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - CLAUDE.md operational docs section contains a hyperlink to docs/process/MERGE_DRIVERS.md
+    - "Link text clearly indicates it points to \"Union merge driver\" documentation"
+    - Link resolves correctly in the repository view
+  depends_on: [INFRA-6335]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6337
+  domain: INFRA
+  title: "INFRA: Validate auto‑resolution on existing dirty PRs (INFRA-1419 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Select at least two open PRs that modify the files covered by .gitattributes
+    - Run the install‑merge‑drivers.sh script locally
+    - Merge the PR branches locally and confirm that the merge completes without conflicts and the resulting files contain the union of changes
+    - Document the verification steps and outcomes in a short markdown report attached to the PR
+  depends_on: [INFRA-6331, INFRA-6332]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
 - id: INFRA-635
   domain: INFRA
