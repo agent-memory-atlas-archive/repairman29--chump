@@ -191,10 +191,10 @@ def _notify_operator_escalation(kind: str, message: str) -> None:
 
 
 def _extract_gap_ids(pr: dict) -> list[str]:
-    """Extract gap IDs from PR title and explicit Closes:/Fixes:/Resolves: trailers in the body.
+    """Extract gap IDs from PR title and explicit Closes: trailer in the body.
 
     Looks for patterns like 'INFRA-1234' or 'CREDIBLE-001' in the PR title.
-    In the PR body, only lines that start with (case-insensitive) 'Closes:', 'Fixes:', or 'Resolves:'
+    In the PR body, only lines that start with (case-insensitive) 'Closes:'
     are considered as trailers and gap IDs are extracted from them.
 
     Returns a deduped list preserving first-seen order.
@@ -207,7 +207,7 @@ def _extract_gap_ids(pr: dict) -> list[str]:
     import re
 
     pattern = re.compile(r"\b([A-Z][A-Z-]+-\d+)\b")
-    trailer_pattern = re.compile(r"(?im)^(?:Closes|Fixes|Resolves):\s*(.+)$")
+    trailer_pattern = re.compile(r"(?im)^Closes:\s*(.+)$")
 
     seen: set[str] = set()
     ordered: list[str] = []
