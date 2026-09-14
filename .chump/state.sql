@@ -8263,6 +8263,60 @@ gaps:
   opened_date: '2026-07-26'
   outcome_id: CREDIBLE-000
 
+- id: CREDIBLE-1210
+  domain: CREDIBLE
+  title: "CREDIBLE: Implement summarized_pct >95% guard in CREDIBLE code path (CREDIBLE-300 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The code path that calculates `summarized_pct` now enforces a minimum value of 95%, clamping any lower result to 95% or higher.
+    - The change compiles without warnings (`cargo fmt` and `cargo clippy -- -D warnings` pass).
+    - No existing unit or integration tests fail after the change.
+  notes: |
+    [chump harvest check 'Almanac']
+    === primitives_index match for 'Almanac' ===
+    
+    === cluster keyword match for 'Almanac' ===
+      cluster misc (28 repos): workspace-docs, almanac, games-workspace, machine-substrate, grave-dancer, jeffadkins-dev, holler, privateer, opportunity-library, posse, realm-of-shadows, upshift-cli, space-shooter, crystal-rush, inversion, roblox-game-manager, kosmos, fulcrum, okr, project-2026-case, pixi-game, jeffadkins-me, bulwark, choose, derelict, registry, project-forge, project_forge
+    
+    === extracted_primitives (per-file, line-refd) match for 'Almanac' ===
+      almanac/crates/almanac-core/src/registry.rs:5 — vector_embedding (//! local tier of the scaling plan (see ROADMAP.md); the fleet pgvector tier is)
+    
+    === repo-description match for 'Almanac' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Almanac' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Almanac' ===
+
+- id: CREDIBLE-1211
+  domain: CREDIBLE
+  title: "CREDIBLE: Add test(s) verifying summarized_pct >95% behavior (CREDIBLE-300 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A test (unit or integration) asserts that `summarized_pct` is never below 95% for relevant inputs.
+    - Running the test suite without the implementation change fails, and passes after the change.
+    - The test is executed by the CI script (`scripts/ci/test-*.sh` or `cargo test`).
+    - Formatting and clippy checks remain clean after adding the test.
+  depends_on: [CREDIBLE-1210]
+  notes: |
+    [chump harvest check 'Almanac']
+    === primitives_index match for 'Almanac' ===
+    
+    === cluster keyword match for 'Almanac' ===
+      cluster misc (28 repos): workspace-docs, almanac, games-workspace, machine-substrate, grave-dancer, jeffadkins-dev, holler, privateer, opportunity-library, posse, realm-of-shadows, upshift-cli, space-shooter, crystal-rush, inversion, roblox-game-manager, kosmos, fulcrum, okr, project-2026-case, pixi-game, jeffadkins-me, bulwark, choose, derelict, registry, project-forge, project_forge
+    
+    === extracted_primitives (per-file, line-refd) match for 'Almanac' ===
+      almanac/crates/almanac-core/src/registry.rs:5 — vector_embedding (//! local tier of the scaling plan (see ROADMAP.md); the fleet pgvector tier is)
+    
+    === repo-description match for 'Almanac' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Almanac' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Almanac' ===
+
 - id: CREDIBLE-122
   domain: CREDIBLE
   title: "CREDIBLE: deliberator can't tally real votes — consensus_result structurally impossible (0 ever); fix tally seam + outcome-based health check + real e2e test"
@@ -11437,7 +11491,7 @@ gaps:
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
   notes: |
-    Decomposed into 2 slices: CREDIBLE-1174, CREDIBLE-1175
+    Decomposed into 2 slices: CREDIBLE-1210, CREDIBLE-1211
   opened_date: '2026-08-22'
   outcome_id: MISSION-010
   evidence: |
