@@ -30791,9 +30791,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Edit the `test-gap-audit-ac-open.sh` script to add a concrete audit routine that queries `state.db` for rows in the `gaps` table where `closed_pr` is populated but `closed_date` is empty, joins these rows to the `gap_flipped_done_on_merge` event records, and prints a concise list of candidate falsely‑closed gaps (gap ID and merge timestamp). The script now reports “No falsely‑closed gaps found” when none exist and exits with status 0.
+    
+    Target file(s):
+    - scripts/ci/test-gap-audit-ac-open.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Script identifies all gaps in state.db where closed_pr is populated but closed_date is empty
-    - Output lists candidate falsely-closed gaps corresponding to historical gap_flipped_done_on_merge events
+    - "scripts/ci/test-gap-audit-ac-open.sh: the script runs a SQLite query `SELECT id FROM gaps WHERE closed_pr IS NOT NULL AND (closed_date IS NULL OR closed_date = '')` and captures the resulting gap IDs."
+    - "scripts/ci/test-gap-audit-ac-open.sh: for each captured gap ID the script performs a join to the `gap_flipped_done_on_merge` event table and prints a line `gap_id <TAB> merge_timestamp`."
+    - "scripts/ci/test-gap-audit-ac-open.sh: when executed against a test `state.db` containing at least one gap with `closed_pr` set and `closed_date` empty, the script outputs the corresponding `gap_id` and merge timestamp and exits with code 0."
+    - "scripts/ci/test-gap-audit-ac-open.sh: when no such gaps are present, the script outputs exactly `No falsely-closed gaps found` and exits with code 0."
   notes: |
     [chump harvest check 'merging']
     === primitives_index match for 'merging' ===
@@ -204035,7 +204044,7 @@ gaps:
 - id: INFRA-6175
   domain: INFRA
   title: "INFRA: Create CI builder Dockerfile (INFRA-2287 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -204065,6 +204074,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-14T06:15:40Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=75, rc=75, cycle_log=3543B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6176
   domain: INFRA
@@ -204380,7 +204390,7 @@ gaps:
 - id: INFRA-6185
   domain: INFRA
   title: "INFRA: Correct bogus action versions in ci-nightly workflow (INFRA-2321 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -204404,6 +204414,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+    [2026-09-14T06:01:42Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=75, rc=75, cycle_log=3418B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6186
   domain: INFRA
