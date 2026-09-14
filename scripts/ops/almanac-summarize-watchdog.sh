@@ -66,6 +66,13 @@ COVERAGE_BIN="${CHUMP_ALMANAC_WATCHDOG_COVERAGE_BIN:-}"
 ALMANAC_BIN="${CHUMP_ALMANAC_BIN:-$HOME/Projects/almanac/target/release/almanac}"
 RECALL_SCRIPT="${CHUMP_ALMANAC_WATCHDOG_RECALL_SCRIPT:-$REPO_ROOT/scripts/dispatch/operator-recall.sh}"
 MIN_PCT="${CHUMP_ALMANAC_SUMMARIZE_MIN_PCT:-95}"
+# CREDIBLE-1210: the summarized_pct guard's enforced floor must never drop
+# below 95% — clamp here so a misconfigured (or careless) env override can't
+# silently weaken the coverage guard. Float-safe: MIN_PCT may be "97.5".
+if awk -v v="$MIN_PCT" 'BEGIN{exit !(v+0 < 95)}' 2>/dev/null; then
+    echo "[almanac-summarize-watchdog] CHUMP_ALMANAC_SUMMARIZE_MIN_PCT=$MIN_PCT is below the 95% mission floor — clamping to 95"
+    MIN_PCT=95
+fi
 
 mkdir -p "$(dirname "$AMBIENT_LOG")" 2>/dev/null || true
 
