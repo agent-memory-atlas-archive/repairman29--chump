@@ -393,7 +393,7 @@ jobs:
   # (admin); leaving the rollup name as `test` ships the throughput win
   # without touching protection.
   test:
-    needs: [fast-checks, clippy, cargo-test, pr-hygiene]
+    needs: [fast-checks, fast-checks-heavy, clippy, cargo-test, pr-hygiene]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5  # rollup only — quick aggregator check
@@ -428,14 +428,15 @@ jobs:
           #         AND not all shards cancelled
           #       ⟹ real_failure (unexpected cancel — surface to operator)
           fast="${{ needs.fast-checks.result }}"
+          fast_heavy="${{ needs.fast-checks-heavy.result }}"
           clippy="${{ needs.clippy.result }}"
           test="${{ needs.cargo-test.result }}"
           hygiene="${{ needs.pr-hygiene.result }}"
-          echo "fast-checks=$fast  clippy=$clippy  cargo-test=$test  pr-hygiene=$hygiene"
+          echo "fast-checks=$fast  fast-checks-heavy=$fast_heavy  clippy=$clippy  cargo-test=$test  pr-hygiene=$hygiene"
 
           # Pass 1: detect whether any shard has a real failure (not cancelled).
           any_real_failure=0
-          for r in "$fast" "$clippy" "$test" "$hygiene"; do
+          for r in "$fast" "$fast_heavy" "$clippy" "$test" "$hygiene"; do
             [ "$r" = "failure" ] && any_real_failure=1
           done
 
@@ -443,9 +444,9 @@ jobs:
           # When a NEW workflow run starts on the same SHA, GH Actions
           # cancels ALL in-flight shards.  If every shard is cancelled
           # and none failed, this is a supersedure — not a real failure.
-          total_shards=4
+          total_shards=5
           cancelled_count=0
-          for r in "$fast" "$clippy" "$test" "$hygiene"; do
+          for r in "$fast" "$fast_heavy" "$clippy" "$test" "$hygiene"; do
             [ "$r" = "cancelled" ] && cancelled_count=$((cancelled_count + 1))
           done
           supersedure=0
@@ -471,10 +472,11 @@ jobs:
               *) real_failures="${real_failures:+$real_failures,}$name" ;;
             esac
           }
-          classify "fast-checks" "$fast"
-          classify "clippy"      "$clippy"
-          classify "cargo-test"  "$test"
-          classify "pr-hygiene"  "$hygiene"
+          classify "fast-checks"       "$fast"
+          classify "fast-checks-heavy" "$fast_heavy"
+          classify "clippy"            "$clippy"
+          classify "cargo-test"        "$test"
+          classify "pr-hygiene"        "$hygiene"
 
           # Structured summary (visible in GHA step log + step summary).
           echo ""
@@ -523,7 +525,7 @@ jobs:
   # protocol smoke test` per docs/baselines/branch-protection-main.json.
   verified:
     name: verified
-    needs: [fast-checks, clippy, cargo-test, pr-hygiene, test]
+    needs: [fast-checks, fast-checks-heavy, clippy, cargo-test, pr-hygiene, test]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -550,6 +552,7 @@ jobs:
         run: |
           bash scripts/ci/aggregator-verified.sh \
             --lane "fast-checks=${{ needs.fast-checks.result }}" \
+            --lane "fast-checks-heavy=${{ needs.fast-checks-heavy.result }}" \
             --lane "clippy=${{ needs.clippy.result }}" \
             --lane "cargo-test=${{ needs.cargo-test.result }}" \
             --lane "pr-hygiene=${{ needs.pr-hygiene.result }}" \
@@ -1098,8 +1101,9 @@ jobs:
       - name: farmer un-killable control-plane tender (RESILIENT-068)
         run: bash scripts/ci/test-farmer.sh
 
-      - name: fleet kill switch — AUTONOMY_LEVEL fail-closed (RESILIENT-073)
-        run: CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-fleet-kill-switch.sh
+      # RESILIENT-304: "fleet kill switch (RESILIENT-073)" MOVED to the
+      # fast-checks-heavy sibling job — it was the #2 wall-clock step here
+      # (244s green / 354s cold). See that job below.
 
       - name: fleet starve auto-action (INFRA-391)
         run: bash scripts/ci/test-fleet-starve-auto-action.sh
@@ -1399,10 +1403,9 @@ jobs:
           CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" \
             bash scripts/ci/test-cli-fleet-coord.sh
 
-      - name: CLI integration tests by command category — 31 commands (CREDIBLE-018)
-        run: |
-          CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" \
-            bash scripts/ci/test-cli-integration.sh
+      # RESILIENT-304: "CLI integration tests — 31 commands (CREDIBLE-018)"
+      # MOVED to the fast-checks-heavy sibling job — it was the #1 wall-clock
+      # step here (137s green / 554s cold). See that job below.
 
       - name: CI gate promotion no-regression (INFRA-1869)
         # Asserts every gate listed in docs/process/CI_GATE_PROMOTION_LOG.md is
@@ -1427,13 +1430,9 @@ jobs:
         # gracefully without crashing the batch, (c) second tick does not double-emit.
         run: bash scripts/ci/test-deliberator-tick-emits.sh
 
-      # CREDIBLE-096: external verify-merge judge — 5-case synthetic matrix.
-      # Builds the chump binary, creates temp git fixtures, fake gh binary,
-      # and asserts MERGE / HELD verdicts across all 5 cases without any
-      # live network calls. Tier-D (requires gh binary stub + git worktrees
-      # that are not meaningful in a preflight-only context).
-      - name: external verify-merge judge — 5-case synthetic matrix (CREDIBLE-096)
-        run: bash scripts/ci/test-external-verify-merge.sh
+      # RESILIENT-304: "external verify-merge judge (CREDIBLE-096)" MOVED to
+      # the fast-checks-heavy sibling job — it was the #3 wall-clock step here
+      # (222s green). See that job below.
 
       # EFFECTIVE-177: chump improve orchestrator integration test.
       # Exercises all 4 stages (pick→dedup→implement→verify-merge) using
@@ -1472,6 +1471,114 @@ jobs:
         with:
           job_start_ts: ${{ steps.job-start.outputs.ts }}
           workflow_name: fast-checks
+          cargo_target_dir: ${{ env.CARGO_TARGET_DIR }}
+
+  # ── Shard 1b: fast-checks-heavy (RESILIENT-304) ───────────────────────────
+  # THROUGHPUT SPLIT. The three slowest binary-driven integration tests were
+  # moved off `fast-checks` onto this parallel sibling so the critical-path
+  # wall-clock of the shard set is max(fast-checks, fast-checks-heavy) instead
+  # of their sum. Measured on the last GREEN main run (job 103814074321,
+  # 2026-09-14): fast-checks total 18m17s of which these three were
+  #   • CLI integration — 31 commands (CREDIBLE-018)  137s green / 554s cold
+  #   • fleet kill switch (RESILIENT-073)             244s green / 354s cold
+  #   • external verify-merge judge (CREDIBLE-096)    222s green
+  # On cold-cache/crates-touching PRs those balloon and pushed fast-checks past
+  # its 25m cap (8/8 recent main runs cancelled → green-main frozen). Splitting
+  # them out returns fast-checks to ~10-11m and keeps this lane ~13-15m, both
+  # comfortably under the cap. Coverage is UNCHANGED: the three tests still run
+  # byte-identically, just on a parallel runner. Gating is preserved via
+  # fast-checks-heavy-required + the `test`/`verified` rollups (a failure here
+  # still fails the required check).
+  fast-checks-heavy:
+    needs: changes
+    # Same trigger as fast-checks: skip on ci_config_only, run on Rust/scripts
+    # changes, push, and merge_group.
+    if: (needs.changes.outputs.rust == 'true' || needs.changes.outputs.scripts == 'true' || github.event_name == 'push' || github.event_name == 'merge_group') && needs.changes.outputs.ci_config_only != 'true'
+    timeout-minutes: 25  # only build + 3 heavy tests; observed ~13-15m worst case
+    runs-on: ${{ vars.CHUMP_SELF_HOSTED_FAST_CHECKS == 'true' && fromJSON('["self-hosted","macos-arm64","chump-fleet"]') || 'ubuntu-latest' }}
+    env:
+      CHUMP_REPO: ${{ github.workspace }}
+      CHUMP_LOCK_DIR: ${{ github.workspace }}/.chump-locks
+      CARGO_TARGET_DIR: ${{ vars.CHUMP_SELF_HOSTED_FAST_CHECKS == 'true' && format('/tmp/cargo-target-{0}-{1}', github.run_id, github.run_attempt) || format('{0}/target', github.workspace) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Record job start (CREDIBLE-069)
+        id: job-start
+        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/Python
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install Linux packages for chump-desktop (workspace member)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            util-linux
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install mold linker (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y mold
+
+      - name: Wire mold as the linker (EFFECTIVE-396)
+        if: runner.os == 'Linux'
+        run: echo "RUSTFLAGS=-Clink-arg=-fuse-ld=mold ${RUSTFLAGS:-}" >> "$GITHUB_ENV"
+
+      - name: Enable fleet autonomy for claim-exercising guards (CREDIBLE-166)
+        run: |
+          mkdir -p "$HOME/.chump"
+          echo 5 > "$HOME/.chump/AUTONOMY_LEVEL"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Share the fast-checks trunk cache: same workspace + toolchain, so
+          # this lane restores main's warm artifacts instead of cold-building.
+          shared-key: ci-fast-checks
+          prefix-key: "v1-trunk"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build chump (debug, single bin) for heavy-lane guard scripts
+        # RESILIENT-073 + CREDIBLE-018 invoke the compiled binary via CHUMP_BIN.
+        # Build once up front; CREDIBLE-096 builds its own fixture binary.
+        run: cargo build --bin chump
+
+      - name: fleet kill switch — AUTONOMY_LEVEL fail-closed (RESILIENT-073)
+        run: CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-fleet-kill-switch.sh
+
+      - name: CLI integration tests by command category — 31 commands (CREDIBLE-018)
+        run: |
+          CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" \
+            bash scripts/ci/test-cli-integration.sh
+
+      - name: external verify-merge judge — 5-case synthetic matrix (CREDIBLE-096)
+        run: bash scripts/ci/test-external-verify-merge.sh
+
+      - name: Emit self-hosted runner stats (CREDIBLE-069)
+        if: always() && runner.os != 'Linux'
+        uses: ./.github/actions/emit-self-hosted-run-stats
+        with:
+          job_start_ts: ${{ steps.job-start.outputs.ts }}
+          workflow_name: fast-checks-heavy
           cargo_target_dir: ${{ env.CARGO_TARGET_DIR }}
 
   # ── Shard 2: clippy ───────────────────────────────────────────────────────
@@ -2101,6 +2208,31 @@ jobs:
             echo "fast-checks-required: PASS (result=$result)"
           else
             echo "::error::fast-checks-required FAIL (result=$result)"
+            exit 1
+          fi
+
+  # ── fast-checks-heavy-required: parity mirror (RESILIENT-304) ─────────────
+  # fast-checks-heavy carries the three slowest integration tests split off
+  # fast-checks for throughput. This rollup mirrors fast-checks-required so the
+  # heavy lane has the same named-required-check surface, keeping the -required
+  # family in parity with the shard set it guards. A heavy-lane failure fails
+  # this rollup (and the `test`/`verified` aggregators) exactly like the other
+  # correctness gates.
+  fast-checks-heavy-required:
+    name: fast-checks-heavy-required
+    needs: [fast-checks-heavy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify fast-checks-heavy passed or was appropriately skipped
+        run: |
+          result="${{ needs.fast-checks-heavy.result }}"
+          echo "fast-checks-heavy=$result"
+          if [ "$result" = "success" ] || [ "$result" = "skipped" ]; then
+            echo "fast-checks-heavy-required: PASS (result=$result)"
+          else
+            echo "::error::fast-checks-heavy-required FAIL (result=$result)"
             exit 1
           fi
 

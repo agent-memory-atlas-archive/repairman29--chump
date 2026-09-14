@@ -14,7 +14,8 @@
 # hardcoded below — update if branch protection changes):
 #   test, audit, ACP protocol smoke test (Zed / JetBrains compatible)
 # Plus the per-shard required rollups that feed into `test`:
-#   clippy-required, cargo-test-required, fast-checks-required, audit-required
+#   clippy-required, cargo-test-required, fast-checks-required,
+#   fast-checks-heavy-required, audit-required
 #
 # Acceptable statuses:
 #   REQUIRED     — in branch protection; should fail loud, no change needed
@@ -47,12 +48,14 @@ REQUIRED_JOBS=(
 # Jobs that feed required rollups — correctness gates, must also fail loud
 CORRECTNESS_GATES=(
     fast-checks
+    fast-checks-heavy
     clippy
     cargo-test
     pr-hygiene
     clippy-required
     cargo-test-required
     fast-checks-required
+    fast-checks-heavy-required
     audit-required
 )
 
@@ -71,9 +74,10 @@ jobs_section = content[jobs_start + 7:]
 job_pattern = re.compile(r'^  ([a-z][a-z0-9_-]+):\s*$', re.MULTILINE)
 positions = [(m.start(), m.group(1)) for m in job_pattern.finditer(jobs_section)]
 
-required = {'test', 'audit', 'fast-checks', 'clippy', 'cargo-test', 'pr-hygiene',
+required = {'test', 'audit', 'fast-checks', 'fast-checks-heavy', 'clippy',
+            'cargo-test', 'pr-hygiene',
             'clippy-required', 'cargo-test-required',
-            'fast-checks-required', 'audit-required'}
+            'fast-checks-required', 'fast-checks-heavy-required', 'audit-required'}
 
 issues = []
 audited = 0
