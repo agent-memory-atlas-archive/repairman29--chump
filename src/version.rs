@@ -129,6 +129,65 @@ pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// INFRA-6384: filesystem-mtime "rebuild check" layered on top of the
+/// git-SHA staleness check. `check_gap_binary_staleness` only sees
+/// *committed* history — a working-tree edit to a `GAP_STORE_FILES` source
+/// file that hasn't been committed (or committed but not yet rebuilt into
+/// the installed binary) is invisible to `git log <sha>..HEAD`. This
+/// compares the binary's on-disk mtime directly against the newest mtime
+/// among `GAP_STORE_FILES` so that class of drift is still caught.
+///
+/// Returns `Some(true)` if the newest tracked source file postdates the
+/// binary (a rebuild is needed), `Some(false)` if the binary is newer than
+/// every tracked source file present on disk, `None` if no tracked source
+/// file's mtime could be read (e.g. none exist at `repo_root`).
+fn binary_predates_source_files_with_mtime(
+    repo_root: &Path,
+    binary_mtime: std::time::SystemTime,
+) -> Option<bool> {
+    let mut newest_source: Option<std::time::SystemTime> = None;
+    for f in GAP_STORE_FILES {
+        if let Ok(meta) = std::fs::metadata(repo_root.join(f)) {
+            if let Ok(mtime) = meta.modified() {
+                if newest_source.is_none_or(|cur| mtime > cur) {
+                    newest_source = Some(mtime);
+                }
+            }
+        }
+    }
+    Some(newest_source? > binary_mtime)
+}
+
+/// Same as [`binary_predates_source_files_with_mtime`] but reads the running
+/// binary's own mtime via `current_exe()`. `None` if that's unreadable
+/// (sandboxed / chrooted env) — treated as inconclusive by callers.
+fn binary_predates_source_files(repo_root: &Path) -> Option<bool> {
+    let exe = std::env::current_exe().ok()?;
+    let binary_mtime = std::fs::metadata(&exe).ok()?.modified().ok()?;
+    binary_predates_source_files_with_mtime(repo_root, binary_mtime)
+}
+
+/// Combines the git-SHA staleness check with the mtime-based rebuild check.
+/// Production entry points ([`warn_if_stale_for_gap_mutation`],
+/// [`fail_if_stale_for_destructive`]) use this instead of
+/// `check_gap_binary_staleness` directly so an uncommitted-and-unbuilt
+/// source edit is caught even when the committed git history is Fresh.
+fn check_gap_binary_staleness_with_rebuild_check(repo_root: &Path) -> StalenessCheck {
+    let git_check = check_gap_binary_staleness(repo_root);
+    if !matches!(git_check, StalenessCheck::Fresh) {
+        return git_check;
+    }
+    match binary_predates_source_files(repo_root) {
+        Some(true) => StalenessCheck::Stale {
+            commits_ahead: 0,
+            latest_subject: "rebuild check: gap-store-affecting source file(s) on disk are \
+                newer than the installed binary (uncommitted or not-yet-rebuilt change)"
+                .to_string(),
+        },
+        Some(false) | None => StalenessCheck::Fresh,
+    }
+}
+
 /// Emit a stderr warning when the binary is stale relative to the repo at
 /// `repo_root`. Honors `CHUMP_BINARY_STALENESS_CHECK=0` to disable.
 /// Returns `true` if a warning was emitted (caller may want to refuse
@@ -138,7 +197,7 @@ pub fn warn_if_stale_for_gap_mutation(repo_root: &Path) -> bool {
     if std::env::var("CHUMP_BINARY_STALENESS_CHECK").as_deref() == Ok("0") {
         return false;
     }
-    match check_gap_binary_staleness(repo_root) {
+    match check_gap_binary_staleness_with_rebuild_check(repo_root) {
         StalenessCheck::Fresh | StalenessCheck::Skip => false,
         StalenessCheck::Stale {
             commits_ahead,
@@ -213,7 +272,7 @@ pub fn fail_if_stale_for_destructive(
     if std::env::var("CHUMP_BINARY_STALENESS_CHECK").as_deref() == Ok("0") {
         return DestructiveStalenessOutcome::Proceed;
     }
-    match check_gap_binary_staleness(repo_root) {
+    match check_gap_binary_staleness_with_rebuild_check(repo_root) {
         StalenessCheck::Fresh | StalenessCheck::Skip => DestructiveStalenessOutcome::Proceed,
         StalenessCheck::Stale {
             commits_ahead,
@@ -675,6 +734,63 @@ mod tests {
             check_gap_binary_staleness_with_sha(dir.path(), "deadbeefcafe"),
             StalenessCheck::Skip
         );
+    }
+
+    // ── INFRA-6384 mtime-based rebuild check ─────────────────────────────────
+
+    #[test]
+    fn rebuild_check_blocks_on_dummy_edit_without_rebuild() {
+        let (dir, _sha1, _sha2) = make_repo();
+        let p = dir.path();
+        // Dummy change to a tracked source file — no commit, no rebuild.
+        std::fs::write(p.join("src/gap_store.rs"), "// dummy edit, no rebuild\n").unwrap();
+        // Simulate a binary built long before this edit.
+        let ancient_binary = std::time::SystemTime::UNIX_EPOCH;
+        assert_eq!(
+            binary_predates_source_files_with_mtime(p, ancient_binary),
+            Some(true),
+            "an ancient binary mtime against a just-edited source file must be flagged stale"
+        );
+    }
+
+    #[test]
+    fn rebuild_check_fresh_when_binary_newer_than_source() {
+        let (dir, _sha1, _sha2) = make_repo();
+        let p = dir.path();
+        let far_future_binary = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+        assert_eq!(
+            binary_predates_source_files_with_mtime(p, far_future_binary),
+            Some(false),
+            "a binary newer than every tracked source file must not be flagged stale"
+        );
+    }
+
+    #[test]
+    fn rebuild_check_none_when_no_tracked_files_present() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            binary_predates_source_files_with_mtime(dir.path(), std::time::SystemTime::now()),
+            None,
+            "no GAP_STORE_FILES on disk means the check is inconclusive"
+        );
+    }
+
+    #[test]
+    fn combined_check_stale_on_uncommitted_edit_despite_fresh_git_history() {
+        let (dir, _sha1, sha2) = make_repo();
+        let p = dir.path();
+        // Baked SHA is HEAD (git-SHA check alone would say Fresh), but a
+        // dummy uncommitted edit landed on disk without a rebuild.
+        std::fs::write(p.join("src/gap_store.rs"), "// dummy edit, no rebuild\n").unwrap();
+        assert_eq!(
+            check_gap_binary_staleness_with_sha(p, &sha2),
+            StalenessCheck::Fresh,
+            "git-SHA check alone is blind to uncommitted edits"
+        );
+        match binary_predates_source_files_with_mtime(p, std::time::SystemTime::UNIX_EPOCH) {
+            Some(true) => {}
+            other => panic!("expected the rebuild check to flag stale, got {other:?}"),
+        }
     }
 
     // ── INFRA-825 hard-fail destructive variant ──────────────────────────────
