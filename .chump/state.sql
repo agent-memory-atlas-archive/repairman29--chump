@@ -2746,10 +2746,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add an async helper `has_resolved_path(changed_file: &str, target: GapTarget) -> bool` to `src/commands/dispatch_external.rs` that queries the Almanac service for an intra‑repo edge, returns true only when the edge is resolved, logs any network error and returns false, and expose it for unit testing; also add a test suite in `src/commands/dispatch_external_test.rs` that mocks Almanac responses for reachable, unreachable, and error cases and verifies the boolean outcome.
+    
+    Target file(s):
+    - src/commands/dispatch_external.rs
+    - src/commands/dispatch_external_test.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "A function `hasResolvedPath(changedFile: string, target: GapTarget): Promise<boolean>` calls the Almanac service and returns true only when a resolved intra‑repo edge exists"
-    - The function returns false on network errors and logs the error without throwing
-    - Unit tests mock Almanac responses for reachable, unreachable, and error cases and assert correct boolean return
+    - In src/commands/dispatch_external.rs, the new function `has_resolved_path` calls the Almanac client, returns true only when the client reports a resolved edge, and returns false on any network error while logging the error.
+    - The function logs errors using the crate’s logger at the error level and does not propagate the error as a panic or Result.
+    - "src/commands/dispatch_external_test.rs contains three unit tests that mock the Almanac client: one where the edge is reachable (asserting true), one where the edge is not reachable (asserting false), and one where the client returns a network error (asserting false and that an error was logged)."
+    - Running `cargo test` passes all new tests without requiring external network access.
   depends_on: [CREDIBLE-1039]
   notes: |
     [chump harvest check 'mechanical']
@@ -2838,12 +2847,20 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new CLI entry point `credible-stub-check` as a function `credible_stub_check` in `scripts/ci/run-local-ci.sh` that reads a gap ID and PR diff JSON from stdin or arguments, calls the existing `determineVerdict` routine, and prints a JSON payload with `verdict`, `citations`, `edgeRate`, and `reviewSignal:true` (when verdict is UNRELATED). Wire this function into the pre‑push test script `scripts/ci/test-pre-push-preflight-hook.sh` so the hook executes the CLI and validates its output, and extend `docs/process/CI_GATES_GENERATED_INVENTORY.md` with documentation on adding the hook to pre‑push or bot‑merge stages.
+    
+    Target file(s):
+    - scripts/ci/run-local-ci.sh
+    - scripts/ci/test-pre-push-preflight-hook.sh
+    - docs/process/CI_GATES_GENERATED_INVENTORY.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A CLI entry point `credible-stub-check` reads a gap ID and PR diff (JSON) from stdin or args
-    - The CLI invokes `determineVerdict` and prints a JSON payload containing `verdict`, `citations`, `edgeRate`, and a `reviewSignal` flag set to true for `UNRELATED`
-    - The hook exits with code 0 for all verdicts (no auto‑reject) and logs a clear message when `UNRELATED` is emitted
-    - Integration tests simulate a pre‑push environment and assert that the CLI runs in <30 seconds
-    - Documentation added to the repo's CI config showing how to add the hook to the pre‑push or bot‑merge stage
+    - scripts/ci/run-local-ci.sh defines a function `credible_stub_check` that parses `--gap-id` and `--pr-diff` flags (or reads from stdin), invokes `determineVerdict`, and echoes a single‑line JSON object containing the keys `verdict`, `citations`, `edgeRate`, and `reviewSignal` (set to true when verdict is UNRELATED).
+    - "scripts/ci/test-pre-push-preflight-hook.sh runs `credible-stub-check` with a mock gap ID and a minimal PR diff JSON, asserts that the process exits with status 0, that the printed JSON includes `\"verdict\":\"UNRELATED\"` and `\"reviewSignal\":true`, and that the command completes in under 30 seconds."
+    - scripts/ci/test-pre-push-preflight-hook.sh verifies that when the verdict is UNRELATED the CLI logs the exact message `Verdict UNRELATED – no action required` to stdout.
+    - docs/process/CI_GATES_GENERATED_INVENTORY.md contains a new bullet under the “CI Gate → Preflight Mirror Inventory (generated)” heading describing how to register `credible-stub-check` in the repository’s CI configuration for the pre‑push and bot‑merge stages.
   depends_on: [CREDIBLE-1043]
   notes: |
     [chump harvest check 'mechanical']
@@ -60658,6 +60675,7 @@ gaps:
     - When a gap reaches the ship stage, PublicationResolver reads the merged gap’s artifact_type.
     - Resolver queries PublishTargetRegistry and attaches the resulting target list to the pipeline context.
     - "If the target list is empty, resolver logs \"no publish targets\" and does not trigger further publication work."
+  depends_on: [EFFECTIVE-1636]
   notes: |
     [chump harvest check 'EFFECTIVE']
     === primitives_index match for 'EFFECTIVE' ===
@@ -60692,6 +60710,7 @@ gaps:
     - "Given a source gap ID and a non‑empty target list, the service creates a new gap record tagged \"publication\"."
     - "The new gap stores a reference to the source gap, the list of targets, and is placed in the work queue with status \"pending\"."
     - "Automated test verifies that after shipping a gap with artifact_type \"docs\", a publication gap appears with the correct tags and target list."
+  depends_on: [EFFECTIVE-1637]
   notes: |
     [chump harvest check 'EFFECTIVE']
     === primitives_index match for 'EFFECTIVE' ===
@@ -60726,6 +60745,7 @@ gaps:
     - "Publication gaps that include any external target identifier (e.g., \"substack\", \"external‑release\") are automatically assigned to the EFFECTIVE-365 approval queue."
     - "These gaps remain in \"awaiting approval\" status until manually approved; no automatic posting occurs."
     - "Test confirms that a publication gap with an external target does not change to \"completed\" without explicit approval."
+  depends_on: [EFFECTIVE-1638]
   notes: |
     [chump harvest check 'EFFECTIVE']
     === primitives_index match for 'EFFECTIVE' ===
@@ -60771,6 +60791,42 @@ gaps:
     - "When a publication gap is marked completed, the system records a \"published_at\" field containing the URL or artifact location for each target."
     - The receipt data is queryable via the gap API and matches the expected format for each target type.
     - "Unit test validates that completing a gap for target \"docs-site\" stores a URL like \"https://docs.example.com/<version>\"."
+  depends_on: [EFFECTIVE-1638]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: EFFECTIVE-1641
+  domain: EFFECTIVE
+  title: "EFFECTIVE: Ensure graceful no‑op when no publish targets exist (EFFECTIVE-364 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - If PublicationResolver returns an empty target list, the pipeline finishes without creating a publication gap.
+    - No errors or warnings are emitted; the ship stage completes successfully.
+    - "Integration test confirms that shipping a gap with artifact_type \"infra\" (no configured targets) results in zero new gaps."
+  depends_on: [EFFECTIVE-1637]
   notes: |
     [chump harvest check 'EFFECTIVE']
     === primitives_index match for 'EFFECTIVE' ===
@@ -63434,7 +63490,7 @@ gaps:
     - "Proven: a merged product gap yields a live URL / installable / delivered artifact the operator can actually use, not just a green PR"
   depends_on: [EFFECTIVE-363]
   notes: |
-    Decomposed into 6 slices: EFFECTIVE-1616, EFFECTIVE-1617, EFFECTIVE-1618, EFFECTIVE-1619, EFFECTIVE-1620, EFFECTIVE-1621
+    Decomposed into 6 slices: EFFECTIVE-1636, EFFECTIVE-1637, EFFECTIVE-1638, EFFECTIVE-1639, EFFECTIVE-1640, EFFECTIVE-1641
   opened_date: '2026-08-19'
   outcome_id: COTG
 
