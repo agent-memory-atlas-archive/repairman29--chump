@@ -212862,6 +212862,68 @@ gaps:
     === cross-pollination briefs mentioning 'ZERO-WASTE' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
 
+- id: INFRA-6353
+  domain: INFRA
+  title: "INFRA: Document ship velocity score formula (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Formula is recorded in docs/ship_velocity_score.md
+    - Includes cosine similarity component
+    - Adds language boost of 0.1
+    - Adds type boost of 0.05
+    - Result is capped at 1.0
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6354
+  domain: INFRA
+  title: "INFRA: Document Match struct fields (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Match struct fields (score, reasons, capability, need) are described in docs/match_struct.md
+    - Each field purpose and type are clearly explained
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6355
+  domain: INFRA
+  title: "INFRA: Decide vendoring vs crate dependency for v0 (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: xs
+
 - id: INFRA-636
   domain: INFRA
   title: "EFFECTIVE: spec-to-gaps importer (chump gap import-spec)"
