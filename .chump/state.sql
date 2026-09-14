@@ -31711,9 +31711,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update `run` in `crates/chump-preflight/src/preflight.rs` to invoke `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` as part of the preflight verification pipeline, failing preflight if formatting or lint warnings exist.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "`cargo fmt --all` completes without changes."
-    - "`cargo clippy --all-targets -- -D warnings` passes with zero warnings."
+    - "`cargo fmt --all -- --check` executes with exit code 0 and reports zero unformatted files."
+    - "`cargo clippy --all-targets -- -D warnings` executes with exit code 0 and zero warnings."
+    - The `run` function in `crates/chump-preflight/src/preflight.rs` triggers cargo fmt and cargo clippy checks during preflight execution.
   depends_on: [CREDIBLE-959]
   notes: |
     [chump harvest check 'bot-merge']
@@ -31774,9 +31782,16 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a section to `docs/process/AUTO_ADMIN_MERGE_POLICY.md` documenting the failure-tolerant auto-close behavior introduced in CREDIBLE-295/CREDIBLE-878, explicitly explaining that best-effort cleanup steps during auto-close will tolerate non-fatal errors without emitting `bot_merge_uncaught_error`.
+    
+    Target file(s):
+    - docs/process/AUTO_ADMIN_MERGE_POLICY.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The README or relevant design doc includes a section explaining that best‑effort steps in the auto‑close stage are now failure‑tolerant and will not emit `bot_merge_uncaught_error`.
-    - Documentation changes are reviewed and merged.
+    - "`docs/process/AUTO_ADMIN_MERGE_POLICY.md` includes a section explaining failure-tolerant auto-close behavior for best-effort steps."
+    - "`docs/process/AUTO_ADMIN_MERGE_POLICY.md` explicitly specifies that auto-close cleanup failures will not emit `bot_merge_uncaught_error`."
   depends_on: [CREDIBLE-959]
   notes: |
     [chump harvest check 'bot-merge']
@@ -31837,10 +31852,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    In scripts/arsenal/build.py, update the build metadata dictionary to include a boolean `merged` lifecycle flag alongside `built`. Initialize `merged` to False when metadata is created, and set `merged` to True upon successful completion of the pull-request merge stage.
+    
+    Target file(s):
+    - scripts/arsenal/build.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A `merged` flag is introduced and set to true after a pull‑request merge completes.
-    - The flag updates the same metadata used for `built`.
-    - Integration test confirms `merged` remains false until merge, then becomes true.
+    - "scripts/arsenal/build.py adds `\"merged\": False` to the default lifecycle metadata dict alongside `\"built\"`."
+    - Updating build lifecycle state in scripts/arsenal/build.py sets `merged` to True in metadata upon post-merge trigger.
+    - Executing `python3 -m unittest discover -s tests` confirms `merged` initializes as False and evaluates to True after merge completion.
   depends_on: [CREDIBLE-968]
   notes: |
     [chump harvest check 'lifecycle']
@@ -31866,10 +31888,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update `scripts/arsenal/build.py` to record a boolean `deployed` lifecycle flag in capability metadata upon successful build and deployment completion, and document the `deployed` attribute state transition under comparison axes in `docs/architecture/ACP_CAPABILITY_COMPARISON.md`.
+    
+    Target file(s):
+    - scripts/arsenal/build.py
+    - docs/architecture/ACP_CAPABILITY_COMPARISON.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A `deployed` flag is added and toggled when deployment scripts finish without error.
-    - Deployment step writes the flag to capability metadata.
-    - End‑to‑end test runs a mock deployment and asserts `deployed` transitions from false to true.
+    - "`scripts/arsenal/build.py` sets the `deployed` metadata flag to `true` upon successful execution and `false` when a deployment error occurs."
+    - "`docs/architecture/ACP_CAPABILITY_COMPARISON.md` documents the `deployed` stage flag and its false-to-true state transition in capability metadata."
+    - Executing `python3 scripts/arsenal/build.py` writes capability metadata JSON containing the `deployed` field.
   depends_on: [CREDIBLE-969]
   notes: |
     [chump harvest check 'lifecycle']
@@ -31953,10 +31983,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update the stage completion evaluation in scripts/coord/bot-merge.sh (specifically in _bm_shadow_plan and stage resolution helpers) to require all five sequential stages (built, merged, deployed, wired, and running) to be true before computing the final DONE status as true.
+    
+    Target file(s):
+    - scripts/coord/bot-merge.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A `done` computed property returns true only when all previous flags are true.
-    - Existing CI pipeline (`cargo test` or `scripts/ci/test-*.sh`) includes a test that fails without the new DONE logic and passes with it.
-    - Running `cargo fmt`, `cargo clippy --all-targets -D warnings`, and the full test suite shows no new warnings or regressions.
+    - In scripts/coord/bot-merge.sh, the computed DONE state returns true if and only if built, merged, deployed, wired, and running flags are all set to true.
+    - The DONE state evaluation returns false if any of built, merged, deployed, wired, or running flags is false or missing.
+    - Running `scripts/ci/check-pr-scope.sh`, `cargo fmt`, `cargo clippy --all-targets -D warnings`, and the test suite succeeds with zero errors or regressions.
   depends_on: [CREDIBLE-972]
   notes: |
     [chump harvest check 'lifecycle']
