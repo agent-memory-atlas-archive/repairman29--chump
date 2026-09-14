@@ -95,7 +95,7 @@ detect_sccache_dir() {
         return
     fi
     local home_avail_kb
-    home_avail_kb="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2{print $4}')"
+    home_avail_kb="$(df -Pk /home 2>/dev/null | awk 'NR==2{print $4}')"
     if [[ -n "$home_avail_kb" ]] && (( home_avail_kb >= SCCACHE_HOME_FREE_THRESHOLD_KB )) \
        && _sccache_dir_writable "$HOME/.cache/sccache"; then
         echo "$HOME/.cache/sccache"
