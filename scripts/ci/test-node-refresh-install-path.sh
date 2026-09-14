@@ -114,4 +114,48 @@ rc=$?
 [ -x "$OVERRIDE" ] || fail "explicit CHUMP_NODE_BIN override was ignored"
 ok "explicit CHUMP_NODE_BIN override still wins (precedence #1 preserved)"
 
+# ── Test 3: on-PATH ~/.local/bin/chump must NOT shadow ~/.cargo/bin/chump ────
+# LIVE ROOT CAUSE (closetjunky 2026-09-14): the refresh loop's OWN PATH had
+# ~/.local/bin ahead of ~/.cargo/bin, so `command -v chump` resolved to
+# ~/.local/bin/chump. Step 2 trusted that ambient answer and kept ~/.local/bin
+# current every cycle, while the workers (PATH=~/.cargo/bin first;
+# /usr/local/bin/chump -> ~/.cargo/bin/chump) ran a STALE ~/.cargo/bin/chump for
+# 2 days. Here a REAL ~/.local/bin/chump is on PATH AND a ~/.cargo/bin/chump
+# exists; the organ must refresh the ~/.cargo/bin binary, not the shadow.
+git -C "$MIRROR" checkout -q -B main "$GREEN_SHA"
+# Restore a stale ~/.cargo/bin/chump (Test 1 refreshed it to green) and plant a
+# real ~/.local/bin/chump that PATH will resolve first.
+cat > "$FAKEHOME/.cargo/bin/chump" <<'INNER'
+#!/usr/bin/env bash
+echo "chump 0.0.0-test (staleaaaaaaaa built old)"
+INNER
+chmod +x "$FAKEHOME/.cargo/bin/chump"
+mkdir -p "$FAKEHOME/.local/bin"
+cat > "$FAKEHOME/.local/bin/chump" <<'INNER'
+#!/usr/bin/env bash
+echo "chump 0.0.0-test (localbbbbbbbb built old)"
+INNER
+chmod +x "$FAKEHOME/.local/bin/chump"
+
+env -u CHUMP_NODE_BIN \
+CHUMP_NODE_REPO="$MIRROR" \
+NODE_AMBIENT="$AMBIENT" \
+CHUMP_NODE_REFRESH_LOGDIR="$TMP/logs3" \
+CHUMP_NODE_REFRESH_TEST_GREEN_SHA="$GREEN_SHA" \
+HOME="$FAKEHOME" \
+PATH="$FAKEHOME/.local/bin:$TMP/bin:/usr/bin:/bin" \
+    bash "$SCRIPT" > "$TMP/out3.log" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || fail "shadow-rot run exited $rc: $(cat "$TMP/out3.log")"
+
+CARGO_VER="$("$FAKEHOME/.cargo/bin/chump" --version 2>/dev/null || echo none)"
+case "$CARGO_VER" in
+    *"${GREEN_SHA:0:12}"*)
+        ok "refresh updated the worker-canonical ~/.cargo/bin/chump despite ~/.local/bin on PATH" ;;
+    *"stale"*)
+        fail "~/.cargo/bin/chump left STALE ($CARGO_VER) — organ refreshed the shadow ~/.local/bin/chump (the closetjunky rot)" ;;
+    *)
+        fail "unexpected ~/.cargo/bin/chump version: $CARGO_VER" ;;
+esac
+
 exit 0

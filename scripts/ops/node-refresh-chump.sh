@@ -135,7 +135,22 @@ fi
 _resolve_target_bin() {
     if [[ -n "${CHUMP_NODE_BIN:-}" ]]; then printf '%s' "$CHUMP_NODE_BIN"; return; fi
     local onpath; onpath="$(command -v chump 2>/dev/null || true)"
-    if [[ -n "$onpath" && "$onpath" != *"/target/release/chump" && "$onpath" != *"/target/debug/chump" ]]; then
+    # RESILIENT-378 follow-up (closetjunky 2026-09-14): `command -v` reflects the
+    # REFRESHER's PATH, which is not always the WORKER's PATH. On closetjunky the
+    # refresh loop runs with ~/.local/bin ahead of ~/.cargo/bin, so `command -v
+    # chump` resolved to ~/.local/bin/chump and the organ kept THAT current every
+    # cycle (artifact-pull succeeded) — while the workers (PATH=~/.cargo/bin
+    # first, and /usr/local/bin/chump -> ~/.cargo/bin/chump) ran a STALE
+    # ~/.cargo/bin/chump for 2 days. The last-resort ~/.local/bin default must
+    # never shadow an existing ~/.cargo/bin/chump (the cargo-install canonical on
+    # Linux nodes, step 3), so drop that on-PATH answer through to step 3 rather
+    # than pinning the refresh to a binary the fleet does not execute.
+    local shadow_rot=0
+    if [[ "$onpath" == "$HOME/.local/bin/chump" && -x "$HOME/.cargo/bin/chump" ]]; then
+        shadow_rot=1
+    fi
+    if [[ -n "$onpath" && "$onpath" != *"/target/release/chump" \
+          && "$onpath" != *"/target/debug/chump" && "$shadow_rot" == "0" ]]; then
         printf '%s' "$onpath"; return
     fi
     if [[ -x "$HOME/.cargo/bin/chump" ]]; then printf '%s' "$HOME/.cargo/bin/chump"; return; fi
