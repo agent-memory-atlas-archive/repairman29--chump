@@ -32103,11 +32103,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update verdict generation in `run_inner` in `crates/chump-verify/src/external_verify_merge.rs` to yield an UNRELATED verdict when both TEST-ONLY and REACHES detections evaluate to false. Format the UNRELATED verdict result to display the explicit string "review-signal not auto-reject" and include the repository's numeric edge-resolution rate fetched from the almanac, and add corresponding test cases in `crates/chump-verify/src/pr_ac_coverage.rs`.
+    
+    Target file(s):
+    - crates/chump-verify/src/external_verify_merge.rs
+    - crates/chump-verify/src/pr_ac_coverage.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - When both TEST‑ONLY detection (slice 1) and REACHES detection (slice 2) are false, the verdict is UNRELATED.
-    - "The UNRELATED output includes the explicit label \"review‑signal not auto‑reject\"."
-    - The output also includes the repository's edge‑resolution rate (e.g., 0.32) obtained from almanac.
-    - Unit test verifies that UNRELATED is emitted with both the label and a numeric rate for a scenario with no reachable edges.
+    - When both test-only and reaches flags are false in `crates/chump-verify/src/external_verify_merge.rs`, `run_inner` produces an UNRELATED verdict.
+    - "The UNRELATED verdict payload contains the exact label \"review-signal not auto-reject\" alongside the numeric edge-resolution rate."
+    - Running `cargo test -p chump-verify` passes with a test in `crates/chump-verify/src/pr_ac_coverage.rs` verifying UNRELATED is emitted with the label and edge-resolution rate for a PR with no reachable edges.
   depends_on: [CREDIBLE-974, CREDIBLE-975, CREDIBLE-976]
   notes: |
     [chump harvest check 'mechanical']
@@ -32198,9 +32205,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update fn free_tier_locate_step in src/execute_gap.rs to document and inspect the locations where registry entries are defined and constructed, ensuring the locate step identifies and records the relevant struct definitions and builder code paths.
+    
+    Target file(s):
+    - src/execute_gap.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Documentation or notes pinpoint the file(s) and struct where registry entries are defined
-    - List of all code paths that construct or modify RegistryEntry objects
+    - fn free_tier_locate_step in src/execute_gap.rs explicitly includes comments or annotations mapping out registry entry definitions and construction locations.
+    - Executing cargo test --lib in src/execute_gap.rs completes successfully.
+    - Running cargo check --all-targets passes without warnings or compilation errors in src/execute_gap.rs.
   notes: |
     [chump harvest check 'Index']
     === primitives_index match for 'Index' ===
@@ -125067,7 +125082,7 @@ gaps:
     - sccache --show-stats shows nonzero hit rate after 2 build cycles; a warm no-source-change rebuild completes in <120s
     - cranelift/mold are omitted or availability-gated so they can't break builds; .cargo/config.toml stays per-machine (CI unaffected)
   notes: |
-    Decomposed into 5 slices: INFRA-3760, INFRA-3761, INFRA-3762, INFRA-3763, INFRA-3764
+    Decomposed into 5 slices: INFRA-6290, INFRA-6291, INFRA-6292, INFRA-6293, INFRA-6294
   opened_date: '2026-08-22'
 
 - id: INFRA-3661
@@ -208133,6 +208148,201 @@ gaps:
     - Add unit test confirming a completed run persists a Completed record with a non-empty outcome pointer using FileBackedMissionStore.
     - "Verify that calling FileBackedMissionStore::load reloads the exact PersistentMission record identically."
   depends_on: [INFRA-6287]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6290
+  domain: INFRA
+  title: "INFRA: INFRA-3760: Update install-sccache.sh for cargo install on Ubuntu CJ and USB mount target (INFRA-3660 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - scripts/setup/install-sccache.sh installs sccache via cargo install on Ubuntu CJ without brew
+    - detect_sccache_dir in install-sccache.sh targets USB mount /mnt/cjdata3/sccache when available with SCCACHE_CACHE_SIZE set to <=10G
+    - _sccache_dir_writable probe verifies real write capability on the USB directory
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6291
+  domain: INFRA
+  title: "INFRA: INFRA-3761: Configure CJ worker environment variables for local sccache (INFRA-3660 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Worker environment exports RUSTC_WRAPPER=sccache, SCCACHE_DIR, and SCCACHE_CACHE_SIZE<=10G
+    - .cargo/config.toml configuration remains per-machine so CI environments are unaffected
+  depends_on: [INFRA-6290]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6292
+  domain: INFRA
+  title: "INFRA: INFRA-3762: Availability-gate mold and cranelift build configurations (INFRA-3660 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - mold and cranelift options in Cargo or rustc configuration are conditionally enabled only when present in system PATH
+    - Missing mold/cranelift binaries on CJ workers fall back cleanly without breaking builds
+  depends_on: [INFRA-6291]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6293
+  domain: INFRA
+  title: "INFRA: INFRA-3763: Add sccache daemon lifecycle management to worker startup (INFRA-3660 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Worker startup scripts verify sccache server state and start sccache daemon if stopped
+    - Worker fails fast with a clear error if USB cache directory /mnt/cjdata3/sccache is unavailable or unwritable
+  depends_on: [INFRA-6290, INFRA-6291]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6294
+  domain: INFRA
+  title: "INFRA: INFRA-3764: Verify sccache hit rate and warm rebuild timing (<120s) on CJ workers (INFRA-3660 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - sccache --show-stats shows a non-zero hit rate after 2 consecutive build cycles
+    - A warm no-source-change build cycle on CJ worker completes in <120s
+  depends_on: [INFRA-6291, INFRA-6292, INFRA-6293]
   notes: |
     [chump harvest check 'MISSION']
     === primitives_index match for 'MISSION' ===
