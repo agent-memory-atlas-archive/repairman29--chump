@@ -9937,6 +9937,66 @@ events:
     expected_volume: "rare; signals genuine merge conflict needing operator attention"
     status: stable
 
+  - kind: pr_terminal_classified
+    effect_metric: resilient
+    emitter: scripts/coord/pr-clean-dirty-classifier.sh (INFRA-6229)
+    trigger: >
+      Emitted once per open PR per tick with a CLEAN or DIRTY label derived
+      from GitHub's mergeStateStatus (CLEAN/HAS_HOOKS → CLEAN;
+      DIRTY/CONFLICTING/BEHIND/BLOCKED/UNSTABLE → DIRTY; anything else →
+      UNKNOWN, non-actionable). Gives every open PR a classification each
+      tick so none sits unlabeled.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, label, merge_state_status, branch]
+    expected_volume: "one per open PR per tick"
+    status: stable
+
+  - kind: pr_terminal_armed
+    effect_metric: resilient
+    emitter: scripts/coord/pr-clean-dirty-classifier.sh (INFRA-6229)
+    trigger: >
+      Emitted when a CLEAN + unarmed PR has auto-merge armed
+      (gh pr merge --auto --squash) so it reaches merged state without
+      further manual action.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, branch]
+    expected_volume: "0-N per tick (one per newly-armed CLEAN PR)"
+    status: stable
+
+  - kind: pr_terminal_rebased
+    effect_metric: resilient
+    emitter: scripts/coord/pr-clean-dirty-classifier.sh (INFRA-6229)
+    trigger: >
+      Emitted when a DIRTY PR whose branch diff is NOT already present on
+      main is content-rebased onto current main via gh pr update-branch.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, branch, method]
+    expected_volume: "0-N per tick (one per rebased DIRTY PR)"
+    status: stable
+
+  - kind: pr_terminal_retired
+    effect_metric: resilient
+    emitter: scripts/coord/pr-clean-dirty-classifier.sh (INFRA-6229)
+    trigger: >
+      Emitted when a DIRTY PR is found redundant (its branch tip is already
+      an ancestor of main — the work shipped some other way) and is closed
+      rather than rebased.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, branch, reason]
+    expected_volume: "rare; only on genuinely redundant PRs"
+    status: stable
+
+  - kind: pr_terminal_tick
+    effect_metric: resilient
+    emitter: scripts/coord/pr-clean-dirty-classifier.sh (INFRA-6229)
+    trigger: >
+      Per-run summary emitted at the end of every classifier tick with the
+      count of CLEAN/DIRTY PRs seen and how many were acted on.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, clean, dirty, acted]
+    expected_volume: "one per tick"
+    status: stable
+
   - kind: keep_mergeable_rebased
     effect_metric: resilient
     emitter: scripts/coord/keep-mergeable-organ.sh (RESILIENT-342)
