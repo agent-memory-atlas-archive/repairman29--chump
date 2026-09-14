@@ -2798,3 +2798,14 @@ CHUMP_SELF_MODEL_SYSTEMCTL_BIN
 CHUMP_APEX_WATCHDOG_HEAL_ESCALATE
 # detected in: (standard input)
 CHUMP_APEX_WATCHDOG_RECALL_SCRIPT
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_PR_CLASSIFIER_AMBIENT
+# detected in: (standard input)
+CHUMP_PR_CLASSIFIER_MAX
+# detected in: (standard input)
+CHUMP_PR_CLASSIFIER_PR_JSON
+# detected in: (standard input)
+CHUMP_TEST_CALL_LOG
