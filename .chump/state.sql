@@ -8147,6 +8147,107 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
 
+- id: CREDIBLE-1207
+  domain: CREDIBLE
+  title: "CREDIBLE: Add --acceptance-criteria flag and enforce requirement for P0/P1 (CREDIBLE-284 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "CLI accepts a new \"--acceptance-criteria\" option for reserve commands"
+    - "When creating a P0 or P1 gap, the command rejects the operation if \"--acceptance-criteria\" is missing, unless \"--no-ac-required\" is supplied"
+    - Error message clearly indicates that acceptance criteria are required for P0/P1 gaps
+  notes: |
+    [chump harvest check 'reserve']
+    === primitives_index match for 'reserve' ===
+    
+    === cluster keyword match for 'reserve' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'reserve' ===
+    
+    === repo-description match for 'reserve' ===
+    
+    === HARVEST_ROADMAP.md mention of 'reserve' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'reserve' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1208
+  domain: CREDIBLE
+  title: "CREDIBLE: Prevent auto‑filled tautological placeholder for empty acceptance criteria (CREDIBLE-284 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - If no acceptance criteria are provided, the reserve command stores an empty AC field instead of a placeholder string
+    - Audit‑ac flags gaps with empty AC as missing acceptance criteria
+    - "\"--no-ac-required\" bypasses the requirement but still stores an empty AC field"
+  depends_on: [CREDIBLE-1207]
+  notes: |
+    [chump harvest check 'reserve']
+    === primitives_index match for 'reserve' ===
+    
+    === cluster keyword match for 'reserve' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'reserve' ===
+    
+    === repo-description match for 'reserve' ===
+    
+    === HARVEST_ROADMAP.md mention of 'reserve' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'reserve' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: CREDIBLE-1209
+  domain: CREDIBLE
+  title: "CREDIBLE: Preserve authored acceptance criteria during decompose and add CI smoke test (CREDIBLE-284 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Decompose operation copies the original acceptance criteria verbatim into the resulting sub‑steps without modification
+    - Only implementation sub‑steps are generated; the original AC remains unchanged
+    - "CI smoke test verifies: (a) reserve P1 without AC is refused, (b) reserve P1 with AC stores the AC exactly as entered, (c) decompose leaves the stored AC unchanged"
+  depends_on: [CREDIBLE-1208]
+  notes: |
+    [chump harvest check 'reserve']
+    === primitives_index match for 'reserve' ===
+    
+    === cluster keyword match for 'reserve' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'reserve' ===
+    
+    === repo-description match for 'reserve' ===
+    
+    === HARVEST_ROADMAP.md mention of 'reserve' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'reserve' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
 - id: CREDIBLE-121
   domain: CREDIBLE
   title: "CREDIBLE: fleet-brief Alerts(30m) counter does not match ambient.jsonl events in 30m window — counts events not in the stream"
@@ -11145,7 +11246,7 @@ gaps:
     - chump gap decompose PRESERVES author-provided acceptance_criteria as the fixed done-definition (the WHAT) and only generates the implementation sub-steps (the HOW); never overwrites authored AC
     - "CI smoke test proves: (a) reserve P1 without AC is refused, (b) with it the AC is stored verbatim, (c) decompose leaves authored AC unchanged"
   notes: |
-    Decomposed into 3 slices: CREDIBLE-1098, CREDIBLE-1099, CREDIBLE-1100
+    Decomposed into 3 slices: CREDIBLE-1207, CREDIBLE-1208, CREDIBLE-1209
   opened_date: '2026-08-19'
   outcome_id: CREDIBLE-000
   evidence: |
@@ -53885,9 +53986,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Modify the `info` and main execution flow in `scripts/ci/test-gap-closure-consistency.sh` to (1) detect the list of files changed by the leaf PR via `git diff --name-only`, (2) invoke the build/compile step only for those files, and (3) assert that the script exits with status 0 only when the leaf PR’s `todo!()` has been replaced and its corresponding test updated, printing explicit success messages that include the counted compiled files.
+    
+    Target file(s):
+    - scripts/ci/test-gap-closure-consistency.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - When a leaf PR implements its `todo!()` and updates the test, the CI run passes all tests.
-    - Only the changed files are compiled; diff size is minimal.
+    - Running `scripts/ci/test-gap-closure-consistency.sh` on a leaf PR where a `todo!()` is replaced and its test updated exits with status 0.
+    - "The script’s stdout contains the line `All tests passed` and a line `Compiled files: N` where N matches the number of paths reported by `git diff --name-only` for that PR."
+    - The `info` function logs exactly the paths returned by `git diff --name-only` and no other file paths.
   depends_on: [EFFECTIVE-1452]
   notes: |
     [chump harvest check 'PILOT']
@@ -218644,7 +218753,7 @@ gaps:
 - id: META-395
   domain: META
   title: "META: Add 'Story of PR' tab UI and integrate /api/trace/pr/:n (META-129 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -218671,6 +218780,7 @@ gaps:
     === cross-pollination briefs mentioning 'architecture' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+    [2026-09-14T13:49:51Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=75, rc=75, cycle_log=4071B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: META-396
   domain: META
