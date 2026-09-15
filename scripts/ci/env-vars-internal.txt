@@ -2847,3 +2847,8 @@ CHUMP_DUTY_OFFICER_SENTINEL_UNIT
 CHUMP_DUTY_OFFICER_SYSTEMCTL_CMD
 # detected in: (standard input)
 CHUMP_DUTY_OFFICER_T1_ESCALATE_THRESHOLD
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_DUTY_OFFICER_SENTINEL_TIMER

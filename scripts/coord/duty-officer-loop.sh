@@ -38,8 +38,15 @@
 #                                         and escalated T1->T3 + paged (default 10; RESILIENT-1230
 #                                         — a live 13h dark-out was rationalized as
 #                                         tier:1 verdict:healed 57x with 0 pages)
-#   CHUMP_DUTY_OFFICER_SENTINEL_UNIT     health-sentinel systemd unit name
+#   CHUMP_DUTY_OFFICER_SENTINEL_UNIT     health-sentinel systemd .service unit name
 #                                         (default chump-fleet-health-sentinel.service)
+#   CHUMP_DUTY_OFFICER_SENTINEL_TIMER    health-sentinel systemd .timer unit name
+#                                         (default: SENTINEL_UNIT with .service ->
+#                                         .timer; RESILIENT-1258 — the sentinel is a
+#                                         timer-driven oneshot, so watch-sentinel
+#                                         health is defined by timer is-active, not
+#                                         service is-active, which is correctly
+#                                         inactive between runs)
 #   CHUMP_DUTY_OFFICER_SYSTEMCTL_CMD     systemctl invocation (default "systemctl --user";
 #                                         override for tests / non-systemd environments)
 #
@@ -59,6 +66,7 @@ WINDOW_N="${CHUMP_DUTY_OFFICER_WINDOW_N:-200}"
 EXECUTE="${CHUMP_DUTY_OFFICER_EXECUTE:-0}"
 T1_ESCALATE_THRESHOLD="${CHUMP_DUTY_OFFICER_T1_ESCALATE_THRESHOLD:-10}"
 SENTINEL_UNIT="${CHUMP_DUTY_OFFICER_SENTINEL_UNIT:-chump-fleet-health-sentinel.service}"
+SENTINEL_TIMER="${CHUMP_DUTY_OFFICER_SENTINEL_TIMER:-${SENTINEL_UNIT%.service}.timer}"
 SYSTEMCTL_CMD="${CHUMP_DUTY_OFFICER_SYSTEMCTL_CMD:-systemctl --user}"
 
 _ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -244,37 +252,41 @@ cmd_tick() {
     return 0
 }
 
-_sentinel_is_active() {
-    $SYSTEMCTL_CMD is-active "$SENTINEL_UNIT" >/dev/null 2>&1
+_sentinel_timer_is_active() {
+    $SYSTEMCTL_CMD is-active "$SENTINEL_TIMER" >/dev/null 2>&1
 }
 
-# Watch the healer-of-healers: chump-fleet-health-sentinel.service. If it's
-# failed, attempt a revival (reset-failed + start); if that doesn't bring it
-# back, this is a T3 — the thing meant to catch every other outage is itself
-# down, so it must page rather than sit silently unwatched (RESILIENT-1230).
+# Watch the healer-of-healers: chump-fleet-health-sentinel is a TIMER-driven
+# oneshot. Its .service is CORRECTLY inactive between runs — that is not a
+# failure signal. Health is defined by the .timer: if the timer is active
+# (armed to fire every cycle), the sentinel is healthy regardless of the
+# service's between-runs idle state. If it's the timer that's failed, attempt
+# a revival (reset-failed + start); if that doesn't bring it back, this is a
+# T3 — the thing meant to catch every other outage is itself down, so it must
+# page rather than sit silently unwatched (RESILIENT-1230, RESILIENT-1258).
 # scanner-anchor: "kind":"duty_officer_action" signal="chump_fleet_health_sentinel"
 cmd_watch_sentinel() {
     local sig="chump_fleet_health_sentinel"
 
-    if _sentinel_is_active; then
-        _emit_action "$sig" 1 healed "unit=${SENTINEL_UNIT} active"
+    if _sentinel_timer_is_active; then
+        _emit_action "$sig" 1 healed "timer=${SENTINEL_TIMER} active (service oneshot idle between runs is expected)"
         return 0
     fi
 
-    $SYSTEMCTL_CMD reset-failed "$SENTINEL_UNIT" >/dev/null 2>&1 || true
-    $SYSTEMCTL_CMD start "$SENTINEL_UNIT" >/dev/null 2>&1 || true
+    $SYSTEMCTL_CMD reset-failed "$SENTINEL_TIMER" >/dev/null 2>&1 || true
+    $SYSTEMCTL_CMD start "$SENTINEL_TIMER" >/dev/null 2>&1 || true
 
-    if _sentinel_is_active; then
-        _emit_action "$sig" 1 healed "unit=${SENTINEL_UNIT} action=reset-failed+start revived"
+    if _sentinel_timer_is_active; then
+        _emit_action "$sig" 1 healed "timer=${SENTINEL_TIMER} action=reset-failed+start revived"
         return 0
     fi
 
     local verdict; verdict="$(_escalation_verdict "$sig")"
     if [[ "$verdict" == suppress ]]; then
-        _emit_action "$sig" 3 suppressed "unit=${SENTINEL_UNIT} failed and could not be revived"
+        _emit_action "$sig" 3 suppressed "timer=${SENTINEL_TIMER} failed and could not be revived"
     else
-        _emit_action "$sig" 3 paged "unit=${SENTINEL_UNIT} failed and could not be revived after reset-failed+start"
-        _notify "duty-officer T3: ${SENTINEL_UNIT} (healer-of-healers) is failed and could not be revived" "$sig"
+        _emit_action "$sig" 3 paged "timer=${SENTINEL_TIMER} failed and could not be revived after reset-failed+start"
+        _notify "duty-officer T3: ${SENTINEL_TIMER} (healer-of-healers timer) is failed and could not be revived" "$sig"
     fi
     return 0
 }
