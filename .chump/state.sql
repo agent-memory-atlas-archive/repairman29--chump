@@ -46312,10 +46312,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a Rust doc comment to the `handle_broadcast` function in `src/web_server.rs` that explicitly describes the new scaffold‑and‑holes workflow, adjust the function body to satisfy `cargo fmt` and `cargo clippy` (e.g., remove unused imports, simplify match arms), and insert a new unit test `test_scaffold_and_holes_workflow` inside the existing `startup_validation_tests` module that asserts successful initialization of the scaffold‑and‑holes components.
+    
+    Target file(s):
+    - src/web_server.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - README and developer docs describe the new scaffold‑and‑holes workflow.
-    - All `cargo fmt` and `cargo clippy` checks pass with no warnings.
-    - All unit, integration, and CI metric tests pass.
+    - The file `src/web_server.rs` contains a `///` doc comment above `fn handle_broadcast` that mentions the scaffold‑and‑holes workflow.
+    - Running `cargo fmt -- --check` reports no formatting differences for `src/web_server.rs`.
+    - Running `cargo clippy -- -D warnings` reports zero warnings originating from `src/web_server.rs`.
+    - The test `test_scaffold_and_holes_workflow` in `src/web_server.rs` (module `startup_validation_tests`) executes and passes when `cargo test --test startup_validation_tests` is run.
   depends_on: [EFFECTIVE-1216]
   notes: |
     [chump harvest check 'PILOT']
@@ -46339,9 +46347,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a new detection routine `detect_top_action_predicted_breakage` to `crates/chump-paramedic/src/paramedic.rs` that scans an incoming action stream, selects the highest‑priority action likely to cause a breakage, and marks it with a `predicted_breakage` flag; integrate this routine into the existing detection flow (e.g., called from `detect_unregistered_event`) and extend `scripts/ci/test-recurring-gap-pattern-detector.sh` to exercise the new logic with a mock stream and assert the flag.
+    
+    Target file(s):
+    - crates/chump-paramedic/src/paramedic.rs
+    - scripts/ci/test-recurring-gap-pattern-detector.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The system identifies the top action that could lead to a breakage and marks it as a predicted breakage candidate.
-    - Unit test verifies that given a mock action stream, the predicted breakage flag is set correctly.
+    - "? In `crates/chump-paramedic/src/paramedic.rs`, the function `detect_top_action_predicted_breakage` returns a `PredictedBreakage` object with `is_top : true` for the highest‑priority action in the provided stream."
+    - The main detection pipeline now calls `detect_top_action_predicted_breakage`, and when an action is identified as the top predicted breakage its `predicted_breakage` field is set to `true`.
+    - "? Executing `scripts/ci/test-recurring-gap-pattern-detector.sh` with a mock action JSON file exits with status 0 and prints `Predicted breakage candidate : <action_id>` for the top action."
+    - A unit test `test_detect_top_action_predicted_breakage` in `crates/chump-paramedic/src/paramedic.rs` asserts that, given a mock stream where action A has higher severity than action B, only action A is flagged as a predicted breakage.
   notes: |
     [chump harvest check 'phase']
     === primitives_index match for 'phase' ===
@@ -46366,10 +46384,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Edit the `classify_sub_failure` function in `scripts/dispatch/worker.sh` to invoke the ticket‑creation endpoint when a predicted breakage is detected, passing a JSON payload with `"severity":"P0"` and `"escalate":true`, embedding the current `$ACTION_CONTEXT` into the payload, and handling any HTTP errors without aborting the worker process.
+    
+    Target file(s):
+    - scripts/dispatch/worker.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - When a predicted breakage is detected, a P0 ticket is automatically created in the dispatch system.
-    - The ticket contains the correct action context and is marked for immediate escalation.
-    - Integration test confirms ticket creation and dispatch call without errors.
+    - "In `scripts/dispatch/worker.sh`, `classify_sub_failure` must execute a `curl` POST to `/api/tickets` with a JSON body that includes `\"severity\":\"P0\"` and `\"escalate\":true` and the variable `$ACTION_CONTEXT`."
+    - "The HTTP request made by `classify_sub_failure` must receive a 201 response and output a line matching `Ticket created: <ticket-id>` to stdout."
+    - When a predicted breakage triggers `classify_sub_failure`, the dispatch system log file `logs/dispatch.log` must contain an entry `P0 ticket dispatched for <action-context>` within 5 seconds of the function call.
+    - The exit code of `scripts/dispatch/worker.sh` after handling a predicted breakage remains `0` even if the ticket‑creation request initially fails and is retried.
   depends_on: [EFFECTIVE-1218]
   notes: |
     [chump harvest check 'phase']
@@ -107534,7 +107560,7 @@ gaps:
   acceptance_criteria:
     - Running Claude Code sessions poll URGENT-INBOX mid-session and act on fix_trunk signals within a bounded interval; a test signal is picked up without a session restart.
   notes: |
-    Decomposed into 9 slices: INFRA-6192, INFRA-6193, INFRA-6194, INFRA-6195, INFRA-6196, INFRA-6197, INFRA-6198, INFRA-6199, INFRA-6200
+    Decomposed into 9 slices: INFRA-6444, INFRA-6445, INFRA-6446, INFRA-6447, INFRA-6448, INFRA-6449, INFRA-6450, INFRA-6451, INFRA-6452
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -215805,7 +215831,7 @@ gaps:
 - id: INFRA-6435
   domain: INFRA
   title: "INFRA: INFRA-6175: Add Dockerfile for chump‑rust‑builder (INFRA-2287 slice)"
-  status: open
+  status: done
   priority: P1
   effort: s
   acceptance_criteria:
@@ -215835,6 +215861,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+  closed_date: '2026-09-14'
+  closed_pr: 4679
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4679 titled 'INFRA-6435: ...' merged 2026-09-14; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6436
   domain: INFRA
@@ -216114,6 +216144,232 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6444
+  domain: INFRA
+  title: "INFRA: Add URGENT-INBOX polling loop to Claude session runner (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A background loop is started when a Claude session begins
+    - The loop polls the URGENT-INBOX every configurable interval (default 5 seconds)
+    - Polling errors are logged but do not crash the session
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6445
+  domain: INFRA
+  title: "INFRA: Implement detection of fix_trunk signals in polled messages (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a polled message contains a `fix_trunk` signal, the system marks it as a valid signal
+    - Signal detection is unit‑testable via a mock message payload
+  depends_on: [INFRA-6444]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6446
+  domain: INFRA
+  title: "INFRA: Add bounded interval handling for signal processing (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A detected `fix_trunk` signal is processed within 500 ms of detection
+    - If processing exceeds the bound, a timeout warning is logged and the signal is dropped
+  depends_on: [INFRA-6445]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6447
+  domain: INFRA
+  title: "INFRA: Integrate signal handling into active session without restart (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Processing a `fix_trunk` signal does not trigger a session restart
+    - The session continues to accept new user inputs after handling the signal
+  depends_on: [INFRA-6446]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6448
+  domain: INFRA
+  title: "INFRA: Expose configuration for polling interval and timeout (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Polling interval and processing timeout can be set via environment variables or a config file
+    - Default values are used when configuration is absent
+  depends_on: [INFRA-6444]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6449
+  domain: INFRA
+  title: "INFRA: Write unit test for fix_trunk signal detection (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test injects a mock URGENT-INBOX message containing a `fix_trunk` signal
+    - The detection logic returns true and the signal payload is correctly parsed
+  depends_on: [INFRA-6445]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6450
+  domain: INFRA
+  title: "INFRA: Write integration test for mid‑session polling and signal handling (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A full Claude session is started in a test harness
+    - A `fix_trunk` signal is injected into the URGENT-INBOX after the session has been running for >10 seconds
+    - The session processes the signal within the bounded interval and continues without restart
+  depends_on: [INFRA-6447, INFRA-6449]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6451
+  domain: INFRA
+  title: "INFRA: Add logging for polling and signal actions (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Each poll iteration logs start and end timestamps at DEBUG level
+    - Detection and processing of a `fix_trunk` signal are logged at INFO level with signal ID
+  depends_on: [INFRA-6444]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6452
+  domain: INFRA
+  title: "INFRA: Update documentation for URGENT-INBOX polling feature (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README/infra docs include a section describing the polling loop, configuration options, and signal handling behavior
+    - Example configuration snippets and a note about the integration test are provided
+  depends_on: [INFRA-6448, INFRA-6451]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
 
 - id: INFRA-650
   domain: INFRA
