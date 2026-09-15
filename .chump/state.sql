@@ -5832,10 +5832,18 @@ gaps:
   status: open
   priority: P1
   effort: xs
+  description: |
+    Add the core implementation to `scripts/ci/check-grep-target-sweep.py` that iterates over all files in `scripts/ci`, uses the existing `GREP_CALL_RE` regex (line 40) to locate `grep` invocations, checks that each extracted target path exists in the repository at HEAD via `git ls-tree`, records any missing targets, writes a JSON report `reports/grep_target_sweep.json` with details, and ensures the script exits with status 0 regardless of findings.
+    
+    Target file(s):
+    - scripts/ci/check-grep-target-sweep.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Script scans scripts/ci for grep commands and verifies that each target path exists in the repository at HEAD; missing targets are logged.
-    - Running the script on the repository snapshot dated 2026-08-08 reports exactly the known stale‑binary assertion and operator‑recall dead instrument.
-    - Script exits with status 0 regardless of findings; findings are written to a JSON file in the reports directory.
+    - Running `scripts/ci/check-grep-target-sweep.py` on the repository snapshot dated 2026-08-08 creates a file `reports/grep_target_sweep.json` that contains JSON entries for the known stale‑binary assertion and operator‑recall dead instrument missing targets.
+    - The script exits with exit code 0 even when missing targets are detected.
+    - Each missing target is recorded in the JSON report with the keys `source_file`, `line_number`, and `missing_target_path`.
+    - The implementation only scans files under the `scripts/ci` directory and extracts grep calls using the `GREP_CALL_RE` pattern defined at line 40 of `scripts/ci/check-grep-target-sweep.py`.
 
 - id: CREDIBLE-1132
   domain: CREDIBLE
@@ -237764,7 +237772,7 @@ gaps:
 - id: META-536
   domain: META
   title: "META: Create CI gate script test‑chump‑playbook‑freshness.sh (META-172 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -237788,6 +237796,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+    [2026-09-15T18:36:43Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1091B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: META-537
   domain: META
