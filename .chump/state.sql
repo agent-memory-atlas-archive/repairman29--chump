@@ -32844,9 +32844,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update the ac-coverage advisory execution to append a failure guard (such as `|| true`) so non-zero advisory exit codes log error details without aborting CI script execution, and update `is_benign_infra_check` in `crates/chump-verify/src/external_verify_merge.rs` to recognize ac-coverage advisory check failures as benign non-blocking infra checks.
+    
+    Target file(s):
+    - crates/chump-verify/src/external_verify_merge.rs
+    - scripts/ci/test-open-pr-dup-detection.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The ac‑coverage advisory is executed with a guard (e.g., `|| true`) so that its failure is logged but does not cause a non‑zero exit from the script.
-    - When the advisory returns a non‑zero status, the log contains the error message and the script continues.
+    - In `crates/chump-verify/src/external_verify_merge.rs`, `is_benign_infra_check` returns true when evaluating failures from the ac-coverage advisory check.
+    - In `scripts/ci/test-open-pr-dup-detection.sh`, the ac-coverage advisory check invocation is appended with a `|| true` guard or status wrapper.
+    - When the ac-coverage advisory produces a non-zero exit code, the warning message is written to logs and the script execution proceeds to completion with a zero exit status.
   depends_on: [CREDIBLE-959]
   notes: |
     [chump harvest check 'bot-merge']
