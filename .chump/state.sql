@@ -46519,10 +46519,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a `compute_mttr` function in `src/audit.rs` that walks the event registry to calculate the mean time from a dispatch‑start event to its corresponding outcome‑settlement event, expose the result via a new `mttr` field on the EV meta‑gauge struct, and modify `crates/chump-kpi-report/src/kpi_report.rs::build_impact_section` to render this MTTR value in the EV meta‑gauge output section.
+    
+    Target file(s):
+    - src/audit.rs
+    - crates/chump-kpi-report/src/kpi_report.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Mean Time To Recovery (MTTR) is calculated from dispatch start to outcome settlement.
-    - The MTTR value is added to the EV meta‑gauge output.
-    - Test verifies MTTR calculation against a controlled timeline of events.
+    - "src/audit.rs::compute_mttr returns a mean duration of 60 seconds for a synthetic event set with dispatch at t=0 and settlements at t=30, t=60, and t=90."
+    - "crates/chump-kpi-report/src/kpi_report.rs::build_impact_section outputs a line `MTTR: 60s` within the EV meta‑gauge string when fed the synthetic event set above."
+    - "crates/chump-kpi-report/src/kpi_report.rs::tests::build_impact_section_includes_mttr passes, asserting the presence and exact value of the MTTR line for the controlled timeline."
+    - "src/audit.rs::sweep_event_registry records dispatch‑start and settlement timestamps required by `compute_mttr` without altering existing event‑processing behavior."
   depends_on: [EFFECTIVE-1222]
   notes: |
     [chump harvest check 'phase']
@@ -109198,7 +109207,7 @@ gaps:
     - "[\"chump claim INFRA-X --paths foo.sh,bar.rs scans every currently-open PR (gh pr list --json files) for path overlap\",\"On any overlap with an open PR: refuse claim with clear message: [claim] paths overlap with open PR #N (gap INFRA-Y, paths: foo.sh). Options: (a) coordinate with #N author and merge into that PR, (b) wait for #N to land then rebase, (c) --allow-overlap to proceed anyway (audit-logged via kind=claim_path_overlap_allowed).\",\"Auto-detection of same-region work (not just same-file): when same file overlaps, run git diff to extract modified line-ranges; only flag as collision if the proposed claim would touch the same line-range. Single-file with disjoint line-ranges still allowed.\",\"Operator-mode: when CHUMP_CLAIM_PATH_OVERLAP_OPERATOR=1 (operator-only env, source-controlled), claim proceeds without check (operator may know they want to ship 2 PRs touching same file)\",\"Emit kind=claim_path_overlap_blocked (and recovered) to ambient.jsonl with {claimed_gap, blocking_pr, blocking_gap, overlapping_paths}\",\"Smoke test scripts/ci/test-claim-path-overlap.sh: mock 1 open PR with file [a.sh]; claim with --paths a.sh exits non-zero with redirect message; claim with --paths b.sh succeeds\",\"Today trigger 2026-06-02: INFRA-2343 (PR #2924, 37h old) and INFRA-2347 both fixed the same 3 printf"
     - "grep -q patterns in scripts/coord/trunk-sentinel-daemon.sh. Different gap IDs, different titles, same code. Bypassed every existing dedup gate.\",\"Filing-time companion follow-up (separate gap if scope grows): chump gap reserve also checks title-similarity against OPEN PR titles (not just other gaps). Catches the case where 2 authors independently file 2 gaps for the same problem.\"]"
   notes: |
-    Decomposed into 4 slices: INFRA-6201, INFRA-6202, INFRA-6203, INFRA-6204
+    Decomposed into 4 slices: INFRA-6453, INFRA-6454, INFRA-6455, INFRA-6456
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -215129,7 +215138,7 @@ gaps:
 - id: INFRA-6412
   domain: INFRA
   title: "INFRA: Implement inventory script to audit CI vs chump preflight gates (INFRA-2084 slice)"
-  status: open
+  status: already_satisfied
   priority: P2
   effort: s
   acceptance_criteria:
@@ -215153,6 +215162,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+  closed_pr: 4664
 
 - id: INFRA-6413
   domain: INFRA
@@ -216148,7 +216158,7 @@ gaps:
 - id: INFRA-6444
   domain: INFRA
   title: "INFRA: Add URGENT-INBOX polling loop to Claude session runner (INFRA-2342 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -216169,6 +216179,10 @@ gaps:
     
     === cross-pollination briefs mentioning 'polling' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+  closed_date: '2026-09-15'
+  closed_pr: 4680
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4680 titled 'INFRA-6444: ...' merged 2026-09-15; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6445
   domain: INFRA
@@ -216370,6 +216384,119 @@ gaps:
     
     === cross-pollination briefs mentioning 'polling' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-6453
+  domain: INFRA
+  title: "INFRA: Implement basic claim-time path overlap detection against open PRs (INFRA-2434 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a claim is issued with --paths that match any file listed in an open PR (queried via `gh pr list --json files`), the claim command exits with a non‑zero status.
+    - "The error message includes the overlapping PR number and gap ID, e.g., \"[claim] paths overlap with open PR #123 (gap INFRA‑XYZ, paths: foo.sh)\"."
+    - When the claimed paths do not appear in any open PR, the claim succeeds (exit code 0).
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6454
+  domain: INFRA
+  title: "INFRA: Add line‑range overlap detection for same‑file claims (INFRA-2434 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - If the overlapping file is the same, the tool runs `git diff` between the PR head and base to extract modified line ranges.
+    - The claim is blocked only when the proposed claim would modify a line range that intersects any line range modified by the open PR.
+    - Disjoint line ranges in the same file allow the claim to proceed.
+    - "Test case: PR modifies lines 10‑20 of a.sh; claim with --paths a.sh and a change limited to lines 30‑40 succeeds; claim limited to lines 15‑25 fails with the same error format as slice 0."
+  depends_on: [INFRA-6453]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6455
+  domain: INFRA
+  title: "INFRA: Introduce operator‑mode bypass via CHUMP_CLAIM_PATH_OVERLAP_OPERATOR (INFRA-2434 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - When the environment variable `CHUMP_CLAIM_PATH_OVERLAP_OPERATOR=1` is set, the claim command skips all overlap checks and always succeeds.
+    - An audit log entry with `kind=claim_path_overlap_allowed` is written, containing the claimed gap ID, paths, and a flag indicating operator bypass.
+    - The bypass behavior is limited to operator‑only environments (e.g., source‑controlled CI) and does not affect normal runs.
+  depends_on: [INFRA-6453]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6456
+  domain: INFRA
+  title: "INFRA: Emit telemetry events for blocked/recovered overlaps and add smoke test (INFRA-2434 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "When a claim is blocked due to path overlap, a JSON line is appended to `ambient.jsonl` with `kind=claim_path_overlap_blocked` and fields: claimed_gap, blocking_pr, blocking_gap, overlapping_paths."
+    - When a previously blocked claim is retried after the blocking PR is merged/closed and succeeds, a `kind=claim_path_overlap_recovered` event is emitted with the same fields.
+    - A new smoke test script `scripts/ci/test-claim-path-overlap.sh` mocks an open PR containing file a.sh; a claim with `--paths a.sh` exits non‑zero with the expected error, while a claim with `--paths b.sh` exits zero.
+    - The smoke test runs as part of CI and fails if any of the above conditions are not met.
+  depends_on: [INFRA-6453, INFRA-6454]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
 
 - id: INFRA-650
   domain: INFRA
