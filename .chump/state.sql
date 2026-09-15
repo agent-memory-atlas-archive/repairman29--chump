@@ -224878,7 +224878,7 @@ gaps:
     - "UI correctness: segment duration computed from start_ts_ms/end_ts_ms (currently shows 0s after the INFRA-2189 normalization); panel surfaces last 3 events on either side of the segment window even when zero events fall inside (so it never says 'No events' for a real segment)"
     - "Marcus review: external-collab curator loops Marcus on the proposal doc and captures his design feedback before ship"
   notes: |
-    Decomposed into 16 slices: META-386, META-387, META-388, META-389, META-390, META-391, META-392, META-393, META-394, META-395, META-396, META-397, META-398, META-399, META-400, META-401
+    Decomposed into 16 slices: META-492, META-493, META-494, META-495, META-496, META-497, META-498, META-499, META-500, META-501, META-502, META-503, META-504, META-505, META-506, META-507
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -233601,6 +233601,509 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: META-492
+  domain: META
+  title: "META: Create design proposal doc and collect feedback (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Design proposal markdown file created at docs/design/SCRUBBER_PANEL_PROPOSALS.md
+    - At least 5 feedback responses from peer curators or operators recorded in the doc
+    - Feedback entries include reviewer name, comment, and timestamp
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-493
+  domain: META
+  title: "META: Summarize feedback and decide v1 vs v2 fields (META-129 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Decision section added to the proposal doc listing fields slated for v1 and those deferred to v2
+    - Decision is approved by the design reviewer (Marcus) via a signed comment
+  depends_on: [META-492]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-494
+  domain: META
+  title: "META: Define idle palette states and confidence flag schema (META-129 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Enum of idle states (scheduled-quiet, working-but-quiet, stalled, dead, untracked) added to the segment schema
+    - Confidence flag field (solid/dashed) defined and documented
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-495
+  domain: META
+  title: "META: Implement idle palette UI component (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Component renders each idle state with correct color/shade and confidence flag style
+    - Component is unit‑tested for all five states and both flag styles
+    - Component integrates into the segment‑detail panel without breaking existing UI
+  depends_on: [META-494]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-496
+  domain: META
+  title: "META: Add idle palette signal detection logic (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Heartbeat freshness, bash_call pattern detection, lease expiry, and event‑gap calculations produce correct idle state per segment
+    - Signal detection covered by integration tests using synthetic event streams
+    - Detected state stored in the segment payload under the new idle field
+  depends_on: [META-494]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-497
+  domain: META
+  title: "META: Extend recorder payload schema for token/cost data (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "Payload schema includes fields: tokens_in, tokens_out, cost_usd, model (when source is anthropic-api)"
+    - Schema change validated by schema‑validation tests
+    - Existing recordings remain backward compatible
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-498
+  domain: META
+  title: "META: Aggregate and render cost per segment in panel (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Scrubber sums tokens_in/out and cost_usd for each segment
+    - Panel displays a 'Cost' row with formatted USD amount
+    - Cost row appears only when cost data is present
+    - Unit tests verify correct aggregation for multiple events
+  depends_on: [META-497]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-499
+  domain: META
+  title: "META: Emit subagent_spawned events at dispatch (META-129 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Agent‑tool dispatch code emits an event of kind=subagent_spawned with sub_session_id and worktree_path
+    - Event schema validated by recorder tests
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-500
+  domain: META
+  title: "META: Map ambient events to subagent sessions by worktree path (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Recorder associates subsequent events with the correct sub_session_id based on worktree_path
+    - Mapping logic covered by integration tests with simulated subagent workflows
+  depends_on: [META-499]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-501
+  domain: META
+  title: "META: Render sub‑lanes nested under parent segment in UI (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - UI shows sub‑lanes indented under their parent segment with distinct visual styling
+    - Sub‑lane events are correctly filtered and displayed when a parent segment is selected
+    - Visual regression tests confirm layout
+  depends_on: [META-500]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-502
+  domain: META
+  title: "META: Add 'Story of PR' tab with trace timeline (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Tab appears in the segment‑detail panel labeled 'Story of PR'
+    - "Tab queries /api/trace/pr/:n and renders a timeline of events"
+    - Cursor highlights corresponding segment on the gantt when hovered
+    - End‑to‑end test verifies timeline loads for a known PR number
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-503
+  domain: META
+  title: "META: Evaluate multi‑machine consolidation options and document decision (META-129 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Comparison matrix for option A (per‑machine sqlite + server joins) vs option B (shared sqlite via NATS replication) created
+    - Rationale for chosen option recorded in docs/infra/MULTI_MACHINE_CONSOLIDATION.md
+    - Decision approved by infra lead
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-504
+  domain: META
+  title: "META: Implement chosen multi‑machine storage configuration (META-129 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - If option B selected, NATS replication for shared sqlite is configured and functional in a 2‑node test cluster
+    - If option A selected, server‑side join service is deployed and returns combined segment data
+    - Smoke tests confirm segment data is consistent across machines
+  depends_on: [META-503]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-505
+  domain: META
+  title: "META: Fix segment duration calculation and display (META-129 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Segment duration computed as (end_ts_ms - start_ts_ms) and displayed correctly in seconds
+    - Regression test verifies duration for a segment with known timestamps (e.g., 5000 ms → 5 s)
+    - No regression in other panels
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-506
+  domain: META
+  title: "META: Show surrounding events when segment window is empty (META-129 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Panel always displays up to three events before and after the segment window, even if none fall inside
+    - UI never shows a 'No events' message for a valid segment
+    - Unit test with a segment lacking internal events confirms surrounding events are shown
+  depends_on: [META-505]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-507
+  domain: META
+  title: "META: Conduct Marcus review loop and capture final design feedback (META-129 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Marcus is looped in on the proposal doc via external‑collab curator
+    - His feedback is recorded in a dedicated 'Marcus Review' section of the doc
+    - All open review items are resolved or explicitly deferred before shipping
+  depends_on: [META-493, META-501, META-502]
+  notes: |
+    [chump harvest check 'architecture']
+    === primitives_index match for 'architecture' ===
+    
+    === cluster keyword match for 'architecture' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'architecture' ===
+    
+    === repo-description match for 'architecture' ===
+    
+    === HARVEST_ROADMAP.md mention of 'architecture' (deep-scan findings) ===
+      143:| `pixel-edge-server` bicameral-mind blueprint (BLUEPRINT_BEST_IN_CLASS.md) — Reflexive on-device + Neocortex cloud routing | Pi mesh / neural-farm architecture | Vendor architectural pattern | not yet filed (consider) |
+      152:- **tools-platform → pixel-edge-server:** unshelved. Bicameral-mind architecture is directly aligned with neural-farm and Pi mesh vision.
+      177:| **5** | `ims` (political-strat) | REAL Flask + SQLAlchemy Initiative Tracker with Chart.js dashboard + role-based auth + RESTful API — not the "political-strategy" lump the cluster label implied | **MEDIUM** — reference architecture for Chump's gap-priority operator UI (esp. dashboard schema + REST shape) |
+      198:- `internal-zendesk-tools` — React 18 + TS + Vite + Tailwind assessment questionnaire (architecture reference for Chump dashboards).
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'architecture' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
 
 - id: MISSION-001
   domain: MISSION
