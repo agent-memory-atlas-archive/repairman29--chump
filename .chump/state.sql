@@ -237451,7 +237451,7 @@ gaps:
 - id: META-535
   domain: META
   title: "META: Add section‑ownership table to CHUMP_PLAYBOOK.md (META-172 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -237473,6 +237473,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+  closed_pr: 4686
 
 - id: META-536
   domain: META
@@ -237731,13 +237732,14 @@ gaps:
 - id: META-545
   domain: META
   title: "META: Create design document for consensus‑based admin‑merge (META-195 slice)"
-  status: open
+  status: done
   priority: P1
   effort: s
   acceptance_criteria:
     - docs/design/CONSENSUS_ADMIN_MERGE.md exists in the repo
     - Document describes decision type, auto‑vote rules, tally thresholds, mode switch procedure
     - Design is reviewed and approved by the operator
+  closed_pr: 4685
 
 - id: META-546
   domain: META
