@@ -24413,9 +24413,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a `#[cfg(test)]` module to `crates/chump-verify/src/external_verify_merge.rs` containing a new unit test `test_identical_diff_consistent_verdict` that invokes the verdict‑generation logic (via `synth_ac_for_pr` or the underlying function) twice with the same diff input and asserts that both the `verdict` field and the `concern_reasons` collection are exactly equal, thereby guaranteeing deterministic output for identical diffs.
+    
+    Target file(s):
+    - crates/chump-verify/src/external_verify_merge.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The new unit test fails before the changes in slice 3 and passes after.
-    - Test asserts that the verdict and its CONCERN reasons are identical across multiple runs.
+    - Running `cargo test` prints a line `test test_identical_diff_consistent_verdict ... ok` indicating the new test is executed.
+    - The test calls `synth_ac_for_pr` (or the internal verdict function) twice with identical diff data and asserts `result1.verdict == result2.verdict` and `result1.concern_reasons == result2.concern_reasons`.
+    - On the pre‑change code base, executing `cargo test` fails with `test test_identical_diff_consistent_verdict ... FAILED`, demonstrating the inconsistency.
+    - After the change, executing `cargo test` succeeds with the test passing, confirming deterministic verdicts for identical diffs.
   depends_on: [CREDIBLE-700]
   notes: |
     [chump harvest check 'opaque']
@@ -125503,7 +125512,7 @@ gaps:
     - "With CHUMP_GONOGO_FORCE_VERDICT=NO-GO, `chump bootstrap \"x\" --dir <tmp> --skip-arch-decision` exits non-zero, creates no .git/ or Cargo.toml in <tmp>, and prints the plain-language reason; with CHUMP_GONOGO_SKIP=1 it scaffolds exactly as today — both asserted in scripts/ci/test-gonogo.sh."
     - scripts/ci/test-gonogo.sh is mirrored into src/preflight.rs (or classified Tier-D/allowlist per CLAUDE.md) so `chump preflight` and the preflight-vs-CI parity gate stay green after the new gate is added.
   notes: |
-    Decomposed into 5 slices: INFRA-6215, INFRA-6216, INFRA-6217, INFRA-6218, INFRA-6219
+    Decomposed into 5 slices: INFRA-6464, INFRA-6465, INFRA-6466, INFRA-6467, INFRA-6468
   opened_date: '2026-08-19'
   outcome_id: COTG
 
@@ -216741,6 +216750,153 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6464
+  domain: INFRA
+  title: "INFRA: Implement gonogo module with Verdict enum, blocks_build, parse_verdict, cost_axis and unit tests (INFRA-3481 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - src/gonogo.rs defines enum Verdict with variants Go, NoGo, NeedsNarrowing, NoGoOnCost
+    - "Verdict::blocks_build() returns true for NoGo and NoGoOnCost, false otherwise"
+    - "Verdict::parse_verdict correctly maps 5 example LLM lines (2 GO, 2 NO‑GO, 1 NEEDS‑NARROWING) to the proper variants"
+    - "Verdict::cost_axis(estimate_usd, ceiling_usd) returns NoGoOnCost when estimate > ceiling, otherwise returns the input verdict"
+    - "cargo test gonogo:: passes all unit tests in src/gonogo.rs"
+  notes: |
+    [chump harvest check 'honest']
+    === primitives_index match for 'honest' ===
+    
+    === cluster keyword match for 'honest' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'honest' ===
+    
+    === repo-description match for 'honest' ===
+    
+    === HARVEST_ROADMAP.md mention of 'honest' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'honest' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
+- id: INFRA-6465
+  domain: INFRA
+  title: "INFRA: Add `chump gonogo` CLI dispatch with JSON output and proper exit codes (INFRA-3481 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`chump gonogo \"<vision>\" --json` prints a JSON object containing keys verdict, reason, cost_estimate_usd, tier_ceiling_usd"
+    - CLI exits with non‑zero status for NoGo and NoGoOnCost, zero for Go and NeedsNarrowing
+    - The command uses the newly created src/gonogo.rs functions for verdict calculation
+  depends_on: [INFRA-6464]
+  notes: |
+    [chump harvest check 'honest']
+    === primitives_index match for 'honest' ===
+    
+    === cluster keyword match for 'honest' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'honest' ===
+    
+    === repo-description match for 'honest' ===
+    
+    === HARVEST_ROADMAP.md mention of 'honest' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'honest' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
+- id: INFRA-6466
+  domain: INFRA
+  title: "INFRA: Guard bootstrap path with gonogo decision and env‑var overrides (INFRA-3481 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - bootstrap command checks CHOMP_GONOGO_SKIP; when set to 1 it bypasses the gate
+    - When CHOMP_GONOGO_FORCE_VERDICT=NO-GO, bootstrap exits non‑zero, creates no .git/ or Cargo.toml in the target directory, and prints the plain‑language reason
+    - "When CHOMP_GONOGO_FORCE_VERDICT is unset, bootstrap uses gonogo::parse_verdict to decide whether to proceed"
+    - All paths compile and unit tests still pass
+  depends_on: [INFRA-6464, INFRA-6465]
+  notes: |
+    [chump harvest check 'honest']
+    === primitives_index match for 'honest' ===
+    
+    === cluster keyword match for 'honest' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'honest' ===
+    
+    === repo-description match for 'honest' ===
+    
+    === HARVEST_ROADMAP.md mention of 'honest' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'honest' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
+- id: INFRA-6467
+  domain: INFRA
+  title: "INFRA: Update CI test script (scripts/ci/test-gonogo.sh) to assert gonogo behavior (INFRA-3481 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - test‑gonogo.sh verifies exit codes for forced NO‑GO, NO‑GO‑ON‑COST, GO, and NEEDS‑NARROWING scenarios
+    - Script checks that forced NO‑GO prevents scaffold creation and that CHOMP_GONOGO_SKIP=1 allows normal scaffolding
+    - CI pipeline runs the script and reports success
+  depends_on: [INFRA-6465, INFRA-6466]
+  notes: |
+    [chump harvest check 'honest']
+    === primitives_index match for 'honest' ===
+    
+    === cluster keyword match for 'honest' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'honest' ===
+    
+    === repo-description match for 'honest' ===
+    
+    === HARVEST_ROADMAP.md mention of 'honest' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'honest' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
+- id: INFRA-6468
+  domain: INFRA
+  title: "INFRA: Mirror gonogo CI checks into src/preflight.rs to keep preflight parity (INFRA-3481 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - src/preflight.rs contains the same logic as scripts/ci/test-gonogo.sh for evaluating gonogo verdicts
+    - "`chump preflight` runs without errors and yields the same results as the CI script"
+    - Parity between CI script and preflight implementation is validated by a unit test
+  depends_on: [INFRA-6467]
+  notes: |
+    [chump harvest check 'honest']
+    === primitives_index match for 'honest' ===
+    
+    === cluster keyword match for 'honest' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'honest' ===
+    
+    === repo-description match for 'honest' ===
+    
+    === HARVEST_ROADMAP.md mention of 'honest' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'honest' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
 
 - id: INFRA-650
   domain: INFRA
