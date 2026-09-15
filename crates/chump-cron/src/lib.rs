@@ -5,6 +5,7 @@
 
 pub mod backend;
 pub mod cron_expr;
+pub mod health_sentinel;
 pub mod ops;
 pub mod spec;
 
