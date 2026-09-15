@@ -216556,7 +216556,7 @@ gaps:
 - id: INFRA-6458
   domain: INFRA
   title: "INFRA: Update organ emitters to output StructuredFinding payloads (INFRA-3470 slice)"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
@@ -216587,6 +216587,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-15T02:10:20Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1097B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6459
   domain: INFRA
@@ -216766,7 +216767,7 @@ gaps:
 - id: INFRA-6464
   domain: INFRA
   title: "INFRA: Implement gonogo module with Verdict enum, blocks_build, parse_verdict, cost_axis and unit tests (INFRA-3481 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -216792,6 +216793,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+  closed_date: '2026-09-15'
+  closed_pr: 4682
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4682 titled 'INFRA-6464: ...' merged 2026-09-15; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6465
   domain: INFRA
