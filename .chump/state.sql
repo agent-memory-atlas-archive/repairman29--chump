@@ -224898,6 +224898,8 @@ gaps:
     - "Smoke test: dispatch a fixture event sequence with parent=A spawning sub=B; assert recorder stores B's events under B not A; assert scrubber renders A with B nested below"
     - Cross-references META-129 (scrubber design collab — sub-agent attribution is one of its open questions); resolves the open question in META-129 (b)
   depends_on: [META-129]
+  notes: |
+    Decomposed into 11 slices: META-508, META-509, META-510, META-511, META-512, META-513, META-514, META-515, META-516, META-517, META-518
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -234104,6 +234106,421 @@ gaps:
     === cross-pollination briefs mentioning 'architecture' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+
+- id: META-508
+  domain: META
+  title: "META: Draft design proposal for sub-agent attribution (META-130 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - docs/design/SUBAGENT_ATTRIBUTION.md file created
+    - "Document includes three parts: emission design, recorder mapping, scrubber rendering"
+    - Rationale, signal flow diagram, and edge case handling (subagent crashes, parent ships before sub, sub-sub spawning) are described
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-509
+  domain: META
+  title: "META: Obtain design sign‑off (META-130 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Design doc reviewed by META leads
+    - All comments addressed and design marked approved in the doc
+  depends_on: [META-508]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-510
+  domain: META
+  title: "META: Emit kind=subagent_spawned from Claude Code orchestrator (META-130 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When Agent‑tool dispatch occurs, chump‑coord emit includes kind=subagent_spawned
+    - Payload contains sub_session_id (synthetic UUID), worktree_path, and parent_session_id
+    - Emission is gated behind a feature flag for safe rollout
+  depends_on: [META-509]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-511
+  domain: META
+  title: "META: Unit test for subagent_spawned emission (META-130 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Test harness triggers Agent‑tool dispatch
+    - Test asserts that emitted event kind is subagent_spawned and payload fields are present and correctly typed
+  depends_on: [META-510]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-512
+  domain: META
+  title: "META: Add in‑memory worktree_path → sub_session_id map to chump‑fleet‑recorder (META-130 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Recorder maintains a thread‑safe HashMap keyed by worktree_path
+    - Map entry is created/updated on receipt of subagent_spawned events
+    - Map can be queried for a given worktree_path
+  depends_on: [META-510]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-513
+  domain: META
+  title: "META: Rewrite session_id on ambient events based on worktree_path map (META-130 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - For every incoming ambient event with payload.worktree, recorder looks up the map
+    - If a sub_session_id is found, event.session_id is replaced before INSERT
+    - No change occurs for worktree_paths without a mapping
+  depends_on: [META-512]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-514
+  domain: META
+  title: "META: Recorder unit tests for mapping and session_id rewrite (META-130 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Test injects a subagent_spawned event, then an ambient event with matching worktree_path
+    - Assert that the ambient event stored in the DB has the sub_session_id, not the parent session_id
+    - Test also verifies that unrelated worktree_path events retain original session_id
+  depends_on: [META-513]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-515
+  domain: META
+  title: "META: Render nested sub‑lanes in fleet‑scrubber UI (META-130 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Parent lane shows an expand/collapse arrow
+    - Sub‑lanes are displayed indented under the parent with a faint dashed separator
+    - Collapsing the parent hides all its sub‑lanes
+    - UI updates without regression of existing lane rendering
+  depends_on: [META-513]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-516
+  domain: META
+  title: "META: End‑to‑end smoke test for sub‑agent attribution (META-130 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test dispatches a fixture sequence where parent session A spawns sub session B
+    - Recorder stores events from B under B's sub_session_id
+    - Scrubber UI (headless render) shows lane A with nested lane B
+    - Test fails if any event from B is recorded under A or if UI nesting is missing
+  depends_on: [META-514, META-515]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-517
+  domain: META
+  title: "META: Resolve open question in META‑129 with cross‑reference to sub‑agent design (META-130 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - META‑129 document updated to reference SUBAGENT_ATTRIBUTION.md
+    - Open question (b) marked resolved with explanation of chosen approach
+  depends_on: [META-508]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+
+- id: META-518
+  domain: META
+  title: "META: Update deployment and ops documentation for sub‑agent attribution (META-130 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README/ops guide includes steps to enable the feature flag
+    - Notes on monitoring the new subagent_spawned events and map size considerations added
+  depends_on: [META-510, META-512, META-515]
+  notes: |
+    [chump harvest check 'session']
+    === primitives_index match for 'session' ===
+    
+    === cluster keyword match for 'session' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'session' ===
+    
+    === repo-description match for 'session' ===
+    
+    === HARVEST_ROADMAP.md mention of 'session' (deep-scan findings) ===
+      154:- **misc → registry:** unshelved as the highest-strategy finding of the whole session.
+      208:**Pattern rule for future Harvester sessions:** if a repo is in the catalog, it gets read. The pre-filter for "obvious skip" is `archived: true` + zero recent commits + no description — three signals, not one.
+    
+    === cross-pollination briefs mentioning 'session' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
 
 - id: MISSION-001
   domain: MISSION
