@@ -50,6 +50,7 @@ members = [
     "crates/chump-kpi-report",
     "crates/chump-cron",
     "crates/chump-storage",
+    "crates/chump-comprehension-organ",
 ]
 resolver = "2"
 

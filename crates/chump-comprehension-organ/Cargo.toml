@@ -1,0 +1,16 @@
+[package]
+name = "chump-comprehension-organ"
+version = "0.1.0"
+edition = "2021"
+description = "StructuredFinding data types shared by the ChumpOS comprehension organs (wiring/gates/config/provenance/traces) so organ output can be filed and verified programmatically instead of only printed as prose."
+repository = "https://github.com/repairman29/chump"
+license = "Apache-2.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true
