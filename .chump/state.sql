@@ -30679,9 +30679,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new public function `calc_value(entry: &RegistryEntry) -> f64` to `src/audit.rs` that computes `fan_in_centrality(entry) + ambient_emission_freq(entry)`, and include a unit test verifying the sum for a known sample entry.
+    
+    Target file(s):
+    - src/audit.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "A function `calc_value(entry: &RegistryEntry) -> f64` returns `fan_in_centrality + ambient_emission_freq`."
-    - Unit test verifies the function returns the expected sum for a sample entry.
+    - "src/audit.rs:calc_value returns the exact sum of `fan_in_centrality` and `ambient_emission_freq` for any provided `RegistryEntry`."
+    - "src/audit.rs:test_calc_value asserts that `calc_value(sample_entry)` equals the expected numeric sum for a handcrafted `RegistryEntry` with predetermined `fan_in_centrality` and `ambient_emission_freq` values."
+    - Running `cargo test` completes successfully and reports the new `test_calc_value` as passed.
   depends_on: [CREDIBLE-893]
   notes: |
     [chump harvest check 'Index']
@@ -30745,9 +30753,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Edit `compute_crown_gauge` in `crates/chump-kpi-report/src/debt_index.rs` to add a term that aggregates `entry.crit.value` weighted by `entry.crit.need`, and update `build_debt_index_section` in `crates/chump-kpi-report/src/kpi_report.rs` to pass the `crit` fields into the gauge computation so the Debt Index now reflects Crit scoring.
+    
+    Target file(s):
+    - crates/chump-kpi-report/src/debt_index.rs
+    - crates/chump-kpi-report/src/kpi_report.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Debt Index computation now incorporates `entry.crit.value` weighted by `entry.crit.need`.
-    - Existing Debt Index tests still pass and new tests reflect the updated scoring.
+    - In `crates/chump-kpi-report/src/debt_index.rs`, the function `compute_crown_gauge` includes a calculation that adds `entry.crit.value * entry.crit.need` to the total gauge.
+    - In `crates/chump-kpi-report/src/kpi_report.rs`, the function `build_debt_index_section` invokes `compute_crown_gauge` with each entry’s `crit` data and the generated Debt Index value changes according to the weighted crit contribution.
+    - Running `cargo test --package chump-kpi-report` finishes with zero failures, confirming that all pre‑existing Debt Index tests still pass.
+    - A new test `crates/chump-kpi-report/tests/debt_index_crit.rs` verifies that two otherwise identical entries with different `crit.need`/`crit.value` produce Debt Index results that differ by the exact weighted amount.
   depends_on: [CREDIBLE-894, CREDIBLE-895]
   notes: |
     [chump harvest check 'Index']
@@ -127548,7 +127566,7 @@ gaps:
     - Implemented by extending refresh-runner-binary.sh (or an almanac twin service) so the almanac binary is refreshed like chump's is today; SHA-idempotent so a healthy binary is a no-op
     - "ADVERSARIAL VERIFY-LIVE: deleting the CJ almanac binary and waiting one cycle results in rebuild + `almanac stats` >0 again, with an almanac_health line showing recovery — the exact tonight-blindness must self-heal. Depth tier + gaps named."
   notes: |
-    Decomposed into 5 slices: INFRA-6263, INFRA-6264, INFRA-6265, INFRA-6266, INFRA-6267
+    Decomposed into 5 slices: INFRA-6516, INFRA-6517, INFRA-6518, INFRA-6519, INFRA-6520
   opened_date: '2026-08-21'
 
 - id: INFRA-3641
@@ -218696,6 +218714,206 @@ gaps:
     - VERIFY-LIVE on CJ shows ambient stream contains an almanac_health line after one cycle
     - The logged event contains binary_present=true and indexed_files>0
   depends_on: [INFRA-6514]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6516
+  domain: INFRA
+  title: "INFRA: Add health detection logic to refresh-runner-binary.sh (INFRA-3639 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - The script reads almanac_health and sets a flag when binary_present=false
+    - The script sets a flag when the almanac index is empty or stale beyond the configured threshold
+    - When either flag is set, the script exits with status code 100 indicating a rebuild is required
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6517
+  domain: INFRA
+  title: "INFRA: Invoke install-almanac-organ.sh for automatic rebuild (INFRA-3639 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - When refresh-runner-binary.sh exits with status 100, it automatically runs install-almanac-organ.sh
+    - install-almanac-organ.sh completes without error and creates a new almanac binary at the expected location
+    - "A log entry \"Almanac rebuild triggered\" is written via the existing log function"
+  depends_on: [INFRA-6516]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6518
+  domain: INFRA
+  title: "INFRA: Make rebuild process SHA‑idempotent (INFRA-3639 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - If the existing almanac binary SHA matches the source SHA, refresh-runner-binary.sh performs a no‑op and exits with status 0
+    - "A log entry \"Almanac binary already up‑to‑date\" is emitted when no rebuild occurs"
+    - Unit test verifies that running the script twice with an up‑to‑date binary results in a single rebuild
+  depends_on: [INFRA-6517]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6519
+  domain: INFRA
+  title: "INFRA: Add post‑rebuild re‑index using local ollama nomic‑embed backend (INFRA-3639 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - After a successful rebuild, the script calls the re‑index command targeting the CJ fleet repositories
+    - The re‑index uses the local ollama nomic‑embed backend and completes within the expected time window
+    - "A log entry \"Almanac re‑index completed\" is recorded and almanac_health shows a fresh index timestamp"
+  depends_on: [INFRA-6518]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6520
+  domain: INFRA
+  title: "INFRA: Adversarial verification: delete binary and confirm self‑heal (INFRA-3639 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A test script deletes the CJ almanac binary, triggers a refresh cycle, and verifies that refresh-runner-binary.sh rebuilds the binary
+    - After rebuild, `almanac stats` returns a count greater than 0
+    - "almanac_health output includes a line indicating recovery (e.g., \"eyes‑alive: true\") within one cycle"
+    - The test passes automatically in CI without manual intervention
+  depends_on: [INFRA-6519]
   notes: |
     [chump harvest check 'MISSION']
     === primitives_index match for 'MISSION' ===
