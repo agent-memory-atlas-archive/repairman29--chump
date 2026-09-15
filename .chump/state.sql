@@ -1708,10 +1708,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Extend the `build_report` function in `src/ci_summary.rs` to generate a markdown table summarising location‑assertion greps (script name, grep line, classification) and append a total count line, and update the `emit` function in `scripts/ops/pr-triage-reporter.sh` to write this markdown to `location_assertion_report.md` in the repository root and add a markdown link to that file in the PR description.
+    
+    Target file(s):
+    - src/ci_summary.rs
+    - scripts/ops/pr-triage-reporter.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The markdown report contains a table with script name, grep line, and classification
-    - The total number of location‑assertion greps is clearly displayed
-    - Report is committed to the repository and linked in the PR description
+    - "src/ci_summary.rs::build_report must output a markdown string whose first two lines are a table header \"`| Script | Grep Line | Classification |`\" and a separator line \"`|---|---|---|`\"."
+    - "The markdown produced by src/ci_summary.rs::build_report must contain exactly one table row for each location‑assertion grep entry passed to the function, with the script name, the raw grep line, and a non‑empty classification value in the respective columns."
+    - "The markdown must include a line \"`Total greps: X`\" after the table, where X equals the number of table rows emitted."
+    - "scripts/ops/pr-triage-reporter.sh::emit must write the markdown from build_report to a file named `location_assertion_report.md` at the repository root and must append the markdown link \"`[Location Assertion Report](./location_assertion_report.md)`\" to the PR description output."
   depends_on: [CREDIBLE-1008]
   notes: |
     [chump harvest check 'gates']
@@ -2028,11 +2037,18 @@ gaps:
   status: open
   priority: P1
   effort: xs
+  description: |
+    Add a new function `ci_gate_grep_target_sweep` to `scripts/coord/chump-runner-migration-pipeline.sh` that recursively scans all files under `scripts/ci/` for `grep` invocations, extracts the target path argument, verifies that each target exists in the repository, and prints a summary count of missing targets followed by a line‑by‑line list showing the missing file path, the script file, and the line number where the offending `grep` appears; integrate this function into the existing CI gate flow so it is executed as a gate check.
+    
+    Target file(s):
+    - scripts/coord/chump-runner-migration-pipeline.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A script scans all files under scripts/ci for grep commands and extracts the target path argument.
-    - The script checks that each extracted target exists in the repository tree.
-    - The script outputs a count of missing targets and lists each missing target with the file and line number.
-    - Unit test with a fixture containing a grep to a non‑existent file returns a count of 1 and includes the correct file/line reference.
+    - "? Running `ci_gate_grep_target_sweep` on a repository containing a fixture file `scripts/ci/test_fixture.sh` with a line `grep -r \"foo\" non_existent_path.txt` exits with status 1, prints “Missing targets : 1”, and lists `non_existent_path.txt` together with `scripts/ci/test_fixture.sh:1`."
+    - "The function correctly parses `grep` commands with both short (`-r`) and long (`--recursive`) options and extracts the first non‑option argument as the target path, as verified by a unit test that feeds a temporary script containing `grep --recursive \"bar\" missing/file.txt` and expects `missing/file.txt` to be reported."
+    - "If all extracted targets exist, the function exits with status 0 and prints “Missing targets: 0” with no per‑file listings."
+    - The new function is invoked from the main CI gate sequence in `chump-runner-migration-pipeline.sh`; a CI run that includes this script produces the expected summary output in the pipeline logs.
 
 - id: CREDIBLE-102
   domain: CREDIBLE
@@ -7940,10 +7956,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend the `emit_ambient` function in `scripts/dispatch/fix-trunk-dispatcher.sh` to detect `gap_flipped_done_on_merge` events where the incoming gap payload has `status` set to `open` but a non‑empty `closed_pr` field, and automatically invoke the `gap ship` command for that gap, logging the action and ensuring `closed_date` is recorded.
+    
+    Target file(s):
+    - scripts/dispatch/fix-trunk-dispatcher.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A new consumer listens for `gap_flipped_done_on_merge` events where the gap status is open but `closed_pr` is set.
-    - The consumer invokes `gap ship` to close the gap and set `closed_date`.
-    - End‑to‑end test confirms that a gap left open with a stale `closed_pr` is automatically closed.
+    - "Running `scripts/dispatch/fix-trunk-dispatcher.sh` with a mock `gap_flipped_done_on_merge` event whose payload contains `\"status\":\"open\"` and `\"closed_pr\":\"123\"` causes the script to execute `gap ship <gap_id>` for that gap."
+    - "After processing the event, the gap’s stored JSON shows `\"status\":\"closed\"` and a populated `\"closed_date\"` field."
+    - The script outputs a line matching `Auto‑closing stale gap <gap_id>` to stdout when the auto‑close logic is triggered.
+    - The script exits with status code 0 after handling the stale‑gap event.
   depends_on: [CREDIBLE-1197]
   notes: |
     [chump harvest check 'merging']
@@ -9190,6 +9214,59 @@ gaps:
     
     === cross-pollination briefs mentioning 'merging' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+
+- id: CREDIBLE-1237
+  domain: CREDIBLE
+  title: "CREDIBLE: Implement summarized_pct >95% guard in coverage owner logic (CREDIBLE-300 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The code path that computes `summarized_pct` now enforces a minimum of 95% before reporting.
+    - The change compiles without warnings (`cargo fmt`, `clippy --all-targets -D warnings`).
+    - Existing unit and integration tests continue to pass.
+  notes: |
+    [chump harvest check 'Almanac']
+    === primitives_index match for 'Almanac' ===
+    
+    === cluster keyword match for 'Almanac' ===
+      cluster misc (28 repos): workspace-docs, almanac, games-workspace, machine-substrate, grave-dancer, jeffadkins-dev, holler, privateer, opportunity-library, posse, realm-of-shadows, upshift-cli, space-shooter, crystal-rush, inversion, roblox-game-manager, kosmos, fulcrum, okr, project-2026-case, pixi-game, jeffadkins-me, bulwark, choose, derelict, registry, project-forge, project_forge
+    
+    === extracted_primitives (per-file, line-refd) match for 'Almanac' ===
+      almanac/crates/almanac-core/src/registry.rs:5 — vector_embedding (//! local tier of the scaling plan (see ROADMAP.md); the fleet pgvector tier is)
+    
+    === repo-description match for 'Almanac' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Almanac' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Almanac' ===
+
+- id: CREDIBLE-1238
+  domain: CREDIBLE
+  title: "CREDIBLE: Add test verifying summarized_pct >95% behavior (CREDIBLE-300 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A new test (cargo test or scripts/ci/test-*.sh) asserts that `summarized_pct` is >= 95% after the change.
+    - The test fails when the guard is removed, proving the behavior is caused by the implementation.
+    - CI runs (`cargo fmt`, `clippy --all-targets -D warnings`) succeed with no regressions.
+  depends_on: [CREDIBLE-1237]
+  notes: |
+    [chump harvest check 'Almanac']
+    === primitives_index match for 'Almanac' ===
+    
+    === cluster keyword match for 'Almanac' ===
+      cluster misc (28 repos): workspace-docs, almanac, games-workspace, machine-substrate, grave-dancer, jeffadkins-dev, holler, privateer, opportunity-library, posse, realm-of-shadows, upshift-cli, space-shooter, crystal-rush, inversion, roblox-game-manager, kosmos, fulcrum, okr, project-2026-case, pixi-game, jeffadkins-me, bulwark, choose, derelict, registry, project-forge, project_forge
+    
+    === extracted_primitives (per-file, line-refd) match for 'Almanac' ===
+      almanac/crates/almanac-core/src/registry.rs:5 — vector_embedding (//! local tier of the scaling plan (see ROADMAP.md); the fleet pgvector tier is)
+    
+    === repo-description match for 'Almanac' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Almanac' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Almanac' ===
 
 - id: CREDIBLE-124
   domain: CREDIBLE
@@ -12331,7 +12408,7 @@ gaps:
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
   notes: |
-    Decomposed into 2 slices: CREDIBLE-1210, CREDIBLE-1211
+    Decomposed into 2 slices: CREDIBLE-1237, CREDIBLE-1238
   opened_date: '2026-08-22'
   outcome_id: MISSION-010
   evidence: |
