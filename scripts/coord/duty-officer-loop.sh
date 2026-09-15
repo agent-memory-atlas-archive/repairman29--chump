@@ -71,6 +71,20 @@ SYSTEMCTL_CMD="${CHUMP_DUTY_OFFICER_SYSTEMCTL_CMD:-systemctl --user}"
 
 _ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# RESILIENT-1297: the .service unit hardcoded XDG_RUNTIME_DIR/DBUS_SESSION_BUS_ADDRESS
+# for a single UID (RESILIENT-1294), which breaks the moment the unit runs as a
+# different user. Fall back to values derived from the running UID whenever the
+# systemd unit (or any other launcher) didn't already set them.
+_ensure_user_bus_env() {
+    if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+    if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+    fi
+}
+_ensure_user_bus_env
+
 # scanner-anchor: "kind":"duty_officer_action"
 _emit_action() {
     local signal="$1" tier="$2" verdict="$3" detail="$4"
@@ -319,4 +333,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]:-}" == "${0}" ]]; then
+    main "$@"
+fi
