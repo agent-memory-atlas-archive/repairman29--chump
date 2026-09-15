@@ -36536,10 +36536,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a Rust doc‑comment block to the `ship` function (located around line 2434 in `crates/chump-gap-store/src/lib.rs`) that explicitly states the required conditions for merging a PR – at least one approving review and a green CI status – and reference these rules in the surrounding module documentation so that the intent is visible in generated docs and code reviews.
+    
+    Target file(s):
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - PR receives at least one approving review
-    - CI status is green and the PR is merged into main
-    - Merged commit appears in the repository history
+    - "In `crates/chump-gap-store/src/lib.rs`, the `ship` function’s doc comment contains the exact bullet list: “* PR receives at least one approving review”, “* CI status is green”, and “* PR is merged into main”."
+    - Running `cargo test` executes the `proof_of_merge_tests` module (line 6142) and includes a test that fails if `ship` is called without an approving review or with a non‑green CI status, confirming the logic is enforced.
+    - Generating documentation with `cargo doc` produces HTML where the `ship` function page displays the new bullet list of merge criteria.
   depends_on: [DOC-142]
 
 - id: DOC-144
@@ -133257,7 +133264,7 @@ gaps:
     - smoke test scripts/ci/test-github-cache-callsite-migration.sh referenced by INFRA-2062 AC4 is created, exercising at least 3 real bash callsites via the CLI path
     - INFRA-2062 is NOT closed by this gap — it remains blocked on an actual 14-consecutive-day zero-divergence window, which cannot start until this gap's divergence-audit infra exists
   notes: |
-    Decomposed into 9 slices: INFRA-6312, INFRA-6313, INFRA-6314, INFRA-6315, INFRA-6316, INFRA-6317, INFRA-6318, INFRA-6319, INFRA-6320
+    Decomposed into 9 slices: INFRA-6574, INFRA-6575, INFRA-6576, INFRA-6577, INFRA-6578, INFRA-6579, INFRA-6580, INFRA-6581, INFRA-6582
 
 - id: INFRA-3834
   domain: INFRA
@@ -221126,6 +221133,250 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-6574
+  domain: INFRA
+  title: "INFRA: Add octocrab dependency to chump-github-cache Cargo.toml (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Cargo.toml lists octocrab with a compatible version
+    - Running `cargo build` succeeds without missing crate errors
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6575
+  domain: INFRA
+  title: "INFRA: Implement bulk REST refill in refresh-open-prs CLI using octocrab (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - CLI contacts GitHub REST API and retrieves all open PRs for the configured repository
+    - Fetched PR data is written to .chump/github_cache.db in the same schema as the original bash script
+    - "Running the CLI no longer prints a stub \"0\" but logs the number of PRs refreshed"
+  depends_on: [INFRA-6574]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6576
+  domain: INFRA
+  title: "INFRA: Add unit tests for bulk refresh-open-prs implementation (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Tests mock GitHub API responses and verify that the CLI writes expected rows to the cache DB
+    - All tests pass with `cargo test`
+  depends_on: [INFRA-6575]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6577
+  domain: INFRA
+  title: "INFRA: Create Rust divergence‑audit binary (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Binary reads .chump/github_cache.db produced by both Python and Rust webhook receivers
+    - Binary compares rows for identical primary keys and prints a JSON event with kind=cache_divergence_detected for any mismatch
+    - Binary exits with status 0 when no divergence is found
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6578
+  domain: INFRA
+  title: "INFRA: Create Python divergence‑audit helper script (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Python script reads the same .chump/github_cache.db and outputs rows in a deterministic JSON format
+    - Script can be invoked from the nightly audit without errors
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6579
+  domain: INFRA
+  title: "INFRA: Add nightly divergence‑audit orchestration script (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Script runs the Rust auditor and the Python helper, compares their outputs, and emits an ambient event with kind=cache_divergence_detected on any mismatch
+    - Script is scheduled to run nightly via CI and returns non‑zero exit code on divergence
+  depends_on: [INFRA-6577, INFRA-6578]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6580
+  domain: INFRA
+  title: "INFRA: Create smoke‑test script scripts/ci/test-github-cache-callsite-migration.sh (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Script invokes the refreshed `chump-github-cache-cli refresh-open-prs` for at least three real bash callsites
+    - Each invocation verifies that the cache DB is populated and logs success
+    - Script exits with status 0 when all three callsites succeed
+  depends_on: [INFRA-6575]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6581
+  domain: INFRA
+  title: "INFRA: Update documentation for bulk refill and divergence audit (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README or infra docs include sections describing the new bulk refresh behavior and the nightly divergence‑audit process
+    - Documentation links to the new smoke‑test script and explains how to interpret divergence events
+  depends_on: [INFRA-6575, INFRA-6579, INFRA-6580]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+
+- id: INFRA-6582
+  domain: INFRA
+  title: "INFRA: Validate that INFRA‑2062 remains open and divergence‑audit infra is present (INFRA-3833 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Verification checklist confirms INFRA‑2062 is not closed by this work
+    - Divergence‑audit binary and orchestration script exist in the repository
+    - A 14‑day zero‑divergence window can be started once the nightly audit runs without emitting any divergence events
+  depends_on: [INFRA-6579, INFRA-6580, INFRA-6581]
+  notes: |
+    [chump harvest check 'ZERO-WASTE']
+    === primitives_index match for 'ZERO-WASTE' ===
+    
+    === cluster keyword match for 'ZERO-WASTE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'ZERO-WASTE' ===
+    
+    === repo-description match for 'ZERO-WASTE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'ZERO-WASTE' (deep-scan findings) ===
+      107:| **G6** | `ZERO-WASTE: archive 6 dead echeo-* variants + 3 dead 2029-* + 2 dead project_forge/-forge` | INFRA | ZERO-WASTE | P3 (hygiene) |
+      218:| `ZERO-WASTE: update INFRA-1818 archive list with Wave 3 confirmations (+2 confirmed: services-dashboard, service-frontends; total 13)` | ZERO-WASTE | P3 |
+    
+    === cross-pollination briefs mentioning 'ZERO-WASTE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
 
 - id: INFRA-679
   domain: INFRA
