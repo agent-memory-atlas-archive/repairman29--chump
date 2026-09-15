@@ -142,6 +142,38 @@ else
     bad "scan: rebuilt catalog missing extracted_primitives field"
 fi
 
+RAW_MTIME_BEFORE=$(date -r "$FIXTURE/docs/arsenal/raw/github_repos.json" +%s 2>/dev/null || echo 0)
+sleep 1
+CHUMP_REPO="$FIXTURE" PATH="$SHIM_DIR:$PATH" "$BIN" harvest scan >/dev/null 2>&1
+RAW_MTIME_AFTER=$(date -r "$FIXTURE/docs/arsenal/raw/github_repos.json" +%s 2>/dev/null || echo 0)
+if [ "$RAW_MTIME_AFTER" -gt "$RAW_MTIME_BEFORE" ]; then
+    ok "scan (INFRA-6616 AC1): docs/arsenal/raw/github_repos.json timestamp changes"
+else
+    bad "scan (INFRA-6616 AC1): raw/github_repos.json timestamp did not change"
+fi
+
+echo
+echo "--- scan (INFRA-6616 AC3: high-severity alert -> non-zero exit) ---"
+ALERT_FIXTURE="$(mktemp -d)"
+mkdir -p "$ALERT_FIXTURE/docs/arsenal/raw" "$ALERT_FIXTURE/scripts/arsenal"
+cp "$REPO_ROOT/scripts/arsenal/harvest.sh" "$ALERT_FIXTURE/scripts/arsenal/harvest.sh"
+chmod +x "$ALERT_FIXTURE/scripts/arsenal/harvest.sh"
+cat > "$ALERT_FIXTURE/scripts/arsenal/build.py" <<'PY'
+import json, pathlib
+out = {
+    "metadata": {}, "clusters": {}, "duplications": [],
+    "alerts": [{"severity": "high", "kind": "embedded_token", "action": "rotate"}],
+    "primitives_index": {}, "repos_by_name": {}, "unmatched_local_roots": [],
+}
+pathlib.Path("docs/arsenal/GLOBAL_ARSENAL.json").write_text(json.dumps(out))
+PY
+if CHUMP_REPO="$ALERT_FIXTURE" PATH="$SHIM_DIR:$PATH" "$BIN" harvest scan >/dev/null 2>&1; then
+    bad "scan (INFRA-6616 AC3): expected non-zero exit on high-severity alert"
+else
+    ok "scan (INFRA-6616 AC3): non-zero exit on high-severity alert"
+fi
+rm -rf "$ALERT_FIXTURE"
+
 echo
 echo "--- unknown subcommand ---"
 CHUMP_REPO="$FIXTURE" "$BIN" harvest bogus-subcommand >/dev/null 2>&1
