@@ -249599,6 +249599,17 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
 
+- id: RESILIENT-1229
+  domain: RESILIENT
+  title: "worker.sh mkdirs FLEET_LOG_DIR only at startup (L244) not per-cycle; if the dir is removed after start every cycle fails rc=1 on the missing log path (L1181) and the node darks out silently — caused a 13h CJ dark-out 2026-09-15 (last real merge 03:55Z, 147 No-such-file errors). Fix: mkdir -p FLEET_LOG_DIR before each cycle log write"
+  status: open
+  priority: P2
+  effort: m
+  acceptance_criteria:
+    - "The change described by \"55Z, 147 No-such-file errors). Fix: mkdir -p FLEET_LOG_DIR before each cycle log write\" is implemented in the relevant RESILIENT code path(s)."
+    - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
+    - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+
 - id: RESILIENT-123
   domain: RESILIENT
   title: "RESILIENT: bot-merge silent exit 2 after cargo-fmt step in DOC_ONLY mode — no step-tracking transition logged"
@@ -249614,6 +249625,17 @@ gaps:
   closed_date: '2026-07-21'
   closed_pr: 3103
   outcome_id: RESILIENT-000
+
+- id: RESILIENT-1230
+  domain: RESILIENT
+  title: "duty-officer rationalized a live 13h dark-out as tier:1 verdict:healed 57x (0 pages) and chump-fleet-health-sentinel.service is in failed state; a persistent worker_circuit_open / repeated ERROR_1 must escalate T1->T3 and page a human, and the health-sentinel (healer-of-healers) must be revived and watched"
+  status: open
+  priority: P2
+  effort: m
+  acceptance_criteria:
+    - "The change described by \"1 verdict:healed 57x (0 pages) and chump-fleet-health-sentinel.service is in failed state; a persistent worker_circuit_open / repeated ERROR_1 must escalate T1->T3 and page a human, and the health-sentinel (healer-of-healers) must be revived and watched\" is implemented in the relevant RESILIENT code path(s)."
+    - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
+    - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
 
 - id: RESILIENT-124
   domain: RESILIENT
