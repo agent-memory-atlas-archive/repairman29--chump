@@ -3038,9 +3038,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend the `class_stats` function in `crates/chump-inventory/src/inventory.rs` to compute a new `debt` field by summing `Crit * (stages - short)` for each high‑Crit dormant stage, with explicit handling for edge cases such as zero stages or zero Crit, and expose this field in the returned stats struct.
+    
+    Target file(s):
+    - crates/chump-inventory/src/inventory.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - debt is computed as the sum of (Crit × (stages - short)) for high‑Crit dormant stages
-    - The calculation matches the specification for edge cases (zero stages, zero Crit, etc.)
+    - The `class_stats` function in `crates/chump-inventory/src/inventory.rs` returns a `debt` value that equals the sum of `Crit * (stages - short)` for every high‑Crit dormant stage in the input data.
+    - For an input where all stages have a count of zero, the `debt` value returned by `class_stats` is exactly zero.
+    - For stages where `Crit` is zero, those stages contribute zero to the `debt` sum, verified by a unit test.
+    - Running `cargo test --package chump-inventory` passes a new test `test_debt_computation` that checks the correct debt calculation for a mixed set of stages.
   notes: |
     [chump harvest check 'Index']
     === primitives_index match for 'Index' ===
@@ -8323,10 +8332,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Modify the `decompose` function in `crates/chump-gap-store/src/sync.rs` so that it copies the original gap's `acceptance_criteria` verbatim into each generated implementation sub‑step and leaves the original gap's `acceptance_criteria` untouched; then extend `scripts/ci/test-gap-preflight-ac-gate.sh` with a smoke‑test sequence that (a) attempts to reserve P1 without an acceptance criteria and expects a refusal, (b) reserves P1 with a specific acceptance criteria and verifies the stored AC matches exactly, and (c) runs the decompose command and confirms the stored AC remains unchanged.
+    
+    Target file(s):
+    - crates/chump-gap-store/src/sync.rs
+    - scripts/ci/test-gap-preflight-ac-gate.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Decompose operation copies the original acceptance criteria verbatim into the resulting sub‑steps without modification
-    - Only implementation sub‑steps are generated; the original AC remains unchanged
-    - "CI smoke test verifies: (a) reserve P1 without AC is refused, (b) reserve P1 with AC stores the AC exactly as entered, (c) decompose leaves the stored AC unchanged"
+    - In `crates/chump-gap-store/src/sync.rs`, the `decompose` function sets each implementation sub‑step's `acceptance_criteria` field to be exactly equal to the original gap's `acceptance_criteria` array (byte‑for‑byte match).
+    - In `crates/chump-gap-store/src/sync.rs`, after calling `decompose`, the original gap object still contains its original `acceptance_criteria` unchanged.
+    - Executing `scripts/ci/test-gap-preflight-ac-gate.sh` prints or logs a refusal message when a reserve of P1 is attempted without providing an acceptance criteria.
+    - Executing `scripts/ci/test-gap-preflight-ac-gate.sh` prints the exact acceptance criteria string supplied during a reserve of P1 with AC, and after the subsequent decompose step the same exact string is observed in the stored gap output.
   depends_on: [CREDIBLE-1208]
   notes: |
     [chump harvest check 'reserve']
@@ -9168,10 +9186,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add an interim off‑switch to the webhook receiver by introducing a `--pause` command‑line flag that toggles a module‑level `PAUSE_RECEIVER` boolean; update `Handler.do_POST` to check this flag and return a 503 response with a clear comment describing the lever, and document the usage in a new “Stopping and Starting the Webhook Receiver” section of the repository README.
+    
+    Target file(s):
+    - scripts/ops/github-webhook-receiver.py
+    - README.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Code comments clearly describe the intended off‑switch (stopping the local receiver process).
-    - README section added with instructions on how to safely stop/start the receiver during maintenance.
-    - Documentation review confirms the lever is discoverable by a new maintainer.
+    - In `scripts/ops/github-webhook-receiver.py`, the `Handler.do_POST` method contains a comment explaining the off‑switch and returns HTTP 503 when `PAUSE_RECEIVER` is true.
+    - In `scripts/ops/github-webhook-receiver.py`, a new CLI argument `--pause` is parsed and sets `PAUSE_RECEIVER` to true, logging “Receiver paused” to stdout.
+    - In `README.md`, a new section titled “Stopping and Starting the Webhook Receiver” describes how to run the receiver with `--pause` and how to resume it, including the exact commands.
+    - "Executing the receiver with `--pause` and then sending a test webhook results in the server responding with status code 503, which can be verified by `curl -i http://localhost:<port>/...` returning “503 Service Unavailable”."
   notes: |
     [chump harvest check 'merging']
     === primitives_index match for 'merging' ===
@@ -63313,6 +63340,180 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
 
+- id: EFFECTIVE-1675
+  domain: EFFECTIVE
+  title: "EFFECTIVE: EFFECTIVE-1637: Define publish‑target registry (EFFECTIVE-364 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A YAML/JSON registry file exists in the repo under `config/publish_targets.yml`
+    - The registry maps each `artifact_type` to a list of publish target identifiers
+    - Unit test validates that the registry can be loaded and returns an empty list for unknown types
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: EFFECTIVE-1676
+  domain: EFFECTIVE
+  title: "EFFECTIVE: EFFECTIVE-1636: Add publication resolver hook after ship event (EFFECTIVE-364 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a gap reaches the `ship` stage, the resolver reads the `artifact_type` from the merged gap
+    - The resolver looks up publish targets in the registry created by EFFECTIVE-1637
+    - If targets are found, a `publish` work item is enqueued; otherwise processing continues without error
+  depends_on: [EFFECTIVE-1675]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: EFFECTIVE-1677
+  domain: EFFECTIVE
+  title: "EFFECTIVE: EFFECTIVE-1638: Create publish‑work gaps tagged with source gap (EFFECTIVE-364 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A new gap of type `publish` is created for each target returned by the resolver
+    - "The new gap contains metadata: source gap ID, artifact_type, target identifier, and status `NEW`"
+    - The publish gap appears in the work queue UI and is subject to existing gating rules
+  depends_on: [EFFECTIVE-1676]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: EFFECTIVE-1678
+  domain: EFFECTIVE
+  title: "EFFECTIVE: EFFECTIVE-1639: Route external publish targets to EFFECTIVE-365 approval queue (EFFECTIVE-364 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Publish gaps whose target is marked as `external` are automatically assigned to the `EFFECTIVE-365` approval queue
+    - These gaps are not auto‑executed; they require manual approval before proceeding
+    - Test verifies that an external target results in a gap with `queue_id = EFFECTIVE-365`
+  depends_on: [EFFECTIVE-1677]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: EFFECTIVE-1679
+  domain: EFFECTIVE
+  title: "EFFECTIVE: EFFECTIVE-1640: Attach where‑published receipt for feedback leg (EFFECTIVE-364 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - When a publish gap completes successfully, it records a receipt field `published_to` with the target identifier and URL/identifier of the published artifact
+    - The receipt is stored on the original source gap for later adoption signal analysis
+    - Automated test confirms that after successful publish, the source gap contains the correct receipt data
+  depends_on: [EFFECTIVE-1677]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
 - id: EFFECTIVE-168
   domain: EFFECTIVE
   title: "EFFECTIVE: Wire RESILIENT-096.yaml into role curator-opus-target"
@@ -63324,6 +63525,41 @@ gaps:
   closed_date: '2026-07-20'
   closed_pr: 3200
   outcome_id: EFFECTIVE-000
+
+- id: EFFECTIVE-1680
+  domain: EFFECTIVE
+  title: "EFFECTIVE: EFFECTIVE-1641: Graceful no‑op handling for artifact types with no publish targets (EFFECTIVE-364 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - If the resolver finds an empty target list for a given `artifact_type`, it logs a `no‑publish‑targets` info message and does not create any publish gaps
+    - The ship pipeline completes without error for such gaps
+    - Test verifies that a gap with an unmapped `artifact_type` results in zero new publish gaps and a successful ship stage
+  depends_on: [EFFECTIVE-1675]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
 
 - id: EFFECTIVE-169
   domain: EFFECTIVE
@@ -65910,7 +66146,7 @@ gaps:
     - "Proven: a merged product gap yields a live URL / installable / delivered artifact the operator can actually use, not just a green PR"
   depends_on: [EFFECTIVE-363]
   notes: |
-    Decomposed into 6 slices: EFFECTIVE-1636, EFFECTIVE-1637, EFFECTIVE-1638, EFFECTIVE-1639, EFFECTIVE-1640, EFFECTIVE-1641
+    Decomposed into 6 slices: EFFECTIVE-1675, EFFECTIVE-1676, EFFECTIVE-1677, EFFECTIVE-1678, EFFECTIVE-1679, EFFECTIVE-1680
   opened_date: '2026-08-19'
   outcome_id: COTG
 
