@@ -1178,6 +1178,11 @@ print('1' if (p == 'P0' and dom == 'MISSION' and e in ('m', 'l', 'xl')) else '0'
     # chump claim call and proceed directly to spawning the agent.
 
     # ── Spawn agent (claude or chump-local) ───────────────────────────────
+    # RESILIENT-1229: re-create FLEET_LOG_DIR every cycle, not just at
+    # startup (L244) — if the dir is removed mid-run (e.g. tmp cleanup),
+    # every subsequent cycle log write fails rc=1 and the node dark-outs
+    # silently (13h CJ dark-out, 2026-09-15, 147 No-such-file errors).
+    mkdir -p "$FLEET_LOG_DIR"
     cycle_log="$FLEET_LOG_DIR/agent-${AGENT_ID}-cycle${cycle}-${GAP_ID}.log"
 
     # INFRA-1160 + RESILIENT-135: scale the per-cycle claude -p timeout by gap
