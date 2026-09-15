@@ -21,6 +21,17 @@ impl Verdict {
     pub fn blocks_build(self) -> bool {
         matches!(self, Verdict::NoGo | Verdict::NoGoOnCost)
     }
+
+    /// Cost-axis gate: returns `NoGoOnCost` when the estimate exceeds the ceiling,
+    /// otherwise returns the input verdict.
+    #[allow(dead_code)] // INFRA-5340 slice: wired into the full gate by later INFRA-3481 slices
+    pub fn cost_axis(self, estimate_usd: f64, ceiling_usd: f64) -> Verdict {
+        if estimate_usd > ceiling_usd {
+            Verdict::NoGoOnCost
+        } else {
+            self
+        }
+    }
 }
 
 /// Parse a single LLM-shaped go/no-go output line into a [`Verdict`].
