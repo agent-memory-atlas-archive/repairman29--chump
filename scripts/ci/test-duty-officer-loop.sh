@@ -94,6 +94,31 @@ else
     printf '  FAIL status did not print a signal count\n'; FAIL=$((FAIL+1))
 fi
 
+echo "[test-duty-officer] RESILIENT-1297 — user-bus env fallback populates unset vars"
+out="$(env -u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS bash -c \
+    "source '$LOOP' >/dev/null 2>&1; printf '%s|%s' \"\$XDG_RUNTIME_DIR\" \"\$DBUS_SESSION_BUS_ADDRESS\"")"
+xdg="${out%%|*}"; dbus="${out##*|}"
+if [[ "$xdg" == "/run/user/$(id -u)" ]]; then
+    printf '  ok   XDG_RUNTIME_DIR fallback derived from UID (%s)\n' "$xdg"; PASS=$((PASS+1))
+else
+    printf '  FAIL XDG_RUNTIME_DIR fallback wrong (got %s)\n' "$xdg"; FAIL=$((FAIL+1))
+fi
+if [[ "$dbus" == "unix:path=/run/user/$(id -u)/bus" ]]; then
+    printf '  ok   DBUS_SESSION_BUS_ADDRESS fallback derived from UID (%s)\n' "$dbus"; PASS=$((PASS+1))
+else
+    printf '  FAIL DBUS_SESSION_BUS_ADDRESS fallback wrong (got %s)\n' "$dbus"; FAIL=$((FAIL+1))
+fi
+
+echo "[test-duty-officer] RESILIENT-1297 — pre-set vars are left unchanged"
+out="$(XDG_RUNTIME_DIR=/run/user/9999 DBUS_SESSION_BUS_ADDRESS='unix:path=/custom/bus' bash -c \
+    "source '$LOOP' >/dev/null 2>&1; printf '%s|%s' \"\$XDG_RUNTIME_DIR\" \"\$DBUS_SESSION_BUS_ADDRESS\"")"
+xdg="${out%%|*}"; dbus="${out##*|}"
+if [[ "$xdg" == "/run/user/9999" && "$dbus" == "unix:path=/custom/bus" ]]; then
+    printf '  ok   pre-set user-bus env left unchanged\n'; PASS=$((PASS+1))
+else
+    printf '  FAIL pre-set user-bus env was overwritten (got %s|%s)\n' "$xdg" "$dbus"; FAIL=$((FAIL+1))
+fi
+
 echo
 printf '[test-duty-officer] %d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1
