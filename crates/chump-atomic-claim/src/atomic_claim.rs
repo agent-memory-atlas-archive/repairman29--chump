@@ -692,6 +692,13 @@ pub fn run_claim(args: ClaimArgs) -> Result<ClaimReport> {
         );
     }
 
+    // INFRA-6625 (INFRA-1863 slice): validate --role against the registry
+    // BEFORE any git/network op — pure file read, same rationale as the
+    // autonomy-level kill switch above.
+    if let Some(role) = &args.role {
+        validate_role(&args.repo_root, role)?;
+    }
+
     // 1. Fetch latest base branch — best-effort; the worktree-add will
     //    fail loudly if origin is unreachable AND no local ref exists.
     let _ = run_git(
@@ -5945,6 +5952,46 @@ mod fuzzy_match_tests {
 mod tests {
     use super::*;
 
+    // INFRA-6625: --role validation against docs/process/AGENT_ROLES.yaml.
+    #[test]
+    fn validate_role_accepts_registered_role() {
+        let tmp = std::env::temp_dir().join(format!(
+            "infra6625-ok-{}",
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(tmp.join("docs/process")).unwrap();
+        std::fs::write(
+            tmp.join("docs/process/AGENT_ROLES.yaml"),
+            "roles:\n  - shepherd\n  - target\n",
+        )
+        .unwrap();
+        assert!(validate_role(&tmp, "shepherd").is_ok());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn validate_role_rejects_unregistered_role() {
+        let tmp = std::env::temp_dir().join(format!(
+            "infra6625-bad-{}",
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(tmp.join("docs/process")).unwrap();
+        std::fs::write(
+            tmp.join("docs/process/AGENT_ROLES.yaml"),
+            "roles:\n  - shepherd\n  - target\n",
+        )
+        .unwrap();
+        let err = validate_role(&tmp, "not-a-real-role").unwrap_err();
+        assert!(err.to_string().contains("Invalid role"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn derive_session_id_shape() {
         let s = derive_session_id("INFRA-123");
@@ -7204,6 +7251,40 @@ fn gate_name_is_plausible(g: &str) -> bool {
     }
     g.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
+}
+
+/// INFRA-6625 (INFRA-1863 slice): load the flat `roles:` list out of
+/// `docs/process/AGENT_ROLES.yaml`. Deliberately hand-rolled (no serde_yaml
+/// dependency in this crate — chump-atomic-claim is split out for build
+/// speed, EFFECTIVE-399) since the registry is just a `- role` bullet list
+/// under a single top-level key.
+fn load_registered_roles(repo_root: &Path) -> Result<Vec<String>> {
+    let path = repo_root.join("docs/process/AGENT_ROLES.yaml");
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("reading role registry at {}", path.display()))?;
+    Ok(text
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.split('#').next().unwrap_or("").trim();
+            trimmed.strip_prefix("- ").map(|r| r.trim().to_string())
+        })
+        .filter(|r| !r.is_empty())
+        .collect())
+}
+
+/// INFRA-6625 (INFRA-1863 slice): validate `--role` against
+/// `docs/process/AGENT_ROLES.yaml`. Bails with "Invalid role" when the
+/// supplied role isn't a registered entry.
+fn validate_role(repo_root: &Path, role: &str) -> Result<()> {
+    let registered = load_registered_roles(repo_root)?;
+    if !registered.iter().any(|r| r == role) {
+        bail!(
+            "Invalid role: {role} (not in docs/process/AGENT_ROLES.yaml registry). \
+             Registered roles: {}",
+            registered.join(", ")
+        );
+    }
+    Ok(())
 }
 
 fn check_main_health_gate(repo_root: &Path, gap_id: &str) -> Result<()> {

@@ -1,0 +1,30 @@
+# Registry of valid --role values for `chump claim --role <ROLE>` (INFRA-1863).
+#
+# `chump claim` validates its `--role` hint against this list (INFRA-6625,
+# INFRA-1863 slice) — a role not listed here fails the claim with
+# "Invalid role". Add an entry here before using a new role hint.
+#
+# Sourced from the curator/agent roster in .claude/agents/ and the
+# orchestrator/curator roles documented across docs/process/*.md.
+roles:
+  - shepherd
+  - target
+  - handoff
+  - ci-audit
+  - decompose
+  - deliberator
+  - harvester
+  - observability
+  - infra-watcher
+  - orchestrator
+  - external-collab
+  - quartermaster
+  - md-links
+  - fresh-eyes
+  - roadmap-keeper
+  - architecture-coach
+  - context-keeper
+  - historian
+  - incident-commander
+  - scout
+  - velocity-tracker
