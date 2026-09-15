@@ -1,0 +1,240 @@
+   Compiling ring v0.17.14
+warning: ring@0.17.14: sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/25ac62e5b3c53843-curve25519.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/curve25519/curve25519.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/0bbbd18bda93c05b-aes_nohw.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/aes/aes_nohw.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/00c879ee3285a50d-montgomery.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/bn/montgomery.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/00c879ee3285a50d-montgomery_inv.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/bn/montgomery_inv.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-ecp_nistz.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/ecp_nistz.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-gfp_p256.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/gfp_p256.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-gfp_p384.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/gfp_p384.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-p256.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/p256.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/aaa1ba3e455ee2e1-limbs.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/limbs/limbs.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a4019cc0736b0423-mem.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/mem.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/d5a9841f3dc6e253-poly1305.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/poly1305/poly1305.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a4019cc0736b0423-crypto.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/crypto.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a4019cc0736b0423-cpu_intel.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/cpu_intel.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/25ac62e5b3c53843-curve25519_64_adx.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/curve25519/curve25519_64_adx.c"cargo:warning=sccache: encountered fatal error
+warning: ring@0.17.14: sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+warning: ring@0.17.14: sccache: caused by: Permission denied (os error 13)
+warning: ring@0.17.14: ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-p256-nistz.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/p256-nistz.c"
+error: failed to run custom build command for `ring v0.17.14`
+
+Caused by:
+  process didn't exit successfully: `/home/jeff/.cargo/chump-shared-target/release/build/ring-2748bcf8f792263e/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-env-changed=CARGO_MANIFEST_DIR
+  cargo:rerun-if-env-changed=CARGO_PKG_NAME
+  cargo:rerun-if-env-changed=CARGO_PKG_VERSION_MAJOR
+  cargo:rerun-if-env-changed=CARGO_PKG_VERSION_MINOR
+  cargo:rerun-if-env-changed=CARGO_PKG_VERSION_PATCH
+  cargo:rerun-if-env-changed=CARGO_PKG_VERSION_PRE
+  cargo:rerun-if-env-changed=CARGO_MANIFEST_LINKS
+  cargo:rerun-if-env-changed=RING_PREGENERATE_ASM
+  cargo:rerun-if-env-changed=OUT_DIR
+  cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ARCH
+  cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS
+  cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENV
+  cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENDIAN
+  cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+  CC_x86_64-unknown-linux-gnu = None
+  cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+  CC_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=HOST_CC
+  HOST_CC = None
+  cargo:rerun-if-env-changed=CC
+  CC = None
+  cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+  cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+  CRATE_CC_NO_DEFAULTS = None
+  cargo:rerun-if-env-changed=CFLAGS
+  CFLAGS = None
+  cargo:rerun-if-env-changed=HOST_CFLAGS
+  HOST_CFLAGS = None
+  cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+  CFLAGS_x86_64_unknown_linux_gnu = None
+  cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+  CFLAGS_x86_64-unknown-linux-gnu = None
+  cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/25ac62e5b3c53843-curve25519.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/curve25519/curve25519.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/0bbbd18bda93c05b-aes_nohw.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/aes/aes_nohw.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/00c879ee3285a50d-montgomery.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/bn/montgomery.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/00c879ee3285a50d-montgomery_inv.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/bn/montgomery_inv.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-ecp_nistz.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/ecp_nistz.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-gfp_p256.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/gfp_p256.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-gfp_p384.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/gfp_p384.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-p256.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/p256.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/aaa1ba3e455ee2e1-limbs.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/limbs/limbs.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a4019cc0736b0423-mem.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/mem.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/d5a9841f3dc6e253-poly1305.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/poly1305/poly1305.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a4019cc0736b0423-crypto.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/crypto.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a4019cc0736b0423-cpu_intel.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/cpu_intel.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/25ac62e5b3c53843-curve25519_64_adx.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/curve25519/curve25519_64_adx.c"cargo:warning=sccache: encountered fatal error
+  cargo:warning=sccache: error: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: failed to create directory `/mnt/cjdata3/sccache/preprocessor`
+  cargo:warning=sccache: caused by: Permission denied (os error 13)
+
+  exit status: 0
+  exit status: 0
+  exit status: 254
+  cargo:warning=ToolExecError: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-p256-nistz.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/p256-nistz.c"
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+  exit status: 0
+
+  --- stderr
+
+
+  error occurred in cc-rs: command did not execute successfully (status code exit status: 254): LC_ALL="C" "sccache" "cc" "-O3" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/include" "-I" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/pregenerated" "-Wall" "-Wextra" "-fvisibility=hidden" "-std=c1x" "-Wall" "-Wbad-function-cast" "-Wcast-align" "-Wcast-qual" "-Wconversion" "-Wmissing-field-initializers" "-Wmissing-include-dirs" "-Wnested-externs" "-Wredundant-decls" "-Wshadow" "-Wsign-compare" "-Wsign-conversion" "-Wstrict-prototypes" "-Wundef" "-Wuninitialized" "-g3" "-DNDEBUG" "-o" "/home/jeff/.cargo/chump-shared-target/release/build/ring-c72a94fc1006edfe/out/a0330e891e733f4e-p256-nistz.o" "-c" "/home/jeff/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ring-0.17.14/crypto/fipsmodule/ec/p256-nistz.c"
+
+
