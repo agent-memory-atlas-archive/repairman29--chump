@@ -27482,10 +27482,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Edit the `_cmd_audit` function in `scripts/coord/ci-audit-loop.sh` to filter out any lines that match the three known boilerplate regex patterns before computing the audit denominator, introducing a local helper `exclude_boilerplate` that returns the line count after exclusion and using its result for all denominator calculations.
+    
+    Target file(s):
+    - scripts/coord/ci-audit-loop.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Auditor no longer counts lines matching the three known boilerplate patterns
-    - Audit reports show the adjusted denominator and correct coverage percentages
-    - No regression in existing acceptance‑criteria coverage calculations
+    - "? Running `scripts/coord/ci-audit-loop.sh audit` on a test source file containing 10 lines, 3 of which match the boilerplate patterns, must produce stdout that includes the exact text `Adjusted denominator : 7`."
+    - The file `scripts/coord/ci-audit-loop.sh` must contain a new Bash function named `exclude_boilerplate` that accepts a file path and returns the count of non‑boilerplate lines.
+    - "? The audit report printed by `_cmd_audit` must still display the correct coverage percentage calculated from the adjusted denominator (e.g., `Coverage : 80%` for 8 covered lines out of the adjusted 10)."
   notes: |
     [chump harvest check 'closed']
     === primitives_index match for 'closed' ===
@@ -27513,10 +27520,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a new regression test function `test_bookkeeping_pr_flag_persistence` inside the `mod tests` block of `crates/chump-verify/src/pr_ac_coverage.rs`. The test will create a bookkeeping‑only pull request, invoke the auditor, assert that the resulting gap is flagged, then modify the gap text (keeping the same file list) and re‑run the auditor to assert that the flag remains set.
+    
+    Target file(s):
+    - crates/chump-verify/src/pr_ac_coverage.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test creates a bookkeeping‑only PR, runs the auditor, and asserts the gap is flagged
-    - Test modifies the gap text to name the same files and asserts the flag still persists
-    - Test fails before the fix and passes after implementation
+    - Running `cargo test --package chump-verify --test pr_ac_coverage test_bookkeeping_pr_flag_persistence` exits with status 0.
+    - The test creates a bookkeeping‑only PR and asserts `gap.flagged == true` after the first `run_auditor` call in `crates/chump-verify/src/pr_ac_coverage.rs`.
+    - After calling a helper that edits the gap text without changing the file list, the test re‑runs the auditor and asserts `gap.flagged == true` again.
+    - The new test function is defined within the `mod tests` section of `crates/chump-verify/src/pr_ac_coverage.rs`.
   depends_on: [CREDIBLE-791]
   notes: |
     [chump harvest check 'closed']
@@ -216522,7 +216537,7 @@ gaps:
 - id: INFRA-6457
   domain: INFRA
   title: "INFRA: Define StructuredFinding data types and schema in comprehension organ crate (INFRA-3470 slice)"
-  status: open
+  status: done
   priority: P1
   effort: s
   acceptance_criteria:
@@ -216552,6 +216567,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+  closed_date: '2026-09-15'
+  closed_pr: 4683
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4683 titled 'INFRA-6457: ...' merged 2026-09-15; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-6458
   domain: INFRA
