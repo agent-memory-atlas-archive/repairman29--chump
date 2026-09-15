@@ -11,6 +11,7 @@
 #   duty-officer-loop.sh tick              # one scan of recent ambient signals
 #   duty-officer-loop.sh route <signal>    # route a single named signal (manual/test)
 #   duty-officer-loop.sh heartbeat         # emit kind=duty_officer_heartbeat
+#   duty-officer-loop.sh watch-sentinel    # check/revive/page chump-fleet-health-sentinel.service
 #   duty-officer-loop.sh status            # print registry coverage summary
 #   duty-officer-loop.sh help
 #
@@ -32,6 +33,15 @@
 #   CHUMP_DUTY_OFFICER_NOTIFY_CMD        notify command (T3 page)
 #   CHUMP_DUTY_OFFICER_WINDOW_N          how many recent ambient lines to scan (default 200)
 #   CHUMP_DUTY_OFFICER_EXECUTE           1 = actually run T1 action scripts (default 0 = log-only)
+#   CHUMP_DUTY_OFFICER_T1_ESCALATE_THRESHOLD  raw firings of a T1 signal within the ambient
+#                                         window before it's treated as NOT actually healing
+#                                         and escalated T1->T3 + paged (default 10; RESILIENT-1230
+#                                         — a live 13h dark-out was rationalized as
+#                                         tier:1 verdict:healed 57x with 0 pages)
+#   CHUMP_DUTY_OFFICER_SENTINEL_UNIT     health-sentinel systemd unit name
+#                                         (default chump-fleet-health-sentinel.service)
+#   CHUMP_DUTY_OFFICER_SYSTEMCTL_CMD     systemctl invocation (default "systemctl --user";
+#                                         override for tests / non-systemd environments)
 #
 # Rust-First-Bypass: bash glue over existing ambient/registry/notify primitives,
 #   mirrors the observability/fresh-eyes loop shape, no state mutation beyond
@@ -47,6 +57,9 @@ REALITY_CHECK_CMD="${CHUMP_DUTY_OFFICER_REALITY_CHECK_CMD:-}"
 NOTIFY_CMD="${CHUMP_DUTY_OFFICER_NOTIFY_CMD:-}"
 WINDOW_N="${CHUMP_DUTY_OFFICER_WINDOW_N:-200}"
 EXECUTE="${CHUMP_DUTY_OFFICER_EXECUTE:-0}"
+T1_ESCALATE_THRESHOLD="${CHUMP_DUTY_OFFICER_T1_ESCALATE_THRESHOLD:-10}"
+SENTINEL_UNIT="${CHUMP_DUTY_OFFICER_SENTINEL_UNIT:-chump-fleet-health-sentinel.service}"
+SYSTEMCTL_CMD="${CHUMP_DUTY_OFFICER_SYSTEMCTL_CMD:-systemctl --user}"
 
 _ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
@@ -123,6 +136,16 @@ _reality_check() { # returns 0 CONFIRMED, 1 REFUTED, 2 UNVERIFIED
     return 2
 }
 
+# Count raw firings of a signal (ambient kind=<sig>, NOT our own
+# duty_officer_action wrapper) within the scan window. A T1 signal that keeps
+# firing faster than it can plausibly be resolved is evidence the action
+# isn't actually healing anything — RESILIENT-1230.
+_signal_repeat_count() {
+    local sig="$1"
+    [[ -f "$AMBIENT" ]] || { echo 0; return; }
+    tail -n "$WINDOW_N" "$AMBIENT" 2>/dev/null | grep -cF "\"kind\":\"${sig}\"" || true
+}
+
 _notify() {
     local msg="$1" sig="$2"
     if [[ -n "$NOTIFY_CMD" ]]; then
@@ -156,6 +179,19 @@ cmd_route() {
 
     case "$tier" in
         1)
+            local repeat_n; repeat_n="$(_signal_repeat_count "$sig")"
+            if [[ "$repeat_n" -ge "$T1_ESCALATE_THRESHOLD" ]]; then
+                # RESILIENT-1230: a T1 signal that keeps re-firing faster than
+                # its action can plausibly resolve it is NOT healed — treat as
+                # T3 and page. This intentionally bypasses the quiet-gate
+                # suppress verdict: a suppression like worker_circuit_open's
+                # ("auto-cools-down and retries") is an assumption that firing
+                # ${T1_ESCALATE_THRESHOLD}x within one scan window disproves —
+                # that's exactly the 13h-dark-out-rationalized-as-healed bug.
+                _emit_action "$sig" 3 paged "action=${action} persistent_count=${repeat_n} — fired ${repeat_n}x without resolving, escalated T1->T3 (quiet-gate bypassed: persistence disproves the suppress assumption)"
+                _notify "duty-officer T3 (escalated from T1): ${sig} fired ${repeat_n}x unresolved — ${action}" "$sig"
+                return 0
+            fi
             local action_script="$REPO_ROOT/${action#./}"
             if [[ "$EXECUTE" == "1" && -x "$action_script" ]]; then
                 "$action_script" >/dev/null 2>&1 || true
@@ -202,6 +238,44 @@ cmd_tick() {
         fi
     done <<< "$kinds"
     [[ "$any" == 0 ]] && echo "[duty-officer] tick: no registered signals fired this window"
+    # RESILIENT-1230: the healer-of-healers gets watched every tick, not just
+    # when it happens to emit an ambient kind of its own.
+    cmd_watch_sentinel
+    return 0
+}
+
+_sentinel_is_active() {
+    $SYSTEMCTL_CMD is-active "$SENTINEL_UNIT" >/dev/null 2>&1
+}
+
+# Watch the healer-of-healers: chump-fleet-health-sentinel.service. If it's
+# failed, attempt a revival (reset-failed + start); if that doesn't bring it
+# back, this is a T3 — the thing meant to catch every other outage is itself
+# down, so it must page rather than sit silently unwatched (RESILIENT-1230).
+# scanner-anchor: "kind":"duty_officer_action" signal="chump_fleet_health_sentinel"
+cmd_watch_sentinel() {
+    local sig="chump_fleet_health_sentinel"
+
+    if _sentinel_is_active; then
+        _emit_action "$sig" 1 healed "unit=${SENTINEL_UNIT} active"
+        return 0
+    fi
+
+    $SYSTEMCTL_CMD reset-failed "$SENTINEL_UNIT" >/dev/null 2>&1 || true
+    $SYSTEMCTL_CMD start "$SENTINEL_UNIT" >/dev/null 2>&1 || true
+
+    if _sentinel_is_active; then
+        _emit_action "$sig" 1 healed "unit=${SENTINEL_UNIT} action=reset-failed+start revived"
+        return 0
+    fi
+
+    local verdict; verdict="$(_escalation_verdict "$sig")"
+    if [[ "$verdict" == suppress ]]; then
+        _emit_action "$sig" 3 suppressed "unit=${SENTINEL_UNIT} failed and could not be revived"
+    else
+        _emit_action "$sig" 3 paged "unit=${SENTINEL_UNIT} failed and could not be revived after reset-failed+start"
+        _notify "duty-officer T3: ${SENTINEL_UNIT} (healer-of-healers) is failed and could not be revived" "$sig"
+    fi
     return 0
 }
 
@@ -226,6 +300,7 @@ main() {
         tick)      cmd_tick ;;
         route)     shift; cmd_route "${1:-}" ;;
         heartbeat) cmd_heartbeat ;;
+        watch-sentinel) cmd_watch_sentinel ;;
         status)    cmd_status ;;
         help|-h|--help) cmd_help; exit 0 ;;
         *) echo "[duty-officer] unknown subcommand: $sub" >&2; cmd_help >&2; exit 2 ;;
