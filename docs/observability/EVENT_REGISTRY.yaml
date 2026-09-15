@@ -1607,6 +1607,21 @@ events:
     consumers: [operator-recall, fleet-brief]
     fields_required: [ts, gate, sha, run_url, head_sha, gap_id, dry_run, status]
 
+  # ── INFRA-6701: recently-merged-PR overlap advisory at reserve time ───────
+  - kind: gap_reserve_merged_pr_overlap
+    effect_metric: self
+    emitter: src/main.rs gap reserve handler (INFRA-6701)
+    trigger: chump gap reserve found a PR merged within
+      CHUMP_GAP_RESERVE_MERGED_PR_WINDOW_DAYS (default 7) whose title
+      Jaccard-overlaps the proposed gap title at or above
+      CHUMP_GAP_RESERVE_SIMILARITY_WARN (default 0.65). Catches the
+      "already shipped, just closing the gap" bookkeeping-PR class that the
+      open-PR (FLEET-029) and shipped-gap (ZERO-WASTE-045) checks miss.
+      Advisory only — never blocks; recorded in the new gap's notes so a
+      human/curator can supersede or dismiss.
+    consumers: [fleet-brief, waste-tally]
+    fields_required: [ts, kind, proposed_title, match_pr, match_title, match_score, merged_at]
+
   - kind: target_artifact_reaped
     effect_metric: self
     emitter: scripts/coord/target-dir-reaper.sh (INFRA-1349)
