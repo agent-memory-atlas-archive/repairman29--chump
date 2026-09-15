@@ -87,6 +87,10 @@ pub struct ClaimArgs {
     /// session (e.g. "shepherd", "target"). Stored for later validation;
     /// not yet enforced against a role registry.
     pub role: Option<String>,
+    /// INFRA-6624 (INFRA-1863 slice): optional scope hint for the claiming
+    /// session (e.g. a module or concern name). Stored for later validation;
+    /// not yet enforced against a scope registry.
+    pub scope: Option<String>,
 }
 
 impl ClaimArgs {
@@ -112,7 +116,8 @@ impl ClaimArgs {
                        -h, --help       Show this help
                        --check-only  Run all preflight gates without creating worktree or lease\n  \
                        --json        Output JSON format (use with --check-only)\n  \
-                       --role ROLE   Role hint for the claiming session (e.g. shepherd, target)"
+                       --role ROLE   Role hint for the claiming session (e.g. shepherd, target)\n  \
+                       --scope SCOPE Scope hint for the claiming session (e.g. a module or concern)"
                 );
                 std::process::exit(0);
             }
@@ -158,6 +163,7 @@ impl ClaimArgs {
         let mut discard_wip = false;
         let mut rename = false;
         let mut role: Option<String> = None;
+        let mut scope: Option<String> = None;
 
         let mut i = 2;
         while i < args.len() {
@@ -230,6 +236,14 @@ impl ClaimArgs {
                     );
                     i += 2;
                 }
+                "--scope" => {
+                    scope = Some(
+                        args.get(i + 1)
+                            .ok_or_else(|| anyhow!("--scope needs a value"))?
+                            .to_string(),
+                    );
+                    i += 2;
+                }
                 other => bail!("unknown flag: {other}"),
             }
         }
@@ -260,6 +274,7 @@ impl ClaimArgs {
             discard_wip,
             rename,
             role,
+            scope,
         })
     }
 }
@@ -6371,6 +6386,45 @@ mod tests {
         assert_eq!(args.session_id.as_deref(), Some("test-session"));
         assert!(args.skip_doctor);
         assert!(!args.resume);
+    }
+
+    #[test]
+    fn from_argv_role_and_scope_flags() {
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-6624".into(),
+            "--role".into(),
+            "shepherd".into(),
+            "--scope".into(),
+            "atomic_claim".into(),
+        ];
+        let args = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap();
+        assert_eq!(args.gap_id, "INFRA-6624");
+        assert_eq!(args.role.as_deref(), Some("shepherd"));
+        assert_eq!(args.scope.as_deref(), Some("atomic_claim"));
+        // --paths is optional and can be omitted without error (AC2).
+        assert!(args.paths.is_none());
+    }
+
+    #[test]
+    fn from_argv_role_missing_value_errors() {
+        let argv: Vec<String> = vec!["claim".into(), "INFRA-6624".into(), "--role".into()];
+        let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
+        assert!(format!("{err:#}").contains("--role needs a value"));
+    }
+
+    #[test]
+    fn from_argv_scope_missing_value_errors() {
+        let argv: Vec<String> = vec!["claim".into(), "INFRA-6624".into(), "--scope".into()];
+        let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
+        assert!(format!("{err:#}").contains("--scope needs a value"));
+    }
+
+    #[test]
+    fn from_argv_unknown_flag_errors() {
+        let argv: Vec<String> = vec!["claim".into(), "INFRA-6624".into(), "--bogus".into()];
+        let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
+        assert!(format!("{err:#}").contains("unknown flag"));
     }
 
     #[test]
