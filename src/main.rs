@@ -113,8 +113,9 @@ mod fleet_velocity;
 mod floor_temp; // INFRA-1992: THE FLOOR Phase 1 — floor-temperature signal
 mod ftue_tool;
 mod rebase_queue; // INFRA-2225: fleet rebase-queue — auto-rebase daemon backlog surface
-                  // INFRA-693: gap_store moved to its own crate (crates/chump-gap-store/).
-                  // The rename keeps every `gap_store::*` call site compiling unchanged.
+mod sentinel_service_restart; // RESILIENT-1241: restart chump-fleet-health-sentinel.service on failed
+                              // INFRA-693: gap_store moved to its own crate (crates/chump-gap-store/).
+                              // The rename keeps every `gap_store::*` call site compiling unchanged.
 use chump_gap_store as gap_store;
 // INFRA-1229: explicit linkage declaration so Cargo always links chump-ship
 // even when the CI rust-cache restores a stale build (fixes E0433 on Ubuntu).
@@ -1609,6 +1610,18 @@ async fn main() -> Result<()> {
             std::process::exit(farmer_status::run_cli(&sub_args[1..]));
         }
         eprintln!("Usage: chump farmer status [--json] [--quiet]");
+        std::process::exit(2);
+    }
+
+    // RESILIENT-1241 (RESILIENT-1230 slice): `chump sentinel-service-restart
+    // check` — detect chump-fleet-health-sentinel.service in a `failed`
+    // state via the systemd client and restart it.
+    if args.get(1).map(String::as_str) == Some("sentinel-service-restart") {
+        let sub_args: Vec<String> = args.iter().skip(2).cloned().collect();
+        if sub_args.first().map(String::as_str) == Some("check") {
+            std::process::exit(sentinel_service_restart::run_cli(&sub_args[1..]));
+        }
+        eprintln!("Usage: chump sentinel-service-restart check");
         std::process::exit(2);
     }
 
