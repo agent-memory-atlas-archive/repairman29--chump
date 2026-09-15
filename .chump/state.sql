@@ -227823,6 +227823,8 @@ gaps:
     OPERATOR TRIGGER: file 2026-05-30, action after current PR queue clears. NOT urgent — observation is the precursor.
   acceptance_criteria:
     - INFRA-2274 consensus flag flipped shadow->enforce in config; an AdminMergeProposal decision type is registered and emitted; a synthetic BLOCKED+green PR is merged via consensus tally end-to-end.
+  notes: |
+    Decomposed into 10 slices: META-545, META-546, META-547, META-548, META-549, META-550, META-551, META-552, META-553, META-554
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -237325,6 +237327,124 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-545
+  domain: META
+  title: "META: Create design document for consensus‑based admin‑merge (META-195 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - docs/design/CONSENSUS_ADMIN_MERGE.md exists in the repo
+    - Document describes decision type, auto‑vote rules, tally thresholds, mode switch procedure
+    - Design is reviewed and approved by the operator
+
+- id: META-546
+  domain: META
+  title: "META: Add AdminMergeProposal variant to DecisionType enum (META-195 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - DecisionType enum in crates/chump-coord/src/consensus.rs includes `AdminMergeProposal`
+    - Enum derives Serialize/Deserialize without compile errors
+    - "`summary()` produces a distinct audit line for AdminMergeProposal"
+  depends_on: [META-545]
+
+- id: META-547
+  domain: META
+  title: "META: Emit AdminMergeProposal decision from bot‑merge.sh (META-195 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - "bot‑merge.sh contains a function that creates a ConsensusDecision with DecisionType::AdminMergeProposal"
+    - When an admin‑merge is requested, the script logs a JSONL entry with kind=admin_merge_proposal
+    - The emitted entry can be parsed by existing audit tooling
+  depends_on: [META-546]
+
+- id: META-548
+  domain: META
+  title: "META: Implement auto‑vote helper in bot‑merge.sh (META-195 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - bot‑merge.sh includes a `_bm_auto_vote` function that accepts signal data and returns `approve` or `reject` per the four rules
+    - Unit‑style test cases (inline in the script) demonstrate correct vote for each rule
+    - Function is callable from curator‑loop scripts (no compile‑time errors)
+  depends_on: [META-547]
+
+- id: META-549
+  domain: META
+  title: "META: Add consensus tally and threshold logic to bot‑merge.sh (META-195 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Bot opens a vote window (default 60 s, configurable via CHUMP_ADMIN_MERGE_VOTE_WAIT_S)
+    - Quorum of ≥3 curators and approval threshold of 3/4 are enforced
+    - If quorum is not reached, the script falls back to operator‑as‑tie‑breaker
+    - Decision (approve/reject) is emitted via the existing consensus record flow
+  depends_on: [META-547, META-548]
+
+- id: META-550
+  domain: META
+  title: "META: Introduce INFRA_2274_MODE flag (shadow | enforce) in bot‑merge.sh (META-195 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A configurable environment variable `INFRA_2274_MODE` defaults to `shadow`
+    - When set to `enforce`, bot‑merge aborts admin‑merge proposals that do not meet consensus
+    - When `shadow`, proposals are only logged but not blocked
+  depends_on: [META-549]
+
+- id: META-551
+  domain: META
+  title: "META: Emit operator notification on enforced admin‑merge decisions (META-195 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - When INFRA_2274_MODE=enforce and a proposal is blocked, bot‑merge emits a JSONL entry with kind=admin_merge_enforced and details of the decision
+    - Operator can see the notification via the standard monitoring dashboard
+  depends_on: [META-550]
+
+- id: META-552
+  domain: META
+  title: "META: Add unit tests for new DecisionType and tally logic (META-195 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - crates/chump-coord/src/consensus.rs contains tests that serialize/deserialize AdminMergeProposal
+    - Tests simulate a vote set and verify quorum/threshold handling matches spec
+    - All CI tests pass
+  depends_on: [META-546, META-549]
+
+- id: META-553
+  domain: META
+  title: "META: Collect ≥10 shadow‑mode admin‑merge votes and generate report (META-195 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A monitoring script runs for 24 h in shadow mode and records each AdminMergeProposal vote
+    - Report file `admin_merge_shadow_report.txt` lists total votes (≥10) and outcome distribution
+    - Operator signs off on the report
+
+- id: META-554
+  domain: META
+  title: "META: Flip INFRA_2274_MODE to enforce after observation (META-195 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Operator updates environment to `INFRA_2274_MODE=enforce`
+    - Subsequent admin‑merge proposals are blocked unless consensus passes (verified by a test PR)
+    - Operator notification is emitted for each enforced decision
+  depends_on: [META-553]
 
 - id: MISSION-001
   domain: MISSION
