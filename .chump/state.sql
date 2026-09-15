@@ -221229,7 +221229,7 @@ gaps:
 - id: INFRA-6577
   domain: INFRA
   title: "INFRA: Create Rust divergence‑audit binary (INFRA-3833 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -221252,6 +221252,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'ZERO-WASTE' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+    [2026-09-15T11:21:15Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=0B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6578
   domain: INFRA
@@ -221709,7 +221710,7 @@ gaps:
 - id: INFRA-6594
   domain: INFRA
   title: "INFRA: Reconcile merge-mix metric duplication and field drift between race-control and merge-mix-board (INFRA-3841 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -221733,6 +221734,7 @@ gaps:
     === cross-pollination briefs mentioning 'phase' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+    [2026-09-15T11:29:32Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=0B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6595
   domain: INFRA
@@ -224398,7 +224400,7 @@ gaps:
     - "TODO: failure-class taxonomy (distinguish transient vs permanent)"
     - "TODO: smoke test command to verify observability"
   notes: |
-    Decomposed into 7 slices: META-358, META-359, META-360, META-361, META-362, META-363, META-364
+    Decomposed into 7 slices: META-465, META-466, META-467, META-468, META-469, META-470, META-471
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -232700,6 +232702,204 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-465
+  domain: META
+  title: "META: META-358: Add corrective-keyword exception for waste‑pause bypass (META-108 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A new keyword `CHUMP_IGNORE_WASTE_PAUSE` can be set in the configuration file
+    - When the keyword is present, the system skips the waste‑pause check for gap reservation
+    - Unit test verifies that gaps are created successfully when the keyword is enabled
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-466
+  domain: META
+  title: "META: META-359: Implement operator‑override‑by‑default for waste‑pause (META-108 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "Operator UI shows a toggle \"Override waste‑pause by default\""
+    - When the toggle is enabled, the pause is automatically overridden without manual approval
+    - Automated test confirms that a gap is reserved even when waste‑pause would normally block it
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-467
+  domain: META
+  title: "META: META-360: Emit observability events for waste‑pause outcomes (META-108 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - An event `waste_pause_success` is emitted when the pause completes successfully
+    - An event `waste_pause_failure` is emitted when the pause fails
+    - An event `waste_pause_timeout` is emitted when the operation times out
+    - Each event payload includes gap ID, timestamp, and outcome details
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-468
+  domain: META
+  title: "META: META-361: Track and report cost of waste‑pause actions (META-108 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Cost (CPU, memory, and time) of each waste‑pause action is recorded in telemetry
+    - Aggregated cost metrics are exposed via the operator dashboard API
+    - Dashboard UI displays total cost per hour and per gap type
+    - Integration test validates that cost metrics increase after a simulated pause
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-469
+  domain: META
+  title: "META: META-362: Define failure‑class taxonomy (transient vs permanent) (META-108 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "A taxonomy document enumerates failure classes: `TRANSIENT`, `PERMANENT`"
+    - The system classifies each `waste_pause_failure` event into one of the two classes
+    - Log entries include the failure class label
+    - Unit test asserts correct classification for simulated transient and permanent failures
+  depends_on: [META-467]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-470
+  domain: META
+  title: "META: META-363: Add smoke‑test command to verify observability pipeline (META-108 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Command `meta-waste-pause-smoke-test` triggers a dummy pause operation
+    - Command checks that `waste_pause_success` and cost metrics are emitted and recorded
+    - Command returns exit code 0 on success and non‑zero on any missing observability data
+    - Automated CI job runs the command and fails the build if observability is broken
+  depends_on: [META-467, META-468]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-471
+  domain: META
+  title: "META: META-364: End‑to‑end integration test covering exception and override flow (META-108 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test enables `CHUMP_IGNORE_WASTE_PAUSE` and the operator override toggle
+    - Test initiates a gap reservation that would normally be blocked by waste‑pause
+    - Test asserts that the gap is created and the reserve is not blocked
+    - Test verifies that success event, cost metric, and correct failure‑class (if any) are recorded
+    - Test cleans up all created resources after verification
+  depends_on: [META-465, META-466, META-467, META-468, META-469, META-470]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
 - id: MISSION-001
   domain: MISSION
