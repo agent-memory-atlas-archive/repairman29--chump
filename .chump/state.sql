@@ -249935,6 +249935,8 @@ gaps:
     - "The change described by \"1 verdict:healed 57x (0 pages) and chump-fleet-health-sentinel.service is in failed state; a persistent worker_circuit_open / repeated ERROR_1 must escalate T1->T3 and page a human, and the health-sentinel (healer-of-healers) must be revived and watched\" is implemented in the relevant RESILIENT code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  notes: |
+    Decomposed into 9 slices: RESILIENT-1238, RESILIENT-1239, RESILIENT-1240, RESILIENT-1241, RESILIENT-1242, RESILIENT-1243, RESILIENT-1244, RESILIENT-1245, RESILIENT-1246
 
 - id: RESILIENT-1231
   domain: RESILIENT
@@ -250129,6 +250131,29 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
 
+- id: RESILIENT-1238
+  domain: RESILIENT
+  title: "RESILIENT: Add detection for repeated `worker_circuit_open` errors (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - The code logs each occurrence of `worker_circuit_open` with a timestamp.
+    - A counter increments for consecutive `worker_circuit_open` errors and resets on a different error or successful operation.
+    - Unit test verifies that the counter increments on repeated errors and resets appropriately.
+
+- id: RESILIENT-1239
+  domain: RESILIENT
+  title: "RESILIENT: Implement escalation state machine (T1 → T3) based on error count (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When the error counter reaches the configured threshold, the system transitions from T1 to T2, then to T3 on subsequent thresholds.
+    - The current escalation tier is exposed via a public function `current_escalation_tier()`.
+    - Unit test confirms correct tier transitions for a simulated error sequence.
+  depends_on: [RESILIENT-1238]
+
 - id: RESILIENT-124
   domain: RESILIENT
   title: "RESILIENT: FLEET-034 go-live — mesh-worker execute-mode default in canonical plist (verified live 2026-06-05)"
@@ -250144,6 +250169,89 @@ gaps:
   closed_date: '2026-07-21'
   closed_pr: 3127
   outcome_id: RESILIENT-000
+
+- id: RESILIENT-1240
+  domain: RESILIENT
+  title: "RESILIENT: Integrate pager notification for T3 escalation (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "When escalation reaches T3, a call to the paging service (`pager::notify_human`) is made with the appropriate payload."
+    - The paging call is mockable for testing.
+    - "Unit test asserts that `pager::notify_human` is invoked exactly once when tier transitions to T3."
+  depends_on: [RESILIENT-1239]
+
+- id: RESILIENT-1241
+  domain: RESILIENT
+  title: "RESILIENT: Add automatic restart logic for `chump-fleet-health-sentinel.service` when failed (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The health sentinel monitor detects a `failed` state via systemd DBus API.
+    - On detection, the monitor issues a `systemctl restart chump-fleet-health-sentinel.service` command.
+    - Integration test (using a mock systemd client) verifies that a restart is attempted when the service reports `failed`.
+
+- id: RESILIENT-1242
+  domain: RESILIENT
+  title: "RESILIENT: Watchdog to verify health sentinel stays healthy after restart (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - After a restart, the watchdog polls the service status every 30 seconds for 5 minutes.
+    - If the service remains `active`, a success metric is recorded; otherwise, an error is logged.
+    - Unit test simulates a successful restart and confirms the watchdog records success.
+  depends_on: [RESILIENT-1241]
+
+- id: RESILIENT-1243
+  domain: RESILIENT
+  title: "RESILIENT: Write unit tests for escalation and paging logic (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Tests cover error counter overflow, tier transitions, and paging invocation.
+    - All new tests pass with `cargo test` and fail when the corresponding implementation is removed.
+    - Coverage report shows ≥ 80% line coverage for the new modules.
+  depends_on: [RESILIENT-1239, RESILIENT-1240]
+
+- id: RESILIENT-1244
+  domain: RESILIENT
+  title: "RESILIENT: Write integration test for health sentinel restart and watchdog (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The test spins up a mock systemd client that initially reports `failed` and then `active` after a restart command.
+    - The test asserts that the restart command is issued and that the watchdog records a successful health check.
+    - The test fails if the restart logic is missing or the watchdog does not detect the active state.
+  depends_on: [RESILIENT-1241, RESILIENT-1242]
+
+- id: RESILIENT-1245
+  domain: RESILIENT
+  title: "RESILIENT: Update CI pipeline to run new unit and integration tests (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - CI script `scripts/ci/test-resilient.sh` includes commands to execute the new tests.
+    - Pipeline passes when all new tests succeed and fails when any new test fails.
+    - Documentation in the CI README is updated with the new test script reference.
+  depends_on: [RESILIENT-1243, RESILIENT-1244]
+
+- id: RESILIENT-1246
+  domain: RESILIENT
+  title: "RESILIENT: Run `cargo fmt` and `cargo clippy` with warnings as errors (RESILIENT-1230 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`cargo fmt -- --check` runs without formatting changes."
+    - "`cargo clippy --all-targets -- -D warnings` runs with zero warnings."
+    - CI pipeline includes these checks and fails on any formatting or clippy warnings.
+  depends_on: [RESILIENT-1245]
 
 - id: RESILIENT-125
   domain: RESILIENT
