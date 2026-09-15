@@ -32422,11 +32422,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update `cmd_safe_sweep` in `scripts/coord/gap-doctor.py` to add support for scheduled sweep execution mode, writing JSON sweep reports to a configured log output directory, rotating execution logs, and writing an alert entry to stderr/syslog if the sweep fails to run.
+    
+    Target file(s):
+    - scripts/coord/gap-doctor.py
+    - scripts/ab-harness/run-ablation-sweep.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The sweep script from slice 0 is registered as a launchd/plist job (or equivalent cron) to run daily on the CI runner host.
-    - Execution logs are written to a known location and rotated weekly.
-    - A successful run produces the same JSON report as a manual run.
-    - If the scheduled job fails to start, an alert is written to the system log.
+    - "`python3 scripts/coord/gap-doctor.py safe-sweep --scheduled` writes the sweep JSON report to the configured log destination."
+    - Running `cmd_safe_sweep` in scheduled mode produces a JSON report matching the schema of manual sweep runs.
+    - If `cmd_safe_sweep` encounters an initialization or execution error during a scheduled run, an error message is emitted to system logs/stderr and exits non-zero.
   depends_on: [CREDIBLE-945]
 
 - id: CREDIBLE-947
