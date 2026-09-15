@@ -40051,10 +40051,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Insert a call to `render_dynamic_sections` in the mission‑doc keeper handler inside `src/web_server.rs` (the code that reads the template and writes the final HTML), ensuring the rendered HTML is written to the canonical repo location, and update the description in `docs/design-pass-stage.md` to document this new rendering step.
+    
+    Target file(s):
+    - src/web_server.rs
+    - docs/design-pass-stage.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Mission-doc keeper reads the template, calls `render_dynamic_sections`, and writes the final HTML to the canonical repo location
-    - Generated HTML file is committed to the version‑controlled path when the agent runs
-    - Running the agent locally updates the HTML file without panics
+    - In `src/web_server.rs`, the function that reads the mission‑doc template now calls `render_dynamic_sections` before writing the HTML file.
+    - Running the agent locally with `cargo run --bin agent -- --update-mission-doc` creates or updates `docs/mission.html` without panicking.
+    - "The generated `docs/mission.html` contains the previously placeholder `{{dynamic_section}}` replaced by concrete rendered markup (e.g., a `<div class=\"dynamic\">…</div>`)."
+    - After the agent run, `git status` lists `docs/mission.html` as staged (new or modified), confirming it is committed to the version‑controlled path.
   depends_on: [EFFECTIVE-1034]
   notes: |
     [chump harvest check 'sonnet']
@@ -223252,7 +223261,7 @@ gaps:
     - children INFRA-467/468/469/470 all shipped
     - "after all 4 land, run a 5-PR sample session and measure: (a) time from claim to first edit, (b) % of shell scripts touched per PR vs. coordination scripts, (c) shell-script lines deleted from scripts/coord/ + scripts/dispatch/. Target: 40% reduction in coord-script touch rate."
   notes: |
-    Decomposed into 10 slices: META-348, META-349, META-350, META-351, META-352, META-353, META-354, META-355, META-356, META-357
+    Decomposed into 10 slices: META-445, META-446, META-447, META-448, META-449, META-450, META-451, META-452, META-453, META-454
   opened_date: '2026-05-05'
   outcome_id: MISSION-010
 
@@ -232032,6 +232041,266 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-445
+  domain: META
+  title: "META: META-348: Baseline analysis of coordination layer overhead (META-038 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Documented report enumerating lease, worktree, state.db, and binary‑wedge interactions per agent session
+    - Baseline metrics captured for claim‑to‑first‑edit latency, script touch count, and lines deleted
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-446
+  domain: META
+  title: "META: META-349: Optimize lease acquisition path (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Lease claim latency reduced by at least 30% versus baseline
+    - Unit test verifies lease claim completes in ≤ 50 ms on a fresh repo
+  depends_on: [META-445]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-447
+  domain: META
+  title: "META: META-350: Streamline worktree initialization (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Worktree setup time reduced by ≥ 25% versus baseline
+    - Integration test confirms worktree ready within 200 ms for a standard PR
+  depends_on: [META-445]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-448
+  domain: META
+  title: "META: META-351: Reduce state.db read/write frequency (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - State.db writes limited to ≤ 2 per agent session
+    - Automated test asserts no more than 2 writes during a simulated 5‑PR workflow
+  depends_on: [META-445]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-449
+  domain: META
+  title: "META: META-352: Eliminate redundant binary‑wedge steps (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Binary‑wedge processing steps reduced from 4 to ≤ 2 per session
+    - Functional test confirms identical output with the reduced steps
+  depends_on: [META-445]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-450
+  domain: META
+  title: "META: META-353: Consolidate coordination scripts into shared library (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - All coordination scripts import the new shared library
+    - Static analysis shows zero duplicate logic across scripts/coord and scripts/dispatch
+  depends_on: [META-446, META-447, META-448, META-449]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-451
+  domain: META
+  title: "META: META-354: Refactor dispatch scripts to use shared library (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Dispatch scripts compile and run using the shared library without regression
+    - End‑to‑end test suite passes with the refactored dispatch flow
+  depends_on: [META-450]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-452
+  domain: META
+  title: "META: META-355: Add metrics collection for claim‑to‑edit latency (META-038 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Metrics endpoint emits claim‑to‑first‑edit latency per session
+    - Automated probe records latency for at least 10 consecutive runs
+  depends_on: [META-451]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-453
+  domain: META
+  title: "META: META-356: Execute sample 5‑PR session and capture metrics (META-038 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Sample session completes without errors
+    - Collected data includes claim‑to‑first‑edit time, % of shell scripts touched, and lines deleted in scripts/coord and scripts/dispatch
+  depends_on: [META-452]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+
+- id: META-454
+  domain: META
+  title: "META: META-357: Validate 40% reduction targets (META-038 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Claim‑to‑first‑edit latency reduced by ≥ 40% compared to baseline
+    - Shell‑script touch rate reduced by ≥ 40% versus baseline
+    - Lines deleted from scripts/coord and scripts/dispatch meet the 40% reduction goal
+  depends_on: [META-453]
+  notes: |
+    [chump harvest check 'collapse']
+    === primitives_index match for 'collapse' ===
+    
+    === cluster keyword match for 'collapse' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'collapse' ===
+    
+    === repo-description match for 'collapse' ===
+    
+    === HARVEST_ROADMAP.md mention of 'collapse' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'collapse' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
 
 - id: MISSION-001
   domain: MISSION
