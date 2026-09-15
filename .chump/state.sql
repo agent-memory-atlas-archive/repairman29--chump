@@ -127239,7 +127239,7 @@ gaps:
     - effective priority is the PRIMARY sort band, not a within-priority-band tiebreaker (today _pick_gap.py INFRA-1258 planner rank only breaks ties WITHIN a nominal band — crates/chump-planner/src/graph.rs has open_prerequisites/layers/critical_path_days/unblocks already)
     - "regression test (extend picker_priority_infra3616.rs): a P3 gap that a P0 depends_on is picked before unrelated P1/P2 gaps; no deadlock where a blocked P0 waits behind all P1s while its own P2 prereq sits unworked"
   notes: |
-    Decomposed into 3 slices: INFRA-6226, INFRA-6227, INFRA-6228
+    Decomposed into 3 slices: INFRA-6475, INFRA-6476, INFRA-6477
   opened_date: '2026-08-19'
 
 - id: INFRA-3614
@@ -217087,6 +217087,84 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-6475
+  domain: INFRA
+  title: "INFRA: INFRA-6226: Implement effective priority calculation (INFRA-3612 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Add a function `effective_priority(gap)` that returns the minimum priority band among the gap's own priority and the priorities of all gaps it transitively unblocks via `chump-planner.unblocks()`.
+    - Unit test verifies that for a chain where a P3 gap unblocks a P0 gap, `effective_priority(P3_gap)` equals P0.
+    - Function correctly handles cycles without infinite recursion.
+  notes: |
+    [chump harvest check 'Picker']
+    === primitives_index match for 'Picker' ===
+    
+    === cluster keyword match for 'Picker' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'Picker' ===
+    
+    === repo-description match for 'Picker' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Picker' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Picker' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+
+- id: INFRA-6476
+  domain: INFRA
+  title: "INFRA: INFRA-6227: Use effective priority as primary picker sort band (INFRA-3612 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Modify the picker to sort gaps first by `effective_priority` (ascending) as the primary sort key.
+    - Within the same effective priority band, existing tie‑breaker logic remains unchanged.
+    - Integration test confirms that gaps are selected in order of ascending effective priority.
+  depends_on: [INFRA-6475]
+  notes: |
+    [chump harvest check 'Picker']
+    === primitives_index match for 'Picker' ===
+    
+    === cluster keyword match for 'Picker' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'Picker' ===
+    
+    === repo-description match for 'Picker' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Picker' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Picker' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+
+- id: INFRA-6477
+  domain: INFRA
+  title: "INFRA: INFRA-6228: Add regression test for effective priority propagation (INFRA-3612 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Extend `picker_priority_infra3616.rs` with a scenario where a P3 gap blocks a P0 gap, alongside unrelated P1 and P2 gaps.
+    - Assert that the picker selects the P0 gap before the unrelated P1/P2 gaps, demonstrating correct effective priority inheritance.
+    - Verify that no deadlock occurs (the blocked P0 does not wait behind all P1s while its own P2 prerequisite remains unworked).
+    - All tests pass in CI.
+  depends_on: [INFRA-6476]
+  notes: |
+    [chump harvest check 'Picker']
+    === primitives_index match for 'Picker' ===
+    
+    === cluster keyword match for 'Picker' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'Picker' ===
+    
+    === repo-description match for 'Picker' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Picker' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Picker' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
 
 - id: INFRA-650
   domain: INFRA
