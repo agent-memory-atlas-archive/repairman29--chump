@@ -2301,7 +2301,11 @@ pub fn check_paths_overlap_open_prs(
             .unwrap_or_default();
         let overlap: Vec<String> = claim_paths
             .iter()
-            .filter(|p| pr_paths.contains(p))
+            .filter(|p| {
+                pr_paths
+                    .iter()
+                    .any(|pr_path| p.eq_ignore_ascii_case(pr_path))
+            })
             .map(|s| s.to_string())
             .collect();
         if !overlap.is_empty() {
