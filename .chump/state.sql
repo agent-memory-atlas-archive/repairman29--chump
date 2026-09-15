@@ -9058,7 +9058,7 @@ gaps:
 - id: CREDIBLE-1231
   domain: CREDIBLE
   title: "CREDIBLE: Restrict gap ID extraction to PR title only (CREDIBLE-268 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -9080,6 +9080,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'merging' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+    [2026-09-15T14:48:27Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=0B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: CREDIBLE-1232
   domain: CREDIBLE
