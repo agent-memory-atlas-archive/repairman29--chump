@@ -221682,7 +221682,7 @@ gaps:
 - id: INFRA-6593
   domain: INFRA
   title: "INFRA: Reconcile merges_24h metric emitters across vital-signs, dashboard, and faculty (INFRA-3841 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -221706,6 +221706,7 @@ gaps:
     === cross-pollination briefs mentioning 'phase' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+    [2026-09-15T12:11:46Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=0B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-6594
   domain: INFRA
