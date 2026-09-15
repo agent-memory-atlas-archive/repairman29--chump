@@ -1807,6 +1807,7 @@ jobs:
           # Re-enable ONLY once builds use stable paths (ZW-021's own criterion):
           # set repo variable CHUMP_CI_SCCACHE=true.
           SCCACHE_ENABLED: ${{ vars.CHUMP_CI_SCCACHE || 'false' }}
+          SCCACHE_BUILDBUDDY_URL: ${{ secrets.BUILDBUDDY_API_KEY && format('grpc.buildbuddy.io?api_key={0}', secrets.BUILDBUDDY_API_KEY) || '' }}
         run: |
           # RESILIENT-041 (2026-05-30): tightened length check from `-n` to `>= 16`.
           # A misconfigured secret stored as a single character used to pass `-n`
