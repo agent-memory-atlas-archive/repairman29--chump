@@ -8062,6 +8062,8 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-15T14:08:07Z] rot-reaper: PR #4670 auto-closed (required-check-red, 24h) 2026-09-15; re-attempt on fresh main.
+    [2026-09-15T14:10:22Z] rot-reaper: PR #4670 auto-closed (required-check-red, 24h) 2026-09-15; re-attempt on fresh main.
 
 - id: CREDIBLE-1202
   domain: CREDIBLE
@@ -234340,7 +234342,7 @@ gaps:
 - id: META-502
   domain: META
   title: "META: Add 'Story of PR' tab with trace timeline (META-129 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -234368,6 +234370,7 @@ gaps:
     === cross-pollination briefs mentioning 'architecture' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+    [2026-09-15T14:02:39Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=0B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: META-503
   domain: META
