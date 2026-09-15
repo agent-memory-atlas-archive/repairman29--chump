@@ -9720,6 +9720,35 @@ events:
     expected_volume: "rare; should be near-zero in healthy fleet operation"
     status: stable
     # payload: {gap_id: string, behind: u64, ts: string}
+  - kind: closed_effect_unverified
+    effect_metric: credible
+    emitter: crates/chump-gap-store/src/lib.rs GapStore::record_effect_verification() (META-555)
+    trigger: >
+      Emitted when a gap flips to done via chump gap ship AND it carried an
+      opt-in `verify:` acceptance criterion whose live-check command failed
+      (non-zero, could not spawn, or timed out). ADVISORY: the close still
+      succeeds — this signal plus a queryable `[META-555 EFFECT-UNVERIFIED ...]`
+      note flag the merged-but-ineffective fix so it stays visible under the
+      SAME gap id instead of silently clean-done and respawning as a new id.
+      Root incident 2026-09-15: RESILIENT-1230 -> 1258 -> 1294 (three ids, one
+      unfixed sentinel false-page; PRs #4688/#4690 merged green, symptom never
+      stopped once).
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, gap_id, cmd, detail]
+    expected_volume: "rare; only gaps that opt in with a verify: criterion whose live-check fails"
+    status: stable
+  - kind: closed_effect_verified
+    effect_metric: credible
+    emitter: crates/chump-gap-store/src/lib.rs GapStore::record_effect_verification() (META-555)
+    trigger: >
+      Emitted when a gap flips to done via chump gap ship AND its opt-in
+      `verify:` acceptance-criterion live-check(s) all exited 0 — a receipt that
+      the merged fix demonstrably changed the live outcome, not merely that CI
+      was green.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, gap_id]
+    expected_volume: "rare; only gaps that opt in with a verify: criterion"
+    status: stable
   - kind: per_gap_branch_pruned
     effect_metric: zero-waste
     emitter: scripts/ops/chump-post-integration-prune.sh (INFRA-2138)
