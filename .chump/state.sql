@@ -33462,11 +33462,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add CI‑stage detection and logging to `discover_test_scripts` in `crates/chump-preflight/src/preflight.rs`, make its `CheckResult` honor the “no hard‑fail” rule for REACHES and TEST_ONLY verdicts while setting a review‑signal flag for UNRELATED verdicts, and extend the `Metadata` struct returned by `connect` in `crates/chump-coord/src/lib.rs` to include the ticket identifiers “EFFECTIVE-354” and “CREDIBLE-200” in a new `related_tickets` field.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    - crates/chump-coord/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The check is wired into the pre‑push or bot‑merge CI stage and runs before the main test suite.
-    - A CI run that produces a REACHES or TEST‑ONLY verdict does not fail the pipeline; an UNRELATED verdict only adds a review‑signal flag but does not cause a hard failure.
-    - Build metadata records links to EFFECTIVE-354 and CREDIBLE-200, indicating which ticket contributed the detection logic.
-    - An integration test simulates a CI pipeline execution, verifies that the check runs at the correct stage, and confirms that the metadata contains the expected ticket references.
+    - "? In `crates/chump-preflight/src/preflight.rs`, the `discover_test_scripts` function now reads the `CI_STAGE` environment variable and, when its value is `pre-push` or `bot-merge`, writes the exact line `CREDIBLE-979 : check executed` to stdout."
+    - In `crates/chump-preflight/src/preflight.rs`, a `CheckResult` produced for a script that returns a `REACHES` or `TEST_ONLY` verdict has `fail_pipeline == false`; a result with an `UNRELATED` verdict has `review_signal == true` and also `fail_pipeline == false`.
+    - "In `crates/chump-coord/src/lib.rs`, the `connect` function returns a `Metadata` struct whose `related_tickets` vector contains exactly the strings `\"EFFECTIVE-354\"` and `\"CREDIBLE-200\"`."
   depends_on: [CREDIBLE-978]
   notes: |
     [chump harvest check 'mechanical']
@@ -127929,7 +127936,7 @@ gaps:
     - chump trek --list / status <id> reads the store back and prints job, mode, state, outcome pointer (PR URL / result)
     - "Test: a completed run persists a Completed record with a non-empty outcome pointer that reloads identically"
   notes: |
-    Decomposed into 3 slices: INFRA-6287, INFRA-6288, INFRA-6289
+    Decomposed into 3 slices: INFRA-6545, INFRA-6546, INFRA-6547
   opened_date: '2026-08-22'
 
 - id: INFRA-3659
@@ -219923,6 +219930,125 @@ gaps:
     - Reaches and outputs FACTORY INSTALLED upon full execution completion
     - Fresh-user run verifies gap-store round-trip and almanac stats > 0 without manual interventions
   depends_on: [INFRA-6543]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6545
+  domain: INFRA
+  title: "INFRA: Integrate FileBackedMissionStore.save into chump trek run flow (INFRA-3658 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When a chump trek run finishes, a Mission record is persisted via FileBackedMissionStore.save with correct job, mode, and outcome pointer fields.
+    - "The persisted JSON file contains a state transition sequence: Pending → InProgress → Completed (or Failed)."
+    - A unit test invoking the run path creates a file under the default mission root and the file includes a non‑empty outcome pointer for a successful run.
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6546
+  domain: INFRA
+  title: "INFRA: Add chump trek --list command to display persisted missions (INFRA-3658 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "The CLI flag `--list` on `chump trek` prints a table of all persisted missions with columns: id, job, mode, state, outcome pointer."
+    - The command reads missions using FileBackedMissionStore.list and formats the output correctly.
+    - An integration test confirms that after a simulated run that persisted a mission, `chump trek --list` includes that mission entry.
+  depends_on: [INFRA-6545]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-6547
+  domain: INFRA
+  title: "INFRA: Add chump trek status <id> command to show mission details (INFRA-3658 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The subcommand `status <id>` on `chump trek` prints detailed information for the mission with the given id, including job, mode, current state, and outcome pointer (PR URL or result).
+    - The command loads the mission via FileBackedMissionStore.load and displays fields that exactly match the persisted data.
+    - A test verifies that after persisting a Completed mission, `chump trek status <id>` outputs the same outcome pointer and state.
+  depends_on: [INFRA-6545]
   notes: |
     [chump harvest check 'MISSION']
     === primitives_index match for 'MISSION' ===
