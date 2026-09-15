@@ -2219,6 +2219,7 @@ async fn main() -> Result<()> {
                 eprintln!();
                 eprintln!("Usage: chump claim <GAP-ID> [--paths CSV] [--session ID]");
                 eprintln!("                          [--skip-doctor] [--skip-import]");
+                eprintln!("                          [--role ROLE] [--scope SCOPE]");
                 eprintln!();
                 eprintln!("Atomically: fetch origin/main, verify the gap, run chump-doctor,");
                 eprintln!("create a linked worktree, write the lease. Replaces the 6-step");
