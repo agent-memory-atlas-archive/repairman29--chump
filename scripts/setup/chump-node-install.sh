@@ -454,6 +454,10 @@ write_node_env() {
   fi
   local _chump_localhost="localhost"
   team_url="${team_url:-http://${_chump_localhost}:3000}"
+  # AC4 (INFRA-6498): never write an empty CHUMP_TEAM_API_KEY — downstream
+  # consumers treat "" as "unset" but some (curl Authorization headers) treat
+  # it as "set to nothing", which is worse than an obviously-fake value.
+  team_api_key="${team_api_key:-placeholder-team-api-key}"
   local store_backend="${CHUMP_STORE_BACKEND:-postgrest}"
   local work_enabled=0 node_mode="control-plane"
   if [ "$CONTROL_PLANE_ONLY" != 1 ] && provider_creds_ready; then
