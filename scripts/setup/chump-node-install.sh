@@ -308,7 +308,7 @@ worker_execution_enabled() {
   fi
 }
 
-# Zero-touch acquire (INFRA-3629): materialize $CREDS from --creds-file or
+# Zero-touch acquire (INFRA-3629, INFRA-6798): materialize $CREDS from --creds-file or
 # $CHUMP_BOOTSTRAP_CREDS. Never echoes secret VALUES — only which source was
 # used. Leaves an existing file untouched (idempotent, no clobber).
 materialize_creds() {
