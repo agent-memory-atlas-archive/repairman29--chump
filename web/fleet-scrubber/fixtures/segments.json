@@ -15,7 +15,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T11:56:15Z",
     "end": "2026-05-29T12:06:55Z",
-    "duration_s": 640
+    "duration_s": 640,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0018",
@@ -42,7 +43,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T12:07:11Z",
     "end": "2026-05-29T12:18:27Z",
-    "duration_s": 676
+    "duration_s": 676,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0002",
@@ -114,7 +116,8 @@
     "gap_id": "INFRA-2160",
     "start": "2026-05-29T12:18:54Z",
     "end": "2026-05-29T12:19:50Z",
-    "duration_s": 56
+    "duration_s": 56,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0042",
@@ -123,7 +126,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T12:20:09Z",
     "end": "2026-05-29T12:27:03Z",
-    "duration_s": 414
+    "duration_s": 414,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0004",
@@ -150,7 +154,8 @@
     "gap_id": "INFRA-2160",
     "start": "2026-05-29T12:27:13Z",
     "end": "2026-05-29T12:38:16Z",
-    "duration_s": 663
+    "duration_s": 663,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0005",
@@ -195,7 +200,8 @@
     "gap_id": null,
     "start": "2026-05-29T12:38:25Z",
     "end": "2026-05-29T12:43:41Z",
-    "duration_s": 316
+    "duration_s": 316,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0027",
@@ -222,7 +228,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T12:44:00Z",
     "end": "2026-05-29T12:49:14Z",
-    "duration_s": 314
+    "duration_s": 314,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0008",
@@ -240,7 +247,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T12:49:36Z",
     "end": "2026-05-29T13:03:57Z",
-    "duration_s": 861
+    "duration_s": 861,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0029",
@@ -285,7 +293,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T13:04:16Z",
     "end": "2026-05-29T13:11:25Z",
-    "duration_s": 429
+    "duration_s": 429,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0032",
@@ -312,7 +321,8 @@
     "gap_id": "INFRA-2131",
     "start": "2026-05-29T13:11:46Z",
     "end": "2026-05-29T13:17:47Z",
-    "duration_s": 361
+    "duration_s": 361,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0011",
@@ -330,7 +340,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T13:18:11Z",
     "end": "2026-05-29T13:23:43Z",
-    "duration_s": 332
+    "duration_s": 332,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0012",
@@ -366,7 +377,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T13:23:58Z",
     "end": "2026-05-29T13:29:44Z",
-    "duration_s": 346
+    "duration_s": 346,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0034",
@@ -384,7 +396,8 @@
     "gap_id": "INFRA-2131",
     "start": "2026-05-29T13:30:11Z",
     "end": "2026-05-29T13:38:59Z",
-    "duration_s": 528
+    "duration_s": 528,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0014",
@@ -411,7 +424,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T13:39:27Z",
     "end": "2026-05-29T13:42:19Z",
-    "duration_s": 172
+    "duration_s": 172,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0036",
@@ -438,7 +452,8 @@
     "gap_id": "INFRA-2160",
     "start": "2026-05-29T13:42:44Z",
     "end": "2026-05-29T13:49:23Z",
-    "duration_s": 399
+    "duration_s": 399,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0015",
@@ -474,7 +489,8 @@
     "gap_id": "INFRA-2158",
     "start": "2026-05-29T13:49:34Z",
     "end": "2026-05-29T13:50:03Z",
-    "duration_s": 29
+    "duration_s": 29,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0055",
@@ -483,7 +499,8 @@
     "gap_id": "INFRA-2131",
     "start": "2026-05-29T13:50:11Z",
     "end": "2026-05-29T13:50:40Z",
-    "duration_s": 29
+    "duration_s": 29,
+    "parent_session_id": "opus-shepherd-abc12"
   },
   {
     "id": "seg-0038",
@@ -501,6 +518,7 @@
     "gap_id": "INFRA-2160",
     "start": "2026-05-29T13:50:55Z",
     "end": "2026-05-29T13:53:24Z",
-    "duration_s": 149
+    "duration_s": 149,
+    "parent_session_id": "opus-shepherd-abc12"
   }
 ]

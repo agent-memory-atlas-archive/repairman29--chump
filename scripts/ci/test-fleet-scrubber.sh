@@ -211,6 +211,38 @@ print('  Lane recency order validated against fixture data')
   || bad "Fixture lane recency sort validation failed"
 
 echo ""
+echo "--- Test 13: META-624 — nested-lane expand/collapse arrow ---"
+if echo "$HTML" | grep -q 'lane-toggle'; then
+    ok "lane-toggle CSS class present"
+else
+    bad "lane-toggle CSS class missing"
+fi
+if echo "$HTML" | grep -q 'chump-scrubber-collapsed-lanes'; then
+    ok "Collapsed-lanes localStorage key (chump-scrubber-collapsed-lanes) present"
+else
+    bad "Collapsed-lanes localStorage key missing"
+fi
+if echo "$HTML" | grep -q 'aria-expanded'; then
+    ok "aria-expanded attribute wired on the lane toggle"
+else
+    bad "aria-expanded attribute missing"
+fi
+if echo "$HTML" | grep -q 'buildLaneOrder'; then
+    ok "buildLaneOrder() parent/child lane hierarchy present"
+else
+    bad "buildLaneOrder() missing — nested-lane grouping not implemented"
+fi
+if python3 -c "
+import json, sys
+segs = json.load(open('$SEGMENTS_JSON'))
+sys.exit(0 if any('parent_session_id' in s for s in segs) else 1)
+"; then
+    ok "fixtures/segments.json includes at least one parent_session_id (nested-lane demo data)"
+else
+    bad "fixtures/segments.json has no parent_session_id — nesting is untestable in fixture mode"
+fi
+
+echo ""
 echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
 
 if [[ $FAIL -gt 0 ]]; then

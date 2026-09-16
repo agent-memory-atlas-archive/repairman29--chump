@@ -225,6 +225,27 @@
       border-left: 3px solid var(--accent);
       font-weight: 700;
     }
+    .lane-label.sub-lane {
+      padding-left: 28px;
+      border-top: 1px dashed var(--border);
+    }
+
+    .lane-toggle {
+      flex-shrink: 0;
+      width: 14px;
+      height: 14px;
+      margin-right: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--text-muted);
+      user-select: none;
+      border-radius: 2px;
+    }
+    .lane-toggle:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+    .lane-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+    .lane-toggle.collapsed { transform: rotate(-90deg); }
 
     .lane-canvas-wrap {
       flex: 1;
@@ -434,6 +455,7 @@ const API = {
 // Self-session detection constants
 const SELF_SESSION_LS_KEY = 'chump-self-session-id';
 const STALE_SESSION_LS_KEY = 'chump-show-stale';
+const COLLAPSED_LANES_LS_KEY = 'chump-scrubber-collapsed-lanes';
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 min
 
 const ACTIVITY_COLOR = {
@@ -468,6 +490,16 @@ let selfSessionId = null;
 
 // Show-stale toggle: default off (hidden stale), persisted in localStorage
 let showStale = localStorage.getItem(STALE_SESSION_LS_KEY) === 'true';
+
+// Collapsed parent-lane ids (nested sub-lanes hidden), persisted in localStorage
+let collapsedLanes = new Set();
+try {
+  collapsedLanes = new Set(JSON.parse(localStorage.getItem(COLLAPSED_LANES_LS_KEY) || '[]'));
+} catch (_) { collapsedLanes = new Set(); }
+
+function saveCollapsedLanes() {
+  localStorage.setItem(COLLAPSED_LANES_LS_KEY, JSON.stringify([...collapsedLanes]));
+}
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const lanesInner   = document.getElementById('lanes-inner');
@@ -658,6 +690,74 @@ function sessionsInView() {
   return filtered;
 }
 
+// Map of session_id -> parent_session_id, derived from segments (META-623 slice).
+// A session with no parent_session_id on any of its segments is top-level.
+function sessionParentMap() {
+  const map = new Map();
+  for (const s of allSegments) {
+    if (s.parent_session_id && !map.has(s.session_id)) {
+      map.set(s.session_id, s.parent_session_id);
+    }
+  }
+  return map;
+}
+
+// Order `sessions` (already sorted by recency) into a display list where each
+// top-level lane is immediately followed by its expanded sub-lanes.
+// Returns [{ sid, depth, hasChildren, parentSid }].
+function buildLaneOrder(sessions) {
+  const parentOf = sessionParentMap();
+  const sessionSet = new Set(sessions);
+  const childrenOf = new Map(); // parentSid -> [childSid, ...] in `sessions` order
+
+  for (const sid of sessions) {
+    const p = parentOf.get(sid);
+    if (p && sessionSet.has(p)) {
+      if (!childrenOf.has(p)) childrenOf.set(p, []);
+      childrenOf.get(p).push(sid);
+    }
+  }
+
+  const order = [];
+  const placed = new Set();
+
+  for (const sid of sessions) {
+    const p = parentOf.get(sid);
+    if (p && sessionSet.has(p)) continue; // placed alongside its parent below
+    if (placed.has(sid)) continue;
+
+    const kids = childrenOf.get(sid) || [];
+    order.push({ sid, depth: 0, hasChildren: kids.length > 0 });
+    placed.add(sid);
+
+    if (!collapsedLanes.has(sid)) {
+      for (const kid of kids) {
+        if (placed.has(kid)) continue;
+        order.push({ sid: kid, depth: 1, hasChildren: false, parentSid: sid });
+        placed.add(kid);
+      }
+    }
+  }
+
+  // Fallback: a child whose parent fell out of the in-view set (e.g. stale
+  // filter) still needs to be visible — render it as top-level.
+  for (const sid of sessions) {
+    if (!placed.has(sid)) {
+      order.push({ sid, depth: 0, hasChildren: false });
+      placed.add(sid);
+    }
+  }
+
+  return order;
+}
+
+function toggleLaneCollapsed(sid) {
+  if (collapsedLanes.has(sid)) collapsedLanes.delete(sid);
+  else collapsedLanes.add(sid);
+  saveCollapsedLanes();
+  renderLanes();
+}
+
 function renderLanes() {
   lanesInner.innerHTML = '';
   const sessions = sessionsInView();
@@ -666,11 +766,13 @@ function renderLanes() {
     return;
   }
 
+  const laneOrder = buildLaneOrder(sessions);
+
   const vsMs = viewStart.getTime();
   const veMs = viewEnd.getTime();
   const windowMs = veMs - vsMs;
 
-  sessions.forEach(sid => {
+  laneOrder.forEach(({ sid, depth, hasChildren, parentSid }) => {
     const row = document.createElement('div');
     row.className = 'lane-row';
 
@@ -679,9 +781,36 @@ function renderLanes() {
     const isActive = activeSessions.has(sid);
     label.className = 'lane-label'
       + (isActive ? ' live-session' : '')
-      + (isSelf   ? ' self-session' : '');
+      + (isSelf   ? ' self-session' : '')
+      + (depth > 0 ? ' sub-lane' : '');
     label.title = sid + (isSelf ? ' (you)' : '');
-    label.textContent = sid.length > 20 ? sid.slice(0, 20) + '…' : sid;
+
+    if (hasChildren) {
+      const collapsed = collapsedLanes.has(sid);
+      const toggle = document.createElement('span');
+      toggle.className = 'lane-toggle' + (collapsed ? ' collapsed' : '');
+      toggle.textContent = '▾';
+      toggle.setAttribute('role', 'button');
+      toggle.setAttribute('tabindex', '0');
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      toggle.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' sub-lanes for ' + sid);
+      toggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        toggleLaneCollapsed(sid);
+      });
+      toggle.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleLaneCollapsed(sid);
+        }
+      });
+      label.appendChild(toggle);
+    }
+
+    const labelText = document.createElement('span');
+    labelText.textContent = sid.length > 20 ? sid.slice(0, 20) + '…' : sid;
+    label.appendChild(labelText);
     row.appendChild(label);
 
     const canvasWrap = document.createElement('div');
@@ -722,7 +851,7 @@ function renderLanes() {
     lanesInner.appendChild(row);
   });
 
-  lanesInner.style.height = `${sessions.length * LANE_H}px`;
+  lanesInner.style.height = `${laneOrder.length * LANE_H}px`;
 }
 
 // ── Timeline brush ───────────────────────────────────────────────────────────
