@@ -2085,12 +2085,42 @@ fi
 # class). Verify the integrator binary + daemon health; if it can't actually
 # drain, fail open to per-PR auto-merge (Mode B), which always lands.
 _BM_INTEGRATOR_HEALTHY_CACHE=""
+# (INFRA-6988) systemd probe, split out so it's independently testable: the
+# Linux coordinator (CJ) runs the Batched Merge Train as
+# chump-integrator.{service,timer} via install-integrator-daemon-systemd.sh,
+# not launchd. Before this, _bm_integrator_healthy only understood launchd,
+# so on the systemd coordinator it fell through to the
+# ~/.cargo/bin/chump-integrator existence check, then failed the launchctl
+# probe (launchctl doesn't exist on Linux) and ALWAYS reported unhealthy —
+# permanently fail-opening Mode A -> Mode B even after --live, defeating the
+# go-live.
+_bm_integrator_healthy_systemd() {
+    local rc=0
+    command -v systemctl >/dev/null 2>&1 || return 1
+    # (1) timer present + active (mirrors the launchd "loaded" check).
+    systemctl is-active --quiet chump-integrator.timer 2>/dev/null || rc=1
+    # (2) binary present at the unit's ExecStart path (absent unit -> empty, falls back).
+    local _bin
+    _bin="$(systemctl cat chump-integrator.service 2>/dev/null \
+        | grep -oE '/[^ ]*chump-integrator' | head -1)"
+    [[ -n "$_bin" ]] || _bin="/root/.cargo/bin/chump-integrator"
+    [[ -x "$_bin" ]] || rc=1
+    # (3) last service run didn't hard-fail (absent=never run yet=ok; non-zero=errored).
+    local _result
+    _result="$(systemctl show chump-integrator.service -p Result --value 2>/dev/null)"
+    [[ -z "$_result" || "$_result" == "success" ]] || rc=1
+    return "$rc"
+}
 _bm_integrator_healthy() {
     [[ -n "$_BM_INTEGRATOR_HEALTHY_CACHE" ]] && return "$_BM_INTEGRATOR_HEALTHY_CACHE"
     local rc=0
     # Test hook (mirrors the watchdog MOCK_* pattern): 1=healthy, 0=unhealthy.
     if [[ -n "${CHUMP_BOT_MERGE_MOCK_INTEGRATOR_HEALTH:-}" ]]; then
         [[ "$CHUMP_BOT_MERGE_MOCK_INTEGRATOR_HEALTH" == "1" ]] && rc=0 || rc=1
+        _BM_INTEGRATOR_HEALTHY_CACHE="$rc"; return "$rc"
+    fi
+    if [[ -f /etc/systemd/system/chump-integrator.service ]]; then
+        _bm_integrator_healthy_systemd; rc=$?
         _BM_INTEGRATOR_HEALTHY_CACHE="$rc"; return "$rc"
     fi
     # (1) integrator binary present at the daemon plist's ProgramArguments path?

@@ -1,6 +1,6 @@
 # Batched Merge Train — operator guide
 
-INFRA-2130 SCALE-A. Last updated: 2026-05-30.
+INFRA-2130 SCALE-A. Last updated: 2026-09-16 (INFRA-6988 — LIVE on CJ).
 
 ## What this is
 
@@ -10,8 +10,24 @@ and arms auto-merge. Instead of running CI once per gap, CI runs once for a
 batch of up to 5 gaps. At 8 min per CI cycle this shifts the theoretical
 ceiling from ~7 PRs/hr toward ~35 PRs/hr for the batched cohort.
 
-The daemon is **DRY-RUN by default**. Operator must explicitly opt in to LIVE
-mode. This document explains how.
+**Status: LIVE on CJ (the sole coordinator), as of INFRA-6988.** The go-live
+gate (trunk confirmed GREEN — coordination single-writer after RESILIENT-1309,
+9 merges/6h, no green-never-lands race) was met, and the systemd `--live`
+drop-in (`scripts/setup/install-integrator-daemon-systemd.sh --live`) is
+installed on CJ. The drop-in is reversible — see
+[Flip to LIVE mode](#flip-to-live-mode) to revert to dry-run immediately if
+PRs start sticking. Every other node stays **DRY-RUN by default**; operators
+must explicitly opt in to LIVE mode there. This document explains how.
+
+Bot-merge's Mode A/B routing (`scripts/coord/bot-merge.sh`, INFRA-2133) checks
+integrator health before routing a gap to the batched queue, and fails open to
+per-PR Mode B (INFRA-2523) if the daemon can't actually drain. That health
+probe originally only understood launchd (macOS); INFRA-6988 added a systemd
+probe (`_bm_integrator_healthy_systemd`, checks `chump-integrator.timer`
+active + unit binary executable + last `Result=success`) so the check is
+accurate on CJ's systemd install — without it, bot-merge would have
+permanently fail-opened to Mode B even after the drop-in flipped the daemon
+LIVE, silently defeating the go-live.
 
 ---
 
