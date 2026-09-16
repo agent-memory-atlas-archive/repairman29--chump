@@ -95,3 +95,5 @@ mod tests {
         assert!(!Verdict::NeedsNarrowing.blocks_build());
     }
 }
+// INFRA-6760: Verdict enum, blocks_build, and parse_verdict implemented
+// INFRA-6760: Verdict enum, blocks_build, and parse_verdict implemented
