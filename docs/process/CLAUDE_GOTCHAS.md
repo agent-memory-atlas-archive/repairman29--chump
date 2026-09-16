@@ -1559,6 +1559,37 @@ with the timing-race diagnosis — not a missing/renamed selector. No new
 repro was needed beyond what's captured above; see also INFRA-4636 (closed
 not-a-bug for the sibling "update the selector" slice).
 
+**INFRA-6338 root-cause pinpointed (2026-09-14):** live `ci-nightly.yml` run
+`34817040814` confirmed the app *does* mount in xvfb — `#app-title` locates
+in seconds, no fatal D-Bus/X11/WebKit error, only cosmetic AT-SPI/DRI3
+warnings. `<chump-chat>` only exists in the DOM while the Chat sub-tab of the
+"Now" cadence is active; since commit `f9a21b6d` (PRODUCT-132 / PR #2066,
+2026-05-15) the "now" cadence's `default_view` is `'cockpit'`, not `'chat'`
+(`web/v2/app.js:378`). `e2e-tauri/run.mjs` loads the app fresh and waits on
+`chump-chat` without ever clicking the Chat sub-tab, so the wait times out
+every run — silently broken since 2026-05-15. Fix (left as a follow-up,
+not shipped here): have `e2e-tauri/run.mjs` click `[data-view="chat"]`
+before waiting on `chump-chat`, mirroring `e2e/tests/api-and-pwa.spec.ts`'s
+Playwright pattern. Full writeup:
+`docs/audits/INFRA-6338-chump-chat-selector-investigation.md`.
+
+**INFRA-6916 re-verification (2026-09-16):** re-checked against current
+`main` two days after INFRA-6338 landed — no drift. `chump-chat` is still
+defined at `web/v2/chat.js:417`, the "now" cadence's `default_view` is still
+`'cockpit'` (`web/v2/app.js:378`), and `tauri-cowork-e2e` is still `if: false`
+(`.github/workflows/ci.yml:296`). Separately, the same selector appears in
+three Playwright specs (`e2e/tests/api-and-pwa.spec.ts`,
+`e2e/tests/daily-driver-llm.spec.ts`) that never execute on the PR-blocking
+path: the `PWA shell` / `PWA mobile viewport` / `Chat /task path` describe
+blocks are gated behind `CHUMP_E2E_INCLUDE_FLAKES=1` (INFRA-1332 quarantine,
+only set in the non-blocking `e2e-pwa-flakes` advisory job in
+`integrations.yml`), and the LLM-reply test is gated behind
+`CHUMP_E2E_LLM=1` (unset in CI). So the selector's absence from ordinary CI
+logs has two independent, already-diagnosed causes — the Tauri/Selenium
+timing race above, and these Playwright specs being intentionally skipped —
+neither a rename nor a headless-mount failure. No code change needed; this
+gap re-confirms INFRA-6338's diagnosis still holds.
+
 **Ongoing enforcement:** `scripts/ci/test-rollup-not-blocked-by-flaky-job.sh` parses
 `ci.yml` and asserts every non-required job has either `continue-on-error: true` or
 a PR-trigger exclusion. Run it after any ci.yml change.
