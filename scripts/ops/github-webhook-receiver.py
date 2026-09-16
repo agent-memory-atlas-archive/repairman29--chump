@@ -203,6 +203,22 @@ def _extract_gap_ids(pr: dict) -> list[str]:
     freeing a lease that cites a gap in passing is harmless). NOT used by
     _auto_flip_gaps_done, which needs a tighter signal — see
     _extract_gap_ids_for_closure below (CREDIBLE-268).
+
+    Examples:
+        >>> _extract_gap_ids({'title': 'Fix INFRA-1234', 'body': ''})
+        ['INFRA-1234']
+        >>> _extract_gap_ids({'title': 'Fix INFRA-1234', 'body': 'See also INFRA-5678'})
+        ['INFRA-1234']
+        >>> _extract_gap_ids({'title': 'Fix INFRA-1234', 'body': 'Closes: INFRA-5678'})
+        ['INFRA-1234', 'INFRA-5678']
+        >>> _extract_gap_ids({'title': 'Fix INFRA-1234 and INFRA-5678', 'body': ''})
+        ['INFRA-1234', 'INFRA-5678']
+        >>> _extract_gap_ids({'title': 'Fix INFRA-1234', 'body': 'Closes: INFRA-5678\\nCloses: INFRA-9012'})
+        ['INFRA-1234', 'INFRA-5678', 'INFRA-9012']
+        >>> _extract_gap_ids({'title': None, 'body': 'Closes: INFRA-1234'})
+        ['INFRA-1234']
+        >>> _extract_gap_ids({'title': 'INFRA-1234', 'body': 'closes: INFRA-5678'})
+        ['INFRA-1234', 'INFRA-5678']
     """
     import re
 
