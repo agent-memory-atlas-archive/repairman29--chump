@@ -2855,3 +2855,5 @@ CHUMP_DUTY_OFFICER_SENTINEL_TIMER
 CHUMP_HEALTH_SENTINEL_SYSTEMCTL_BIN
 # INFRA-6701: recently-merged-PR overlap advisory lookback window (default 7 days)
 CHUMP_GAP_RESERVE_MERGED_PR_WINDOW_DAYS
+# META-555: opt-in effect-verify live-check timeout (default 30s)
+CHUMP_EFFECT_VERIFY_TIMEOUT_S
