@@ -208,6 +208,7 @@ mod provider_bandit;
 mod provider_cascade;
 mod provider_probe;
 mod provider_quality;
+mod prune_ledger; // CREDIBLE-1277: prune_ledger — low-crit dormant stage pruning
 mod ratings;
 mod read_url_tool;
 mod reasoning_mode;
