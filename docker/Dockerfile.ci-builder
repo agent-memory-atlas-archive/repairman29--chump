@@ -1,4 +1,4 @@
-# Dockerfile.ci-builder — INFRA-6435 (INFRA-2287 slice)
+# Dockerfile.ci-builder — INFRA-6435 (INFRA-2287 slice) INFRA-6721
 #
 # Standalone builder image for chump-rust-builder: Rust 1.82 + sccache + mold
 # + cranelift codegen backend + cargo-nextest + jq + gh + python3.
