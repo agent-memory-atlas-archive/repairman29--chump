@@ -2610,6 +2610,16 @@ impl GapStore {
             params![session_id, gap_id],
         );
 
+        // META-555 (advisory MVP): now that the gap has flipped to done,
+        // evaluate whether its acceptance criterion was EFFECT-verified and
+        // not merely CI-green. Best-effort + NEVER blocks — a gap with no
+        // `verify:` criterion (the default) is untouched; one whose `verify:`
+        // live-check fails is flagged (note + `closed_effect_unverified`
+        // signal) so it stays visible under the SAME id instead of silently
+        // respawning as a fresh gap id (root incident: RESILIENT-1230 ->
+        // 1258 -> 1294, one unfixed symptom, three ids).
+        self.record_effect_verification(gap_id);
+
         // EFFECTIVE-478 (EFFECTIVE-364 slice): trigger the publication
         // resolver asynchronously so "ship -> told" work gets queued
         // without blocking this transition. `ship()` is called from a sync
@@ -2656,6 +2666,111 @@ impl GapStore {
         }
 
         Ok(())
+    }
+
+    /// META-555: after a gap flips to done in `ship()`, evaluate whether its
+    /// acceptance criterion was EFFECT-verified — not merely that a PR merged
+    /// green. Reads the gap's opt-in `verify:` live-check command(s) (see
+    /// `extract_verify_commands`) and runs them in the repo root. Pure of side
+    /// effects (no ambient emit, no DB write) so it is cheaply unit-testable;
+    /// `record_effect_verification` is the side-effecting wrapper ship() calls.
+    ///
+    /// ANTI-WEDGE: a gap with no `verify:` criterion returns `NoLiveCriterion`
+    /// immediately, having run nothing. This is the >99% default and the reason
+    /// this check can never stall an ordinary closure.
+    pub fn evaluate_effect_verification(&self, gap_id: &str) -> EffectVerdict {
+        let ac: String = match self.conn.query_row(
+            "SELECT CAST(acceptance_criteria AS TEXT) FROM gaps WHERE id=?1",
+            params![gap_id],
+            |r| r.get(0),
+        ) {
+            Ok(s) => s,
+            Err(_) => return EffectVerdict::NoLiveCriterion,
+        };
+        let cmds = extract_verify_commands(&ac);
+        if cmds.is_empty() {
+            return EffectVerdict::NoLiveCriterion;
+        }
+        let timeout_s: u64 = std::env::var("CHUMP_EFFECT_VERIFY_TIMEOUT_S")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+        for cmd in &cmds {
+            match run_verify_command(&self.repo_root, cmd, timeout_s) {
+                Ok(true) => continue,
+                Ok(false) => {
+                    return EffectVerdict::EffectUnverified {
+                        failed_command: cmd.clone(),
+                        detail: "verify command exited non-zero".to_string(),
+                    }
+                }
+                Err(e) => {
+                    return EffectVerdict::EffectUnverified {
+                        failed_command: cmd.clone(),
+                        detail: format!("{e:#}"),
+                    }
+                }
+            }
+        }
+        EffectVerdict::EffectVerified
+    }
+
+    /// META-555: the side-effecting wrapper `ship()` calls once a gap has flipped
+    /// to done. Best-effort ONLY — every path swallows its errors so a successful
+    /// close is NEVER turned into a failure (the hard anti-wedge rule). Outputs:
+    ///   * NoLiveCriterion  -> nothing (ordinary closures untouched).
+    ///   * EffectVerified   -> a `closed_effect_verified` ambient signal (receipt).
+    ///   * EffectUnverified -> a `closed_effect_unverified` ambient signal AND a
+    ///     queryable `[META-555 EFFECT-UNVERIFIED ...]` note appended to the gap,
+    ///     so downstream (dedup / operator / a future re-work consumer) can find
+    ///     done-but-flagged gaps via `notes LIKE '%EFFECT-UNVERIFIED%'` and
+    ///     re-work them under the SAME id rather than spawning a duplicate.
+    fn record_effect_verification(&self, gap_id: &str) {
+        let amb = self.repo_root.join(".chump-locks").join("ambient.jsonl");
+        let append = |payload: &serde_json::Value| {
+            use std::io::Write as _;
+            let _ = std::fs::create_dir_all(amb.parent().unwrap_or(&self.repo_root));
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&amb)
+            {
+                let _ = writeln!(f, "{payload}");
+            }
+        };
+        match self.evaluate_effect_verification(gap_id) {
+            EffectVerdict::NoLiveCriterion => {}
+            EffectVerdict::EffectVerified => {
+                // scanner-anchor: "kind":"closed_effect_verified" (META-555)
+                append(&serde_json::json!({
+                    "ts": unix_to_iso_full(unix_now()),
+                    "kind": "closed_effect_verified",
+                    "gap_id": gap_id,
+                }));
+            }
+            EffectVerdict::EffectUnverified {
+                failed_command,
+                detail,
+            } => {
+                let ts = unix_to_iso_full(unix_now());
+                let flag =
+                    format!("[META-555 EFFECT-UNVERIFIED @ {ts}: `{failed_command}` -> {detail}]");
+                // Queryable flag so a merged-but-ineffective fix stays visible
+                // under the same id rather than being silently clean-done.
+                let _ = self.conn.execute(
+                    "UPDATE gaps SET notes = TRIM(COALESCE(notes,'') || char(10) || ?1) WHERE id=?2",
+                    params![flag, gap_id],
+                );
+                // scanner-anchor: "kind":"closed_effect_unverified" (META-555)
+                append(&serde_json::json!({
+                    "ts": ts,
+                    "kind": "closed_effect_unverified",
+                    "gap_id": gap_id,
+                    "cmd": failed_command,
+                    "detail": detail,
+                }));
+            }
+        }
     }
 
     /// RESILIENT-119: first-class triage-close for gaps that will never ship
@@ -4772,6 +4887,101 @@ fn yaml_block_scalar(s: &str, indent: &str) -> String {
 /// empty Vec when the field is empty or unparseable. Public for COG-052 audit-ac.
 pub fn parse_json_ac_list(s: &str) -> Vec<String> {
     parse_json_string_list(s).unwrap_or_default()
+}
+
+/// META-555: Effect-verified done-bar — the opt-in `verify:` acceptance-criterion
+/// marker and its evaluation. WHY THIS EXISTS: gaps close on PR-merge (CI-green),
+/// not on outcome-changed, so a fix that merges but does not actually work is
+/// marked `done` and its still-present symptom respawns as a fresh gap id. Live
+/// proof 2026-09-15: RESILIENT-1230 -> 1258 -> 1294 = three ids for ONE unfixed
+/// sentinel false-page; PRs #4688 and #4690 both merged green and flipped their
+/// gaps to done while the symptom never stopped once. CI-green proved the code
+/// compiled + its own unit test passed; it never proved the LIVE symptom stopped.
+///
+/// This is the ADVISORY MVP wire-in of the fleet's existing effect-verification
+/// idea (scripts/ops/effect-verifier.sh RESILIENT-1109 and
+/// organ-success-verifier.sh RESILIENT-1108 verify ORGAN effects; this brings the
+/// same shape to the GAP-CLOSURE path). It NEVER blocks a close — see
+/// `GapStore::ship` / `GapStore::record_effect_verification`.
+///
+/// An acceptance-criterion list item whose trimmed text begins (case-insensitively)
+/// with the exact prefix `verify:` DECLARES a live, checkable command that proves
+/// the fix changed the real outcome (e.g.
+/// `verify: ! journalctl -u sentinel | grep -q false-page`). The command is
+/// everything after the prefix. Every other criterion — the overwhelming default —
+/// yields no command, so ship() is byte-for-byte unchanged for it. THIS is the
+/// structural anti-wedge guarantee: the opt-in class is empty until a gap author
+/// or curator deliberately writes a `verify:` line, and a `verify:` substring
+/// buried mid-sentence (or a `self-verify:` prefix) never matches.
+pub fn extract_verify_commands(acceptance_criteria: &str) -> Vec<String> {
+    const MARKER: &str = "verify:";
+    parse_json_ac_list(acceptance_criteria)
+        .iter()
+        .filter_map(|item| {
+            let t = item.trim();
+            if t.len() >= MARKER.len() && t[..MARKER.len()].eq_ignore_ascii_case(MARKER) {
+                let cmd = t[MARKER.len()..].trim();
+                if cmd.is_empty() {
+                    None
+                } else {
+                    Some(cmd.to_string())
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// META-555: the verdict of the advisory effect check run at gap-close time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EffectVerdict {
+    /// The gap carries no `verify:` live-check criterion (the default for nearly
+    /// every gap). ship() does nothing extra — no signal, no annotation. This is
+    /// the case that guarantees ordinary closures are never touched.
+    NoLiveCriterion,
+    /// The gap carried one or more `verify:` commands and they all exited 0 — the
+    /// merged fix demonstrably changed the live outcome. Clean-done, confirmed.
+    EffectVerified,
+    /// A `verify:` command failed (non-zero, could not spawn, or timed out). The
+    /// close STILL succeeds (advisory MVP — never blocks); the gap is annotated
+    /// and a `closed_effect_unverified` signal is emitted so a merged-but-
+    /// ineffective fix stays visibly FLAGGED under the SAME id instead of
+    /// silently clean-done + respawning as a new id.
+    EffectUnverified {
+        failed_command: String,
+        detail: String,
+    },
+}
+
+/// META-555: run one `verify:` live-check under `sh -c` in the repo root, bounded
+/// by `timeout_s`. Ok(true) => exited 0; Ok(false) => exited non-zero; Err =>
+/// could not spawn or timed out. The caller treats every non-Ok(true) as
+/// UNVERIFIED (we could not prove the effect), never as verified.
+fn run_verify_command(repo_root: &std::path::Path, cmd: &str, timeout_s: u64) -> Result<bool> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(repo_root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("META-555: spawn verify command failed: {cmd}"))?;
+    let deadline = Instant::now() + Duration::from_secs(timeout_s.max(1));
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status.success());
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("META-555: verify command timed out after {timeout_s}s: {cmd}");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// INFRA-1411: load a single gap from its YAML file as a fallback when
@@ -9042,6 +9252,120 @@ meta:
         assert!(parse_json_ac_list("not json").is_empty());
     }
 
+    // ── META-555: effect-verified done-bar (advisory MVP) ─────────────────────
+
+    #[test]
+    fn meta555_extract_verify_commands_default_is_empty() {
+        // Natural-language ACs (the overwhelming default) yield NO command, so
+        // ship() is untouched for them — the structural anti-wedge guarantee.
+        assert!(extract_verify_commands(
+            r#"["cargo fmt passes","script exists and is executable"]"#
+        )
+        .is_empty());
+        assert!(extract_verify_commands("").is_empty());
+        assert!(extract_verify_commands("not json").is_empty());
+        // A mid-sentence or differently-prefixed "verify:" must NOT match — only
+        // an exact `verify:` prefix on the trimmed item counts.
+        assert!(extract_verify_commands(
+            r#"["This will self-verify: nothing","please verify: it by hand"]"#
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn meta555_extract_verify_commands_opt_in_marker() {
+        let cmds = extract_verify_commands(
+            r#"["some prose","verify: test -f Cargo.toml","VERIFY:   echo hi  "]"#,
+        );
+        assert_eq!(
+            cmds,
+            vec!["test -f Cargo.toml".to_string(), "echo hi".to_string()]
+        );
+    }
+
+    #[test]
+    fn meta555_no_criterion_is_noop() {
+        let (store, _dir) = test_store();
+        let id = store.reserve("INFRA", "plain-gap", "P2", "s").unwrap();
+        // No verify: marker -> NoLiveCriterion, nothing run.
+        assert_eq!(
+            store.evaluate_effect_verification(&id),
+            EffectVerdict::NoLiveCriterion
+        );
+    }
+
+    #[test]
+    fn meta555_passing_verify_is_effect_verified() {
+        let (store, _dir) = test_store();
+        let id = store.reserve("INFRA", "verified-gap", "P2", "s").unwrap();
+        store
+            .set_fields(
+                &id,
+                GapFieldUpdate {
+                    acceptance_criteria: Some(r#"["verify: true"]"#.to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            store.evaluate_effect_verification(&id),
+            EffectVerdict::EffectVerified
+        );
+    }
+
+    #[test]
+    fn meta555_failing_verify_flags_gap_but_still_ships() {
+        // The core scenario: a fix that "merges" but does NOT change the live
+        // outcome. Its verify: check fails -> the gap ships (done) but is left
+        // FLAGGED (note annotation) rather than clean-done, so it can be
+        // re-worked under the same id instead of spawning a duplicate.
+        let (store, _dir) = test_store();
+        let id = store
+            .reserve("INFRA", "ineffective-fix", "P2", "s")
+            .unwrap();
+        store
+            .set_fields(
+                &id,
+                GapFieldUpdate {
+                    acceptance_criteria: Some(r#"["verify: false"]"#.to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // Direct verdict.
+        match store.evaluate_effect_verification(&id) {
+            EffectVerdict::EffectUnverified { failed_command, .. } => {
+                assert_eq!(failed_command, "false");
+            }
+            other => panic!("expected EffectUnverified, got {other:?}"),
+        }
+        // End-to-end through ship(): closure SUCCEEDS (never blocked) ...
+        store.ship(&id, "s", None).unwrap();
+        let g = store.get(&id).unwrap().expect("gap exists");
+        assert_eq!(g.status, "done", "advisory MVP must NOT block the close");
+        // ... but the gap is visibly FLAGGED, not clean-done.
+        assert!(
+            g.notes.contains("EFFECT-UNVERIFIED"),
+            "expected effect-unverified flag in notes, got: {:?}",
+            g.notes
+        );
+    }
+
+    #[test]
+    fn meta555_ordinary_ship_is_not_flagged() {
+        // Anti-wedge end-to-end: a normal gap with no verify: criterion ships
+        // exactly as before — done, and NOT flagged.
+        let (store, _dir) = test_store();
+        let id = store.reserve("INFRA", "ordinary", "P2", "s").unwrap();
+        store.ship(&id, "s", None).unwrap();
+        let g = store.get(&id).unwrap().expect("gap exists");
+        assert_eq!(g.status, "done");
+        assert!(
+            !g.notes.contains("EFFECT-UNVERIFIED"),
+            "ordinary ship must not be flagged"
+        );
+    }
+
     /// Empty-input guard: nothing to preserve, nothing returned.
     #[test]
     fn merge_preserve_unknown_fields_noop_when_existing_is_pure() {
@@ -10289,5 +10613,49 @@ mod waiting_operator_tests {
             .suspend_waiting(&id, "bogus_kind", "q?", None)
             .unwrap_err();
         assert!(err.to_string().contains("kind must be"));
+    }
+}
+
+#[cfg(test)]
+mod meta555_effect_verify_tests {
+    use crate::extract_verify_commands;
+
+    // ANTI-WEDGE (META-555): an acceptance-criteria list with no `verify:` line
+    // yields no commands, so evaluate_effect_verification returns NoLiveCriterion
+    // and ship() is left untouched — ordinary gap closures can never block.
+    #[test]
+    fn no_verify_line_yields_no_commands() {
+        assert!(extract_verify_commands("[]").is_empty());
+        assert!(extract_verify_commands(r#"["do the thing","and another"]"#).is_empty());
+        assert!(extract_verify_commands("not valid json").is_empty());
+    }
+
+    #[test]
+    fn extracts_single_verify_command() {
+        assert_eq!(
+            extract_verify_commands(r#"["verify: true"]"#),
+            vec!["true".to_string()]
+        );
+    }
+
+    #[test]
+    fn verify_prefix_case_insensitive_and_trimmed() {
+        assert_eq!(
+            extract_verify_commands(r#"["VERIFY:   mycmd --flag  "]"#),
+            vec!["mycmd --flag".to_string()]
+        );
+    }
+
+    #[test]
+    fn only_verify_items_match_when_mixed_with_plain_ac() {
+        assert_eq!(
+            extract_verify_commands(r#"["set up the thing","verify: check --live","more prose"]"#),
+            vec!["check --live".to_string()]
+        );
+    }
+
+    #[test]
+    fn empty_verify_command_is_ignored() {
+        assert!(extract_verify_commands(r#"["verify:   "]"#).is_empty());
     }
 }
