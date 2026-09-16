@@ -29,5 +29,6 @@
   },
   "role_pin": "brain",
   "role_pin_reason": "always-on coordination node (topology decision 2026-09-07)",
-  "role_assigned": "brain"
+  "role_assigned": "brain",
+  "decommissioned": true
 }
