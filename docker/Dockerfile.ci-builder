@@ -41,5 +41,5 @@ RUN rustc --version && cargo --version \
     && mold --version
 
 LABEL org.opencontainers.image.source="https://github.com/repairman29/chump"
-LABEL org.opencontainers.image.description="Chump Rust builder image (Rust 1.82 + sccache + mold + cranelift + cargo-nextest + jq + gh + python3)"
+LABEL org.opencontainers.image.description="Chump Rust builder image (Rust 1.82 + sccache + mold + cranelift + cargo-nextest + jq + gh + python3) - INFRA-6721"
 LABEL org.opencontainers.image.licenses="MIT"
