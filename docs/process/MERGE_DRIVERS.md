@@ -76,26 +76,28 @@ git merge test-union-b   # expect: clean merge, both entry-a and entry-b present
 
 ### Files configured for `merge=union`
 
-| File | Reason (gap ref) |
-|---|---|
-| `docs/observability/EVENT_REGISTRY.yaml` | INFRA-949 |
-| `scripts/ci/env-vars-internal.txt` | INFRA-949 |
-| `web/v2/index.html` | INFRA-1201 |
-| `scripts/ci/event-registry-reserved.txt` | RESILIENT-344 |
-| `scripts/ci/ambient-emit-allowlist.txt` | RESILIENT-344 |
-| `scripts/ci/bypass-env-var-allowlist.txt` | RESILIENT-344 |
-| `scripts/ci/coord-shell-allowlist.txt` | RESILIENT-344 |
-| `scripts/ci/cross-pr-allowlist.txt` | RESILIENT-344 |
-| `scripts/ci/legacy-bypass-trailer-allowlist.txt` | RESILIENT-344 |
-| `scripts/ci/raw-gh-allowlist.txt` | RESILIENT-344 |
-| `scripts/ci/research-integrity-phantom-allowlist.txt` | RESILIENT-344 |
-| `scripts/ci/shell-test-allowlist.txt` | RESILIENT-344 |
-| `scripts/ops/organ-manifest.txt` | INFRA-1688 |
-| `scripts/setup/optional-installers-allowlist.txt` | INFRA-1688 |
-| `scripts/ci/preflight-ci-parity-exceptions.txt` | INFRA-1688 |
+| File | Why it needs union | Gap ref |
+|---|---|---|
+| `docs/observability/EVENT_REGISTRY.yaml` | Many PRs each register one new ambient event kind; two additions on adjacent lines otherwise conflict textually with no semantic overlap. | INFRA-949 |
+| `scripts/ci/env-vars-internal.txt` | Same append-one-line-per-PR pattern for tier-2/3 env var names. | INFRA-949 |
+| `web/v2/index.html` | Append-only PWA hot file — each new feature adds a `<script src="X.js">` entry and/or a custom-element placement; concurrent feature PRs hit the same blocks. | INFRA-1201 |
+| `scripts/ci/event-registry-reserved.txt` | Flat allowlist, one reserved-id per line, appended by many PRs concurrently. | RESILIENT-344 |
+| `scripts/ci/ambient-emit-allowlist.txt` | Flat allowlist, one entry per line, same append pattern. | RESILIENT-344 |
+| `scripts/ci/bypass-env-var-allowlist.txt` | Flat allowlist, one entry per line, same append pattern. | RESILIENT-344 |
+| `scripts/ci/coord-shell-allowlist.txt` | Flat allowlist, one entry per line, same append pattern. | RESILIENT-344 |
+| `scripts/ci/cross-pr-allowlist.txt` | Flat allowlist, one entry per line, same append pattern. | RESILIENT-344 |
+| `scripts/ci/legacy-bypass-trailer-allowlist.txt` | Flat allowlist, one entry per line, same append pattern. | RESILIENT-344 |
+| `scripts/ci/raw-gh-allowlist.txt` | Flat allowlist, one entry per line, same append pattern. | RESILIENT-344 |
+| `scripts/ci/research-integrity-phantom-allowlist.txt` | Flat allowlist, one entry per line, same append pattern. | RESILIENT-344 |
+| `scripts/ci/shell-test-allowlist.txt` | Flat allowlist, one entry per line, same append pattern. | RESILIENT-344 |
+| `scripts/ops/organ-manifest.txt` | Append-only registry; textual conflicts here were reaping green, already-reviewed PRs on rebase. | INFRA-1688 |
+| `scripts/setup/optional-installers-allowlist.txt` | Same append-only, reap-on-rebase pattern as `organ-manifest.txt`. | INFRA-1688 |
+| `scripts/ci/preflight-ci-parity-exceptions.txt` | Same append-only, reap-on-rebase pattern as `organ-manifest.txt`. | INFRA-1688 |
 
 This list is derived from `.gitattributes` — that file remains the source of
 truth; re-grep it (`grep 'merge=union' .gitattributes`) if this table drifts.
+The "why" column summarizes the rationale recorded in `.gitattributes`
+comments at the time each entry was added.
 
 ## How the append-only driver works
 
