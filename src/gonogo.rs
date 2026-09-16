@@ -1,6 +1,8 @@
 //! INFRA-3481/INFRA-5340: honest go/no-go gate on a user's vision
 //! (evidence-before-build).
 //!
+//! INFRA-6760: Create src/gonogo.rs with Verdict enum, blocks_build, and parse_verdict implementation (INFRA-3481 slice)
+//!
 //! `parse_verdict` is cloned from `pr_ac_coverage::parse_judge_verdicts`'s
 //! keyword-anywhere-on-the-line parsing shape: robust to case and extra
 //! prose from the LLM, format-agnostic ("GO -", "1. GO -", "VERDICT: GO -").
