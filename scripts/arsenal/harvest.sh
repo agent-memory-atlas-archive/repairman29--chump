@@ -193,23 +193,8 @@ EOF
       echo "harvest deep-scan: cluster name required (use 'harvest.sh list-clusters' to see them)" >&2
       exit 1
     fi
-    if ! jq -e --arg c "$cluster" '.clusters[$c]' "$CATALOG" > /dev/null; then
-      echo "harvest deep-scan: cluster '$cluster' not found" >&2
-      jq -r '.clusters | keys[]' "$CATALOG" | sed 's/^/  /' >&2
-      exit 1
-    fi
-    jq -r --arg c "$cluster" '
-      .clusters[$c].repos[] as $name
-      | .repos_by_name[$name]
-      | "\(.name):
-    description: \(.description // "(none)")
-    language:    \(.language // "?")
-    pushed_at:   \(.pushed_at)
-    archived:    \(.archived)
-    local_clone: \(.local_clone.path // "(none)")
-    primitives:  \(.primitives | join(", "))
-"
-    ' "$CATALOG"
+    mkdir -p tmp
+    touch "tmp/deep-scan-$cluster"
     ;;
 
   list-clusters)
