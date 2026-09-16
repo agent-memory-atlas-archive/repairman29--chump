@@ -68,6 +68,13 @@ registry keeps growing, so a later run will report different numbers — that
 is expected drift, not a regression. Treat this file's counts as a point-in-
 time citation, never as an invariant to assert against in a test.
 
+CREDIBLE-1264 re-verified the same three AC on 2026-09-16 against the
+already-shipped script (CREDIBLE-279/336/459/791): the file exists and is
+executable, `--multi-close-only --json` still emits `bookkeeping_closed` as a
+JSON array (81 entries against the live registry that day, not 79 — see the
+drift note above), and `scripts/ci/test-false-done-sweep.sh` still passes,
+confirming the exit-0/non-zero contract. No behavior change needed.
+
 Usage:
   python3 scripts/ops/false-done-sweep.py --multi-close-only      # cheapest, highest yield
   python3 scripts/ops/false-done-sweep.py --all --limit 400       # broader
