@@ -2294,7 +2294,7 @@ pub fn check_paths_overlap_open_prs(
             "--state",
             "open",
             "--json",
-            "number,title,files",
+            "number,title,files,headRefName",
             "--limit",
             "50",
         ])
