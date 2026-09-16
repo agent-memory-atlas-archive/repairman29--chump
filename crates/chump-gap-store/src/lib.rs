@@ -4925,6 +4925,69 @@ pub fn shipped_gap_dedupe_candidates(
     scored
 }
 
+/// INFRA-6701: recently-merged-PR overlap advisory candidates.
+///
+/// Reads the local GitHub PR cache (`.chump/github_cache.db`, populated by the
+/// webhook / REST cache path) for PRs merged within the last `window_days` and
+/// returns those whose title Jaccard-overlaps `proposed_title` at or above
+/// `threshold`. This is the fold the reserve-time dedupe layer was missing: the
+/// state.db + Almanac checks catch duplicate *gaps*, and the FLEET-029 glance
+/// catches overlap with *open* PRs, but nothing folded a new gap against PRs
+/// that recently MERGED — the exact shape of the "already shipped, just closing
+/// the gap" bookkeeping-PR class (INFRA-6701 convergence audit).
+///
+/// Advisory ONLY. Returns `(pr_number, pr_title, merged_at, score)` sorted
+/// descending by score. Best-effort: returns an empty vec on a missing or
+/// unreadable cache so the caller surfaces a signal rather than blocking a
+/// legitimate reserve — gaps are truth; we surface duplicates, never throttle.
+pub fn recently_merged_pr_dedupe_candidates(
+    repo_root: &std::path::Path,
+    proposed_title: &str,
+    window_days: i64,
+    threshold: f64,
+) -> Vec<(i64, String, String, f64)> {
+    let db = repo_root.join(".chump").join("github_cache.db");
+    if !db.exists() {
+        return Vec::new();
+    }
+    let conn = match rusqlite::Connection::open_with_flags(
+        &db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let mut stmt = match conn.prepare(
+        "SELECT number, title, merged_at FROM pr_state \
+         WHERE merged_at IS NOT NULL AND title IS NOT NULL \
+           AND julianday('now') - julianday(merged_at) <= ?1",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    let rows = stmt.query_map([window_days], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+        ))
+    });
+    let rows = match rows {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut scored: Vec<(i64, String, String, f64)> = rows
+        .filter_map(|r| r.ok())
+        .map(|(num, title, merged_at)| {
+            let score = GapStore::title_jaccard(proposed_title, &title);
+            (num, title, merged_at, score)
+        })
+        .filter(|(_, _, _, score)| *score >= threshold)
+        .collect();
+    scored.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
+    scored
+}
+
 /// INFRA-1411: returns true when `ac_string` either is empty OR every
 /// item is a TODO/TBD/placeholder string. Used by `chump gap show` to
 /// trigger the YAML fallback even when state.db has a row.
@@ -9161,6 +9224,81 @@ meta:
     // (found via full-text search over docs/gaps/*.yaml) get loaded straight
     // from YAML and scored, so long-shipped gaps that fell out of state.db's
     // closed-lookback window still surface as near-matches.
+    // ── INFRA-6701: recently-merged-PR overlap advisory ──────────────
+    fn seed_pr_cache(dir: &std::path::Path) -> std::path::PathBuf {
+        let chump = dir.join(".chump");
+        std::fs::create_dir_all(&chump).unwrap();
+        let db = chump.join("github_cache.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE pr_state (number INTEGER PRIMARY KEY, title TEXT, merged_at TEXT);",
+        )
+        .unwrap();
+        db
+    }
+
+    #[test]
+    fn recently_merged_pr_flags_in_window_near_dup_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = seed_pr_cache(tmp.path());
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        // In-window merged near-dup — MUST be flagged.
+        conn.execute(
+            "INSERT INTO pr_state (number, title, merged_at) VALUES (?1, ?2, datetime('now'))",
+            rusqlite::params![4242_i64, "duty-officer escalation page fallback"],
+        )
+        .unwrap();
+        // Unrelated merged PR — MUST NOT match.
+        conn.execute(
+            "INSERT INTO pr_state (number, title, merged_at) VALUES (?1, ?2, datetime('now'))",
+            rusqlite::params![4243_i64, "kroger cart pricing edge function"],
+        )
+        .unwrap();
+        // Near-dup but merged 90 days ago — outside the 7-day window.
+        conn.execute(
+            "INSERT INTO pr_state (number, title, merged_at) VALUES (?1, ?2, datetime('now','-90 days'))",
+            rusqlite::params![4244_i64, "duty-officer escalation page fallback"],
+        )
+        .unwrap();
+        // Still-open PR (merged_at NULL) — this fold is merged-only.
+        conn.execute(
+            "INSERT INTO pr_state (number, title, merged_at) VALUES (?1, ?2, NULL)",
+            rusqlite::params![4245_i64, "duty-officer escalation page fallback"],
+        )
+        .unwrap();
+
+        let hits = recently_merged_pr_dedupe_candidates(
+            tmp.path(),
+            "duty-officer escalation page fallback",
+            7,
+            0.65,
+        );
+        assert_eq!(
+            hits.len(),
+            1,
+            "expected exactly one in-window merged near-dup, got {hits:?}"
+        );
+        assert_eq!(hits[0].0, 4242, "wrong PR flagged: {hits:?}");
+        assert!(hits[0].3 >= 0.65, "score below threshold: {hits:?}");
+    }
+
+    #[test]
+    fn recently_merged_pr_degrades_to_empty_when_cache_absent() {
+        // No .chump/github_cache.db → advisory helper returns empty and never
+        // errors, so a missing cache can never block a legitimate reserve.
+        let tmp = tempfile::tempdir().unwrap();
+        let hits = recently_merged_pr_dedupe_candidates(
+            tmp.path(),
+            "some brand new gap title with no dup",
+            7,
+            0.65,
+        );
+        assert!(
+            hits.is_empty(),
+            "expected empty on absent cache, got {hits:?}"
+        );
+    }
+
     #[test]
     fn shipped_gap_dedupe_candidates_surfaces_old_shipped_gap() {
         let dir = tempfile::tempdir().unwrap();

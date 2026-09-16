@@ -11050,6 +11050,73 @@ async fn main() -> Result<()> {
                     }
                 }
 
+                // ── INFRA-6701: recently-merged-PR overlap advisory ──────────────────
+                // The state.db (INFRA-1149) and Almanac (ZERO-WASTE-045) checks above
+                // catch duplicate *gaps*; the FLEET-029 ambient glance catches overlap
+                // with *open* PRs. None of them folds a new gap against PRs that
+                // recently MERGED — the exact shape of the "already shipped, just
+                // closing the gap" bookkeeping-PR class (INFRA-6701 convergence audit:
+                // 12 such PRs in 6 days; gap store growing ~18:1 vs drain). Advisory
+                // ONLY: it links the likely-duplicate merged PR(s) and records them in
+                // the new gap's notes so a human/curator can supersede or dismiss. It
+                // NEVER exits — gaps are truth; we surface duplicates, we do not
+                // throttle generation.
+                if similarity_enabled {
+                    let window_days: i64 = std::env::var("CHUMP_GAP_RESERVE_MERGED_PR_WINDOW_DAYS")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(7);
+                    let merged_pr_warn_threshold: f64 =
+                        std::env::var("CHUMP_GAP_RESERVE_SIMILARITY_WARN")
+                            .ok()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0.65);
+                    let pr_hits = gap_store::recently_merged_pr_dedupe_candidates(
+                        &worktree_root,
+                        &title,
+                        window_days,
+                        merged_pr_warn_threshold,
+                    );
+                    if !pr_hits.is_empty() {
+                        let ambient_path = worktree_root.join(".chump-locks").join("ambient.jsonl");
+                        let ts = unix_ts();
+                        eprintln!();
+                        eprintln!(
+                            "[reserve] INFRA-6701: recently-merged-PR overlap — proposed: \"{}\"",
+                            title
+                        );
+                        for (num, ptitle, merged_at, score) in &pr_hits {
+                            eprintln!(
+                                "  {:.2}  PR #{} (merged {}) — \"{}\"",
+                                score, num, merged_at, ptitle
+                            );
+                            dedupe_considered.push(format!(
+                                "merged-PR near-match #{num} (score {score:.2}, merged {merged_at})"
+                            ));
+                            let safe_title = title.replace(['"', '\\'], "");
+                            let safe_ptitle = ptitle.replace(['"', '\\'], "");
+                            let safe_merged = merged_at.replace(['"', '\\'], "");
+                            // scanner-anchor: "kind":"gap_reserve_merged_pr_overlap"
+                            let _ = std::fs::OpenOptions::new()
+                                .append(true)
+                                .create(true)
+                                .open(&ambient_path)
+                                .and_then(|mut f| {
+                                    use std::io::Write;
+                                    writeln!(
+                                        f,
+                                        r#"{{"ts":"{ts}","kind":"gap_reserve_merged_pr_overlap","proposed_title":"{safe_title}","match_pr":{num},"match_title":"{safe_ptitle}","match_score":{score:.3},"merged_at":"{safe_merged}"}}"#
+                                    )
+                                });
+                        }
+                        eprintln!(
+                            "[reserve] advisory only — proceeding. Check whether the above \
+                             already ships this work before claiming; pass --force-duplicate to \
+                             record an explicit override."
+                        );
+                    }
+                }
+
                 // ── INFRA-1152: pillar-balance guard ─────────────────────────────────
                 // Parse proposed pillar from title prefix, then check current
                 // open-pickable distribution and warn/block overweighted pillars.
