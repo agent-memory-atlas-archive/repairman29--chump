@@ -353,9 +353,22 @@ CHANGED_UNITS=()
 # what left CJ's merged organ units DARK (organ-reconcile/organ-watchdog both
 # log "needs root ... skipping" every cycle). Keep this narrow set root; paths
 # are still /root-rewritten so they find the repo on an owned node.
+#
+# RESILIENT-1327: chump-organ-reconcile belongs in this set too.
+# organ-reconcile.sh's own guard (`id -u != 0` -> `organ_reconcile_skipped
+# reason=not_root`) proves it needs root to write /etc/systemd/system, exactly
+# like organ-deploy — but it was missing from this exemption, so the generic
+# host-rewrite demoted it to the run-user on Oracle nodes cuphead/mugman
+# (User=ubuntu). The unit ran every cycle but silently no-op'd instead of
+# converging systemd state to the manifest — a latent enforcement hole masked
+# only because RESILIENT-1309 made the role-aware health-sentinel the actual
+# resurrector on muscle nodes. Fix it at the source so reconcile enforces the
+# manifest again wherever it's deployed.
 declare -A _KEEP_ROOT_ORGANS=(
   [chump-organ-deploy.service]=1
   [chump-organ-deploy.timer]=1
+  [chump-organ-reconcile.service]=1
+  [chump-organ-reconcile.timer]=1
 )
 for unit in "${SYSTEM_UNITS[@]}"; do
   src="$REPO_ROOT/scripts/dispatch/$unit"
