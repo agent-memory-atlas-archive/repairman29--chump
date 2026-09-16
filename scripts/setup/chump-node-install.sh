@@ -1519,12 +1519,12 @@ self_test() {
   local substrate_script="$NODE_DIR/repo/scripts/setup/install-gap-substrate.sh"
   [ -f "$substrate_script" ] || substrate_script="$(dirname "$0")/install-gap-substrate.sh"
   if [ -x "$substrate_script" ]; then
-    if [ -f "$STATE_DIR/.substrate.pending" ]; then
-      info SUBSTRATE "still provisioning in background (non-fatal) — re-run --self-test-only shortly"
-    elif command -v pgrep >/dev/null 2>&1 && pgrep -f postgrest >/dev/null 2>&1; then
+    if command -v pgrep >/dev/null 2>&1 && pgrep -f postgrest >/dev/null 2>&1; then
       ok "substrate: postgrest running"
-    else no "substrate: postgrest not running (re-run: bash $substrate_script)"; fail=1; fi
-  fi
+    else
+      no "substrate: postgrest not running (re-run: bash $substrate_script)"; fail=1; fi
+  else
+    no "substrate: install-gap-substrate.sh missing or not executable"; fail=1; fi
   local eyes_script="$NODE_DIR/repo/scripts/setup/install-almanac-organ.sh"
   [ -f "$eyes_script" ] || eyes_script="$(dirname "$0")/install-almanac-organ.sh"
   if [ -x "$eyes_script" ]; then
