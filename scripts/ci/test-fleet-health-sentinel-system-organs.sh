@@ -130,5 +130,27 @@ ck "absent organ produced no heal and no race page" \
    '! grep -q fleet_health_race_signature "$SINK" && ! grep -q fleet_health_self_healed "$WORK/ambient.jsonl"'
 
 echo
+# ── Scenario 5: muscle (non-coordination) node → coordination organs NOT re-armed ──
+# RESILIENT-1309 / RESILIENT-1326: on a non-coordination node the sentinel must
+# strip the coordination organs from its heal set even when they are DEAD and
+# even when handed to it via CHUMP_SENTINEL_SYSTEM_ORGANS. The node-local
+# organ-reconcile is still healed. Role comes from CHUMP_STATE_DIR/node.env.
+echo "[5] muscle node: dead board-cycle is NOT resurrected; reconcile still healed"
+: > "$WORK/ambient.jsonl"; SINK="$WORK/sink5"; : > "$SINK"
+mkdir -p "$WORK/chump-state"
+printf 'export CHUMP_NODE_ROLE=muscle\n' > "$WORK/chump-state/node.env"
+set_unit chump-organ-reconcile.timer 1 active "" infinity      # DEAD, node-local → heal
+set_unit chump-board-cycle.timer     1 active "" infinity      # DEAD, coordination → SKIP on muscle
+set_unit chump-armed-pr-rebaser.timer 1 inactive "" ""
+set_unit chump-pr-auto-rebase.timer   1 inactive "" ""
+run_pass "$SINK"
+ck "muscle: node-local reconcile still healed" \
+   'grep -q "\"kind\":\"fleet_health_self_healed\".*chump-organ-reconcile.timer" "$WORK/ambient.jsonl"'
+ck "muscle: coordination board-cycle NOT healed (stripped by role)" \
+   '! grep -q "chump-board-cycle.timer" "$WORK/ambient.jsonl"'
+ck "muscle: dead board-cycle left dead (not re-armed)" \
+   '[[ "$(cat "$STATE/chump-board-cycle.timer.mono")" == infinity ]]'
+rm -f "$WORK/chump-state/node.env"
+
 if [[ $fails -eq 0 ]]; then echo "PASS: all system-organ + race sentinel assertions"; exit 0
 else echo "FAIL: $fails assertion(s)"; exit 1; fi

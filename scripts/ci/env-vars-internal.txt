@@ -2857,3 +2857,14 @@ CHUMP_HEALTH_SENTINEL_SYSTEMCTL_BIN
 CHUMP_GAP_RESERVE_MERGED_PR_WINDOW_DAYS
 # META-555: opt-in effect-verify live-check timeout (default 30s)
 CHUMP_EFFECT_VERIFY_TIMEOUT_S
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_SENTINEL_COORDINATION_ORGANS
+# detected in: (standard input)
+CHUMP_SENTINEL_SUDO
+# detected in: (standard input)
+CHUMP_SENTINEL_SYSTEM_ORGANS
+# detected in: (standard input)
+CHUMP_SENTINEL_WATCHED_HEALERS

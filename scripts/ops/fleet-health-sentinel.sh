@@ -139,6 +139,42 @@ SYSTEMCTL_SYS="${CHUMP_SENTINEL_SYSTEMCTL_SYS:-systemctl}"
 # heal with a fake systemctl and no privilege prefix), not fall back to sudo.
 SUDO="${CHUMP_SENTINEL_SUDO-sudo -n}"
 
+# ── RESILIENT-1309 / RESILIENT-1326: coordination organs run ONLY on the ──────
+# coordination home (CJ). The self-drive / merge / paging organs (board-cycle,
+# nba-dispatch, duty-officer, merge-serializer, next-best-action) must be active
+# on exactly ONE node, co-located with the live canonical state.db. On a
+# NON-coordination node the sentinel USED to re-arm them (via the SYSTEM_ORGANS
+# default AND a host CHUMP_SENTINEL_WATCHED_HEALERS override), resurrecting the
+# retired organs within ~2min and driving the split-brain paging + cross-node
+# merge race. Node role lives in ~/.chump/node.env (CHUMP_NODE_ROLE,
+# RESILIENT-1083) — the SAME lever organ-reconcile self-scopes on, and it
+# survives the deploy mirror's `git reset --hard`. On any non-coordination role
+# we STRIP the coordination organs from BOTH watch/heal sets regardless of
+# source (built-in default OR env override), so a lingering host drop-in cannot
+# re-introduce them. Back-compat: role brain / all / EMPTY = coordination home →
+# lists unchanged (CJ and any pre-role node keep coordinating).
+_SENTINEL_NODE_ENV="${CHUMP_STATE_DIR:-$HOME/.chump}/node.env"
+# shellcheck disable=SC1090
+[[ -f "$_SENTINEL_NODE_ENV" ]] && . "$_SENTINEL_NODE_ENV" 2>/dev/null || true
+COORDINATION_ORGANS="${CHUMP_SENTINEL_COORDINATION_ORGANS:-chump-board-cycle.timer chump-nba-dispatch.timer chump-duty-officer.timer chump-merge-serializer.timer chump-next-best-action.timer}"
+_sentinel_is_coordination_role() {  # brain / all / empty = coordination home
+  case "${1:-}" in brain|all|"") return 0 ;; *) return 1 ;; esac
+}
+_sentinel_strip_coordination() {  # $1 = space-separated unit list -> filtered list
+  local _in="$1" _out="" _tok _c _skip
+  for _tok in $_in; do
+    _skip=0
+    for _c in $COORDINATION_ORGANS; do [[ "$_tok" == "$_c" ]] && { _skip=1; break; }; done
+    [[ $_skip -eq 0 ]] && _out="$_out $_tok"
+  done
+  printf "%s" "${_out# }"
+}
+if ! _sentinel_is_coordination_role "${CHUMP_NODE_ROLE:-}"; then
+  SYSTEM_ORGANS="$(_sentinel_strip_coordination "$SYSTEM_ORGANS")"
+  WATCHED_HEALERS="$(_sentinel_strip_coordination "$WATCHED_HEALERS")"
+  echo "[fleet-health-sentinel] RESILIENT-1309: node role=${CHUMP_NODE_ROLE:-<empty>} (non-coordination) — coordination organs excluded from watch/heal sets" >&2
+fi
+
 MODE="local"
 DRY=0
 LOOP=0
