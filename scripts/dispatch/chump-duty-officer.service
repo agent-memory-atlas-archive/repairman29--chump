@@ -12,8 +12,11 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
+User=jeff
 Environment=HOME=/root
 Environment=CHUMP_REPO_ROOT=/root/Projects/chump
 Environment=CHUMP_DUTY_OFFICER_EXECUTE=1
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
 ExecStart=/bin/bash -lc "set -a; source /root/.chump/providers.env 2>/dev/null; set +a; cd /root/Projects/chump; exec bash scripts/coord/duty-officer-loop.sh tick"
 TimeoutStartSec=300
