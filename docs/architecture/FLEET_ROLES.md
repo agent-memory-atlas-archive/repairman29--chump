@@ -1,12 +1,71 @@
 ---
 doc_tag: canonical
-owner_gap:
-last_audited: 2026-04-25
+owner_gap: RESILIENT-1309
+last_audited: 2026-09-16
 ---
 
 # Fleet Roles — Chump + Mabel + Scout
 
 Summary of the Fleet Roles proposal: turning the agent fleet from "agents that build agents" into a **personal operations team** that does real work. Full proposal text: [PROPOSAL_FLEET_ROLES.md](PROPOSAL_FLEET_ROLES.md).
+
+---
+
+## Coordination home — single-writer (authoritative, current fleet, 2026-09-16)
+
+> This section is authoritative for **which node coordinates the fleet** and
+> supersedes the older Mac/Pixel/iPhone ("Chump/Mabel/Scout") proposal below,
+> which predates the move onto owned iron (helsinki decommissioned 2026-08-17).
+
+**CJ (`closetjunky`) is the SINGLE coordination home.** It is co-located with
+the LIVE canonical gap store (`~/chump/.chump/state.db`) and the worker, so the
+node that decides merges and pages reads the same state the fleet actually
+writes. The coordination organs run **only on CJ**:
+
+| Organ (systemd unit) | Manifest role | Runs on |
+|---|---|---|
+| `chump-merge-serializer.timer` (RESILIENT-372 native-merge-queue substitute) | `brain` | **CJ only** |
+| `chump-duty-officer.timer` (RESILIENT-274 health-signal router / pager) | `brain` | **CJ only** |
+| `chump-board-cycle.timer` (board tick + paging) | `brain` | **CJ only** |
+| `chump-nba-dispatch.timer` (next-best-action auto-dispatch consumer) | `brain` | **CJ only** |
+| `chump-next-best-action.timer` (EV-ranked advisory router) | `data` | **CJ only** |
+
+**The Oracle nodes `cuphead` (161.153.42.233) and `mugman` (137.131.14.145) are
+NON-coordination** — role `muscle` (worker/spare) pending Jeff's later rethink
+of the Oracle boxes. They stay running; only their coordination organs are
+retired. Do NOT decommission them.
+
+### Why (RESILIENT-1309, split-brain confirmed 2026-09-16)
+
+cuphead + mugman each still ran `merge-serializer` + `duty-officer` +
+`board-cycle` + `nba-dispatch` + `next-best-action` **against a `state.db`
+frozen at 2026-09-12** (5,646 gaps) while CJ's store was live (10,812 gaps,
+same day). cuphead was gh-logged-in as `repairman29` and actively paging
+(`board_cycle_page_sent` + `duty_officer_action` in the last 24h) on the dead
+snapshot — a prime source of the cross-node merge-race
+(`merge-race-green-but-never-lands`) and phantom-paging incident classes. One
+serializer + one duty-officer fleet-wide is the invariant.
+
+### Durable mechanism — how "CJ only" is enforced (survives `git reset --hard`)
+
+Each node's role lives in `~/.chump/node.env` as `CHUMP_NODE_ROLE`
+(RESILIENT-1083) — OUTSIDE the repo, so it survives the deploy mirror's
+`git reset --hard origin/main`. `scripts/ops/organ-reconcile.sh` reads it and
+self-scopes via `organ_role_filter_for` (`scripts/ops/lib/organ-manifest-lib.sh`):
+
+- `muscle` → filter `muscle` — only `role=muscle` manifest organs are kept; the
+  drift-removal pass **disables + reaps** any live coordination organ that is
+  out-of-role. So on cuphead/mugman (`CHUMP_NODE_ROLE=muscle`) the five organs
+  above are never reconciled back — a role-scoped reconcile reaps them instead
+  of resurrecting them.
+- `brain` (CJ) → filter `brain,data,janitor,trust` — the coordination organs
+  stay enabled.
+
+The five organs are already tagged `role=brain`/`role=data` (never `muscle`) in
+`scripts/ops/organ-manifest.txt`, so no manifest edit is required — setting a
+node to `CHUMP_NODE_ROLE=muscle` is sufficient to retire coordination there. The
+recurring `chump-node-refresh` path also defaults to `muscle`
+(`scripts/ops/node-refresh-chump.sh`), so a refresh never re-brains a muscle node.
+
 
 ## The three roles
 
