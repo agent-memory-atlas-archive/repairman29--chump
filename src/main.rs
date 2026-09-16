@@ -10653,6 +10653,58 @@ async fn main() -> Result<()> {
                     _ => "[]".into(),
                 };
 
+                // ── CREDIBLE-1270: acceptance-criteria gate for P0/P1 ──────────────
+                // A P0/P1 gap with empty acceptance_criteria is unpickable in
+                // practice (audit-priorities already flags "vague pickable" gaps —
+                // this closes the gate at file time instead of catching it after
+                // the fact). Only the explicit `[]` case (--skip-obs-acs with no
+                // --acceptance-criteria) trips the gate; the default obs-AC
+                // template above already fills acceptance_criteria_json for the
+                // common path, so this fires rarely. Bypass: --no-ac-required
+                // (audited to ambient.jsonl), same shape as MISSION-045 below.
+                {
+                    let no_ac_required = args.iter().any(|a| a == "--no-ac-required");
+                    let enforce_priorities = ["P0", "P1"];
+                    if enforce_priorities.contains(&priority.as_str())
+                        && acceptance_criteria_json == "[]"
+                    {
+                        if !no_ac_required {
+                            eprintln!();
+                            eprintln!(
+                                "chump gap reserve: P0/P1 gaps require acceptance criteria (CREDIBLE-1270)."
+                            );
+                            eprintln!(
+                                "Pass --acceptance-criteria \"bullet one|bullet two\" (or drop --skip-obs-acs to use the default template)."
+                            );
+                            eprintln!(
+                                "Bypass: --no-ac-required (audited). P2/P3 gaps are unaffected."
+                            );
+                            std::process::exit(1);
+                        }
+                        let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+                        let ambient_path = worktree_root.join(".chump-locks").join("ambient.jsonl");
+                        let safe_domain = domain.replace(['"', '\\'], "");
+                        let safe_title = title.replace(['"', '\\'], "");
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .append(true)
+                            .create(true)
+                            .open(&ambient_path)
+                        {
+                            use std::io::Write;
+                            let _ = writeln!(
+                                f,
+                                r#"{{"ts":"{ts}","kind":"ac_gate_bypassed","priority":"{priority}","domain":"{safe_domain}","title":"{safe_title}","bypass_reason":"--no-ac-required flag"}}"#
+                            );
+                        }
+                        if !quiet {
+                            eprintln!(
+                                "[reserve] WARN: ac_gate_bypassed emitted (bypass=--no-ac-required flag)"
+                            );
+                        }
+                    }
+                }
+                // ── end CREDIBLE-1270 acceptance-criteria gate ──────────────────────
+
                 // FLEET-029: ambient glance before allocating ID
                 if !force && std::env::var("FLEET_029_AMBIENT_GLANCE_SKIP").is_err() {
                     use std::process::Command;
