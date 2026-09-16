@@ -1,7 +1,7 @@
 # SUBAGENT_ATTRIBUTION.md — wiring parent vs sub-agent identity into the fleet event stream
 
-**Filed under:** META-130 (sibling to META-129 scrubber panel collab)
-**Status:** design proposal — collecting FEEDBACK on NATS before implementation
+**Filed under:** META-130 (sibling to META-129 scrubber panel collab); doc authored under META-617
+**Status:** design proposal — under META team review via `FEEDBACK kind=proposal subject=META-617-subagent-attribution-review` (A2A consensus, see AGENTS.md); vote `chump vote META-617-subagent-attribution-review +1|-1|0 --reason '<why>'`
 **Owner:** TBD (orchestrator + recorder + scrubber touch points)
 
 ## Problem
@@ -161,3 +161,4 @@ This ordering means Part A can ship independently and immediately surface the di
 - INFRA-2176 — web/fleet-scrubber (Part C target)
 - CREDIBLE-074 — curator sub-agent dispatch-ratio telemetry (consumes `subagent_spawned`)
 - SUBAGENT_DISPATCH.md — model-defaults doc for orchestrator behavior
+- META-617 — filed this design proposal for META team review (this doc)
