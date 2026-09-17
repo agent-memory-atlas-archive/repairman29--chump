@@ -248831,7 +248831,7 @@ gaps:
 - id: INFRA-7154
   domain: INFRA
   title: "INFRA: Investigate existence and naming of 'chump-chat' selector (INFRA-1433 slice)"
-  status: open
+  status: done
   priority: P1
   effort: s
   acceptance_criteria:
@@ -248853,6 +248853,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+  closed_pr: 4725
 
 - id: INFRA-7155
   domain: INFRA
