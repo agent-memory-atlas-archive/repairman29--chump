@@ -252627,6 +252627,8 @@ gaps:
     - "TODO: how cost tracked and reported to operator"
     - "TODO: failure-class taxonomy (distinguish transient vs permanent)"
     - "TODO: smoke test command to verify observability"
+  notes: |
+    Decomposed into 8 slices: META-717, META-718, META-719, META-720, META-721, META-722, META-723, META-724
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -267673,6 +267675,276 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: META-717
+  domain: META
+  title: "META: Design cache key algorithm (META-203 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Cache key uniquely identifies a test run based on source code hash, test configuration, and environment variables
+    - Unit test confirms identical keys for unchanged code and different keys when any input changes
+  notes: |
+    [chump harvest check 'cache']
+    === primitives_index match for 'cache' ===
+    
+    === cluster keyword match for 'cache' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'cache' ===
+    
+    === repo-description match for 'cache' ===
+      bulwark: Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.
+    
+    === HARVEST_ROADMAP.md mention of 'cache' (deep-scan findings) ===
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'cache' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-718
+  domain: META
+  title: "META: Implement in‑memory cache layer (META-203 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Cache API provides `store(key, result)` and `retrieve(key)` methods
+    - Stored results can be retrieved within the same process
+    - Unit test verifies store‑retrieve round‑trip and cache miss behavior
+  depends_on: [META-717]
+  notes: |
+    [chump harvest check 'cache']
+    === primitives_index match for 'cache' ===
+    
+    === cluster keyword match for 'cache' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'cache' ===
+    
+    === repo-description match for 'cache' ===
+      bulwark: Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.
+    
+    === HARVEST_ROADMAP.md mention of 'cache' (deep-scan findings) ===
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'cache' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-719
+  domain: META
+  title: "META: Persist cache to disk (META-203 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Cache writes serialized entries to a configurable file path on each store
+    - Cache loads existing entries on process start
+    - Integration test shows that a result stored in one run is available after process restart
+  depends_on: [META-718]
+  notes: |
+    [chump harvest check 'cache']
+    === primitives_index match for 'cache' ===
+    
+    === cluster keyword match for 'cache' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'cache' ===
+    
+    === repo-description match for 'cache' ===
+      bulwark: Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.
+    
+    === HARVEST_ROADMAP.md mention of 'cache' (deep-scan findings) ===
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'cache' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-720
+  domain: META
+  title: "META: Integrate cache check into test runner (META-203 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Before executing a test, the runner computes the cache key and queries the cache
+    - If a hit is found, the test is marked as `skipped` and the cached result is reported
+    - If a miss, the test runs normally and the result is stored in the cache
+    - End‑to‑end test verifies that unchanged code leads to a skipped test and changed code leads to execution
+  depends_on: [META-718]
+  notes: |
+    [chump harvest check 'cache']
+    === primitives_index match for 'cache' ===
+    
+    === cluster keyword match for 'cache' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'cache' ===
+    
+    === repo-description match for 'cache' ===
+      bulwark: Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.
+    
+    === HARVEST_ROADMAP.md mention of 'cache' (deep-scan findings) ===
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'cache' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-721
+  domain: META
+  title: "META: Emit events on test result (success/failure/timeout) (META-203 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "On each test completion, an event is emitted with fields: test_id, outcome (success|failure|timeout), cache_hit (bool), timestamp"
+    - Event payload conforms to the defined schema
+    - Automated listener test captures events for all three outcomes and validates payload correctness
+  depends_on: [META-720]
+  notes: |
+    [chump harvest check 'cache']
+    === primitives_index match for 'cache' ===
+    
+    === cluster keyword match for 'cache' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'cache' ===
+    
+    === repo-description match for 'cache' ===
+      bulwark: Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.
+    
+    === HARVEST_ROADMAP.md mention of 'cache' (deep-scan findings) ===
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'cache' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-722
+  domain: META
+  title: "META: Implement cost tracking for cached vs executed tests (META-203 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - System records execution time for each test run and distinguishes cached skips from real executions
+    - Aggregated metrics (total time saved, number of cache hits) are exposed via the existing metrics endpoint
+    - Metric unit test asserts that a known cache hit reduces reported execution time accordingly
+  depends_on: [META-720]
+  notes: |
+    [chump harvest check 'cache']
+    === primitives_index match for 'cache' ===
+    
+    === cluster keyword match for 'cache' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'cache' ===
+    
+    === repo-description match for 'cache' ===
+      bulwark: Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.
+    
+    === HARVEST_ROADMAP.md mention of 'cache' (deep-scan findings) ===
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'cache' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-723
+  domain: META
+  title: "META: Define failure‑class taxonomy (transient vs permanent) (META-203 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Taxonomy document lists failure classes with clear definitions and examples
+    - Code path classifies a test failure into `transient` or `permanent` based on error type
+    - Unit test verifies classification for representative transient (e.g., network timeout) and permanent (e.g., assertion) failures
+  notes: |
+    [chump harvest check 'cache']
+    === primitives_index match for 'cache' ===
+    
+    === cluster keyword match for 'cache' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'cache' ===
+    
+    === repo-description match for 'cache' ===
+      bulwark: Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.
+    
+    === HARVEST_ROADMAP.md mention of 'cache' (deep-scan findings) ===
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'cache' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-724
+  domain: META
+  title: "META: Add smoke‑test command to verify observability (META-203 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Command runs a minimal test suite, checks that cache hits are reported, events are emitted, and cost metrics are updated
+    - Command exits with status 0 only when all checks pass
+    - Automated CI job executes the command and fails if any observability check is missing
+  depends_on: [META-720, META-721, META-722, META-723]
+  notes: |
+    [chump harvest check 'cache']
+    === primitives_index match for 'cache' ===
+    
+    === cluster keyword match for 'cache' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'cache' ===
+    
+    === repo-description match for 'cache' ===
+      bulwark: Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.
+    
+    === HARVEST_ROADMAP.md mention of 'cache' (deep-scan findings) ===
+      18:| **4** | `openclaw` memory pattern (SQLite + FTS + LanceDB embeddings cache + `memory-tool` integration into agent tool registry) | INFRA-1765 (cross-agent lesson propagation) + general `memory_db` deepening | **Vendor** the schema & lookup patterns | Openclaw's spawn contract was the production-ready inspiration for Chump's just-shipped INFRA-1720 — the memory layer is the next obvious port |
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'cache' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
 
 - id: MISSION-001
   domain: MISSION
