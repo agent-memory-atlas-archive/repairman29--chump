@@ -1,0 +1,16 @@
+# RESILIENT-1247 — the OFF-CJ witness. Install on an always-on box that is NOT
+# CJ (cuphead). Pure read+page observer — NON-coordination, safe on a
+# CHUMP_NODE_ROLE=muscle node; it re-enables nothing. Reversible:
+# `systemctl --user disable --now chump-offnode-deadman-watch.timer`.
+[Unit]
+Description=chump off-node dead-man watcher — pages if CJ goes dark (RESILIENT-1247)
+After=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=120
+WorkingDirectory=%h/chump
+# CHUMP_DEADMAN_GIST_ID from ~/.chump/providers.env; DISCORD_TOKEN +
+# CHUMP_READY_DM_USER_ID sourced by the script for the CJ-independent page.
+ExecStart=/usr/bin/env bash %h/chump/scripts/ops/offnode-deadman-watch.sh
+Nice=15

@@ -1,0 +1,14 @@
+# RESILIENT-1247 — CJ's outbound liveness beat to the off-node dead-man gist.
+# Install on CJ (closetjunky) ONLY. Reversible: `systemctl --user disable --now
+# chump-cj-deadman-push.timer`.
+[Unit]
+Description=chump CJ dead-man liveness push (RESILIENT-1247)
+After=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=90
+WorkingDirectory=%h/Projects/chump
+# CHUMP_DEADMAN_GIST_ID is read from ~/.chump/providers.env by the script.
+ExecStart=/usr/bin/env bash %h/Projects/chump/scripts/ops/cj-deadman-push.sh
+Nice=15

@@ -88,3 +88,6 @@ fleet_health_self_healed	suppress
 fleet_health_unit_failed	page
 fleet_health_healer_down	page
 fleet_health_sentinel_peer_dead	page
+cj_deadman_dark	page
+cj_deadman_worker_wedged	page
+cj_deadman_unreadable	page

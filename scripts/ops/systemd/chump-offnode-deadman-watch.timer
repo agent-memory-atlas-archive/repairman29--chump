@@ -1,0 +1,11 @@
+[Unit]
+Description=chump off-node dead-man watcher timer (every 10m) — RESILIENT-1247
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
