@@ -244995,7 +244995,7 @@ gaps:
 - id: INFRA-7113
   domain: INFRA
   title: "INFRA: Implement SCCACHE_DIR default to USB when /home free < 25G (INFRA-3661 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -245026,6 +245026,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+  closed_date: '2026-09-17'
+  closed_pr: 4719
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4719 titled 'INFRA-7113: ...' merged 2026-09-17; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-7114
   domain: INFRA
