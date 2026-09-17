@@ -5936,10 +5936,19 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Add a public function `sweep_enabled_daemons` to `crates/chump-preflight/src/preflight.rs` that recursively walks all `*.toml` files under the project's config directories, parses each file for entries where `enabled = true` and a `daemon_name` field is present, checks the system for a running process with that name, and returns a vector of structs containing the file path, daemon name, and the literal status `"missing"` for any daemon without a matching process; then modify `scripts/ci/test-integrator-daemon-activation.sh` to invoke this function (via the compiled binary) and echo its JSON output.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    - scripts/ci/test-integrator-daemon-activation.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Parser reads all *.toml files under config directories, extracts entries where enabled=true and daemon_name is specified.
-    - For each enabled daemon, it verifies a running process with that name exists; missing processes are recorded.
-    - "Recorded entries contain file path, daemon name, and status \"missing\"."
+    - "Running `cargo test --test sweep_enabled_daemons` in the repository produces a test that asserts the returned vector includes a record with `file_path` equal to the path of a test TOML file, `daemon_name` equal to the value defined in that file, and `status` exactly `\"missing\"` when no process with that name exists."
+    - "Starting a dummy process named `dummy_daemon` (e.g., `sleep 60 &` and renaming its argv) and providing a TOML entry `enabled = true` and `daemon_name = \"dummy_daemon\"` results in `sweep_enabled_daemons` returning no record with `status = \"missing\"` for `dummy_daemon`."
+    - "Executing `scripts/ci/test-integrator-daemon-activation.sh` prints a line containing `\"status\":\"missing\"` for each enabled daemon that lacks a running process, demonstrating that the script successfully calls the new function and outputs its results."
+    - The function `sweep_enabled_daemons` is declared as `pub fn sweep_enabled_daemons(...)` in `crates/chump-preflight/src/preflight.rs` and the project builds without warnings or errors after the change.
   depends_on: [CREDIBLE-1131]
 
 - id: CREDIBLE-1134
