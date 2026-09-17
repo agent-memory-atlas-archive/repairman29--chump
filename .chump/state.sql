@@ -11546,7 +11546,7 @@ gaps:
 - id: CREDIBLE-1303
   domain: CREDIBLE
   title: "CREDIBLE: Implement summarized_pct guard in Almanac coverage owner logic (CREDIBLE-300 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -11568,6 +11568,10 @@ gaps:
     === HARVEST_ROADMAP.md mention of 'Almanac' (deep-scan findings) ===
     
     === cross-pollination briefs mentioning 'Almanac' ===
+  closed_date: '2026-09-17'
+  closed_pr: 4723
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4723 titled 'CREDIBLE-1303: ...' merged 2026-09-17; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: CREDIBLE-1304
   domain: CREDIBLE
