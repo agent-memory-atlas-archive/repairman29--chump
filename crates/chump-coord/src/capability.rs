@@ -358,7 +358,11 @@ pub async fn resolve_target_node(kv: &kv::Store, unit: &str) -> Result<String> {
 
 /// Best-effort hostname read. Falls back to `CHUMP_MACHINE_LABEL` env if
 /// the hostname call fails. Returns `None` on total failure.
-fn hostname_or_label() -> Option<String> {
+///
+/// Public so callers outside this crate (e.g. `chump-verify`'s
+/// `check_live_outcome`, INFRA-7098) can compare a [`resolve_target_node`]
+/// result against the current host without re-implementing this lookup.
+pub fn hostname_or_label() -> Option<String> {
     if let Ok(label) = std::env::var("CHUMP_MACHINE_LABEL") {
         if !label.is_empty() {
             return Some(label);

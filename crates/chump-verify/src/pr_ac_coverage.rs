@@ -458,6 +458,41 @@ fn run_remote_systemctl(node: &str, unit: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// INFRA-7098: resolve the hostname that owns `unit` by reading its
+/// `CapabilityManifest` from the NATS capabilities KV
+/// (`chump_coord::capability::resolve_target_node`). Fails closed to `None`
+/// on any error — no NATS reachable, no manifest for `unit`, a stale
+/// manifest, or a manifest with no `machine` set — so callers fall back to
+/// the pre-existing local-only probe rather than erroring out.
+///
+/// `CoordClient::connect` already bounds the NATS dial with its own
+/// `tokio::time::timeout` (`CHUMP_NATS_TIMEOUT_MS`, default 500ms), so a
+/// bare current-thread runtime is enough to drive it synchronously without
+/// risking a hang when NATS is unreachable (the common case in unit tests
+/// and most CI runs).
+fn resolve_target_node_for_unit(unit: &str) -> Option<String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    rt.block_on(async {
+        let client = chump_coord::CoordClient::connect_or_skip().await?;
+        chump_coord::capability::resolve_target_node(&client.capabilities_kv, unit)
+            .await
+            .ok()
+    })
+}
+
+/// True when `node` names the current host, per the same
+/// hostname-or-`CHUMP_MACHINE_LABEL` lookup [`chump_coord::capability`] uses
+/// to populate a manifest's `machine` field — so the comparison matches how
+/// the field was written in the first place.
+fn is_current_host(node: &str) -> bool {
+    chump_coord::capability::hostname_or_label()
+        .map(|h| h == node)
+        .unwrap_or(false)
+}
+
 fn ambient_log_path() -> String {
     std::env::var("CHUMP_AMBIENT_LOG").unwrap_or_else(|_| ".chump-locks/ambient.jsonl".to_string())
 }
@@ -516,6 +551,30 @@ fn find_url_token(bullet: &str) -> Option<String> {
 /// the gate never takes a proof claim on faith.
 fn check_live_outcome(bullet: &str) -> (bool, String) {
     if let Some(unit) = find_systemd_unit_token(bullet) {
+        // INFRA-7098: resolve which host actually owns `unit` via the
+        // capability manifest KV, and probe that host — local systemctl if
+        // it's us, `ssh <node> systemctl` (INFRA-3728) if it's someone else.
+        // `resolve_target_node_for_unit` fails closed to `None` (no NATS, no
+        // manifest, stale manifest, no machine field) so the pre-existing
+        // local-only path is exactly what runs when target-node resolution
+        // isn't available — AC-2/AC-4.
+        if let Some(node) = resolve_target_node_for_unit(&unit) {
+            if !is_current_host(&node) {
+                return match run_remote_systemctl(&node, &unit) {
+                    Ok(state) => {
+                        let ok = state == "active";
+                        (
+                            ok,
+                            format!("ssh {node} systemctl is-active {unit} -> \"{state}\""),
+                        )
+                    }
+                    Err(e) => (
+                        false,
+                        format!("remote check of {unit} on {node} failed: {e}"),
+                    ),
+                };
+            }
+        }
         return match Command::new(systemctl_bin())
             .args(["is-active", &unit])
             .output()

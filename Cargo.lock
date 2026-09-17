@@ -2077,9 +2077,11 @@ dependencies = [
  "anyhow",
  "chrono",
  "chump-ambient-cli",
+ "chump-coord",
  "serde_json",
  "serial_test",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

@@ -11,6 +11,11 @@ anyhow = "1.0"
 serde_json = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 chump-ambient-cli = { path = "../ambient-cli", version = "0.1.0" }
+# INFRA-7098: resolve_target_node needs the capabilities KV lookup; the
+# connect itself is bounded by CoordClient::connect's own tokio::time::timeout,
+# so a minimal current-thread runtime is enough to drive it synchronously.
+chump-coord = { path = "../chump-coord", version = "0.2.0" }
+tokio = { version = "1", features = ["rt"] }
 
 [dev-dependencies]
 tempfile = "3"
