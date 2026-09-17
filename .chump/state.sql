@@ -11313,7 +11313,7 @@ gaps:
 - id: CREDIBLE-1297
   domain: CREDIBLE
   title: "CREDIBLE: CREDIBLE-1261: Extend test-gap-closure-consistency.sh with file‑overlap check (CREDIBLE-268 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -11335,6 +11335,10 @@ gaps:
     
     === cross-pollination briefs mentioning 'merging' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-002-treesitter-lineage.md
+  closed_date: '2026-09-17'
+  closed_pr: 4721
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4721 titled 'CREDIBLE-1297: ...' merged 2026-09-17; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: CREDIBLE-1298
   domain: CREDIBLE
