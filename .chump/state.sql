@@ -9390,11 +9390,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add integration test suite assertions to `scripts/coord/bot-merge.sh` covering the complete auto-flip flow, including mock PR merges closing gaps via `gap ship` with populated `closed_date`, file-overlap validation failures when PR diffs do not match AC-listed files, and re-closing of reopened gaps by the `stale_post_merge_gap` consumer.
+    
+    Target file(s):
+    - scripts/coord/bot-merge.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test suite creates a mock PR with title IDs, merges it, and asserts that gaps are closed via `gap ship` with correct closed_date.
-    - Tests verify that gaps whose PR does not touch AC‑listed files cause the file‑overlap check to fail.
-    - Tests confirm that the stale_post_merge_gap consumer correctly re‑closes a reopened gap.
-    - All new tests pass in CI.
+    - "`scripts/coord/bot-merge.sh` includes integration test routines verifying that `gap ship` closes gaps with a valid `closed_date` upon merging a mock PR."
+    - "`scripts/coord/bot-merge.sh` includes assertions confirming the file-overlap check fails when a mock PR does not touch files listed in acceptance criteria."
+    - "`scripts/coord/bot-merge.sh` includes test cases validating that the `stale_post_merge_gap` handler re-closes gaps that are subsequently reopened."
+    - Running `bash scripts/coord/bot-merge.sh --test` executes all auto-flip integration tests and exits with code 0.
   depends_on: [CREDIBLE-1231, CREDIBLE-1232, CREDIBLE-1233, CREDIBLE-1234]
   notes: |
     [chump harvest check 'merging']
