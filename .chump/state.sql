@@ -243714,7 +243714,7 @@ gaps:
 - id: INFRA-7084
   domain: INFRA
   title: "INFRA: Update bootstrap-manifest.yaml to include almanac-code-intel entry and run install-almanac-organ.sh before chump-ftue-hook.sh (INFRA-3637 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -243750,6 +243750,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-17T07:40:21Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=942B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-7085
   domain: INFRA
