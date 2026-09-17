@@ -87,6 +87,73 @@ _gap_id_from_pr() {
   printf '%s' "$id"
 }
 
+# ── isolated publisher (RESILIENT-1341) ─────────────────────────────────────
+# The registry reconcile (above, in writer()) MUST read/write the CANONICAL live
+# state.db, which lives in the shared fleet tree ($REPO) where 3+ worker.sh procs
+# run git constantly. Committing state.sql THERE races their `.git/index.lock` and
+# dies ("fatal: Unable to create '.git/index.lock': File exists") — the writer sat
+# dead 33h+, origin/main's state.sql went stale, registry split-brain risk.
+#
+# Fix (RESILIENT-1341): NEVER git-commit in the shared tree. Publish through a
+# DEDICATED, fully independent clone (its own .git, refs and index) that only ever
+# tracks origin/main and carries a single file — .chump/state.sql, dumped from the
+# CANONICAL live DB in $REPO. It shares no git state with the workers, so it can
+# never collide on their index.lock. Single-writer is preserved (RESILIENT-194):
+# still exactly one --writer; this only relocates its git I/O off the shared tree.
+BSYNC_TREE="${CHUMP_BACKLOG_SYNC_TREE:-$HOME/.chump/backlog-sync-tree}"
+
+_ensure_isolated_tree() {
+  if [[ -d "$BSYNC_TREE/.git" ]] && git -C "$BSYNC_TREE" rev-parse --git-dir >/dev/null 2>&1; then
+    return 0
+  fi
+  local url; url="$(git -C "$REPO" remote get-url origin 2>/dev/null)"
+  [[ -n "$url" ]] || { log "no origin remote to clone for isolated publish tree"; return 1; }
+  log "provisioning isolated publish clone at $BSYNC_TREE"
+  rm -rf "$BSYNC_TREE"
+  mkdir -p "$(dirname "$BSYNC_TREE")"
+  git clone --quiet --single-branch --branch main "$url" "$BSYNC_TREE" \
+    || { log "isolated clone failed"; return 1; }
+}
+
+# publish_state_sql <closed_count>: dump the canonical DB and push state.sql to
+# origin/main from the isolated clone. Re-anchors on the freshest origin/main each
+# attempt, so a push rejected by a concurrent PR-merge (main advances constantly)
+# is retried by RE-BASING onto the new tip — never by a merge commit.
+publish_state_sql() {
+  local closed="$1" tries
+  _ensure_isolated_tree || return 1
+  for tries in 1 2 3; do
+    if ! git -C "$BSYNC_TREE" fetch --quiet origin main 2>/dev/null; then
+      log "isolated fetch failed (offline?) — will retry next cycle"; return 1
+    fi
+    if ! git -C "$BSYNC_TREE" reset --hard --quiet FETCH_HEAD 2>/dev/null; then
+      git -C "$BSYNC_TREE" reset --hard FETCH_HEAD || { log "isolated reset failed"; return 1; }
+    fi
+    git -C "$BSYNC_TREE" clean -fdq -- .chump 2>/dev/null || true
+    # Dump the CANONICAL live DB ($REPO's, via CHUMP_REPO) into the isolated tree.
+    if ! CHUMP_REPO="$REPO" "$CHUMP" gap dump > "$BSYNC_TREE/.chump/state.sql" 2>/dev/null; then
+      log "gap dump failed"; return 1
+    fi
+    if git -C "$BSYNC_TREE" diff --quiet -- .chump/state.sql 2>/dev/null; then
+      log "state.sql already current on origin/main — nothing to push"; return 0
+    fi
+    git -C "$BSYNC_TREE" add .chump/state.sql
+    # Skip code hooks: automated single-file (state.sql) publish, not a code change;
+    # state.sql is auto-allowed by the off-rails guard.
+    git -C "$BSYNC_TREE" -c core.hooksPath=/dev/null commit -q -m "chore(backlog): coherence sync — $closed gaps closed, state.sql regenerated
+
+Automated by scripts/coord/backlog-sync.sh --writer (RESILIENT-194/RESILIENT-1341).
+Single-writer hub reconcile: merged PRs -> gap done, regenerate the shared truth,
+published from an isolated clone that never races the fleet tree's git index." 2>/dev/null \
+      || { log "commit failed"; return 1; }
+    if git -C "$BSYNC_TREE" push --quiet origin HEAD:main 2>/dev/null; then
+      log "published state.sql to origin/main ($closed gaps closed this cycle)"; return 0
+    fi
+    log "push rejected (origin/main advanced) — re-basing, attempt $tries/3"
+  done
+  log "push failed after retries — will retry next cycle"; return 1
+}
+
 writer() {
   git fetch origin main --quiet 2>/dev/null || true
   local closed=0 checked=0 tmp
@@ -122,25 +189,10 @@ writer() {
 
   [[ "$DRY" == 1 ]] && { log "dry-run — not regenerating/pushing state.sql"; return 0; }
 
-  # regenerate the single source of truth + publish
-  "$CHUMP" gap dump > "$REPO/.chump/state.sql" 2>/dev/null || { log "gap dump failed"; return 1; }
-  if git diff --quiet .chump/state.sql 2>/dev/null; then
-    log "state.sql already current — nothing to push"; return 0
-  fi
-  git add .chump/state.sql
-  # Skip code hooks: this is an automated single-file (state.sql) reconcile, not a
-  # code change, and it runs headless on the hub where clippy/fmt hooks would only
-  # stall it. state.sql is auto-allowed by the off-rails guard.
-  git -c core.hooksPath=/dev/null commit -q -m "chore(backlog): coherence sync — $closed gaps closed, state.sql regenerated
-
-Automated by scripts/coord/backlog-sync.sh --writer (RESILIENT-194). Single-writer
-hub reconcile: merged PRs -> gap done, then regenerate the shared truth." 2>/dev/null || { log "commit failed"; return 1; }
-  git pull --no-edit --quiet origin main 2>/dev/null || true
-  if git push 2>/dev/null; then
-    log "published state.sql to origin/main ($closed gaps closed this cycle)"
-  else
-    log "push failed — will retry next cycle"; return 1
-  fi
+  # Regenerate + publish the single source of truth. RESILIENT-1341: this happens
+  # in an ISOLATED clone (see publish_state_sql), never the shared fleet tree, so
+  # it can never die on the workers' .git/index.lock.
+  publish_state_sql "$closed"
 }
 
 "$ROLE"
