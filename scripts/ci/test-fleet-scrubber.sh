@@ -243,6 +243,29 @@ else
 fi
 
 echo ""
+echo "--- Test 14: META-743 — segment duration computed from start_ts_ms/end_ts_ms ---"
+INDEX_HTML="$WEB_DIR/index.html"
+if command -v node >/dev/null 2>&1; then
+    NODE_RESULT=$(node -e "
+const fs = require('fs');
+const html = fs.readFileSync('$INDEX_HTML', 'utf8');
+const durMatch = html.match(/const computeDurS = \(seg\) => \{[\s\S]*?\n\};/);
+const fmtMatch = html.match(/const fmtDur = \(s\) => \{[\s\S]*?\n\};/);
+if (!durMatch || !fmtMatch) { console.log('EXTRACT_FAIL'); process.exit(0); }
+const fn = new Function(durMatch[0] + fmtMatch[0] + '; return [computeDurS({ start_ts_ms: 1000, end_ts_ms: 5500 }), fmtDur(computeDurS({ start_ts_ms: 1000, end_ts_ms: 5500 }))];');
+const [dur, label] = fn();
+console.log(dur + '|' + label);
+" 2>&1)
+    if [[ "$NODE_RESULT" == "4.5|4.5s" ]]; then
+        ok "segment start_ts_ms=1000, end_ts_ms=5500 renders as 4.5s (got: $NODE_RESULT)"
+    else
+        bad "segment duration mismatch: expected '4.5|4.5s', got '$NODE_RESULT'"
+    fi
+else
+    echo "  [SKIP] node not available — cannot exercise computeDurS/fmtDur"
+fi
+
+echo ""
 echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
 
 if [[ $FAIL -gt 0 ]]; then
