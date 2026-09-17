@@ -48639,10 +48639,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a confirmation gate in `web/v2/lib/publisher/drive.ts` (inside the `publishToUpshift`/`drive` function) that calls a new `await confirmByJeff()` helper; only when it returns true does the code invoke the upshift.ai deployment API and then records the `DriveResult` via `storeDriveResult`.  Update the unit test in `drive.test.ts` to mock Jeff’s response and assert the gate behavior, and extend the end‑to‑end test in `e2e.test.ts` to verify that a successful manual trigger creates a visible success entry in the co‑pilot dashboard.
+    
+    Target file(s):
+    - web/v2/lib/publisher/drive.ts
+    - web/v2/lib/publisher/drive.test.ts
+    - web/v2/lib/publisher/e2e.test.ts
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Blessed drafts can be manually triggered to deploy to upshiftai.dev
-    - Deployment only occurs after Jeff confirms the action
-    - Result (success or error) is stored and visible in the co‑pilot dashboard
+    - In `web/v2/lib/publisher/drive.ts`, the `publishToUpshift` function calls `confirmByJeff()` and aborts deployment when it returns false.
+    - In `web/v2/lib/publisher/drive.test.ts`, a test case mocks `confirmByJeff()` to return false and asserts that the deployment API is not invoked and that a “cancelled” `DriveResult` is stored.
+    - In `web/v2/lib/publisher/e2e.test.ts`, an end‑to‑end scenario triggers a manual publish, confirms Jeff’s approval, and checks that the co‑pilot dashboard UI lists a success entry for the artifact.
   depends_on: [EFFECTIVE-1172]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -111510,7 +111519,7 @@ gaps:
   acceptance_criteria:
     - "Extend src/dispatch.rs wait_with_hang_detection (shipped INFRA-1972) to enforce two NEW budgets alongside the existing CHUMP_SUBAGENT_BUDGET_S wall-clock kill: (a) CHUMP_SUBAGENT_TOKEN_BUDGET — kill on streaming-token-counter exceed; (b) CHUMP_SUBAGENT_DOLLAR_BUDGET — kill on per-model-rate-card cost exceed."
   notes: |
-    Decomposed into 9 slices: INFRA-6989, INFRA-6990, INFRA-6991, INFRA-6992, INFRA-6993, INFRA-6994, INFRA-6995, INFRA-6996, INFRA-6997
+    Decomposed into 9 slices: INFRA-7217, INFRA-7218, INFRA-7219, INFRA-7220, INFRA-7221, INFRA-7222, INFRA-7223, INFRA-7224, INFRA-7225
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -251171,6 +251180,253 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
 
+- id: INFRA-7217
+  domain: INFRA
+  title: "INFRA: Refactor wait_with_hang_detection to extract budget handling (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Existing wall‑clock kill behavior remains unchanged
+    - Budget handling code is isolated in a new helper function
+    - Helper function is called from wait_with_hang_detection
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7218
+  domain: INFRA
+  title: "INFRA: Implement token‑budget kill logic (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Subagent is terminated when streaming‑token counter exceeds CHUMP_SUBAGENT_TOKEN_BUDGET
+    - Termination logs contain the token‑budget reason
+  depends_on: [INFRA-7217]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7219
+  domain: INFRA
+  title: "INFRA: Implement dollar‑budget kill logic (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Subagent is terminated when accumulated cost exceeds CHUMP_SUBAGENT_DOLLAR_BUDGET
+    - Termination logs contain the dollar‑budget reason
+  depends_on: [INFRA-7217]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7220
+  domain: INFRA
+  title: "INFRA: Add config parsing for CHUMP_SUBAGENT_TOKEN_BUDGET (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Configuration file/environment variable maps to a u64 token budget field
+    - Invalid or missing values fall back to a disabled (zero) budget
+  depends_on: [INFRA-7217]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7221
+  domain: INFRA
+  title: "INFRA: Add config parsing for CHUMP_SUBAGENT_DOLLAR_BUDGET (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Configuration file/environment variable maps to a f64 dollar budget field
+    - Invalid or missing values fall back to a disabled (zero) budget
+  depends_on: [INFRA-7217]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7222
+  domain: INFRA
+  title: "INFRA: Write unit test for token‑budget enforcement (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test simulates token usage exceeding the configured budget
+    - wait_with_hang_detection returns an error indicating token‑budget kill
+    - Test passes when token‑budget kill is triggered and does not affect other budgets
+  depends_on: [INFRA-7218, INFRA-7220]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7223
+  domain: INFRA
+  title: "INFRA: Write unit test for dollar‑budget enforcement (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test simulates cost accumulation exceeding the configured dollar budget
+    - wait_with_hang_detection returns an error indicating dollar‑budget kill
+    - Test passes when dollar‑budget kill is triggered and does not affect other budgets
+  depends_on: [INFRA-7219, INFRA-7221]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7224
+  domain: INFRA
+  title: "INFRA: Update integration test for parent‑kill with budgets (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Integration test launches a subagent with both token and dollar budgets set
+    - Subagent is killed according to the first budget that is exceeded
+    - Test validates that wall‑clock kill still works when budgets are not exceeded
+  depends_on: [INFRA-7222, INFRA-7223]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7225
+  domain: INFRA
+  title: "INFRA: Update documentation and release notes (INFRA-2090 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README and internal docs list CHOMP_SUBAGENT_TOKEN_BUDGET and CHOMP_SUBAGENT_DOLLAR_BUDGET flags
+    - Release notes describe the new resilient kill behavior
+    - Documentation examples show how to configure both budgets
+  depends_on: [INFRA-7224]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
 - id: INFRA-723
   domain: INFRA
   title: "ZERO-WASTE: split main.rs phase 2 — extract providers/ module group (provider_bandit, provider_cascade, provider_quality, streaming_provider, local_openai, mistralrs_provider)"
@@ -271484,7 +271740,7 @@ gaps:
 - id: META-743
   domain: META
   title: "META: Fix segment duration computation from timestamps (META-129 slice)"
-  status: open
+  status: done
   priority: P1
   effort: s
   acceptance_criteria:
@@ -271511,6 +271767,7 @@ gaps:
     === cross-pollination briefs mentioning 'architecture' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+  closed_pr: 4728
 
 - id: META-744
   domain: META
