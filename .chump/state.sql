@@ -38830,9 +38830,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add YAML front-matter metadata to the top of docs/process/CI_GATES_GENERATED_INVENTORY.md specifying the title "Fleet Build‑Speed Plan of Record", date "2026-08-09", and tags ["fleet", "build-speed", "strategy"].
+    
+    Target file(s):
+    - docs/process/CI_GATES_GENERATED_INVENTORY.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "Front‑matter includes title: \"Fleet Build‑Speed Plan of Record\""
-    - "Front‑matter includes date set to 2026‑08‑09 and tags: [\"fleet\",\"build-speed\",\"strategy\"]"
+    - The file docs/process/CI_GATES_GENERATED_INVENTORY.md starts with YAML front-matter enclosed in `---` lines.
+    - "The front-matter in docs/process/CI_GATES_GENERATED_INVENTORY.md includes `title: \"Fleet Build‑Speed Plan of Record\"`."
+    - "The front-matter in docs/process/CI_GATES_GENERATED_INVENTORY.md includes `date: 2026-08-09` and `tags: [\"fleet\", \"build-speed\", \"strategy\"]`."
   depends_on: [DOC-127]
 
 - id: DOC-140
@@ -38861,9 +38869,16 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update docs/process/SELF_HOSTED_RUNNERS.md to add a section for the DOC-095 slice, detailing pull request criteria, main branch targeting, and commit title matching requirements for self-hosted runner documentation updates.
+    
+    Target file(s):
+    - docs/process/SELF_HOSTED_RUNNERS.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A PR is opened against the main branch containing the commit from slice 13
-    - PR title matches the commit message and description outlines the changes
+    - docs/process/SELF_HOSTED_RUNNERS.md includes a section titled with DOC-095 / DOC-141 pull request updates.
+    - docs/process/SELF_HOSTED_RUNNERS.md explicitly states that pull requests must target the main branch and match the commit message title.
   depends_on: [DOC-140]
 
 - id: DOC-142
@@ -244142,7 +244157,7 @@ gaps:
 - id: INFRA-7093
   domain: INFRA
   title: "INFRA: INFRA-6835: Implement svc_is_alive and svc_revive service abstraction (INFRA-3649 slice)"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
@@ -244176,6 +244191,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-17T09:30:15Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1573B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-7094
   domain: INFRA
