@@ -248925,6 +248925,8 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+    [2026-09-17T21:42:50Z] EFFECTIVE-441: escalated required_model -> opus after 3 consecutive unverified_ship attempts
+  required_model: opus
 
 - id: INFRA-7156
   domain: INFRA
@@ -270323,7 +270325,7 @@ gaps:
 - id: META-735
   domain: META
   title: "META: Extend recorder payload schema with token/cost fields (META-129 slice)"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
@@ -270349,6 +270351,7 @@ gaps:
     === cross-pollination briefs mentioning 'architecture' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+    [2026-09-17T21:33:08Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1408B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: META-736
   domain: META
