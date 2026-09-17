@@ -8153,12 +8153,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new integration‑test step named `merge_to_close_flow` to the test‑runner script (`scripts/setup/test-runner-lane-broad-canary.sh`) by inserting a `register_step` call that points to a new test script file, and update the `discover_test_scripts` function in `crates/chump-preflight/src/preflight.rs` so that this script is included in the list of discovered test scripts.
+    
+    Target file(s):
+    - scripts/setup/test-runner-lane-broad-canary.sh
+    - crates/chump-preflight/src/preflight.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "Test creates a PR with a title containing multiple gap IDs, merges it, and asserts that:"
-    - • All IDs are extracted from the title only.
-    - • Gaps are closed via `gap ship`.
-    - • `closed_date` is populated for each gap.
-    - • No extra gaps are closed (no collateral closures).
+    - Running `scripts/setup/test-runner-lane-broad-canary.sh merge_to_close_flow` creates a PR whose title contains at least two gap IDs, merges it, and the test asserts that all IDs are extracted from the title, each gap is closed via `gap ship`, each gap’s `closed_date` field is populated, and no gaps outside the list are closed.
+    - The `register_step` call for `merge_to_close_flow` appears in `scripts/setup/test-runner-lane-broad-canary.sh` at the location where other steps are registered (around line 88).
+    - The `discover_test_scripts` function in `crates/chump-preflight/src/preflight.rs` returns the path to the new `merge_to_close_flow` test script, confirming it is discovered alongside existing scripts.
   depends_on: [CREDIBLE-1195, CREDIBLE-1196, CREDIBLE-1197]
   notes: |
     [chump harvest check 'merging']
@@ -11522,6 +11528,59 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
 
+- id: CREDIBLE-1303
+  domain: CREDIBLE
+  title: "CREDIBLE: Implement summarized_pct guard in Almanac coverage owner logic (CREDIBLE-300 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The coverage owner code path calculates `summarized_pct` and enforces that it is > 95%; if not, it triggers the fallback behavior as defined in the specification.
+    - The change compiles without warnings (`cargo fmt` and `cargo clippy -- -D warnings` pass).
+    - All existing unit and integration tests continue to pass.
+  notes: |
+    [chump harvest check 'Almanac']
+    === primitives_index match for 'Almanac' ===
+    
+    === cluster keyword match for 'Almanac' ===
+      cluster misc (28 repos): workspace-docs, almanac, games-workspace, machine-substrate, grave-dancer, jeffadkins-dev, holler, privateer, opportunity-library, posse, realm-of-shadows, upshift-cli, space-shooter, crystal-rush, inversion, roblox-game-manager, kosmos, fulcrum, okr, project-2026-case, pixi-game, jeffadkins-me, bulwark, choose, derelict, registry, project-forge, project_forge
+    
+    === extracted_primitives (per-file, line-refd) match for 'Almanac' ===
+      almanac/crates/almanac-core/src/registry.rs:5 — vector_embedding (//! local tier of the scaling plan (see ROADMAP.md); the fleet pgvector tier is)
+    
+    === repo-description match for 'Almanac' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Almanac' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Almanac' ===
+
+- id: CREDIBLE-1304
+  domain: CREDIBLE
+  title: "CREDIBLE: Add test verifying summarized_pct guard behavior (CREDIBLE-300 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - A new test (cargo test or script under `scripts/ci/test-*.sh`) asserts that `summarized_pct` is > 95% after the guard is applied.
+    - The test fails on the baseline code (without the guard) and passes after the implementation from slice 0.
+    - The test runs as part of the CI pipeline and does not introduce new warnings.
+  depends_on: [CREDIBLE-1303]
+  notes: |
+    [chump harvest check 'Almanac']
+    === primitives_index match for 'Almanac' ===
+    
+    === cluster keyword match for 'Almanac' ===
+      cluster misc (28 repos): workspace-docs, almanac, games-workspace, machine-substrate, grave-dancer, jeffadkins-dev, holler, privateer, opportunity-library, posse, realm-of-shadows, upshift-cli, space-shooter, crystal-rush, inversion, roblox-game-manager, kosmos, fulcrum, okr, project-2026-case, pixi-game, jeffadkins-me, bulwark, choose, derelict, registry, project-forge, project_forge
+    
+    === extracted_primitives (per-file, line-refd) match for 'Almanac' ===
+      almanac/crates/almanac-core/src/registry.rs:5 — vector_embedding (//! local tier of the scaling plan (see ROADMAP.md); the fleet pgvector tier is)
+    
+    === repo-description match for 'Almanac' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Almanac' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Almanac' ===
+
 - id: CREDIBLE-131
   domain: CREDIBLE
   title: "CREDIBLE: mass-deletion guard underscore/space token mismatch false-positives cold-water RED_LETTER PRs"
@@ -14553,7 +14612,7 @@ gaps:
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
   notes: |
-    Decomposed into 2 slices: CREDIBLE-1273, CREDIBLE-1274
+    Decomposed into 2 slices: CREDIBLE-1303, CREDIBLE-1304
   opened_date: '2026-08-22'
   outcome_id: MISSION-010
   evidence: |
