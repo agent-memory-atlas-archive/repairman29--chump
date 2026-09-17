@@ -138920,7 +138920,7 @@ gaps:
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
   notes: |
-    Decomposed into 5 slices: INFRA-6904, INFRA-6905, INFRA-6906, INFRA-6907, INFRA-6908
+    Decomposed into 5 slices: INFRA-7142, INFRA-7143, INFRA-7144, INFRA-7145, INFRA-7146
   outcome_id: CHUMPOS
 
 - id: INFRA-3842
@@ -245978,6 +245978,146 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7142
+  domain: INFRA
+  title: "INFRA: Reconcile merges_24h metric emitters (vital-signs, dashboard, faculty) (INFRA-3841 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - INFRA code paths for merges_24h in vital-signs, dashboard, and faculty emit to a single canonical column name.
+    - A unit test asserts that the emitted column matches the canonical name and contains expected values; the test fails before the change.
+    - cargo fmt, clippy, and full test suite run without warnings or regressions.
+  notes: |
+    [chump harvest check 'phase']
+    === primitives_index match for 'phase' ===
+    
+    === cluster keyword match for 'phase' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'phase' ===
+    
+    === repo-description match for 'phase' ===
+      chump-proprietary: Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
+    
+    === HARVEST_ROADMAP.md mention of 'phase' (deep-scan findings) ===
+      186:- `mythseeker2` — ACTIVE refactor in progress (Feb 7, "75% REFACTORED — PHASE 2 COMPLETE"). Firebase Cloud Functions + Vertex AI → OpenAI fallback. Worth re-checking quarterly.
+    
+    === cross-pollination briefs mentioning 'phase' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7143
+  domain: INFRA
+  title: "INFRA: Reconcile merge-mix metric emitters (race-control vs merge-mix-board) (INFRA-3841 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - INFRA code merges the duplicate merge-mix emitters from race-control and merge-mix-board into one canonical column.
+    - A test verifies that queries against both original sources now return the same canonical column and identical data; the test fails without the change.
+    - All linting and existing tests pass with no new warnings.
+  notes: |
+    [chump harvest check 'phase']
+    === primitives_index match for 'phase' ===
+    
+    === cluster keyword match for 'phase' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'phase' ===
+    
+    === repo-description match for 'phase' ===
+      chump-proprietary: Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
+    
+    === HARVEST_ROADMAP.md mention of 'phase' (deep-scan findings) ===
+      186:- `mythseeker2` — ACTIVE refactor in progress (Feb 7, "75% REFACTORED — PHASE 2 COMPLETE"). Firebase Cloud Functions + Vertex AI → OpenAI fallback. Worth re-checking quarterly.
+    
+    === cross-pollination briefs mentioning 'phase' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7144
+  domain: INFRA
+  title: "INFRA: Reconcile Brier metric emitters (3 surfaces) (INFRA-3841 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Brier metric emitters for the three surfaces are unified to a single canonical column in the INFRA layer.
+    - A test confirms that data from each surface is written to and read from the canonical column; the test fails prior to the change.
+    - cargo fmt, clippy, and the full test suite succeed without regressions.
+  notes: |
+    [chump harvest check 'phase']
+    === primitives_index match for 'phase' ===
+    
+    === cluster keyword match for 'phase' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'phase' ===
+    
+    === repo-description match for 'phase' ===
+      chump-proprietary: Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
+    
+    === HARVEST_ROADMAP.md mention of 'phase' (deep-scan findings) ===
+      186:- `mythseeker2` — ACTIVE refactor in progress (Feb 7, "75% REFACTORED — PHASE 2 COMPLETE"). Firebase Cloud Functions + Vertex AI → OpenAI fallback. Worth re-checking quarterly.
+    
+    === cross-pollination briefs mentioning 'phase' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7145
+  domain: INFRA
+  title: "INFRA: Reconcile ci pass-rate metric emitters (2 definitions) (INFRA-3841 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Both definitions of ci pass-rate now emit to one canonical column in the INFRA code.
+    - A test asserts that the pass-rate values from both definitions are stored under the same column and match expected results; the test fails before the change.
+    - No lint warnings and all existing tests remain green.
+  notes: |
+    [chump harvest check 'phase']
+    === primitives_index match for 'phase' ===
+    
+    === cluster keyword match for 'phase' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'phase' ===
+    
+    === repo-description match for 'phase' ===
+      chump-proprietary: Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
+    
+    === HARVEST_ROADMAP.md mention of 'phase' (deep-scan findings) ===
+      186:- `mythseeker2` — ACTIVE refactor in progress (Feb 7, "75% REFACTORED — PHASE 2 COMPLETE"). Firebase Cloud Functions + Vertex AI → OpenAI fallback. Worth re-checking quarterly.
+    
+    === cross-pollination briefs mentioning 'phase' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7146
+  domain: INFRA
+  title: "INFRA: Reconcile operator-pages metric emitters (3 names) (INFRA-3841 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Operator-pages metric emitters with three different names are consolidated into a single canonical column.
+    - A test validates that queries for any of the former names now return data from the canonical column; the test fails without the change.
+    - Formatting, clippy, and the full test suite pass without new warnings.
+  notes: |
+    [chump harvest check 'phase']
+    === primitives_index match for 'phase' ===
+    
+    === cluster keyword match for 'phase' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'phase' ===
+    
+    === repo-description match for 'phase' ===
+      chump-proprietary: Autonomous swarm coordination system for Chump (Phase-1 simulation complete; not production).
+    
+    === HARVEST_ROADMAP.md mention of 'phase' (deep-scan findings) ===
+      186:- `mythseeker2` — ACTIVE refactor in progress (Feb 7, "75% REFACTORED — PHASE 2 COMPLETE"). Firebase Cloud Functions + Vertex AI → OpenAI fallback. Worth re-checking quarterly.
+    
+    === cross-pollination briefs mentioning 'phase' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
 
 - id: INFRA-721
