@@ -9,6 +9,7 @@ install-allowlist-audit-launchd.sh
 install-almanac-organ.sh
 install-almanac-summarize-watchdog.sh
 install-index-almanac-timer.sh
+install-fleet-clone-index-timer.sh
 install-ambient-hooks.sh
 install-gap-substrate.sh
 install-ambient-rotate-launchd.sh

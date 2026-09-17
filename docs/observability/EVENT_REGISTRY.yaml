@@ -7241,6 +7241,60 @@ events:
     consumers: [fleet-brief, ops-audit]
     fields_required: [ts, kind, bin]
 
+  - kind: almanac_fleet_clone_started
+    effect_metric: self
+    emitter: scripts/ops/fleet-clone-index.sh (RESILIENT-1351)
+    trigger: the org-wide clone+index+untether sweep began — repo_count is
+      how many repairman29 repos `gh repo list` returned; free_gb/floor_gb
+      record the disk headroom the sweep starts with.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, org, repo_count, free_gb, floor_gb, dry_run]
+
+  - kind: almanac_fleet_clone_repo_failed
+    effect_metric: self
+    emitter: scripts/ops/fleet-clone-index.sh (RESILIENT-1351)
+    trigger: one repo's clone or index exited non-zero during the org sweep
+      (private/archived/huge/transient) — skipped and counted, not fatal to
+      the rest of the sweep. stage is "clone" or "index".
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, repo, stage]
+
+  - kind: almanac_fleet_clone_disk_floor
+    effect_metric: self
+    emitter: scripts/ops/fleet-clone-index.sh (RESILIENT-1351)
+    trigger: ESCALATION — free disk fell below the floor before cloning the
+      next org repo, so the sweep STOPPED with a partial index to keep the
+      coordinator healthy. This is the "needs a dedicated indexer box" signal
+      feeding the Oracle rethink; numbers name exactly what fit.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, org, org_count, newly_indexed, already_registered, free_gb, floor_gb, stopped_before]
+
+  - kind: almanac_fleet_clone_completed
+    effect_metric: self
+    emitter: scripts/ops/fleet-clone-index.sh (RESILIENT-1351)
+    trigger: the org-wide sweep finished — newly_indexed/failed/
+      already_registered give the per-repo tally, total_registered is the
+      canonical index size afterward, disk_stop=1 if it ended at the floor.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, org, org_count, newly_indexed, failed, already_registered, total_registered, free_gb, disk_stop]
+
+  - kind: almanac_fleet_clone_no_binary
+    effect_metric: self
+    emitter: scripts/ops/fleet-clone-index.sh (RESILIENT-1351)
+    trigger: the almanac CLI was absent at ALMANAC_BIN — the org sweep was
+      skipped entirely instead of silently no-op'ing.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, bin]
+
+  - kind: almanac_fleet_clone_no_gh
+    effect_metric: self
+    emitter: scripts/ops/fleet-clone-index.sh (RESILIENT-1351)
+    trigger: the gh CLI was missing or unauthenticated, so the org could not
+      be enumerated and the sweep was skipped. reason is "gh_missing" or
+      "gh_unauthed".
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, reason]
+
   - kind: vision_acuity
     effect_metric: almanac_summary_coverage_pct
     emitter: scripts/ops/almanac-vision-keeper.sh (INFRA-3637)

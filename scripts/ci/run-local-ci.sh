@@ -145,6 +145,7 @@ run_test_script 1 "$SCRIPTS_CI/test-gap-audit-ac.sh"
 run_test_script 1 "$SCRIPTS_CI/test-gap-preflight-ac-gate.sh"
 run_test_script 1 "$SCRIPTS_CI/test-hardcoded-date-guard.sh"
 run_test_script 1 "$SCRIPTS_CI/test-plist-no-tmp-paths.sh"  # INFRA-2419: plist temp-path lint
+run_test_script 1 "$SCRIPTS_CI/test-fleet-clone-index.sh"   # RESILIENT-1351: org clone+index+untether sweep (hermetic, fake gh/almanac)
 run_test_script 1 "$SCRIPTS_CI/test-curator-liveness.sh"    # RESILIENT-246: curator exit-78 + silence regression
 
 # Hook / commit hygiene gates
