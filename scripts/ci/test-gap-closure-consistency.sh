@@ -6,14 +6,17 @@
 # Forward mode (CREDIBLE-028): queries state.db for gaps with status=done and
 # closed_pr=N, then verifies each PR is actually merged on GitHub.
 #
-# File-overlap check (CREDIBLE-268 FIX 3): for each forward-mode gap whose PR
-# IS merged, extracts file-path-looking tokens from the gap's
-# acceptance_criteria and compares them against the PR's changed-file list.
-# ACs that name files but share none with the PR diff are the fingerprint of
-# an over-broad auto-flip (e.g. a PR merely CITING a gap rather than doing
-# its work) — see PR #3556, which changed 2 files and closed 5 gaps by
-# citing them. Extension of the existing forward-mode gate, not a new
-# detector (deliberate: MINE BEFORE BUILD).
+# File-overlap check (CREDIBLE-268 FIX 3, made unconditional in CREDIBLE-1297):
+# for each forward-mode gap whose PR IS merged, extracts file-path-looking
+# tokens from the gap's acceptance_criteria and compares them against the
+# PR's changed-file list. ACs that name files but share none with the PR
+# diff are the fingerprint of an over-broad auto-flip (e.g. a PR merely
+# CITING a gap rather than doing its work) — see PR #3556, which changed 2
+# files and closed 5 gaps by citing them. Extension of the existing
+# forward-mode gate, not a new detector (deliberate: MINE BEFORE BUILD).
+# CREDIBLE-1297: this check now ALWAYS fails the gate on a mismatch
+# (independent of --strict) and logs the offending gap IDs — CI must fail
+# whenever it fires, not just advise.
 #
 # Reverse mode (CREDIBLE-039): queries state.db for gaps with status=open and
 # closed_pr=N, then checks if that PR is merged → emits stale_post_merge_gap.
@@ -160,11 +163,11 @@ FILE_OVERLAP_IDS=()
 # fingerprint of a closure that rode in on a citation rather than the work
 # itself (PR #3556: 2 files changed, 5 gaps closed by naming them in prose).
 #
-# Deliberately advisory, not blocking by default: filenames named in ACs are
-# a design sketch, not a contract, so a real implementation can legitimately
-# land in different files than first proposed. Emits gap_closed_no_file_overlap
-# for operator review; only affects overall_drift under --strict (same as
-# every other check in this gate).
+# CREDIBLE-1297: unconditional drift (not gated on --strict). A PR that
+# touches none of the files its closed gap's ACs name is the fingerprint of
+# a citation-only closure (PR #3556), which is exactly the failure class this
+# gate exists to catch — advisory-only made it too easy to ignore in
+# practice. Emits gap_closed_no_file_overlap for operator review either way.
 check_file_overlap() {
     local gap_id="$1" pr_num="$2"
     local ac_text
@@ -198,7 +201,7 @@ check_file_overlap() {
             emit_alert "gap_closed_no_file_overlap" \
                 '"gap_id":"'"$gap_id"'","pr":'"$pr_num"',"ac_files_sample":"'"${ac_files[0]}"'"'
         fi
-        [[ "$STRICT" -eq 1 ]] && overall_drift=1
+        overall_drift=1
     fi
     return 0
 }

@@ -93,6 +93,67 @@ check "gate exits non-zero on GH_FAIL with ALLOW_GH_FAIL=0" bash -c "
 check "ALLOW_GH_FAIL=1 escape hatch allows pass" bash -c \
   "grep -A5 'ALLOW_GH_FAIL.*==.*1\|allow_gh_fail.*1' '$GATE' | grep -q 'warn\|skip\|soft'"
 
+# ── Functional: file-overlap check fails the gate unconditionally (CREDIBLE-1297) ──
+# A done gap whose ACs name a file the merged PR never touched must fail the
+# gate even without --strict, and the offending gap ID must be logged.
+if command -v sqlite3 &>/dev/null; then
+  FO_DIR="$(mktemp -d)"
+  trap 'rm -rf "$FO_DIR"' RETURN 2>/dev/null || true
+
+  FO_DB="$FO_DIR/state.db"
+  sqlite3 "$FO_DB" "
+    CREATE TABLE gaps (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      status TEXT,
+      priority TEXT,
+      effort TEXT,
+      closed_pr INTEGER,
+      depends_on TEXT,
+      acceptance_criteria TEXT
+    );
+    INSERT INTO gaps VALUES('FIXTURE-002','test overlap gap','done','P2','xs',88881,NULL,
+      'Modify src/actual_target.rs to add the new flag.');
+  " 2>/dev/null
+
+  # Fake gh shim: PR #88881 is merged but only touched an unrelated file.
+  FO_GH="$FO_DIR/gh"
+  cat > "$FO_GH" <<'SHIM'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+  *"api /rate_limit"*) exit 0 ;;
+  *"--json mergedAt"*) echo "2026-01-01T00:00:00Z" ;;
+  *"--json files"*) echo "unrelated/other_file.rs" ;;
+  *"--json state"*) echo "MERGED" ;;
+  *) exit 0 ;;
+esac
+SHIM
+  chmod +x "$FO_GH"
+
+  FO_OUT="$FO_DIR/out.txt"
+  FO_EXIT=0
+  PATH="$FO_DIR:$PATH" CHUMP_STATE_DB="$FO_DB" CHUMP_GH_PROBE_SKIP=1 \
+    bash "$GATE" >"$FO_OUT" 2>&1 || FO_EXIT=$?
+
+  if [[ "$FO_EXIT" -ne 0 ]]; then
+    echo "  PASS: file-overlap mismatch fails the gate (exit $FO_EXIT)"; (( PASS++ )) || true
+  else
+    echo "  FAIL: file-overlap mismatch should fail the gate but exited 0"; (( FAIL++ )) || true
+  fi
+
+  if grep -q 'FIXTURE-002' "$FO_OUT"; then
+    echo "  PASS: offending gap ID (FIXTURE-002) logged in output"; (( PASS++ )) || true
+  else
+    echo "  FAIL: offending gap ID not found in gate output"; (( FAIL++ )) || true
+  fi
+
+  rm -rf "$FO_DIR"
+else
+  echo "  SKIP: sqlite3 not found — skipping file-overlap functional test"
+  (( PASS++ )) || true
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
