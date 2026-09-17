@@ -51404,10 +51404,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a new `#[test]` function named `test_quota_exhaustion_handling` to `tests/cli_help_consistency_test.rs` that invokes the Upshift CLI with the AI bucket deliberately blocked, captures its stdout/stderr, asserts that the output contains the exact “quota exhausted” banner, verifies that the process exits successfully, and confirms that no “got‑stuck” findings are recorded (e.g., by checking that the `got_stuck.log` file is absent or empty).
+    
+    Target file(s):
+    - tests/cli_help_consistency_test.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test runs Upshift CLI with AI bucket blocked
-    - CLI outputs the honest quota‑exhausted banner and completes execution
-    - Test records zero got‑stuck findings
+    - "tests/cli_help_consistency_test.rs defines a `#[test] fn test_quota_exhaustion_handling()` that compiles without errors."
+    - The test runs the Upshift CLI binary with a flag/environment that blocks the AI bucket and asserts that the captured stdout contains the literal string “quota exhausted”.
+    - The test asserts that the CLI process exits with status code 0, indicating normal completion after the banner.
+    - After the CLI run, the test asserts that `got_stuck.log` does not exist or is empty, confirming zero got‑stuck findings.
   depends_on: [EFFECTIVE-1279]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -51439,10 +51447,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add an honest‑degradation flag to the Olive UI by extending the `GapBriefing` struct in `src/briefing.rs` with a `degradation_active: bool` field that is set to true when Kroger or AI health‑checks fail, and modify the banner generation in `src/system_prompt.rs` so that `VOICE_ADDENDUM` includes the text “Limited functionality: some services unavailable” whenever `degradation_active` is true.
+    
+    Target file(s):
+    - src/briefing.rs
+    - src/system_prompt.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - When Kroger or AI services fail, Olive UI shows an honest banner indicating limited functionality
-    - Core list‑keeping loop continues to operate
-    - No dead‑endpoint routes are reachable from primary CTA buttons
+    - "In `src/briefing.rs`, the `GapBriefing` struct contains a new `degradation_active: bool` field initialized to `false` and the health‑check routine sets it to `true` on Kroger or AI failure."
+    - "? In `src/system_prompt.rs`, the `VOICE_ADDENDUM` constant (or the function that builds it) appends the exact banner string “Limited functionality : some services unavailable” when `degradation_active` is true."
+    - An integration test that forces a Kroger service failure and runs the core list‑keeping loop asserts that the rendered UI output (captured from the function `render_ui` in `src/briefing.rs`) contains the banner text.
+    - A unit test for the primary CTA handler (`primary_action` in `src/briefing.rs`) confirms that, even when `degradation_active` is true, the returned route is not a dead‑endpoint URL.
   depends_on: [EFFECTIVE-1276]
   notes: |
     [chump harvest check 'EFFECTIVE']
