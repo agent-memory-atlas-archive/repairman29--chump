@@ -49189,11 +49189,19 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Add a call to the almanac `fluff-audit` command inside the `discover_test_scripts` function in `crates/chump-preflight/src/preflight.rs` so that after the existing posse‑crawl it runs `fluff-audit` for each allowed repository, merges the resulting JSON into the current findings under a new top‑level `"fluff"` field, and extend `scripts/ci/test-closer-batcher-filing-pr.sh` to assert that the combined output contains both `"posse"` and `"fluff"` sections and that a README mismatch appears as a fluff finding.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    - scripts/ci/test-closer-batcher-filing-pr.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - fluff‑audit runs after the posse crawl for each allowed repository
-    - fluff‑audit findings are merged into the same findings payload as the posse crawl
-    - "output JSON contains both \"posse\" and \"fluff\" sections per repository"
-    - test with a sample repo validates that a README mismatch is reported as a fluff finding
+    - In `crates/chump-preflight/src/preflight.rs`, the `discover_test_scripts` function invokes the `fluff-audit` binary after completing the posse crawl for every repository in the allowed set.
+    - "The JSON payload produced by `discover_test_scripts` now includes a top‑level `\"fluff\"` object alongside the existing `\"posse\"` object for each repository."
+    - "The CI test `scripts/ci/test-closer-batcher-filing-pr.sh` runs the sweep on the sample repository and checks that the output JSON contains both `\"posse\"` and `\"fluff\"` keys."
+    - "The same CI test verifies that the `\"fluff\"` section contains a finding with the message “README mismatch” for the sample repository."
   depends_on: [EFFECTIVE-1189]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -255261,7 +255269,7 @@ gaps:
     - "Smoke test scripts/ci/test-chump-playbook-freshness-smoke.sh: <60s, creates a synthetic divergence (rename a referenced script), runs the freshness gate, asserts non-zero exit + correct error message + correct kind=playbook_drift_detected event emitted"
     - "Pillar tag: RESILIENT (reduces operator-overhead by catching doc rot before it misleads readers); META-domain because it is fleet-discipline doctrine, not feature work"
   notes: |
-    Decomposed into 10 slices: META-645, META-646, META-647, META-648, META-649, META-650, META-651, META-652, META-653, META-654
+    Decomposed into 10 slices: META-774, META-775, META-776, META-777, META-778, META-779, META-780, META-781, META-782, META-783
   source_doc: docs/process/CHUMP_PLAYBOOK.md
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
@@ -273204,6 +273212,292 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-019-mythseeker2-cascade-convergent.md
+
+- id: META-774
+  domain: META
+  title: "META: Create CI gate script test-chump-playbook-freshness.sh (META-172 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - File scripts/ci/test-chump-playbook-freshness.sh exists in repository
+    - Script implements the five assertions described in the gap and exits with code 0 on success, non‑zero on failure
+    - Runtime on a typical repository checkout is under 30 seconds
+    - On each failed assertion the script prints the divergent item, the expected value, and the line number in CHUMP_PLAYBOOK.md
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-775
+  domain: META
+  title: "META: Register ambient event kind playbook_drift_detected in EVENT_REGISTRY.yaml (META-172 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "EVENT_REGISTRY.yaml contains a top‑level entry with kind: playbook_drift_detected"
+    - Entry includes required fields (description, severity, owners) matching the project schema
+    - CI gate script can emit this event via the existing event‑emission helper without error
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-776
+  domain: META
+  title: "META: Integrate CI gate script into GitHub workflow and preflight.rs parity (META-172 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The CI job runs test-chump-playbook-freshness.sh on every push and PR that touches docs/process/CHUMP_PLAYBOOK.md or any file referenced by it
+    - The same script is invoked from src/preflight.rs so local preflight matches CI behavior (INFRA‑1867 parity)
+    - When the script fails, the CI job is marked failed and the preflight command returns a non‑zero exit code
+    - Successful runs produce a green check badge in the PR
+  depends_on: [META-774, META-775]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-777
+  domain: META
+  title: "META: Add Section‑Ownership table (SECTION_OWNERS.md) and reference it from CHUMP_PLAYBOOK.md (META-172 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - File SECTION_OWNERS.md exists and lists each numbered section with a curator lane (orchestrator, handoff, observability, external‑collab, infra‑watcher, shepherd, cross‑cutting)
+    - CHUMP_PLAYBOOK.md contains a top‑level link or include to SECTION_OWNERS.md
+    - CI gate script validates that every section number in the playbook has a corresponding owner entry; missing owners cause CI failure
+  depends_on: [META-776]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-778
+  domain: META
+  title: "META: Add LAST_VERIFIED timestamp handling in CI gate (META-172 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "CHUMP_PLAYBOOK.md header includes a line `HEADER:LAST_VERIFIED: <ISO8601>`"
+    - When CI gate passes, the script updates this timestamp to the current UTC time
+    - Timestamp format is validated (ISO‑8601) and the line is preserved on subsequent edits
+    - CI gate fails if the timestamp is older than 14 days and no drift is detected (to trigger stale‑warning event)
+  depends_on: [META-776]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-779
+  domain: META
+  title: "META: Create smoke‑test script test-chump-playbook-freshness-smoke.sh (META-172 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Script creates a temporary copy of CHUMP_PLAYBOOK.md, renames a referenced script file to induce divergence, runs the CI gate script against the copy
+    - Smoke test exits with non‑zero status, prints the expected assertion failure message, and verifies that event kind playbook_drift_detected is emitted
+    - Execution time of the smoke test is under 60 seconds
+    - All temporary artifacts are cleaned up after the test
+  depends_on: [META-774, META-775, META-776]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-780
+  domain: META
+  title: "META: Schedule weekly remote‑agent drift check (Wednesday 9 am MT) (META-172 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - A cron entry `0 15 * * 3` (UTC) is added to the claude.ai remote‑agent configuration
+    - Weekly job checks out the latest CHUMP_PLAYBOOK.md, runs test-chump-playbook-freshness.sh, and then performs an LLM‑driven prose‑vs‑reality comparison for the lifecycle diagram
+    - Any divergence found creates a gap ticket with appropriate metadata and emits event kind playbook_drift_detected
+    - Job logs are stored and accessible in the CI artifacts dashboard
+  depends_on: [META-774, META-775, META-778]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-781
+  domain: META
+  title: "META: Extend tech‑writer agent to scan CHUMP_PLAYBOOK.md hourly (META-172 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Tech‑writer agent runs hourly (via existing agent scheduler) and parses CHUMP_PLAYBOOK.md
+    - Agent re‑uses the CI gate assertions; on failure it automatically creates a drift gap ticket using the standard gap‑creation API
+    - Created gaps include the failing assertion, line number, and are labeled with kind=playbook_drift_detected
+    - Agent does not duplicate already‑open gaps for the same divergence
+  depends_on: [META-775, META-778]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-782
+  domain: META
+  title: "META: Emit stale‑warning event when playbook is >14 days without verification (META-172 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "A background check runs (can be part of the weekly drift job) that reads HEADER:LAST_VERIFIED timestamp"
+    - If the timestamp is older than 14 days and no drift was detected, the system emits event kind playbook_stale_warning
+    - Event payload includes the document name, last verified date, and owning curator lane (derived from SECTION_OWNERS.md)
+    - Stale‑warning appears in the chump fleet brief alerts panel
+  depends_on: [META-778]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-783
+  domain: META
+  title: "META: Update documentation with freshness contract overview and usage instructions (META-172 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README or a new section in docs/process/CHUMP_PLAYBOOK.md describes the freshness contract, CI gate, weekly check, ownership responsibilities, and how to resolve drift
+    - Documentation includes links to the CI script, SECTION_OWNERS.md, and the event kinds
+    - All new files referenced in the contract are cross‑referenced correctly
+    - Documentation passes the CI gate validation (no missing owners, timestamp present, etc.)
+  depends_on: [META-776, META-777, META-778, META-779, META-780, META-781, META-782]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
 - id: MISSION-001
   domain: MISSION
