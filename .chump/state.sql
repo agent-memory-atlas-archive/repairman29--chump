@@ -35885,9 +35885,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a concrete implementation of `calc_need(entry: &RegistryEntry) -> f32` in `crates/chump-preflight/src/preflight.rs` that returns a positive float for entries flagged as still‑wired and returns 0.0 for entries flagged as orphaned, using the appropriate fields on `RegistryEntry`; also add a minimal unit test exercising the orphaned case.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "Function `calc_need(entry: &RegistryEntry) -> f32` returns >0 for still‑wired entries and 0 for orphaned entries"
-    - Unit test verifies need is 0 for a known orphaned CLI entry
+    - The function `calc_need` in `crates/chump-preflight/src/preflight.rs` returns a value > 0.0 when invoked with a `RegistryEntry` whose `wired` flag is true.
+    - The function `calc_need` in `crates/chump-preflight/src/preflight.rs` returns exactly 0.0 when invoked with a `RegistryEntry` whose `orphaned` flag is true.
+    - Running `cargo test --test calc_need` passes, confirming that `calc_need` yields 0.0 for the known orphaned CLI entry defined in the test.
   depends_on: [CREDIBLE-981]
   notes: |
     [chump harvest check 'Index']
