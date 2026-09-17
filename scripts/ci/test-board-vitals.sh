@@ -17,6 +17,13 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 
+# CREDIBLE-1303: every scenario below is about SOMETHING ELSE — without this,
+# each subshell would fall through to the real $HOME/.almanac/vision-acuity.state
+# (if any) and the almanac_coverage_low check could non-deterministically fire
+# and pollute unrelated assertions. Point at a path that never exists by
+# default; the dedicated almanac tests below override it per-case.
+export CHUMP_BOARD_VITALS_ALMANAC_STATE="$TMP/no-such-almanac.state"
+
 _ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS+1)); }
 _fail() { printf '  FAIL %s\n' "$1"; FAIL=$((FAIL+1)); }
 _emitted()   { if grep -qE "$3" "$2" 2>/dev/null; then _ok "$1"; else _fail "$1 (no /$3/ in $2)"; fi; }
@@ -55,6 +62,54 @@ dd_count="$(_count "$A" '"board_vitals_page_deduped".*"disk_full"')"
 dryrun_count="$(_count "$A" '"board_vitals_page_dryrun".*"disk_full"')"
 [[ "$dryrun_count" -eq 1 ]] && _ok "disk paged exactly once across two runs" \
     || _fail "disk pages != 1 (got $dryrun_count)"
+
+# ── CREDIBLE-1303: almanac summarized_pct guard ──────────────────────────────
+echo "[test-board-vitals] almanac coverage below floor pages once then dedupes"
+AL="$TMP/almanac.jsonl"; : > "$AL"
+ALSTATE="$TMP/almanac-low.state"; printf '20 68\n' > "$ALSTATE"   # summary_pct=68 <= 95
+SDA="$TMP/state-almanac"
+run_almanac() {
+    ( set -a
+      CHUMP_AMBIENT_LOG="$AL"; CHUMP_BOARD_VITALS_STATE_DIR="$SDA"
+      CHUMP_BOARD_VITALS_DRY_RUN=1; CHUMP_BOARD_VITALS_ESCALATE=0
+      CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+      CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+      CHUMP_BOARD_VITALS_ALMANAC_STATE="$ALSTATE"
+      set +a
+      source "$LIB"; board_vitals_check )
+}
+run_almanac >/dev/null 2>&1
+_emitted "68% summarized (<=95 floor) → pages almanac_coverage_low" "$AL" '"board_vitals_page_dryrun".*"almanac_coverage_low"'
+run_almanac >/dev/null 2>&1
+al_pages="$(_count "$AL" '"board_vitals_page_dryrun".*"almanac_coverage_low"')"
+[[ "$al_pages" -eq 1 ]] && _ok "almanac coverage paged exactly once across two runs (dedup)" \
+    || _fail "almanac coverage pages != 1 (got $al_pages)"
+
+echo "[test-board-vitals] almanac coverage above floor never pages"
+AH="$TMP/almanac-healthy.jsonl"; : > "$AH"
+ALSTATE_HEALTHY="$TMP/almanac-healthy.state"; printf '99 97\n' > "$ALSTATE_HEALTHY"  # summary_pct=97 > 95
+( set -a
+  CHUMP_AMBIENT_LOG="$AH"; CHUMP_BOARD_VITALS_STATE_DIR="$TMP/state-almanac-healthy"
+  CHUMP_BOARD_VITALS_DRY_RUN=1; CHUMP_BOARD_VITALS_ESCALATE=0
+  CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+  CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+  CHUMP_BOARD_VITALS_ALMANAC_STATE="$ALSTATE_HEALTHY"
+  set +a
+  source "$LIB"; board_vitals_check ) >/dev/null 2>&1
+_notemitted "97% summarized (>95 floor) → no page" "$AH" '"board_vitals_page_(dryrun|sent)".*"almanac_coverage_low"'
+
+echo "[test-board-vitals] almanac coverage state file missing → unknown, never pages"
+AM="$TMP/almanac-missing.jsonl"; : > "$AM"
+( set -a
+  CHUMP_AMBIENT_LOG="$AM"; CHUMP_BOARD_VITALS_STATE_DIR="$TMP/state-almanac-missing"
+  CHUMP_BOARD_VITALS_DRY_RUN=1; CHUMP_BOARD_VITALS_ESCALATE=0
+  CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+  CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+  CHUMP_BOARD_VITALS_ALMANAC_STATE="$TMP/definitely-does-not-exist.state"
+  set +a
+  source "$LIB"; board_vitals_check ) >/dev/null 2>&1
+_notemitted "missing acuity state → unknown coverage, no page (not treated as 0%)" \
+    "$AM" '"board_vitals_page_(dryrun|sent)".*"almanac_coverage_low"'
 
 # ── clean cycle never pages ──────────────────────────────────────────────────
 echo "[test-board-vitals] clean cycle is phone-quiet"

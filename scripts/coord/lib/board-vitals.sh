@@ -31,6 +31,11 @@
 #   * oauth_expired — ≥3 oauth_token_refresh_failed in-window with NO recovery
 #                   since (routine oauth_token_refreshed successes never page).
 #   * cost_cap    — a cost_cap_exceeded in-window (sub cap / OpenRouter credit).
+#   * almanac_coverage_low — the almanac index's summarized_pct (written by
+#                   almanac-vision-keeper.sh's acuity state file, CREDIBLE-300)
+#                   is at or below the 95% mission floor. An unreadable/missing
+#                   state file means "unknown", not "0%" — it never pages (the
+#                   keeper not having run yet is not a coverage regression).
 # oauth_expired + cost_cap residentize operator-recall.sh's proven signals+bar.
 # The `[board-vitals] tick` proof-of-life line (RESILIENT-410) still prints
 # EVERY beat regardless — that is journal observability, NOT a DM.
@@ -74,6 +79,11 @@
 #                                      test hook).
 #   CHUMP_BOARD_VITALS_FLOOR_WINDOW_S  window for oauth/cost signal counts (default 7200 = 2h)
 #   CHUMP_BOARD_VITALS_OAUTH_FAIL_THR  oauth_token_refresh_failed count to page (default 3)
+#   CHUMP_BOARD_VITALS_ALMANAC_STATE   almanac-vision-keeper.sh acuity state file to read
+#                                      summarized_pct from (default
+#                                      $CHUMP_VISION_ACUITY_STATE, else
+#                                      $HOME/.almanac/vision-acuity.state; test hook)
+#   CHUMP_BOARD_VITALS_ALMANAC_FLOOR   summarized_pct floor, page at-or-below (default 95)
 #   CHUMP_BOARD_VITALS_ESCALATE_MODEL  model for the merge-stall diagnosis (default sonnet)
 #   CHUMP_BOARD_VITALS_ESCALATE        1 enables the LLM diagnosis on merge_stall (default 1)
 #
@@ -276,6 +286,20 @@ print(n)
 PY
 }
 
+# Read the almanac index's summarized_pct off almanac-vision-keeper.sh's
+# acuity state file ("<symbol_pct> <summary_pct>", CREDIBLE-300). Prints the
+# integer summary_pct on stdout, or nothing if the file is missing/unreadable/
+# malformed — callers must treat empty output as "unknown", never as 0, so a
+# keeper that simply hasn't run yet cannot masquerade as a coverage collapse.
+_bv_almanac_coverage_pct() {
+    local state_file
+    state_file="${CHUMP_BOARD_VITALS_ALMANAC_STATE:-${CHUMP_VISION_ACUITY_STATE:-$HOME/.almanac/vision-acuity.state}}"
+    [[ -f "$state_file" ]] || return 0
+    local sym sum
+    read -r sym sum _ < "$state_file" 2>/dev/null || return 0
+    [[ "$sum" =~ ^[0-9]+$ ]] && printf '%s\n' "$sum"
+}
+
 # Resolve notify_operator (source notify-operator.sh; stub if absent so the lib
 # stays testable). Sets a module flag so we source once.
 _bv_ensure_notify() {
@@ -367,11 +391,17 @@ board_vitals_check() {
 
     local incidents=0
 
-    # Check almanac coverage
-    local coverage="${almanac_coverage_summarized_pct:-0}"
-    if [[ "$coverage" =~ ^[0-9]+$ ]] && (( coverage <= 95 )); then
-        echo "ALMANAC_COVERAGE_LOW" >&2
-        ((incidents++))
+    # ── 0 · ALMANAC: summarized_pct guard (CREDIBLE-300/CREDIBLE-1303) ────────
+    # summarized_pct is read from almanac-vision-keeper.sh's acuity state, not
+    # assumed — an unreadable/missing file is "unknown" and never pages (the
+    # keeper not having run yet is not itself a coverage regression).
+    local almanac_floor coverage
+    almanac_floor="${CHUMP_BOARD_VITALS_ALMANAC_FLOOR:-95}"
+    coverage="$(_bv_almanac_coverage_pct)"
+    if [[ "$coverage" =~ ^[0-9]+$ ]] && (( coverage <= almanac_floor )); then
+        incidents=$((incidents+1))
+        _bv_maybe_page "almanac_coverage_low" \
+"🔴 **Almanac coverage — summarized_pct guard.** The chump index is ${coverage}% summarized, at or below the ${almanac_floor}% mission floor (CREDIBLE-300). almanac-vision-keeper.sh should be driving summarize to completion each pass — check it's alive and not stuck. (board-vitals.sh, pages once per $(( ${CHUMP_BOARD_VITALS_WINDOW_S:-7200} / 60 ))m)"
     fi
 
     # ── 1 · BOX: disk ────────────────────────────────────────────────────────
