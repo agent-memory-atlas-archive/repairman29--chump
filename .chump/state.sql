@@ -249047,7 +249047,7 @@ gaps:
 - id: INFRA-7160
   domain: INFRA
   title: "INFRA: Create smoke test script test‑chump‑chat‑selector.sh (INFRA-1433 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -249070,6 +249070,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+    [2026-09-17T22:33:08Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=5956B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-7161
   domain: INFRA
@@ -288250,6 +288251,17 @@ gaps:
     - Release notes list the new escalation behavior and operator surface flag
     - Documentation builds without errors
   depends_on: [RESILIENT-1343, RESILIENT-1344, RESILIENT-1345, RESILIENT-1346, RESILIENT-1347]
+
+- id: RESILIENT-1351
+  domain: RESILIENT
+  title: "Make CJ the fleet canonical almanac index home (decision 2026-09-17): today CJ only indexes its 2 local repos; the fleet mine-before-build memory needs ALL ~95 repairman29 repos but no box holds them (Mac=29 @93% disk, CJ=2) — the ~95 is the GitHub-org total. Build: on CJ, a niced/off-peak sweep that (a) gh repo list repairman29 -> shallow-clone (--depth 1, no history) each repo into a dedicated index tree, (b) git pull the shallow clones each cycle + discover-new-repos, (c) run almanac AST index over all of them (NO embeds — embed/summarize is a separate deferred subcommand; plain index gives the file:line receipts that ARE mine-before-build), (d) serve the fleet almanac MCP/CLI queries from this canonical CJ index. GUARDRAILS: shallow-only; MONITOR disk (29GB free, ~95 shallow clones ~few GB but watch big repos like games monorepo/chump — if it wont fit, escalate: needs a dedicated indexer box, loops into the Oracle rethink); nice the sweep so it never fights the coordinator/workers; keep single-writer. Verify: almanac_search_fleet returns hits across many repos (not just 2), fleet-doctor almanac-freshness stays green on a REAL fleet-wide index"
+  status: open
+  priority: P2
+  effort: m
+  acceptance_criteria:
+    - "The change described by \"today CJ only indexes its 2 local repos; the fleet mine-before-build memory needs ALL ~95 repairman29 repos but no box holds them (Mac=29 @93% disk, CJ=2) — the ~95 is the GitHub-org total. Build: on CJ, a niced/off-peak sweep that (a) gh repo list repairman29 -> shallow-clone (--depth 1, no history) each repo into a dedicated index tree, (b) git pull the shallow clones each cycle + discover-new-repos, (c) run almanac AST index over all of them (NO embeds — embed/summarize is a separate deferred subcommand; plain index gives the file:line receipts that ARE mine-before-build), (d) serve the fleet almanac MCP/CLI queries from this canonical CJ index. GUARDRAILS: shallow-only; MONITOR disk (29GB free, ~95 shallow clones ~few GB but watch big repos like games monorepo/chump — if it wont fit, escalate: needs a dedicated indexer box, loops into the Oracle rethink); nice the sweep so it never fights the coordinator/workers; keep single-writer. Verify: almanac_search_fleet returns hits across many repos (not just 2), fleet-doctor almanac-freshness stays green on a REAL fleet-wide index\" is implemented in the relevant RESILIENT code path(s)."
+    - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
+    - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
 
 - id: RESILIENT-136
   domain: RESILIENT
