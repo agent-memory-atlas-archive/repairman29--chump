@@ -247468,7 +247468,7 @@ gaps:
     - "Install via scripts/setup/install-system-invariants-launchd.sh. CRITICAL: bake path via git rev-parse --git-common-dir (not CWD) per INFRA-451 so monitor can't break the same way"
     - "Independence requirement (INFRA-452 partial): primary monitor's heartbeat graded by reaper-watchdog AND a secondary check (e.g. gh pr comment cron 'is monitor alive') so single-launchd-instance failure is detected"
   notes: |
-    Decomposed into 14 slices: META-556, META-557, META-558, META-559, META-560, META-561, META-562, META-563, META-564, META-565, META-566, META-567, META-568, META-569
+    Decomposed into 14 slices: META-660, META-661, META-662, META-663, META-664, META-665, META-666, META-667, META-668, META-669, META-670, META-671, META-672, META-673
   opened_date: '2026-05-04'
   outcome_id: MISSION-010
 
@@ -263753,6 +263753,408 @@ gaps:
     - Measured total wall‑clock time for fast‑checks is at least 30% lower than the sequential baseline
     - All checks still report successfully to the aggregator
   depends_on: [META-658]
+
+- id: META-660
+  domain: META
+  title: "META: Create launchd job definition and skeleton script (system-invariants-monitor.sh) (META-033 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Launchd plist file exists at scripts/ops/com.company.system-invariants-monitor.plist
+    - Plist schedules the script to run every 10 minutes
+    - Skeleton script logs start and end timestamps and exits with code 0
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-661
+  domain: META
+  title: "META: Implement INV-1: PR count per CI step invariant (META-033 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Function `inv_1_check` queries GitHub API for open PRs and groups by CI step name + script path
+    - "Returns `{ok:true}` when count ≤ 2 for every group, otherwise `{violation:true, details:\"...\"}`"
+    - Unit test verifies both ok and violation paths
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-662
+  domain: META
+  title: "META: Implement INV-2: Domain gap list size invariant (META-033 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Function `inv_2_check` reads the chump gap list and calculates per‑domain open gap counts
+    - Returns ok when no domain exceeds 100 gaps and no domain exceeds 50% of total open gaps
+    - Returns violation with domain name and counts when thresholds are breached
+    - Unit test covers edge cases (exact thresholds, over thresholds)
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-663
+  domain: META
+  title: "META: Implement INV-3: Reaper heartbeat freshness invariant (META-033 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Function `inv_3_check` reads the latest reaper heartbeat timestamp
+    - Returns ok when timestamp is < 4 h old, otherwise violation with age detail
+    - Test script simulates fresh and stale timestamps
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-664
+  domain: META
+  title: "META: Implement INV-4: Disk free space thresholds invariant (META-033 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Function `inv_4_check` checks free percentage on /, /System/Volumes/Data, and ~/Projects
+    - Returns ok when all ≥ 10 %, warning when any < 10 % ≥ 5 %, critical when < 5 % ≥ 2 %, blocking when < 2 %
+    - Outputs appropriate severity level and path in details
+    - Test harness validates each threshold scenario
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-665
+  domain: META
+  title: "META: Implement INV-5: Launchd plist uniqueness invariant (META-033 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Function `inv_5_check` scans .claude/worktrees/ and .chump/worktrees/ for launchd plist files
+    - Detects duplicate subpaths and returns violation with duplicate list
+    - Returns ok when all plist locations are unique
+    - Test creates duplicate and unique scenarios
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-666
+  domain: META
+  title: "META: Implement INV-6: Required CI shard green status invariant (META-033 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Function `inv_6_check` queries CI API for required shards on origin/main over the last 4 h
+    - Returns ok when all required shards are green, otherwise violation with shard IDs
+    - Handles API pagination and rate‑limit errors gracefully
+    - Unit tests mock API responses for all‑green and mixed states
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-667
+  domain: META
+  title: "META: Implement INV-7: Green‑test count regression invariant (META-033 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Function `inv_7_check` runs `cargo test` on origin/main HEAD and HEAD~10
+    - Compares green test counts and returns ok when count does not decrease
+    - Returns violation with before/after counts when regression detected
+    - Test harness simulates both stable and regressive runs
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-668
+  domain: META
+  title: "META: Emit ALERT on violation and auto‑file cleanup gap after consecutive failures (META-033 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - When any invariant returns violation, script emits an ambient ALERT of kind `invariant_violation` with invariant ID and details
+    - Tracks consecutive failures per invariant across cron ticks
+    - "After 2+ consecutive failures, automatically creates an INFRA gap titled `invariant INV‑N broken: <details>` via the gap‑creation CLI"
+    - Verification script confirms ALERT payload and gap creation in a synthetic run
+  depends_on: [META-661, META-662, META-663, META-664, META-665, META-666, META-667]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-669
+  domain: META
+  title: "META: Create CI test fixtures script (test-system-invariants-fixtures.sh) (META-033 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Script seeds a synthetic environment for each invariant (mock GitHub, CI, filesystem, reaper heartbeat, etc.)
+    - Runs `system-invariants-monitor.sh` against each fixture and asserts expected ALERTs or gaps are produced
+    - One fixture per invariant, plus a mixed‑fixture that triggers multiple violations
+    - Exit code 0 only when all assertions pass
+  depends_on: [META-661, META-662, META-663, META-664, META-665, META-666, META-667, META-668]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-670
+  domain: META
+  title: "META: Write install script (install-system-invariants-launchd.sh) with git‑common‑dir path handling (META-033 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Script determines the repository’s common git directory via `git rev-parse --git-common-dir`
+    - Installs the launchd plist to `$COMMON_DIR/Library/LaunchAgents/` without using the current working directory
+    - Runs successfully on a clean checkout and reports success message
+    - Unit test verifies correct target path resolution
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-671
+  domain: META
+  title: "META: Implement secondary heartbeat check (e.g., GH PR comment cron) to monitor primary monitor liveness (META-033 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Secondary cron posts a comment on a designated tracking PR after each successful run of `system-invariants-monitor.sh`
+    - If no comment appears within two scheduled intervals, an ALERT of kind `monitor_missing_heartbeat` is emitted
+    - Configuration allows specifying the tracking PR number
+    - Test simulates missing comment and verifies ALERT generation
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-672
+  domain: META
+  title: "META: Integrate primary monitor heartbeat grading with reaper‑watchdog (META-033 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Monitor writes a heartbeat file/timestamp that reaper‑watchdog reads
+    - Reaper‑watchdog grades the monitor as healthy when heartbeat is < 4 h old
+    - Failure to update heartbeat results in reaper‑watchdog marking monitor unhealthy
+    - Test confirms both healthy and stale heartbeat scenarios
+  depends_on: [META-660]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-673
+  domain: META
+  title: "META: Full integration test and documentation (META-033 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Run the install script, start the launchd job, and let it execute at least three ticks
+    - Verify that each invariant runs, ALERTs are emitted for seeded violations, and auto‑filed gaps appear after consecutive failures
+    - Documentation file `docs/system-invariants.md` describes setup, each invariant, alert semantics, and troubleshooting steps
+    - All previous unit and fixture tests pass
+  depends_on: [META-660, META-661, META-662, META-663, META-664, META-665, META-666, META-667, META-668, META-669, META-670, META-671, META-672]
+  notes: |
+    [chump harvest check 'RESILIENT']
+    === primitives_index match for 'RESILIENT' ===
+    
+    === cluster keyword match for 'RESILIENT' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'RESILIENT' ===
+    
+    === repo-description match for 'RESILIENT' ===
+    
+    === HARVEST_ROADMAP.md mention of 'RESILIENT' (deep-scan findings) ===
+      106:| **G5** | `RESILIENT: vendor openclaw memory schema (SQLite + FTS + embeddings cache) into Chump memory_db (INFRA-1765 substrate)` | INFRA | RESILIENT | P2 |
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'RESILIENT' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
 - id: MISSION-001
   domain: MISSION
