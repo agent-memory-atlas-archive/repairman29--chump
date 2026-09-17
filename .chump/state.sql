@@ -268344,6 +268344,8 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
     [2026-09-17T19:22:22Z] test
     [2026-09-17T19:22:26Z] Verified 2026-09-17: chump cron install/uninstall/status already fully implemented in crates/chump-cron (all 4 AC met — CLI subcommand exists, validates name via CronSpec::validate_name, generates launchd plist with Label/ProgramArguments/RunAtLoad on macOS or systemd unit on Linux, exits 0 with success message on install/reload/noop). Shipped via INFRA-2057 / PR #3840 (commit a98b2ae04), predates this gap's filing. Covered by unit tests in crates/chump-cron/src/lib.rs and CI smoke test scripts/ci/test-chump-cron-install.sh. Closing as duplicate/already-shipped — no new code required.
+    [2026-09-17T19:32:11Z] EFFECTIVE-441: escalated required_model -> opus after 3 consecutive unverified_ship attempts
+  required_model: opus
 
 - id: META-702
   domain: META
@@ -268493,7 +268495,7 @@ gaps:
 - id: META-706
   domain: META
   title: "META: META-602: Migrate `inbox-injector` plist to chump‑cron management (META-110 slice)"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
@@ -268525,6 +268527,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-17T19:35:21Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=3951B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: META-707
   domain: META
@@ -269158,7 +269161,7 @@ gaps:
 - id: META-725
   domain: META
   title: "META: Add Verify-existence discipline subsection to CLAUDE.md (META-113 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -269188,6 +269191,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-17T19:44:13Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1097B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: META-726
   domain: META
