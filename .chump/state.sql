@@ -242330,7 +242330,7 @@ gaps:
 - id: INFRA-7050
   domain: INFRA
   title: "INFRA: INFRA-6475: Implement effective priority aggregation in chump-planner (INFRA-3612 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -242351,6 +242351,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'Picker' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+    [2026-09-17T04:41:21Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=942B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-7051
   domain: INFRA
@@ -272910,7 +272911,7 @@ gaps:
 - id: RESILIENT-1247
   domain: RESILIENT
   title: "Close single-node SPOF: give CJ an off-node dead-mans watcher — kill CJ worker/farmer wholesale and something off-CJ notices within one cycle and pages Jeff with zero human polling. Direct fix for the 13h/35h dark-out topology (single live node; apex-watchdog watches only dead peers so nothing watches CJ)"
-  status: open
+  status: done
   priority: P2
   effort: m
   acceptance_criteria:
@@ -272919,6 +272920,10 @@ gaps:
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
   notes: |
     Decomposed into 11 slices: RESILIENT-1329, RESILIENT-1330, RESILIENT-1331, RESILIENT-1332, RESILIENT-1333, RESILIENT-1334, RESILIENT-1335, RESILIENT-1336, RESILIENT-1337, RESILIENT-1338, RESILIENT-1339
+  closed_date: '2026-09-17'
+  closed_pr: 4713
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4713 titled 'RESILIENT-1247: ...' merged 2026-09-17; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: RESILIENT-1248
   domain: RESILIENT
@@ -275589,6 +275594,8 @@ gaps:
     - "The change described by \"RESILIENT-1247 (SPOF), INFRA-6613/6614/6738/6752 all show worker_timeout_scaled + model_tier_escalated + failed x4 -> gap_auto_blocked; the equivalents that SHIPPED this session were all Opus-class dispatched agents, not the fleet floor. The self-heal that stops the loop also silently kills the work. Fix: on auto-block, classify reason — transient (timeout/wedge -> retry) vs CAPABILITY (repeated fail with model-tier ALREADY escalated) — and on capability-failure route to a capable-agent escalation lane OR flag on an operator needs-escalation surface, never silent blocked. Verify: a gap the fleet fails N times with model-tier escalated is SURFACED for escalation, high-value blocked gaps visible not lost\" is implemented in the relevant RESILIENT code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  notes: |
+    Decomposed into 9 slices: RESILIENT-1342, RESILIENT-1343, RESILIENT-1344, RESILIENT-1345, RESILIENT-1346, RESILIENT-1347, RESILIENT-1348, RESILIENT-1349, RESILIENT-1350
 
 - id: RESILIENT-1329
   domain: RESILIENT
@@ -276046,13 +276053,106 @@ gaps:
 - id: RESILIENT-1341
   domain: RESILIENT
   title: "Backlog-sync writer (registry single-writer, CREDIBLE-292/RESILIENT-194) cannot publish state.sql to origin/main — it runs INSIDE the shared fleet working tree /home/jeff/Projects/chump and races the live workers git ops, dying on .git/index.lock contention (recurs instantly after clearing; 2 worker.sh procs churn the tree). Local main is also 24 commits behind origin/main. Result: git-tracked state.sql 33h+ stale = registry split-brain risk (git-state drifts from the live canonical state.db). Fix: run the writer in its OWN isolated clone/worktree (never the shared tree) so it cannot collide with workers; fetch+reset that tree to origin/main, dump+commit+push only .chump/state.sql. Verify: state.sql on origin/main refreshes every cycle and fleet-doctor backlog-sync-freshness passes"
-  status: open
+  status: done
   priority: P2
   effort: m
   acceptance_criteria:
     - "The change described by \"git-tracked state.sql 33h+ stale = registry split-brain risk (git-state drifts from the live canonical state.db). Fix: run the writer in its OWN isolated clone/worktree (never the shared tree) so it cannot collide with workers; fetch+reset that tree to origin/main, dump+commit+push only .chump/state.sql. Verify: state.sql on origin/main refreshes every cycle and fleet-doctor backlog-sync-freshness passes\" is implemented in the relevant RESILIENT code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  closed_pr: 4714
+
+- id: RESILIENT-1342
+  domain: RESILIENT
+  title: "RESILIENT: Investigate current auto‑block implementation and locate insertion points (RESILIENT-1328 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Code owners confirm the identified files contain the auto‑block decision logic
+    - A short design note (markdown) outlines where the classification hook will be added
+
+- id: RESILIENT-1343
+  domain: RESILIENT
+  title: "RESILIENT: Add reason classification (transient vs capability) to auto‑block flow (RESILIENT-1328 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - The function `classify_auto_block_reason` returns `Transient` for timeout/wedge cases and `Capability` for repeated failures after model‑tier escalation
+    - All existing code paths compile after the new function is called
+    - No existing unit test fails
+  depends_on: [RESILIENT-1342]
+
+- id: RESILIENT-1344
+  domain: RESILIENT
+  title: "RESILIENT: Route capability‑failure gaps to capable‑agent escalation lane (RESILIENT-1328 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - When `classify_auto_block_reason` returns `Capability`, the gap is sent to the `capable_agent_escalation` queue instead of being silently blocked
+    - Metrics show the escalation lane receives at least one gap in a simulated run
+  depends_on: [RESILIENT-1343]
+
+- id: RESILIENT-1345
+  domain: RESILIENT
+  title: "RESILIENT: Expose operator escalation surface flag for capability failures (RESILIENT-1328 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "A new field `needs_escalation: bool` is set to true on the gap metadata when reason is `Capability`"
+    - The operator UI (or mock) displays a visible badge for gaps with `needs_escalation = true`
+    - No regression to existing UI flows
+  depends_on: [RESILIENT-1343]
+
+- id: RESILIENT-1346
+  domain: RESILIENT
+  title: "RESILIENT: Write unit tests for classification and routing logic (RESILIENT-1328 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Tests cover all branches of `classify_auto_block_reason`
+    - Tests verify that `Capability` reasons trigger `capable_agent_escalation` and set `needs_escalation` flag
+    - Running `cargo test` passes with the new tests
+  depends_on: [RESILIENT-1343, RESILIENT-1344, RESILIENT-1345]
+
+- id: RESILIENT-1347
+  domain: RESILIENT
+  title: "RESILIENT: Create integration test simulating N failed cycles with model‑tier escalated (RESILIENT-1328 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - The test spins up a mock fleet worker that fails the configured number of times with `model_tier_escalated`
+    - The gap ends up surfaced to the operator escalation lane (flag true) and is not silently blocked
+    - Test fails before the change and passes after
+  depends_on: [RESILIENT-1346]
+
+- id: RESILIENT-1348
+  domain: RESILIENT
+  title: "RESILIENT: Add new tests to CI pipeline scripts (RESILIENT-1328 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`scripts/ci/test-*.sh` includes the new integration test"
+    - CI run reports the new test as part of the standard test suite
+  depends_on: [RESILIENT-1346, RESILIENT-1347]
+
+- id: RESILIENT-1349
+  domain: RESILIENT
+  title: "RESILIENT: Run cargo fmt, clippy and ensure zero warnings (RESILIENT-1328 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - "`cargo fmt -- --check` passes"
+    - "`cargo clippy --all-targets -D warnings` passes"
+    - No new warnings introduced by the changes
+  depends_on: [RESILIENT-1342, RESILIENT-1343, RESILIENT-1344, RESILIENT-1345, RESILIENT-1346, RESILIENT-1347]
 
 - id: RESILIENT-135
   domain: RESILIENT
@@ -276071,6 +276171,18 @@ gaps:
     Fixed by #3109 (fix(RESILIENT-135): worker timeout death-spiral — per-cycle budget from immutable base), merged to main 7ad6a2c56. Stale-open P0 de-inflation 2026-06-20.
   closed_pr: 3109
   outcome_id: MISSION-010
+
+- id: RESILIENT-1350
+  domain: RESILIENT
+  title: "RESILIENT: Update documentation and release notes for auto‑block enhancement (RESILIENT-1328 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - README/DEV docs contain a section describing the transient vs capability classification
+    - Release notes list the new escalation behavior and operator surface flag
+    - Documentation builds without errors
+  depends_on: [RESILIENT-1343, RESILIENT-1344, RESILIENT-1345, RESILIENT-1346, RESILIENT-1347]
 
 - id: RESILIENT-136
   domain: RESILIENT
