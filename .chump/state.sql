@@ -276205,13 +276205,17 @@ gaps:
 - id: RESILIENT-1340
   domain: RESILIENT
   title: "Almanac reindex FAILS every sweep (fleet memory 999h stale / rotting) — the deployed almanac binary is an OLD version whose index subcommand only accepts --db/--dry-run/--json, but the index-almanac.sh wrapper (L127, RESILIENT-404) calls it with --embed-backend ollama --embed-model nomic-embed-text --index-dir, so almanac errors unexpected-argument and 0/N repos index every cycle (ollama itself is healthy). Fix: rebuild+deploy the current almanac binary (which supports the embed flags) on the node that hosts the index, OR align the wrapper to the deployed binary. ALSO decide WHERE the fleet almanac index should live — CJ only has 2 local repos (almanac+chump); the ~95-repo mine-before-build index needs the box that has the repos (was the Mac). Verify: index-almanac sweep reports N/N indexed OK and fleet-doctor almanac-freshness passes"
-  status: open
+  status: done
   priority: P2
   effort: m
   acceptance_criteria:
     - "The change described by \"rebuild+deploy the current almanac binary (which supports the embed flags) on the node that hosts the index, OR align the wrapper to the deployed binary. ALSO decide WHERE the fleet almanac index should live — CJ only has 2 local repos (almanac+chump); the ~95-repo mine-before-build index needs the box that has the repos (was the Mac). Verify: index-almanac sweep reports N/N indexed OK and fleet-doctor almanac-freshness passes\" is implemented in the relevant RESILIENT code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  closed_date: '2026-09-17'
+  closed_pr: 4715
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4715 titled 'RESILIENT-1340: ...' merged 2026-09-17; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: RESILIENT-1341
   domain: RESILIENT
