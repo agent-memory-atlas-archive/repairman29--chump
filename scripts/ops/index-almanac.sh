@@ -26,9 +26,11 @@
 #   ALMANAC_INDEX_CMD     override the per-repo index command; {repo} is
 #                         substituted with the repo's absolute path, {name}
 #                         with its basename
-#                         (default: "$ALMANAC_BIN" index {repo}
-#                          --embed-backend ollama --embed-model
-#                          nomic-embed-text --json)
+#                         (default: "$ALMANAC_BIN" index {repo} --json).
+#                         NOTE: almanac index takes NO --embed-backend/--embed-model/
+#                         --index-dir flags -- embeddings are a separate almanac
+#                         embed/summarize pass. Passing them errored every repo
+#                         (0/N) until RESILIENT-1340.)
 #   ALMANAC_INDEX_MARKER  path to the "last full fleet index" marker file
 #                         (default: $HOME/.almanac/fleet-index.last)
 #   ALMANAC_INDEX_LOG     path to the human-readable run log
@@ -119,12 +121,12 @@ log "discovered $REPO_COUNT fleet repo(s) under: $ALMANAC_FLEET_ROOTS"
 # fires at the start of every fleet-wide reindex sweep)
 emit almanac_fleet_index_started "\"repo_count\":$REPO_COUNT,\"dry_run\":$DRY_RUN"
 
-# ---------- reindex each repo via the local ollama nomic-embed-text backend ----------
+# ---------- reindex each repo (AST symbol index; no inference -- embeddings are a separate almanac embed/summarize pass) ----------
 OK_COUNT=0
 FAIL_COUNT=0
 for repo in "${REPOS[@]}"; do
     name="$(basename "$repo")"
-    cmd="${ALMANAC_INDEX_CMD:-\"$ALMANAC_BIN\" index \"$repo\" --embed-backend ollama --embed-model nomic-embed-text --index-dir \"$ALMANAC_INDEX_DIR\" --json}"
+    cmd="${ALMANAC_INDEX_CMD:-\"$ALMANAC_BIN\" index \"$repo\" --json}"
     cmd="${cmd//\{repo\}/$repo}"
     cmd="${cmd//\{name\}/$name}"
 
@@ -154,6 +156,17 @@ fi
 date -u +%Y-%m-%dT%H:%M:%SZ > "$ALMANAC_INDEX_MARKER" 2>/dev/null || true
 
 log "sweep complete: $OK_COUNT/$REPO_COUNT indexed OK, $FAIL_COUNT failed — marker: $ALMANAC_INDEX_MARKER"
+
+# RESILIENT-1340: fleet-doctor-strict.sh check_almanac_freshness (INFRA-3586) watches
+# $ALMANAC_HOME/refresh.log as the canonical "routine reindex loop is alive" latch.
+# This sweep IS that routine driver on the factory node, but it historically only wrote
+# fleet-index.log -- so the latch read a missing refresh.log, defaulted age to 999h, and
+# FAILed "refresh loop stale" even when the index was fresh. Stamp refresh.log on every
+# completed (non-dry-run) sweep so the latch reflects real loop liveness.
+ALMANAC_HOME_DIR="${ALMANAC_HOME:-$(dirname "$ALMANAC_INDEX_LOG")}"
+printf '%s [index-almanac] sweep complete: %s/%s indexed OK, %s failed\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$OK_COUNT" "$REPO_COUNT" "$FAIL_COUNT" \
+    >> "$ALMANAC_HOME_DIR/refresh.log" 2>/dev/null || true
 # scanner-anchor: "kind":"almanac_fleet_index_completed"  (RESILIENT-404;
 # fires once per sweep with the final ok/fail tally and marker write)
 emit almanac_fleet_index_completed "\"repo_count\":$REPO_COUNT,\"ok_count\":$OK_COUNT,\"fail_count\":$FAIL_COUNT,\"index_dir\":\"$ALMANAC_INDEX_DIR\""
