@@ -37,33 +37,10 @@ warn() { echo "[install-sccache] WARN: $*" >&2; }
 
 OS_KIND="$(uname -s)"
 
-# ── 1. install sccache ──────────────────────────────────────────────────
-log "checking for sccache …"
-if ! command -v sccache >/dev/null 2>&1; then
-    case "$OS_KIND" in
-        Linux)
-            log "sccache not found — installing via 'cargo install sccache' (Ubuntu CJ has no brew)"
-            cargo install sccache --locked
-            ;;
-        Darwin)
-            if command -v brew >/dev/null 2>&1; then
-                log "sccache not found — installing via brew"
-                brew install sccache
-            else
-                log "sccache not found, brew not found — installing via 'cargo install sccache'"
-                cargo install sccache --locked
-            fi
-            ;;
-        *)
-            warn "unrecognized OS '$OS_KIND' — install sccache manually (cargo install sccache)"
-            exit 1
-            ;;
-    esac
-else
-    log "sccache already installed ($(sccache --version | head -1))"
-fi
-
-# ── 2. pick a LOCAL cache dir — prefer an external/USB data disk ────────
+# ── dir-selection helpers — defined up top so scripts/ci/test-sccache-dir-selection.sh
+# can `source` this file (BASH_SOURCE guard below skips the install/write/verify
+# side effects) and exercise detect_sccache_dir() directly against a faked
+# $HOME + df output. INFRA-7113.
 # Never a cloud path (no Cloudflare/R2 — see docs/process/SCCACHE_R2_CACHE.md
 # for that separate, CI-only, opt-in mechanism).
 # INFRA-3661: generalized past the INFRA-3660 cjdata3-specific pin — any
@@ -135,6 +112,41 @@ detect_sccache_dir() {
     fi
 }
 
+# Everything below has side effects (installs sccache, writes .cargo/config.toml,
+# runs cargo check) — skip it when this file is sourced (e.g. by the test
+# harness above) so tests can call detect_sccache_dir() in isolation.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0
+fi
+
+# ── 1. install sccache ──────────────────────────────────────────────────
+log "checking for sccache …"
+if ! command -v sccache >/dev/null 2>&1; then
+    case "$OS_KIND" in
+        Linux)
+            log "sccache not found — installing via 'cargo install sccache' (Ubuntu CJ has no brew)"
+            cargo install sccache --locked
+            ;;
+        Darwin)
+            if command -v brew >/dev/null 2>&1; then
+                log "sccache not found — installing via brew"
+                brew install sccache
+            else
+                log "sccache not found, brew not found — installing via 'cargo install sccache'"
+                cargo install sccache --locked
+            fi
+            ;;
+        *)
+            warn "unrecognized OS '$OS_KIND' — install sccache manually (cargo install sccache)"
+            exit 1
+            ;;
+    esac
+else
+    log "sccache already installed ($(sccache --version | head -1))"
+fi
+
+# ── 2. pick a LOCAL cache dir — prefer an external/USB data disk ────────
+# (helpers defined above, before the sourced-guard)
 SCCACHE_DIR_RESOLVED="$(detect_sccache_dir)"
 SCCACHE_CACHE_SIZE_RESOLVED="${SCCACHE_CACHE_SIZE:-10G}"
 log "cache dir: $SCCACHE_DIR_RESOLVED (cap $SCCACHE_CACHE_SIZE_RESOLVED)"
