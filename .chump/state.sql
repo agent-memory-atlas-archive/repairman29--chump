@@ -11300,10 +11300,19 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Modify `step4_dispatch_pickable_gaps` in `scripts/coord/wizard-daemon.sh` to invoke `chump gap ship <ID> --status done --closed-pr <PR>` for each extracted gap ID, and extend the `ship` function in `crates/chump-gap-store/src/lib.rs` to accept the `--status` and `--closed-pr` flags, update the gap's status to `done`, and populate `closed_date` with the current timestamp.
+    
+    Target file(s):
+    - scripts/coord/wizard-daemon.sh
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The _auto_flip_gaps_done function calls `chump gap ship <ID> --status done --closed-pr <N>` for each extracted ID.
-    - Proof‑of‑Merge guard fires and closed_date is populated.
-    - Integration test verifies that after merging a PR, the gap status is done and closed_date is non‑null.
+    - In `scripts/coord/wizard-daemon.sh`, the `step4_dispatch_pickable_gaps` function contains a loop that executes `chump gap ship $ID --status done --closed-pr $PR_NUMBER` for every gap ID it processes.
+    - "In `crates/chump-gap-store/src/lib.rs`, the `fn ship` signature includes parameters for `status` and `closed_pr`, parses the corresponding CLI flags, sets the gap's `status` field to `\"done\"`, and writes a non‑null `closed_date` (e.g., ISO‑8601 timestamp) to the gap record."
+    - Running the Proof‑of‑Merge guard (e.g., `cargo test --test proof_of_merge`) produces a gap record whose `closed_date` field is non‑null after a PR merge simulation.
+    - "An integration test in `crates/chump-gap-store/src/lib.rs` (under `mod tests`) calls `ship` with `--status done --closed-pr 123` and asserts that the returned gap has `status == \"done\"` and `closed_date` is populated."
   depends_on: [CREDIBLE-1294]
   notes: |
     [chump harvest check 'merging']
@@ -250809,7 +250818,7 @@ gaps:
     - SUBAGENT_DISPATCH.md adds a 'before filing a missing-primitive gap, verify against origin/main' default step
     - scripts/dev/verify-existence.sh --explicit-source-check option that errors if anything other than origin/main is the source (catches accidental local checks)
   notes: |
-    Decomposed into 4 slices: META-613, META-614, META-615, META-616
+    Decomposed into 4 slices: META-725, META-726, META-727, META-728
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -267945,6 +267954,143 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: META-725
+  domain: META
+  title: "META: Add Verify-existence discipline subsection to CLAUDE.md (META-113 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "CLAUDE.md contains a new subsection titled \"Verify-existence discipline\""
+    - The subsection explains that before filing or asserting a file is missing/present, the origin/main branch must be checked (using the verify-existence skill or `git ls-tree`)
+    - The wording matches the description in the gap and is free of spelling or formatting errors
+  notes: |
+    [chump harvest check 'skill']
+    === primitives_index match for 'skill' ===
+    
+    === cluster keyword match for 'skill' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'skill' ===
+    
+    === repo-description match for 'skill' ===
+      JARVIS-Premium: 💎 JARVIS Premium Skills - Professional AI-powered productivity tools for teams and enterprises
+    
+    === HARVEST_ROADMAP.md mention of 'skill' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      81:| `JARVIS`, `JARVIS-Premium`, `jarvis-rog-ed`, `jarvis-gateway` | **Shelf — architectural conflict.** JARVIS is a competing personal-assistant frontend (skill marketplace, voice channels). Chump is an engine for coding agents. The substrates compete; harvesting between them would create model confusion. Revisit only if Chump pivots toward end-user assistant features |
+      153:- **jarvis-family:** confirmed conflict. `jarvis-rog-ed` has reusable skill orchestration patterns but Windows-platform scope. `JARVIS-Premium`/`jarvis-gateway`/`jarvis-android` confirmed shelf/skip/dead.
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'skill' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: META-726
+  domain: META
+  title: "META: Mirror Verify-existence discipline in AGENTS.md (META-113 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "AGENTS.md includes a subsection named \"Verify-existence discipline\" identical in content to the one added to CLAUDE.md"
+    - The subsection is placed in a logical location alongside other discipline sections
+    - The file renders correctly in the repository's documentation view
+  notes: |
+    [chump harvest check 'skill']
+    === primitives_index match for 'skill' ===
+    
+    === cluster keyword match for 'skill' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'skill' ===
+    
+    === repo-description match for 'skill' ===
+      JARVIS-Premium: 💎 JARVIS Premium Skills - Professional AI-powered productivity tools for teams and enterprises
+    
+    === HARVEST_ROADMAP.md mention of 'skill' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      81:| `JARVIS`, `JARVIS-Premium`, `jarvis-rog-ed`, `jarvis-gateway` | **Shelf — architectural conflict.** JARVIS is a competing personal-assistant frontend (skill marketplace, voice channels). Chump is an engine for coding agents. The substrates compete; harvesting between them would create model confusion. Revisit only if Chump pivots toward end-user assistant features |
+      153:- **jarvis-family:** confirmed conflict. `jarvis-rog-ed` has reusable skill orchestration patterns but Windows-platform scope. `JARVIS-Premium`/`jarvis-gateway`/`jarvis-android` confirmed shelf/skip/dead.
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'skill' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: META-727
+  domain: META
+  title: "META: Add default verify-existence step to SUBAGENT_DISPATCH.md for missing-primitive gaps (META-113 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - SUBAGENT_DISPATCH.md contains a new default step that runs the verify-existence skill before filing a missing-primitive gap
+    - The step explicitly checks origin/main and aborts if the check fails
+    - Documentation in the file explains the purpose of the step and references the Verify-existence discipline
+  notes: |
+    [chump harvest check 'skill']
+    === primitives_index match for 'skill' ===
+    
+    === cluster keyword match for 'skill' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'skill' ===
+    
+    === repo-description match for 'skill' ===
+      JARVIS-Premium: 💎 JARVIS Premium Skills - Professional AI-powered productivity tools for teams and enterprises
+    
+    === HARVEST_ROADMAP.md mention of 'skill' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      81:| `JARVIS`, `JARVIS-Premium`, `jarvis-rog-ed`, `jarvis-gateway` | **Shelf — architectural conflict.** JARVIS is a competing personal-assistant frontend (skill marketplace, voice channels). Chump is an engine for coding agents. The substrates compete; harvesting between them would create model confusion. Revisit only if Chump pivots toward end-user assistant features |
+      153:- **jarvis-family:** confirmed conflict. `jarvis-rog-ed` has reusable skill orchestration patterns but Windows-platform scope. `JARVIS-Premium`/`jarvis-gateway`/`jarvis-android` confirmed shelf/skip/dead.
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'skill' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: META-728
+  domain: META
+  title: "META: Implement --explicit-source-check option in scripts/dev/verify-existence.sh (META-113 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The script accepts a new flag `--explicit-source-check`
+    - When the flag is used, the script verifies that the source being checked is `origin/main` and exits with a non‑zero status and an informative error message if it is not
+    - Running the script with the flag against a non‑origin/main source produces the expected error, and running it against origin/main succeeds
+    - The script's help output (`-h`/`--help`) lists the new flag and its description
+  notes: |
+    [chump harvest check 'skill']
+    === primitives_index match for 'skill' ===
+    
+    === cluster keyword match for 'skill' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'skill' ===
+    
+    === repo-description match for 'skill' ===
+      JARVIS-Premium: 💎 JARVIS Premium Skills - Professional AI-powered productivity tools for teams and enterprises
+    
+    === HARVEST_ROADMAP.md mention of 'skill' (deep-scan findings) ===
+      17:| **3** | `echeo::Matchmaker::calculate_ship_velocity_score()` (cosine sim + language/type boosts, returns 0–1.0) | INFRA-1764 (skill-aware routing via `routing_outcomes`) | **Vendor** the algorithm (~50 LOC of Rust) | Replaces heuristic pillar-balance scoring with a single deterministic number; identical math to what INFRA-1764 needs |
+      81:| `JARVIS`, `JARVIS-Premium`, `jarvis-rog-ed`, `jarvis-gateway` | **Shelf — architectural conflict.** JARVIS is a competing personal-assistant frontend (skill marketplace, voice channels). Chump is an engine for coding agents. The substrates compete; harvesting between them would create model confusion. Revisit only if Chump pivots toward end-user assistant features |
+      153:- **jarvis-family:** confirmed conflict. `jarvis-rog-ed` has reusable skill orchestration patterns but Windows-platform scope. `JARVIS-Premium`/`jarvis-gateway`/`jarvis-android` confirmed shelf/skip/dead.
+      248:— surfaced real primitives this pass (skill-plugin architecture, generic Prisma CRUD base repo,
+    
+    === cross-pollination briefs mentioning 'skill' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
 
 - id: MISSION-001
   domain: MISSION
