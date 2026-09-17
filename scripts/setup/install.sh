@@ -101,6 +101,66 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 ok "git present ($(git --version))"
 
+# ---------- 0.5 TOOLCHAIN (node, npm, etc.) ----------
+# Install node and npm if missing.
+# Use host-specific package managers.
+install_node_npm() {
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    ok "node and npm present ($(node --version))"
+    return 0
+  fi
+  info TOOLCHAIN "node/npm missing — installing for host=$(uname -s)"
+  case "$(uname -s)" in
+    Darwin)
+      if command -v brew >/dev/null 2>&1; then
+        if [ "$DRY" = 1 ]; then
+          echo "  DRY: brew install node"
+        else
+          brew install node
+        fi
+      else
+        no "Homebrew not found — install brew first"
+        return 1
+      fi
+      ;;
+    Linux)
+      if command -v apt >/dev/null 2>&1; then
+        if [ "$DRY" = 1 ]; then
+          echo "  DRY: sudo apt update && sudo apt install -y nodejs npm"
+        else
+          sudo apt update && sudo apt install -y nodejs npm
+        fi
+      elif command -v dnf >/dev/null 2>&1; then
+        if [ "$DRY" = 1 ]; then
+          echo "  DRY: sudo dnf install -y nodejs npm"
+        else
+          sudo dnf install -y nodejs npm
+        fi
+      else
+        no "Please install nodejs and npm via your distro's package manager"
+        return 1
+      fi
+      ;;
+    *)
+      no "Unsupported OS for automatic node/npm installation"
+      return 1
+      ;;
+  esac
+  # Verify installation
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    ok "node and npm installed ($(node --version))"
+    return 0
+  else
+    no "node/npm installation failed"
+    return 1
+  fi
+}
+
+# Invoke toolchain installation
+if ! install_node_npm; then
+  exit 1
+fi
+
 # ---------- 1. CLONE (the chicken-egg break) ----------
 mkdir -p "$NODE_DIR"
 if [ -d "$REPO_DIR/.git" ]; then
