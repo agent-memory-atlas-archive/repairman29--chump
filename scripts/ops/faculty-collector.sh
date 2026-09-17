@@ -285,11 +285,15 @@ FAC+=("$(mkfac learn "Learn" "the OS forges its own new tools" \
 # ── assemble ────────────────────────────────────────────────────────────────
 FRONTIER='{"crossing":["see","resolve","know_score","verify"],"ours":["aim","communicate","conscience","learn"]}'
 faculties_json="$(printf '%s\n' "${FAC[@]}" | jq -s '.')"
+# INFRA-7142 (INFRA-3841 slice): surface the BUILD faculty's merge count
+# under the canonical `merges_24h` column name, shared with vital-signs.sh's
+# top-level `merges_24h` and dashboard.rs's `DashboardSummary.merges_24h`.
 DOC="$(jq -n \
       --arg ts "$NOW" \
       --argjson f "$faculties_json" \
       --argjson fr "$FRONTIER" \
-      '{generated_at:$ts, faculties:$f, frontier:$fr}')"
+      --argjson merges24h "$merges" \
+      '{generated_at:$ts, faculties:$f, frontier:$fr, merges_24h:$merges24h}')"
 
 if [[ "$DRY_RUN" == 1 ]]; then
   printf '%s\n' "$DOC"
@@ -305,7 +309,7 @@ printf '%s\n' "$DOC" > "$tmp" && mv -f "$tmp" "$OUT"
 mkdir -p "$(dirname "$AMBIENT_LOG")" 2>/dev/null || true
 n_fac="$(printf '%s' "$DOC" | jq '.faculties|length')"
 avg_pos="$(printf '%s' "$DOC" | jq -r '[.faculties[].position]|add/length|.*1000|round/1000')"
-printf '{"ts":"%s","kind":"faculty_status","faculties":%s,"avg_position":%s,"build_merges_24h":%s,"see_avg_pct":%s,"out":"%s"}\n' \
-  "$NOW" "$n_fac" "$avg_pos" "$merges" "$see_avg" "$OUT" >> "$AMBIENT_LOG" 2>/dev/null || true
+printf '{"ts":"%s","kind":"faculty_status","faculties":%s,"avg_position":%s,"build_merges_24h":%s,"merges_24h":%s,"see_avg_pct":%s,"out":"%s"}\n' \
+  "$NOW" "$n_fac" "$avg_pos" "$merges" "$merges" "$see_avg" "$OUT" >> "$AMBIENT_LOG" 2>/dev/null || true
 
 echo "[faculty-collector] wrote $OUT (${n_fac} faculties, avg_position=${avg_pos}) @ $NOW"

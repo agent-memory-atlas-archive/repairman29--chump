@@ -5,6 +5,12 @@
 //! - `today_ships` — count of PRs merged in the last 24 h.
 //!   Reads `.chump/github_cache.db` first (cache-first per INFRA-1081);
 //!   falls through to `gh pr list --state merged --json mergedAt` on cold cache.
+//! - `merges_24h` — INFRA-7142 (INFRA-3841 slice): identical value to
+//!   `today_ships`, emitted under the canonical `merges_24h` column name
+//!   shared with `scripts/ops/vital-signs.sh` and
+//!   `scripts/ops/faculty-collector.sh` (both also emit a top-level
+//!   `merges_24h` field). `today_ships` stays for back-compat with existing
+//!   consumers (`web/v2/dashboard-tiles.js`, `scripts/dev/chump-dashboard-tui.sh`).
 //! - `ci_qa_score` — payload of the most recent `kind=ci_qa_score` event from
 //!   `.chump-locks/ambient.jsonl` (INFRA-1872 emit) within the last 24 h. When
 //!   no fresh event exists (the emitter isn't scheduled on this node), falls
@@ -28,6 +34,14 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Serialize)]
 pub struct DashboardSummary {
     pub today_ships: u64,
+    /// INFRA-7142 (INFRA-3841 slice): same value as `today_ships`, emitted
+    /// under the canonical `merges_24h` column name shared with
+    /// `scripts/ops/vital-signs.sh` (top-level `merges_24h`) and
+    /// `scripts/ops/faculty-collector.sh` (top-level `merges_24h`). Kept
+    /// alongside `today_ships` rather than replacing it — `today_ships` is a
+    /// stable public field consumed by `web/v2/dashboard-tiles.js` and
+    /// `scripts/dev/chump-dashboard-tui.sh`.
+    pub merges_24h: u64,
     pub ci_qa_score: Option<CiQaScore>,
     pub active_leases: Vec<ActiveLease>,
     pub window_hours: u32,
@@ -502,8 +516,43 @@ pub fn build_summary(repo_root: &Path) -> DashboardSummary {
 
     DashboardSummary {
         today_ships,
+        merges_24h: today_ships,
         ci_qa_score,
         active_leases,
         window_hours: WINDOW_HOURS,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// INFRA-7142 (INFRA-3841 slice): the JSON emitted by dashboard.rs must
+    /// carry the canonical `merges_24h` column name — the same name used by
+    /// `scripts/ops/vital-signs.sh` and `scripts/ops/faculty-collector.sh`
+    /// (see `scripts/ci/test-merges-24h-canonical.sh`). Before this change
+    /// `DashboardSummary` only had `today_ships`, so `v["merges_24h"]` was
+    /// `Value::Null` and this assertion failed.
+    #[test]
+    fn dashboard_summary_emits_canonical_merges_24h_column() {
+        let summary = DashboardSummary {
+            today_ships: 7,
+            merges_24h: 7,
+            ci_qa_score: None,
+            active_leases: Vec::new(),
+            window_hours: 24,
+        };
+
+        let v: serde_json::Value = serde_json::to_value(&summary).unwrap();
+
+        assert_eq!(
+            v.get("merges_24h").and_then(|n| n.as_u64()),
+            Some(7),
+            "DashboardSummary must serialize a canonical `merges_24h` column matching today_ships"
+        );
+        assert_eq!(
+            v["merges_24h"], v["today_ships"],
+            "merges_24h must always equal today_ships"
+        );
     }
 }

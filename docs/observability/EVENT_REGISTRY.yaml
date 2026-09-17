@@ -7274,7 +7274,7 @@ events:
       collector — and a frozen self-portrait — is itself observable from the
       ambient stream instead of silently going stale.
     consumers: [fleet-brief, ops-audit]
-    fields_required: [ts, kind, faculties, avg_position, build_merges_24h, see_avg_pct, out]
+    fields_required: [ts, kind, faculties, avg_position, build_merges_24h, merges_24h, see_avg_pct, out]
 
   - kind: faculty_journey
     effect_metric: self
@@ -12458,7 +12458,7 @@ events:
       a frozen vitals board — is itself observable from the ambient stream
       instead of silently going stale.
     consumers: [fleet-brief, ops-audit, operator-recall]
-    fields_required: [ts, kind, signs, green, amber, red, unknown, p_full_trek, out]
+    fields_required: [ts, kind, signs, green, amber, red, unknown, p_full_trek, merges_24h, out]
 
   # ── INFRA-1564: dev-script launchd wiring ─────────────────────────────────
   - kind: decomposition_hint_tracked

@@ -426,12 +426,16 @@ fi
 
 # ── assemble ────────────────────────────────────────────────────────────────
 signs_json="$(printf '%s\n' "${SIGNS[@]}" | jq -s '.')"
+# INFRA-7142 (INFRA-3841 slice): surface merge_throughput's value under the
+# canonical `merges_24h` column name, shared with faculty-collector.sh's
+# top-level `merges_24h` and dashboard.rs's `DashboardSummary.merges_24h`.
 DOC="$(jq -n \
   --arg ts "$NOW" \
   --argjson pft "$(jnum "$p_full")" \
   --argjson signs "$signs_json" \
   --argjson caplc "$cap_lifecycle_json" \
-  '{generated_at:$ts, p_full_trek:$pft, signs:$signs, capability_lifecycle:$caplc}')"
+  --argjson merges24h "$(jnum "$merges")" \
+  '{generated_at:$ts, p_full_trek:$pft, signs:$signs, capability_lifecycle:$caplc, merges_24h:$merges24h}')"
 
 if [[ "$DRY_RUN" == 1 ]]; then
   printf '%s\n' "$DOC"
@@ -449,7 +453,7 @@ n_red="$(printf '%s' "$DOC" | jq '[.signs[]|select(.status=="red")]|length')"
 n_amber="$(printf '%s' "$DOC" | jq '[.signs[]|select(.status=="amber")]|length')"
 n_green="$(printf '%s' "$DOC" | jq '[.signs[]|select(.status=="green")]|length')"
 n_unknown="$(printf '%s' "$DOC" | jq '[.signs[]|select(.status=="unknown")]|length')"
-printf '{"ts":"%s","kind":"vital_signs","signs":%s,"green":%s,"amber":%s,"red":%s,"unknown":%s,"p_full_trek":%s,"out":"%s"}\n' \
-  "$NOW" "$n_signs" "$n_green" "$n_amber" "$n_red" "$n_unknown" "$(jnum "$p_full")" "$OUT" >> "$AMBIENT_LOG" 2>/dev/null || true
+printf '{"ts":"%s","kind":"vital_signs","signs":%s,"green":%s,"amber":%s,"red":%s,"unknown":%s,"p_full_trek":%s,"merges_24h":%s,"out":"%s"}\n' \
+  "$NOW" "$n_signs" "$n_green" "$n_amber" "$n_red" "$n_unknown" "$(jnum "$p_full")" "$(jnum "$merges")" "$OUT" >> "$AMBIENT_LOG" 2>/dev/null || true
 
 echo "[vital-signs] wrote $OUT ($n_signs signs: ${n_green}G/${n_amber}A/${n_red}R/${n_unknown}U, p_full_trek=${p_full:-null}) @ $NOW"

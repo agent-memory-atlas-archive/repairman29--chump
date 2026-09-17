@@ -81,6 +81,13 @@ vital_val="$(printf '%s' "$vital_json" | jq -r '.signs[] | select(.key=="merge_t
   && _ok "vital-signs merge_throughput.value == $EXPECT (got $vital_val)" \
   || _fail "vital-signs merge_throughput.value expected $EXPECT, got '$vital_val'"
 
+# INFRA-7142 (INFRA-3841 slice): the top-level document must ALSO carry the
+# canonical `merges_24h` column name, not just the merge_throughput sign.
+vital_canonical="$(printf '%s' "$vital_json" | jq -r '.merges_24h')"
+[[ "$vital_canonical" == "$EXPECT" ]] \
+  && _ok "vital-signs merges_24h (canonical column) == $EXPECT (got $vital_canonical)" \
+  || _fail "vital-signs merges_24h (canonical column) expected $EXPECT, got '$vital_canonical'"
+
 # ── 3. faculty-collector.sh --dry-run, build_merges_24h ──────────────────────
 echo "[test-merges-24h-canonical] faculty-collector.sh"
 faculty_json="$(CHUMP_REPO_ROOT="$DATA_ROOT" REPO_ROOT="$DATA_ROOT" \
@@ -94,6 +101,13 @@ faculty_val="$(printf '%s' "$faculty_json" | jq -r '.faculties[] | select(.key==
 [[ "$faculty_val" == "$EXPECT" ]] \
   && _ok "faculty-collector build merges == $EXPECT (got $faculty_val)" \
   || _fail "faculty-collector build merges expected $EXPECT, got '$faculty_val'"
+
+# INFRA-7142 (INFRA-3841 slice): the top-level document must ALSO carry the
+# canonical `merges_24h` column name, not just the build faculty's value.
+faculty_canonical="$(printf '%s' "$faculty_json" | jq -r '.merges_24h')"
+[[ "$faculty_canonical" == "$EXPECT" ]] \
+  && _ok "faculty-collector merges_24h (canonical column) == $EXPECT (got $faculty_canonical)" \
+  || _fail "faculty-collector merges_24h (canonical column) expected $EXPECT, got '$faculty_canonical'"
 
 echo
 echo "[test-merges-24h-canonical] $PASS passed, $FAIL failed"

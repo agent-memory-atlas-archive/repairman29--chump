@@ -181,6 +181,10 @@ async fn test_dashboard_summary_empty_fixtures() {
 
     // Required top-level keys.
     assert!(v.get("today_ships").is_some(), "missing today_ships");
+    assert!(
+        v.get("merges_24h").is_some(),
+        "missing canonical merges_24h column (INFRA-7142)"
+    );
     assert!(v.get("ci_qa_score").is_some(), "missing ci_qa_score key");
     assert!(v.get("active_leases").is_some(), "missing active_leases");
     assert!(v.get("window_hours").is_some(), "missing window_hours");
@@ -245,6 +249,17 @@ async fn test_dashboard_summary_with_fixtures() {
         v["today_ships"].as_u64().unwrap(),
         3,
         "today_ships should count 3 merged PRs from fixture cache"
+    );
+
+    // merges_24h (canonical column, INFRA-7142) mirrors today_ships exactly.
+    assert_eq!(
+        v["merges_24h"].as_u64().unwrap(),
+        3,
+        "merges_24h should count 3 merged PRs from fixture cache"
+    );
+    assert_eq!(
+        v["merges_24h"], v["today_ships"],
+        "merges_24h and today_ships must always agree"
     );
 
     // ci_qa_score from ambient fixture.
