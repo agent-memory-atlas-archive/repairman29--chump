@@ -244371,7 +244371,7 @@ gaps:
 - id: INFRA-7098
   domain: INFRA
   title: "INFRA: Implement target node resolution in check_live_outcome (INFRA-3652 slice)"
-  status: open
+  status: done
   priority: P1
   effort: s
   acceptance_criteria:
@@ -244407,6 +244407,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+  closed_date: '2026-09-17'
+  closed_pr: 4718
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4718 titled 'INFRA-7098: ...' merged 2026-09-17; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-7099
   domain: INFRA
