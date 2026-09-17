@@ -11710,6 +11710,8 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+    [2026-09-17T19:20:26Z] EFFECTIVE-441: escalated required_model -> opus after 3 consecutive unverified_ship attempts
+  required_model: opus
 
 - id: CREDIBLE-1307
   domain: CREDIBLE
@@ -105726,7 +105728,7 @@ gaps:
     - Cross-pollination brief CP-005-echeo-ship-velocity-score.md documents harvest and gap-vs-need mapping
     - Coordinate with INFRA-1764 — routing layer reads this score, does not compute its own competing one
   notes: |
-    Decomposed into 5 slices: INFRA-6931, INFRA-6932, INFRA-6933, INFRA-6934, INFRA-6935
+    Decomposed into 5 slices: INFRA-7169, INFRA-7170, INFRA-7171, INFRA-7172, INFRA-7173
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -249265,6 +249267,146 @@ gaps:
     === cross-pollination briefs mentioning 'ZERO-WASTE' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
 
+- id: INFRA-7169
+  domain: INFRA
+  title: "INFRA: Document calculate_ship_velocity_score formula (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - docs/ship_velocity_score.md created
+    - "Formula documented as: cosine similarity + language boost (0.1) + type boost (0.05), capped at 1.0"
+    - Reference to original source file echeo/src/matchmaker.rs included
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7170
+  domain: INFRA
+  title: "INFRA: Document Match struct fields (score, reasons, capability, need) (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - docs/match_struct.md created
+    - All fields (score, reasons, capability, need) described with types and purpose
+    - Link to original source echeo/src/matchmaker.rs Match struct added
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7171
+  domain: INFRA
+  title: "INFRA: Decide vendoring vs lightweight‑crate and add lineage comment (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - docs/vendor_decision.md created stating vendoring for v0 with single Rust file src/gap_scoring.rs
+    - Rationale for revisiting at v1 documented
+    - Lineage comment added at top of src/gap_scoring.rs citing repairman29/echeo commit SHA for calculate_ship_velocity_score
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7172
+  domain: INFRA
+  title: "INFRA: Implement calculate_gap_value_score in src/gap_scoring.rs (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Function calculate_gap_value_score(gap, routing_outcomes) -> f64 added
+    - Uses documented formula and boost factors (language match, domain match, recency on similar task class)
+    - Returns value clamped between 0.0 and 1.0
+    - Compilation succeeds and unit tests (if any) pass
+  depends_on: [INFRA-7169, INFRA-7170, INFRA-7171]
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7173
+  domain: INFRA
+  title: "INFRA: Add smoke test script and cross‑pollination brief; coordinate with INFRA‑1764 (INFRA-1816 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - scripts/ci/test-gap-scoring.sh added and executable
+    - Script runs synthetic gap and routing_outcomes, produces deterministic 0.0‑1.0 score
+    - CI pipeline passes the new test
+    - Cross‑pollination brief CP-005-echeo-ship-velocity-score.md created documenting harvest and gap‑vs‑need mapping
+    - INFRA‑1764 routing layer confirmed to read the new score without own competing computation
+  depends_on: [INFRA-7172]
+  notes: |
+    [chump harvest check 'INFRA-1816']
+    === primitives_index match for 'INFRA-1816' ===
+    
+    === cluster keyword match for 'INFRA-1816' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'INFRA-1816' ===
+    
+    === repo-description match for 'INFRA-1816' ===
+    
+    === HARVEST_ROADMAP.md mention of 'INFRA-1816' (deep-scan findings) ===
+      176:| **4** | `economy-system-service` (smugglers-rpg) | REAL MarketSimulationEngine: elasticity-based pricing, sector-stratified, beginner-mode variant | **MEDIUM** — extends INFRA-1816 ShipVelocityScore substrate options; alternative gap-value scoring algorithm to evaluate |
+    
+    === cross-pollination briefs mentioning 'INFRA-1816' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
 - id: INFRA-721
   domain: INFRA
   title: "EFFECTIVE: chump fleet brief on SessionStart — operator gets 60s briefing (24h ships, pillar mix, stalls, auto-fixed count, manual rescues, suggested actions) instead of having to ask 'is anything stuck'. Wire into existing FLEET-019 ambient digest."
@@ -268200,6 +268342,8 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-17T19:22:22Z] test
+    [2026-09-17T19:22:26Z] Verified 2026-09-17: chump cron install/uninstall/status already fully implemented in crates/chump-cron (all 4 AC met — CLI subcommand exists, validates name via CronSpec::validate_name, generates launchd plist with Label/ProgramArguments/RunAtLoad on macOS or systemd unit on Linux, exits 0 with success message on install/reload/noop). Shipped via INFRA-2057 / PR #3840 (commit a98b2ae04), predates this gap's filing. Covered by unit tests in crates/chump-cron/src/lib.rs and CI smoke test scripts/ci/test-chump-cron-install.sh. Closing as duplicate/already-shipped — no new code required.
 
 - id: META-702
   domain: META
@@ -268312,7 +268456,7 @@ gaps:
 - id: META-705
   domain: META
   title: "META: META-601: Migrate `recovery-queue-service` plist to chump‑cron management (META-110 slice)"
-  status: open
+  status: blocked
   priority: P1
   effort: s
   acceptance_criteria:
@@ -268344,6 +268488,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-17T19:29:43Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=11077B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: META-706
   domain: META
