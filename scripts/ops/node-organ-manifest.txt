@@ -1,0 +1,54 @@
+# node-organ-manifest.txt — desired PROCESS-LEVEL state for CJ (closetjunky),
+# the first owned MUSCLE node (INFRA-3648 slice).
+#
+# Sibling of scripts/ops/organ-manifest.txt: that file declares desired
+# chump-*.service/.timer SYSTEMD unit state, read by organ-reconcile.sh.
+# THIS file declares desired state for CJ's raw background bash organs
+# installed by scripts/setup/install-node-housekeeping.sh — loop-wrapped
+# invocations of tracked scripts/ scripts that are NOT systemd units at all
+# (the "supervisor=nohup" fallback path, or any node where systemd isn't the
+# chosen supervisor). Nothing in organ-manifest.txt / organ-reconcile.sh can
+# see or revive these if they die, the same "designed but never wired into
+# the revivable gate" blind spot scripts/ops/process-organ-registry.txt
+# already closes for the almanac-vision-keeper class of raw processes. This
+# manifest is that same declaration, scoped to the 9 node-housekeeping
+# organs.
+#
+# Format: one directive per line,
+#   "<state>  <name>  launcher=<path>  pgrep=<pattern>  heartbeat=<seconds>  # wraps <tracked-script>"
+#
+#   state       enabled — this organ must be running. A pgrep+respawn heal
+#               loop (mirroring scripts/ops/process-organ-heal.sh's shape)
+#               reads this file, runs `pgrep -f <pattern>`, and — if
+#               absent — respawns via `bash <launcher>`.
+#   name        short identifier — matches install-node-housekeeping.sh's
+#               ORGANS table and its chump-<name> supervised-unit naming.
+#   launcher    the self-contained loop-wrapper script written by
+#               install-node-housekeeping.sh's write_runner() at
+#               ~/.chump/organs/<name>.sh. This wrapper sources
+#               providers.env/cj.env, sets PATH/CHUMP_REPO_ROOT, and either
+#               execs the wrapped script once (heartbeat=0, self-looping
+#               script) or loops `bash <wrapped-script>; sleep <heartbeat>`
+#               forever.
+#   pgrep       the `pgrep -f` match pattern. The LAUNCHER path is used
+#               (not the wrapped script's own path) because the launcher is
+#               what is actually exec'd/looped and stays resident even
+#               between wrapped-script invocations; matching the wrapped
+#               script's path alone would read a false DOWN during the
+#               `sleep <heartbeat>` gap between runs.
+#   heartbeat   seconds between wrapped-script invocations; 0 means the
+#               wrapped script self-loops forever (no external cadence).
+#
+# Values below are sourced directly from install-node-housekeeping.sh's
+# ORGANS table (the single place cadences are actually configured) — keep
+# the two in sync if that table changes.
+
+enabled  node-orchestrator     launcher=~/.chump/organs/node-orchestrator.sh      pgrep=~/.chump/organs/node-orchestrator.sh      heartbeat=0     # wraps scripts/ops/node-orchestrator.sh
+enabled  rot-reaper            launcher=~/.chump/organs/rot-reaper.sh            pgrep=~/.chump/organs/rot-reaper.sh            heartbeat=1800  # wraps scripts/ops/rot-reaper.sh
+enabled  worktree-reaper       launcher=~/.chump/organs/worktree-reaper.sh       pgrep=~/.chump/organs/worktree-reaper.sh       heartbeat=900   # wraps scripts/ops/stale-worktree-reaper.sh --execute
+enabled  disk-monitor          launcher=~/.chump/organs/disk-monitor.sh          pgrep=~/.chump/organs/disk-monitor.sh          heartbeat=300   # wraps scripts/ops/disk-health-monitor.sh
+enabled  main-health-watchdog  launcher=~/.chump/organs/main-health-watchdog.sh  pgrep=~/.chump/organs/main-health-watchdog.sh  heartbeat=600   # wraps scripts/ops/main-health-watchdog.sh
+enabled  pr-lander             launcher=~/.chump/organs/pr-lander.sh             pgrep=~/.chump/organs/pr-lander.sh             heartbeat=600   # wraps scripts/dispatch/pr-lander-beat.sh
+enabled  cargo-sweep-gc        launcher=~/.chump/organs/cargo-sweep-gc.sh        pgrep=~/.chump/organs/cargo-sweep-gc.sh        heartbeat=3600  # wraps scripts/ops/cargo-sweep-gc.sh
+enabled  reviver               launcher=~/.chump/organs/reviver.sh              pgrep=~/.chump/organs/reviver.sh              heartbeat=60    # wraps scripts/coord/post-push-integrity-watch.sh
+enabled  pr-stuck-live-scan    launcher=~/.chump/organs/pr-stuck-live-scan.sh    pgrep=~/.chump/organs/pr-stuck-live-scan.sh    heartbeat=3600  # wraps scripts/ops/stuck-pr-filer.sh
