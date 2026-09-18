@@ -128,13 +128,8 @@ if ! command -v sccache >/dev/null 2>&1; then
             cargo install sccache --locked
             ;;
         Darwin)
-            if command -v brew >/dev/null 2>&1; then
-                log "sccache not found — installing via brew"
-                brew install sccache
-            else
-                log "sccache not found, brew not found — installing via 'cargo install sccache'"
-                cargo install sccache --locked
-            fi
+            log "sccache not found — installing via brew"
+            brew install sccache
             ;;
         *)
             warn "unrecognized OS '$OS_KIND' — install sccache manually (cargo install sccache)"
