@@ -30482,11 +30482,18 @@ gaps:
   status: open
   priority: P1
   effort: s
+  description: |
+    Modify the `scripts/coord/ci-fleet-health-sweep.sh` script, specifically the `_classify_red` function (and its caller), to serialize the sweep’s missing‑target count and list into a JSON file named `rot-detector-report.json`, upload that file as a CI artifact, force the script to exit with status 0 regardless of findings, and emit a markdown link to the artifact in the CI job summary.
+    
+    Target file(s):
+    - scripts/coord/ci-fleet-health-sweep.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "When the sweep finds missing targets, the results are uploaded as a CI artifact named \"rot‑detector‑report.json\"."
-    - The CI job always exits with status 0, regardless of findings, so it does not block PR merges.
-    - The artifact contains the same JSON structure produced by the sweep script (count and list of missing targets).
-    - A link to the artifact is added to the CI job summary for easy human access.
+    - In `scripts/coord/ci-fleet-health-sweep.sh`, the `_classify_red` function creates a file `rot-detector-report.json` whose contents exactly match the JSON structure produced by the sweep script (including `count` and `missing_targets` fields).
+    - "The script invokes the CI artifact upload command (e.g., `::set-output`/`actions/upload-artifact`) with the name `rot-detector-report.json`, and the artifact is visible in the CI run’s artifact list."
+    - The CI job’s exit code is always `0` even when the sweep reports missing targets (verify by checking the job’s status after a failing sweep scenario).
+    - The CI job summary contains a markdown link pointing to the uploaded `rot-detector-report.json` artifact (verify by inspecting the job summary output).
   depends_on: [CREDIBLE-787]
 
 - id: CREDIBLE-790
@@ -251761,7 +251768,7 @@ gaps:
 - id: INFRA-7234
   domain: INFRA
   title: "INFRA: Add offline mode detection to local-merge-queue.sh and route merges locally (INFRA-2252 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -251784,6 +251791,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+    [2026-09-18T02:19:37Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=942B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-7235
   domain: INFRA
