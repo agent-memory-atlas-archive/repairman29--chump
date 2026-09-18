@@ -53631,10 +53631,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update Thompson Sampling selection logic and state initialization in `src/provider_bandit.rs` (around `select_from_internal`) to consume per-task-class tender fitness rankings as prior weights, initializing the Beta distribution parameters using the underlying tender fitness scores.
+    
+    Target file(s):
+    - src/provider_bandit.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Provider_bandit reads the per‑task‑class ranking produced by the tender and uses it as the initial weight distribution for Thompson Sampling
-    - When the bandit updates its weights, it respects the underlying fitness scores as priors
-    - Integration test shows that after a few samples the bandit prefers higher‑fitness slots
+    - "`src/provider_bandit.rs` uses per-task-class tender fitness scores to set initial alpha/beta prior parameters for Thompson Sampling in `select_from_internal`."
+    - Bandit reward updates in `src/provider_bandit.rs` retain the initial tender fitness priors when recalculating provider weights.
+    - "`cargo test --lib provider_bandit::tests` passes, including a test confirming that Thompson Sampling selects higher-fitness tender slots with higher frequency over repeated iterations."
   depends_on: [EFFECTIVE-1303]
   notes: |
     [chump harvest check 'inference']
@@ -54809,10 +54816,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update `scripts/ci/test-all.sh` to include `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` step invocations before running workspace unit tests, ensuring format violations and lint warnings fail the pipeline execution.
+    
+    Target file(s):
+    - scripts/ci/test-all.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "`scripts/ci/test-*.sh` includes execution of the new unit tests."
-    - CI pipeline fails if `cargo fmt` or `cargo clippy` produce warnings.
-    - Pipeline passes when all tests and lint checks succeed.
+    - "`scripts/ci/test-all.sh` executes `cargo fmt --check` and returns a non-zero exit code if unformatted code is detected."
+    - "`scripts/ci/test-all.sh` executes `cargo clippy --all-targets -- -D warnings` and fails if any clippy warnings are produced."
+    - "`scripts/ci/test-all.sh` runs `cargo test --workspace` and exits with code 0 when all lints and unit tests pass."
   depends_on: [EFFECTIVE-1342]
   notes: |
     [chump harvest check 'phase']
@@ -54945,11 +54959,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add sub-command routing in `src/commands/dispatch_external.rs` for `chump lease` supporting `ls`, `release`, and `reconcile` sub-verbs, delegating state, NATS-KV, and git lease operations to `crates/chump-gap-store/src/lib.rs` and formatting structured output when `--json` is provided.
+    
+    Target file(s):
+    - src/commands/dispatch_external.rs
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - CLI supports `chump lease ls` to list current leases from all stores.
-    - "`chump lease release <gap>` releases the lease in state.db, NATS‑KV, and git."
-    - "`chump lease reconcile [--gap <id>] [--session] [--all‑stores]` runs `lease.Reconcile` for the specified scope."
-    - Each sub‑verb returns a JSON‑compatible summary when `--json` is supplied.
+    - Running `chump lease ls` lists active leases across all stores and prints a JSON object when `--json` is supplied.
+    - Running `chump lease release <gap>` clears the lease entry in state.db, NATS-KV, and git via `crates/chump-gap-store/src/lib.rs` and outputs a confirmation summary.
+    - Running `chump lease reconcile` with optional `--gap <id>`, `--session`, and `--all-stores` flags invokes `lease.Reconcile` in `src/commands/dispatch_external.rs` for the specified scope.
   depends_on: [EFFECTIVE-1344]
   notes: |
     [chump harvest check 'EFFECTIVE']
