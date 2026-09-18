@@ -27785,9 +27785,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update the `build_debt_index_section` function in `crates/chump-kpi-report/src/kpi_report.rs` to compute the debt metric by filtering KPI entries for high‑criticality (`Crit::High`) and dormant status, multiplying each entry’s `crit` value by its `stages_short` count, summing those products, and returning the resulting numeric value as part of the debt index section.
+    
+    Target file(s):
+    - crates/chump-kpi-report/src/kpi_report.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Debt is calculated according to the specification and returns a numeric value
-    - High‑criticality dormant entries are correctly filtered before aggregation
+    - In `crates/chump-kpi-report/src/kpi_report.rs`, the `build_debt_index_section` function returns a numeric value that equals the sum of `crit * stages_short` for every high‑criticality dormant entry.
+    - The unit test `test_debt_calculation` in `crates/chump-kpi-report/tests/debt.rs` passes when supplied a dataset containing two high‑crit dormant entries (`crit=5, stages_short=2` and `crit=3, stages_short=4` and expects the debt value `22`.
+    - "Running `cargo run --bin chump-kpi-report` with the same dataset prints a line `Debt Index: 22` in the generated KPI report output."
   depends_on: [CREDIBLE-706]
   notes: |
     [chump harvest check 'Index']
@@ -115581,7 +115589,7 @@ gaps:
   acceptance_criteria:
     - All ~47 bogus/typo action versions across ci-advisory, ci-nightly, audit-weekly and experimental workflows are corrected to valid published versions; actionlint passes on those files.
   notes: |
-    Decomposed into 8 slices: INFRA-7015, INFRA-7016, INFRA-7017, INFRA-7018, INFRA-7019, INFRA-7020, INFRA-7021, INFRA-7022
+    Decomposed into 8 slices: INFRA-7251, INFRA-7252, INFRA-7253, INFRA-7254, INFRA-7255, INFRA-7256, INFRA-7257, INFRA-7258
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -251995,7 +252003,7 @@ gaps:
 - id: INFRA-7242
   domain: INFRA
   title: "INFRA: Create Dockerfile for chump‑rust‑builder (INFRA-2287 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -252026,6 +252034,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+  closed_date: '2026-09-18'
+  closed_pr: 4730
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4730 titled 'INFRA-7242: ...' merged 2026-09-18; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-7243
   domain: INFRA
@@ -252327,6 +252339,232 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7251
+  domain: INFRA
+  title: "INFRA: INFRA-7015: Correct bogus action versions in ci-advisory workflow files (INFRA-2321 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - All identified bogus/typo action versions in ci-advisory workflow YAML files are replaced with the correct published versions
+    - The modified ci-advisory workflow files are committed without syntax errors
+  notes: |
+    [chump harvest check 'sweep']
+    === primitives_index match for 'sweep' ===
+    
+    === cluster keyword match for 'sweep' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'sweep' ===
+    
+    === repo-description match for 'sweep' ===
+    
+    === HARVEST_ROADMAP.md mention of 'sweep' (deep-scan findings) ===
+      65:| The other 6 | **Archive on GitHub** — pure debt; recommend `gh repo archive` on a hygiene sweep |
+    
+    === cross-pollination briefs mentioning 'sweep' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7252
+  domain: INFRA
+  title: "INFRA: INFRA-7016: Correct bogus action versions in ci-nightly workflow files (INFRA-2321 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - All identified bogus/typo action versions in ci-nightly workflow YAML files are replaced with the correct published versions
+    - The modified ci-nightly workflow files are committed without syntax errors
+  notes: |
+    [chump harvest check 'sweep']
+    === primitives_index match for 'sweep' ===
+    
+    === cluster keyword match for 'sweep' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'sweep' ===
+    
+    === repo-description match for 'sweep' ===
+    
+    === HARVEST_ROADMAP.md mention of 'sweep' (deep-scan findings) ===
+      65:| The other 6 | **Archive on GitHub** — pure debt; recommend `gh repo archive` on a hygiene sweep |
+    
+    === cross-pollination briefs mentioning 'sweep' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7253
+  domain: INFRA
+  title: "INFRA: INFRA-7017: Correct bogus action versions in audit-weekly workflow files (INFRA-2321 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - All identified bogus/typo action versions in audit-weekly workflow YAML files are replaced with the correct published versions
+    - The modified audit-weekly workflow files are committed without syntax errors
+  notes: |
+    [chump harvest check 'sweep']
+    === primitives_index match for 'sweep' ===
+    
+    === cluster keyword match for 'sweep' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'sweep' ===
+    
+    === repo-description match for 'sweep' ===
+    
+    === HARVEST_ROADMAP.md mention of 'sweep' (deep-scan findings) ===
+      65:| The other 6 | **Archive on GitHub** — pure debt; recommend `gh repo archive` on a hygiene sweep |
+    
+    === cross-pollination briefs mentioning 'sweep' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7254
+  domain: INFRA
+  title: "INFRA: INFRA-7018: Correct bogus action versions in experimental/workflow A (INFRA-2321 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - All identified bogus/typo action versions in experimental/workflow A YAML file are replaced with the correct published versions
+    - The modified experimental/workflow A file is committed without syntax errors
+  notes: |
+    [chump harvest check 'sweep']
+    === primitives_index match for 'sweep' ===
+    
+    === cluster keyword match for 'sweep' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'sweep' ===
+    
+    === repo-description match for 'sweep' ===
+    
+    === HARVEST_ROADMAP.md mention of 'sweep' (deep-scan findings) ===
+      65:| The other 6 | **Archive on GitHub** — pure debt; recommend `gh repo archive` on a hygiene sweep |
+    
+    === cross-pollination briefs mentioning 'sweep' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7255
+  domain: INFRA
+  title: "INFRA: INFRA-7019: Correct bogus action versions in experimental/workflow B (INFRA-2321 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - All identified bogus/typo action versions in experimental/workflow B YAML file are replaced with the correct published versions
+    - The modified experimental/workflow B file is committed without syntax errors
+  notes: |
+    [chump harvest check 'sweep']
+    === primitives_index match for 'sweep' ===
+    
+    === cluster keyword match for 'sweep' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'sweep' ===
+    
+    === repo-description match for 'sweep' ===
+    
+    === HARVEST_ROADMAP.md mention of 'sweep' (deep-scan findings) ===
+      65:| The other 6 | **Archive on GitHub** — pure debt; recommend `gh repo archive` on a hygiene sweep |
+    
+    === cross-pollination briefs mentioning 'sweep' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7256
+  domain: INFRA
+  title: "INFRA: INFRA-7020: Correct bogus action versions in experimental/workflow C (INFRA-2321 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - All identified bogus/typo action versions in experimental/workflow C YAML file are replaced with the correct published versions
+    - The modified experimental/workflow C file is committed without syntax errors
+  notes: |
+    [chump harvest check 'sweep']
+    === primitives_index match for 'sweep' ===
+    
+    === cluster keyword match for 'sweep' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'sweep' ===
+    
+    === repo-description match for 'sweep' ===
+    
+    === HARVEST_ROADMAP.md mention of 'sweep' (deep-scan findings) ===
+      65:| The other 6 | **Archive on GitHub** — pure debt; recommend `gh repo archive` on a hygiene sweep |
+    
+    === cross-pollination briefs mentioning 'sweep' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7257
+  domain: INFRA
+  title: "INFRA: INFRA-7021: Run actionlint on updated ci-advisory, ci-nightly, and audit-weekly workflows (INFRA-2321 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - actionlint runs without errors on ci-advisory, ci-nightly, and audit-weekly workflow files
+    - Any lint warnings are addressed or documented as acceptable
+  depends_on: [INFRA-7251, INFRA-7252, INFRA-7253]
+  notes: |
+    [chump harvest check 'sweep']
+    === primitives_index match for 'sweep' ===
+    
+    === cluster keyword match for 'sweep' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'sweep' ===
+    
+    === repo-description match for 'sweep' ===
+    
+    === HARVEST_ROADMAP.md mention of 'sweep' (deep-scan findings) ===
+      65:| The other 6 | **Archive on GitHub** — pure debt; recommend `gh repo archive` on a hygiene sweep |
+    
+    === cross-pollination briefs mentioning 'sweep' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+
+- id: INFRA-7258
+  domain: INFRA
+  title: "INFRA: INFRA-7022: Run actionlint on updated experimental workflows and verify all pass (INFRA-2321 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - actionlint runs without errors on all experimental workflow files updated in slices 3‑6
+    - All experimental workflows pass actionlint validation
+  depends_on: [INFRA-7254, INFRA-7255, INFRA-7256, INFRA-7257]
+  notes: |
+    [chump harvest check 'sweep']
+    === primitives_index match for 'sweep' ===
+    
+    === cluster keyword match for 'sweep' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'sweep' ===
+    
+    === repo-description match for 'sweep' ===
+    
+    === HARVEST_ROADMAP.md mention of 'sweep' (deep-scan findings) ===
+      65:| The other 6 | **Archive on GitHub** — pure debt; recommend `gh repo archive` on a hygiene sweep |
+    
+    === cross-pollination briefs mentioning 'sweep' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
 
 - id: INFRA-726
   domain: INFRA
@@ -274060,7 +274298,7 @@ gaps:
 - id: META-774
   domain: META
   title: "META: Create CI gate script test-chump-playbook-freshness.sh (META-172 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -274084,6 +274322,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+    [2026-09-18T01:11:30Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=936B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: META-775
   domain: META
