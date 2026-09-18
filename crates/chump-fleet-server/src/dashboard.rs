@@ -555,4 +555,78 @@ mod tests {
             "merges_24h must always equal today_ships"
         );
     }
+
+    /// INFRA-7400 (INFRA-3841 slice): INFRA-3843/INFRA-7142 already unified
+    /// vital-signs.sh, faculty-collector.sh, and dashboard.rs onto the
+    /// single canonical computation in `scripts/ops/lib/merges-24h.sh` (see
+    /// `scripts/ci/test-merges-24h-canonical.sh`), but that shell-side test
+    /// never exercised dashboard.rs's own code path — it only proved the two
+    /// *bash* callers agreed with each other. This test closes that hole:
+    /// it drives `count_today_ships_from_shared_helper` (dashboard.rs's
+    /// real entry point) against the exact fixture shape used by the shell
+    /// test (5 merges inside the 24h window, 2 outside as a negative
+    /// control) and asserts the Rust path aggregates to the same value.
+    #[test]
+    fn count_today_ships_matches_canonical_fixture() {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        let tmp = std::env::temp_dir().join(format!(
+            "infra-7400-merges24h-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        let chump_dir = tmp.join(".chump");
+        std::fs::create_dir_all(&chump_dir).expect("create fixture .chump dir");
+        let db_path = chump_dir.join("github_cache.db");
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+        let merged_1h_ago = epoch_to_rfc3339(now.saturating_sub(3600));
+        let merged_3d_ago = epoch_to_rfc3339(now.saturating_sub(3 * 86400));
+
+        let conn = Connection::open(&db_path).expect("create fixture cache db");
+        conn.execute_batch(&format!(
+            "CREATE TABLE pr_state (
+                number INTEGER PRIMARY KEY,
+                merged_at TEXT,
+                updated_at_api TEXT NOT NULL DEFAULT '',
+                fetched_at_local TEXT NOT NULL DEFAULT ''
+            );
+            INSERT INTO pr_state (number, merged_at, updated_at_api, fetched_at_local) VALUES
+                (1, '{m1}', '{m1}', '{m1}'),
+                (2, '{m1}', '{m1}', '{m1}'),
+                (3, '{m1}', '{m1}', '{m1}'),
+                (4, '{m1}', '{m1}', '{m1}'),
+                (5, '{m1}', '{m1}', '{m1}'),
+                (6, '{m3d}', '{m3d}', '{m3d}'),
+                (7, '{m3d}', '{m3d}', '{m3d}');",
+            m1 = merged_1h_ago,
+            m3d = merged_3d_ago,
+        ))
+        .expect("seed fixture pr_state rows");
+        drop(conn);
+
+        let via_shared_helper = count_today_ships_from_shared_helper(&tmp, 24);
+        let via_public_api = count_today_ships(&tmp, 24);
+
+        std::fs::remove_dir_all(&tmp).ok();
+
+        assert_eq!(
+            via_shared_helper,
+            Some(5),
+            "dashboard.rs's shared-helper path must aggregate merges_24h the same way \
+             scripts/ci/test-merges-24h-canonical.sh proves vital-signs.sh and \
+             faculty-collector.sh do (5 merges inside the 24h window)"
+        );
+        assert_eq!(
+            via_public_api, 5,
+            "count_today_ships (the DashboardSummary.merges_24h source) must equal \
+             the canonical fixture count"
+        );
+    }
 }
