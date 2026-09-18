@@ -25750,10 +25750,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add a daily scheduled invocation of the existing `audit_done` routine by introducing a new `fn schedule_audit_done()` in `crates/mcp-servers/chump-mcp-eval/src/main.rs` that registers a job with a cron expression “0 0 * * *” (midnight UTC) using the project’s scheduler crate, call this function from `main()` during startup, and have the job log a structured `INFO` message “AuditDone executed” which is consumed by the operator’s monitoring dashboard via the existing logging pipeline.
+    
+    Target file(s):
+    - crates/mcp-servers/chump-mcp-eval/src/main.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - audit‑done is invoked automatically on a daily schedule (launchd plist or CI pipeline)
-    - Findings are posted to the operator’s monitoring dashboard or log aggregation system
-    - Operators can see the latest audit results without manual invocation
+    - crates/mcp-servers/chump-mcp-eval/src/main.rs defines a public function `fn schedule_audit_done()` that creates a scheduler job with the cron expression `0 0 * * *` and invokes the existing `audit_done()` handler.
+    - The `main()` function in the same file calls `schedule_audit_done()` before entering the server event loop.
+    - When the binary is run, the application log (captured by `env_logger` or equivalent) contains an `INFO` line exactly matching `AuditDone executed` for each scheduled run.
+    - A unit test `test_schedule_audit_done_registers_one_job` located in `crates/mcp-servers/chump-mcp-eval/src/main.rs` asserts that the scheduler holds exactly one job with the cron pattern `0 0 * * *` after `schedule_audit_done()` is called.
   depends_on: [CREDIBLE-629]
   notes: |
     [chump harvest check 'closed']
@@ -289093,13 +289101,17 @@ gaps:
 - id: RESILIENT-1351
   domain: RESILIENT
   title: "Make CJ the fleet canonical almanac index home (decision 2026-09-17): today CJ only indexes its 2 local repos; the fleet mine-before-build memory needs ALL ~95 repairman29 repos but no box holds them (Mac=29 @93% disk, CJ=2) — the ~95 is the GitHub-org total. Build: on CJ, a niced/off-peak sweep that (a) gh repo list repairman29 -> shallow-clone (--depth 1, no history) each repo into a dedicated index tree, (b) git pull the shallow clones each cycle + discover-new-repos, (c) run almanac AST index over all of them (NO embeds — embed/summarize is a separate deferred subcommand; plain index gives the file:line receipts that ARE mine-before-build), (d) serve the fleet almanac MCP/CLI queries from this canonical CJ index. GUARDRAILS: shallow-only; MONITOR disk (29GB free, ~95 shallow clones ~few GB but watch big repos like games monorepo/chump — if it wont fit, escalate: needs a dedicated indexer box, loops into the Oracle rethink); nice the sweep so it never fights the coordinator/workers; keep single-writer. Verify: almanac_search_fleet returns hits across many repos (not just 2), fleet-doctor almanac-freshness stays green on a REAL fleet-wide index"
-  status: open
+  status: done
   priority: P2
   effort: m
   acceptance_criteria:
     - "The change described by \"today CJ only indexes its 2 local repos; the fleet mine-before-build memory needs ALL ~95 repairman29 repos but no box holds them (Mac=29 @93% disk, CJ=2) — the ~95 is the GitHub-org total. Build: on CJ, a niced/off-peak sweep that (a) gh repo list repairman29 -> shallow-clone (--depth 1, no history) each repo into a dedicated index tree, (b) git pull the shallow clones each cycle + discover-new-repos, (c) run almanac AST index over all of them (NO embeds — embed/summarize is a separate deferred subcommand; plain index gives the file:line receipts that ARE mine-before-build), (d) serve the fleet almanac MCP/CLI queries from this canonical CJ index. GUARDRAILS: shallow-only; MONITOR disk (29GB free, ~95 shallow clones ~few GB but watch big repos like games monorepo/chump — if it wont fit, escalate: needs a dedicated indexer box, loops into the Oracle rethink); nice the sweep so it never fights the coordinator/workers; keep single-writer. Verify: almanac_search_fleet returns hits across many repos (not just 2), fleet-doctor almanac-freshness stays green on a REAL fleet-wide index\" is implemented in the relevant RESILIENT code path(s)."
     - At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.
     - cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.
+  closed_date: '2026-09-17'
+  closed_pr: 4729
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4729 titled 'RESILIENT-1351: ...' merged 2026-09-17; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: RESILIENT-136
   domain: RESILIENT
