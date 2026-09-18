@@ -102,6 +102,18 @@ try {
     throw new Error(`Expected "Chump" in #app-title, got: ${JSON.stringify(title)}`);
   }
 
+  // `<chump-chat>` only mounts while the "Now" cadence's Chat sub-tab is the
+  // active view (ChumpViewChat.connectedCallback() in app.js sets
+  // this.innerHTML = '<chump-chat ...>'). PRODUCT-132 (PR #2066, 2026-05-15)
+  // changed the cadence's default_view to 'cockpit', so on fresh load the
+  // element never appears until the nav is clicked — root-caused in
+  // docs/audits/INFRA-6338-chump-chat-selector-investigation.md (INFRA-1433
+  // slice). Click the Chat nav button first, mirroring how a real user (and
+  // the Playwright specs, see e2e/tests/api-and-pwa.spec.ts) reach the surface.
+  console.log(`tauri e2e: #app-title found at t=${Date.now()}; clicking Chat nav…`);
+  await driver.wait(until.elementLocated(By.css('[data-view="chat"]')), 30_000);
+  await driver.findElement(By.css('[data-view="chat"]')).click();
+
   // Wait for `<chump-chat>` to upgrade and attach its shadow root.
   // The backward-compat alias script in index.html renames shadow #input → #msg-input
   // shortly after DOMContentLoaded (CREDIBLE-055). Accept either id so this check
@@ -112,7 +124,7 @@ try {
   // all those modules parse+execute after the static #app-title renders but
   // before DOMContentLoaded fires — the JS-rendered <chump-chat> can take >60 s
   // to appear.  120 s keeps us well within the job's overall timeout budget.
-  console.log(`tauri e2e: #app-title found at t=${Date.now()}; waiting for <chump-chat>…`);
+  console.log(`tauri e2e: Chat nav clicked at t=${Date.now()}; waiting for <chump-chat>…`);
   await driver.wait(until.elementLocated(By.css('chump-chat')), 120_000);
   console.log(`tauri e2e: <chump-chat> located at t=${Date.now()}; waiting for shadow root…`);
   await driver.wait(async () => {
