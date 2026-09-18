@@ -40906,10 +40906,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Extend the `cleanup` function in `scripts/ci/run-battle-sim-suite.sh` to invoke `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` sequentially, aborting with a non‑zero exit code if any of these commands fails, thereby enforcing formatting, lint, and full test suite compliance in the CI run.
+    
+    Target file(s):
+    - scripts/ci/run-battle-sim-suite.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - "`cargo fmt --all -- --check` passes with no formatting issues."
-    - "`cargo clippy --all-targets -- -D warnings` passes with zero warnings."
-    - All existing tests plus the new RUN half tests pass (`cargo test`).
+    - Running `scripts/ci/run-battle-sim-suite.sh` executes `cargo fmt --all -- --check` and the script exits with code 0 only when formatting passes without issues.
+    - The script executes `cargo clippy --all-targets -- -D warnings` and exits with a non‑zero code if any clippy warning is emitted.
+    - The script executes `cargo test` after fmt and clippy, and exits with code 0 only when all tests (including the new RUN half tests) succeed.
+    - The overall exit status of `scripts/ci/run-battle-sim-suite.sh` is zero only when fmt, clippy, and the full test suite all succeed; otherwise it is non‑zero.
   depends_on: [DOCS-022, DOCS-023, DOCS-024, DOCS-025]
   notes: |
     [chump harvest check 'roadmap']
@@ -41010,9 +41018,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add support for a new “--half” flag in `scripts/dispatch/run-fleet.sh` by extending the argument parser, introducing a `RUN_HALF` variable, and modifying the target‑selection loop to limit execution to the first half of the discovered cargo targets; also add a test case in `crates/chump-verify/src/pr_ac_coverage.rs` that invokes the script with `--half` and asserts the expected reduced target list and output.
+    
+    Target file(s):
+    - scripts/dispatch/run-fleet.sh
+    - crates/chump-verify/src/pr_ac_coverage.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - RUN half functionality behaves as specified in design.
-    - Running cargo test shows new behavior passes.
+    - scripts/dispatch/run-fleet.sh parses the `--half` flag and sets a boolean `RUN_HALF` variable accordingly.
+    - When `RUN_HALF` is true, `scripts/dispatch/run-fleet.sh` limits the list of cargo targets to exactly the first 50 % of the discovered targets before invoking them.
+    - Executing `scripts/dispatch/run-fleet.sh --half` prints a line containing the phrase “Running half of fleet”.
+    - The test added to `crates/chump-verify/src/pr_ac_coverage.rs` runs the script with `--half` and asserts that only half of the expected targets are processed, causing `cargo test` to pass.
   depends_on: [DOCS-028]
   notes: |
     [chump harvest check 'roadmap']
@@ -136430,7 +136448,7 @@ gaps:
     - Detects non-macOS and uses cargo install sccache --locked; cranelift/mold blocks skipped unless the components/binaries are present
     - SCCACHE_DIR defaults to a USB path when /home free < 25G; idempotent re-run is safe
   notes: |
-    Decomposed into 4 slices: INFRA-7111, INFRA-7112, INFRA-7113, INFRA-7114
+    Decomposed into 4 slices: INFRA-7360, INFRA-7361, INFRA-7362, INFRA-7363
   opened_date: '2026-08-22'
 
 - id: INFRA-3662
@@ -256538,6 +256556,144 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7360
+  domain: INFRA
+  title: "INFRA: Add Linux/Ubuntu detection and use cargo for sccache install (INFRA-3661 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - On macOS the script continues to use brew for sccache installation
+    - On Linux/Ubuntu the script runs `cargo install sccache --locked`
+    - The OS detection logic correctly distinguishes macOS vs non‑macOS environments
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7361
+  domain: INFRA
+  title: "INFRA: Guard cranelift/mold installation blocks with component presence checks (INFRA-3661 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - If the required cranelift or mold binaries are not present, the script skips their installation steps
+    - Skipping does not cause the script to exit with an error
+    - When the binaries are present, the original installation behavior is unchanged
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7362
+  domain: INFRA
+  title: "INFRA: Set SCCACHE_DIR to USB path when /home free space < 25 GB (INFRA-3661 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - The script calculates free space on /home
+    - If free space is less than 25 GB, SCCACHE_DIR is set to a USB mount path (e.g., /mnt/usb/sccache)
+    - If free space is ≥ 25 GB, SCCACHE_DIR remains unchanged
+    - The logic reuses the existing `detect_sccache_dir` function
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7363
+  domain: INFRA
+  title: "INFRA: Make install-sccache.sh idempotent for repeated runs (INFRA-3661 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Running the script a second time does not reinstall sccache if it is already present
+    - The script verifies that SCCACHE_DIR is writable before attempting changes
+    - No errors are emitted on a re‑run and the environment remains consistent
+  depends_on: [INFRA-7360, INFRA-7362]
+  notes: |
+    [chump harvest check 'EFFECTIVE']
+    === primitives_index match for 'EFFECTIVE' ===
+    
+    === cluster keyword match for 'EFFECTIVE' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'EFFECTIVE' ===
+    
+    === repo-description match for 'EFFECTIVE' ===
+    
+    === HARVEST_ROADMAP.md mention of 'EFFECTIVE' (deep-scan findings) ===
+      102:| **G1** | `EFFECTIVE: investigate INFRA-1719 vs echeo/src/shredder.rs — confirm harvest lineage or file consolidation` | INFRA | EFFECTIVE | P1 |
+      103:| **G2** | `EFFECTIVE: vendor BEAST-MODE HITL approval flow into chump preflight + bot-merge (Marcus trust gate)` | INFRA | EFFECTIVE | P0 (Marcus blocker) |
+      104:| **G3** | `EFFECTIVE: extract chump-coord-mesh crate from chump-proprietary, consumed by both private + public mesh layer` | INFRA | EFFECTIVE | P1 |
+      105:| **G4** | `EFFECTIVE: vendor echeo::ShipVelocityScore as Chump gap-value scorer for routing_outcomes (INFRA-1764)` | INFRA | EFFECTIVE | P1 |
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      215:| `EFFECTIVE: vendor mock-services (Anthropic / OpenAI / Stripe / Supabase containers) into Chump CI fixture layer (CP-009)` | EFFECTIVE | P1 |
+      216:| `EFFECTIVE: compare project-forge OKR schema vs Chump state.db gap schema — extract any superior primitives (CP-010)` | EFFECTIVE | P2 |
+    
+    === cross-pollination briefs mentioning 'EFFECTIVE' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
 
 - id: INFRA-739
   domain: INFRA
