@@ -38,7 +38,8 @@ ENV CARGO_HOME=/usr/local/cargo \
 RUN rustc --version && cargo --version \
     && cargo nextest --version && sccache --version \
     && jq --version && git --version && gh --version && python3 --version \
-    && mold --version
+    && mold --version \
+    && rustup component list --toolchain nightly | grep rustc-codegen-cranelift-preview
 
 LABEL org.opencontainers.image.source="https://github.com/repairman29/chump"
 LABEL org.opencontainers.image.description="Chump Rust builder image (Rust 1.82 + sccache + mold + cranelift + cargo-nextest + jq + gh + python3)"
