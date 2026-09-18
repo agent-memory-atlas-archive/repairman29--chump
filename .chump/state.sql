@@ -253844,7 +253844,7 @@ gaps:
 - id: INFRA-7298
   domain: INFRA
   title: "INFRA: Add --creds-file path support to materialize_creds (INFRA-3629 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -253879,6 +253879,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+  closed_date: '2026-09-18'
+  closed_pr: 4732
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4732 titled 'INFRA-7298: ...' merged 2026-09-18; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-7299
   domain: INFRA
