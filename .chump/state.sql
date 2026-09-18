@@ -252838,7 +252838,7 @@ gaps:
 - id: INFRA-7268
   domain: INFRA
   title: "INFRA: Detect path overlap with currently open PRs (INFRA-2434 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -252861,6 +252861,7 @@ gaps:
     
     === cross-pollination briefs mentioning 'ZERO-WASTE' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+    [2026-09-18T03:32:48Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1843B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-7269
   domain: INFRA
