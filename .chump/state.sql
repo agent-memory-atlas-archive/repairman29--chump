@@ -251457,7 +251457,7 @@ gaps:
 - id: INFRA-7226
   domain: INFRA
   title: "INFRA: INFRA-6998: Sign up for BuildBuddy free tier and store API key in GitHub secrets (INFRA-2249 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -251487,6 +251487,7 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-18T01:35:46Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=101, rc=101, cycle_log=2800B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-7227
   domain: INFRA
