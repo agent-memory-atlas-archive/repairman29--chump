@@ -31301,10 +31301,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a call to the lifecycle gauge setter inside the `execute` function of `src/spawn_worker_tool.rs` so that the gauge is set to the value `"running"` as soon as a worker is successfully started, and extend `scripts/ci/test-capability-lifecycle.sh` to query the gauge after runtime start and assert that the reported value is `"running"`.
+    
+    Target file(s):
+    - src/spawn_worker_tool.rs
+    - scripts/ci/test-capability-lifecycle.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Runtime start-up updates the gauge to the running stage.
-    - A functional test confirms that a running instance reports the running gauge value.
-    - No regressions in existing test suite.
+    - "src/spawn_worker_tool.rs:execute must invoke `metrics::set_lifecycle_gauge(\"running\")` immediately after a successful worker spawn."
+    - scripts/ci/test-capability-lifecycle.sh must run `./scripts/ops/vital-signs.sh --gauge lifecycle` after starting the runtime and fail if the output does not contain the word `running`.
+    - Executing `cargo test --all` must complete with zero test failures, confirming no regressions.
+    - "The CI job `test-capability-lifecycle` must log the line `Lifecycle gauge: running` in its output."
   depends_on: [CREDIBLE-813]
   notes: |
     [chump harvest check 'lifecycle']
@@ -31580,10 +31589,19 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new unit test function `test_summarized_pct_guard` inside `crates/chump-preflight/src/preflight.rs` that asserts the `summarized_pct` value is never below 95% after the guard is applied, and modify `scripts/ci/test-jetstream-consumer-roundtrip.sh` to invoke `cargo test` and abort the CI run if the new test fails.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    - scripts/ci/test-jetstream-consumer-roundtrip.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A test (unit or integration) asserts that `summarized_pct` is never below 95% after the guard is applied.
-    - Running the test suite without the guard implementation causes the new test to fail, confirming test validity.
-    - The test runs via `cargo test` or `scripts/ci/test-*.sh` and passes when the guard is present, with CI reporting success.
+    - "In `crates/chump-preflight/src/preflight.rs` a `#[test]` function named `test_summarized_pct_guard` exists and contains an `assert!(summarized_pct >= 95.0)` (or equivalent) checking the guard’s result."
+    - Executing `cargo test` on a checkout where the guard implementation is omitted exits with a non‑zero status because `test_summarized_pct_guard` fails.
+    - The script `scripts/ci/test-jetstream-consumer-roundtrip.sh` includes a line that runs `cargo test` and exits with the test command’s exit code, causing the CI job to fail if any test (including the new one) fails.
+    - When the guard implementation is present, running `cargo test` exits with status 0 and the CI job invoked by `scripts/ci/test-jetstream-consumer-roundtrip.sh` reports success.
   depends_on: [CREDIBLE-822]
   notes: |
     [chump harvest check 'Almanac']
@@ -135569,7 +135587,7 @@ gaps:
     - effective priority is the PRIMARY sort band, not a within-priority-band tiebreaker (today _pick_gap.py INFRA-1258 planner rank only breaks ties WITHIN a nominal band — crates/chump-planner/src/graph.rs has open_prerequisites/layers/critical_path_days/unblocks already)
     - "regression test (extend picker_priority_infra3616.rs): a P3 gap that a P0 depends_on is picked before unrelated P1/P2 gaps; no deadlock where a blocked P0 waits behind all P1s while its own P2 prereq sits unworked"
   notes: |
-    Decomposed into 3 slices: INFRA-7050, INFRA-7051, INFRA-7052
+    Decomposed into 3 slices: INFRA-7285, INFRA-7286, INFRA-7287
   opened_date: '2026-08-19'
 
 - id: INFRA-3614
@@ -253353,6 +253371,83 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7285
+  domain: INFRA
+  title: "INFRA: INFRA-7050: Implement effective priority calculation (INFRA-3612 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - picker computes effective_priority(gap) = max(own priority, priority of every gap it transitively unblocks) via chump‑planner unblocks()
+    - Cross‑band dependencies are considered (e.g., a P3 blocker of a P0 influences the P0’s effective priority)
+    - Gaps without dependents retain their original priority as effective priority
+  notes: |
+    [chump harvest check 'Picker']
+    === primitives_index match for 'Picker' ===
+    
+    === cluster keyword match for 'Picker' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'Picker' ===
+    
+    === repo-description match for 'Picker' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Picker' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Picker' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+
+- id: INFRA-7286
+  domain: INFRA
+  title: "INFRA: INFRA-7051: Use effective priority as primary sort band (INFRA-3612 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Picker sorts gaps primarily by effective priority band (lower numeric band = higher priority)
+    - Within the same effective priority band, existing tie‑breaker logic remains unchanged
+    - A P3 gap that blocks a P0 is ordered as if it were a P0 (effective priority = P0)
+  depends_on: [INFRA-7285]
+  notes: |
+    [chump harvest check 'Picker']
+    === primitives_index match for 'Picker' ===
+    
+    === cluster keyword match for 'Picker' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'Picker' ===
+    
+    === repo-description match for 'Picker' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Picker' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Picker' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+
+- id: INFRA-7287
+  domain: INFRA
+  title: "INFRA: INFRA-7052: Add regression test for effective priority propagation (INFRA-3612 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test (picker_priority_infra3616.rs) creates a P3 gap that a P0 depends_on, plus unrelated P1 and P2 gaps
+    - Test asserts the P0 (effective priority) gap is selected before the unrelated P1/P2 gaps
+    - "Test verifies no deadlock: the blocked P0 does not wait behind all P1s while its own P2 prerequisite remains unworked"
+  depends_on: [INFRA-7286]
+  notes: |
+    [chump harvest check 'Picker']
+    === primitives_index match for 'Picker' ===
+    
+    === cluster keyword match for 'Picker' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'Picker' ===
+    
+    === repo-description match for 'Picker' ===
+    
+    === HARVEST_ROADMAP.md mention of 'Picker' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'Picker' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
 
 - id: INFRA-739
   domain: INFRA
