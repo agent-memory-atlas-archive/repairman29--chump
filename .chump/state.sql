@@ -135541,7 +135541,7 @@ gaps:
     - "reopener and stale-PR-reaper share one policy: keep a PR alive only if gap open AND branch mergeable/rebaseable; retire conflicting+stale+low-priority PRs (gap stays open for clean re-pick)"
     - "receipt 2026-08-19: closed #3919(INFRA-1784)/#3910(META-193) 03:14:1x, reopened by repairman29 at 03:14:4x (~25s); both DIRTY+P2 → un-retireable, re-jam"
   notes: |
-    Decomposed into 6 slices: INFRA-7044, INFRA-7045, INFRA-7046, INFRA-7047, INFRA-7048, INFRA-7049
+    Decomposed into 6 slices: INFRA-7279, INFRA-7280, INFRA-7281, INFRA-7282, INFRA-7283, INFRA-7284
   opened_date: '2026-08-19'
 
 - id: INFRA-3606
@@ -253174,6 +253174,185 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+
+- id: INFRA-7279
+  domain: INFRA
+  title: "INFRA: Investigate current PR reopener behavior and identify root cause (INFRA-3604 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Reproduce the issue where a manually‑closed, stale, conflicting PR is reopened within ~25 seconds
+    - Document the exact conditions (gap state, mergeability check, policy flags) that trigger the reopen
+    - Create a concise report outlining required policy changes
+  notes: |
+    [chump harvest check 'while']
+    === primitives_index match for 'while' ===
+    
+    === cluster keyword match for 'while' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'while' ===
+    
+    === repo-description match for 'while' ===
+    
+    === HARVEST_ROADMAP.md mention of 'while' (deep-scan findings) ===
+      130:**Actual state (per CP-007 investigation):** the fork is **0 ahead, 276 BEHIND** upstream. Jeff's fork is **stale, not divergent** — taken once on 2026-04-16 and never touched while upstream marched 276 hourly-bot commits. Zero original divergence.
+      256:The single most important finding from this entire pass isn't any individual primitive. It's the **echeo tree-sitter DRY catch**. We just shipped a tree-sitter crawler in INFRA-1719 (Sonnet's work, 2 days ago) while an existing one sat in echeo. Whether it was harvested-but-unacknowledged or reinvented, **the Harvester catalog would have flagged it at decompose time** if it had been live.
+    
+    === cross-pollination briefs mentioning 'while' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7280
+  domain: INFRA
+  title: "INFRA: Update PR reopener policy to require both gap open AND branch mergeable/rebaseable (INFRA-3604 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Reopener checks that the gap is still open before considering a PR for reopening
+    - Reopener also verifies the target branch is mergeable or rebaseable; if not, it does not reopen
+    - Code changes pass existing unit tests and new policy logic is covered by unit tests
+  depends_on: [INFRA-7279]
+  notes: |
+    [chump harvest check 'while']
+    === primitives_index match for 'while' ===
+    
+    === cluster keyword match for 'while' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'while' ===
+    
+    === repo-description match for 'while' ===
+    
+    === HARVEST_ROADMAP.md mention of 'while' (deep-scan findings) ===
+      130:**Actual state (per CP-007 investigation):** the fork is **0 ahead, 276 BEHIND** upstream. Jeff's fork is **stale, not divergent** — taken once on 2026-04-16 and never touched while upstream marched 276 hourly-bot commits. Zero original divergence.
+      256:The single most important finding from this entire pass isn't any individual primitive. It's the **echeo tree-sitter DRY catch**. We just shipped a tree-sitter crawler in INFRA-1719 (Sonnet's work, 2 days ago) while an existing one sat in echeo. Whether it was harvested-but-unacknowledged or reinvented, **the Harvester catalog would have flagged it at decompose time** if it had been live.
+    
+    === cross-pollination briefs mentioning 'while' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7281
+  domain: INFRA
+  title: "INFRA: Align stale‑PR‑reaper policy with the updated reopener logic (INFRA-3604 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Stale‑PR‑reaper uses the same condition (gap open AND branch mergeable) to decide whether to keep a PR alive
+    - Conflicting, stale, low‑priority PRs are retired (closed) when the gap remains open
+    - "No regression: PRs that were previously correctly retired remain retired"
+  depends_on: [INFRA-7280]
+  notes: |
+    [chump harvest check 'while']
+    === primitives_index match for 'while' ===
+    
+    === cluster keyword match for 'while' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'while' ===
+    
+    === repo-description match for 'while' ===
+    
+    === HARVEST_ROADMAP.md mention of 'while' (deep-scan findings) ===
+      130:**Actual state (per CP-007 investigation):** the fork is **0 ahead, 276 BEHIND** upstream. Jeff's fork is **stale, not divergent** — taken once on 2026-04-16 and never touched while upstream marched 276 hourly-bot commits. Zero original divergence.
+      256:The single most important finding from this entire pass isn't any individual primitive. It's the **echeo tree-sitter DRY catch**. We just shipped a tree-sitter crawler in INFRA-1719 (Sonnet's work, 2 days ago) while an existing one sat in echeo. Whether it was harvested-but-unacknowledged or reinvented, **the Harvester catalog would have flagged it at decompose time** if it had been live.
+    
+    === cross-pollination briefs mentioning 'while' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7282
+  domain: INFRA
+  title: "INFRA: Add unit tests for reopener not reopening stale, conflicting PRs (INFRA-3604 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Test case where a PR is manually closed, gap stays open, and the PR is conflicting/dirty
+    - Assert that the reopener does not reopen the PR within 30 seconds
+    - All tests run and pass in CI
+  depends_on: [INFRA-7280]
+  notes: |
+    [chump harvest check 'while']
+    === primitives_index match for 'while' ===
+    
+    === cluster keyword match for 'while' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'while' ===
+    
+    === repo-description match for 'while' ===
+    
+    === HARVEST_ROADMAP.md mention of 'while' (deep-scan findings) ===
+      130:**Actual state (per CP-007 investigation):** the fork is **0 ahead, 276 BEHIND** upstream. Jeff's fork is **stale, not divergent** — taken once on 2026-04-16 and never touched while upstream marched 276 hourly-bot commits. Zero original divergence.
+      256:The single most important finding from this entire pass isn't any individual primitive. It's the **echeo tree-sitter DRY catch**. We just shipped a tree-sitter crawler in INFRA-1719 (Sonnet's work, 2 days ago) while an existing one sat in echeo. Whether it was harvested-but-unacknowledged or reinvented, **the Harvester catalog would have flagged it at decompose time** if it had been live.
+    
+    === cross-pollination briefs mentioning 'while' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7283
+  domain: INFRA
+  title: "INFRA: Create integration test for end‑to‑end scenario (manual close → gap open → reopener) (INFRA-3604 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Simulate closing a stale, conflicting PR while the gap is open
+    - Run the full pipeline and verify the PR remains closed and is not re‑queued
+    - Validate that the merge‑queue does not jam after the test execution
+  depends_on: [INFRA-7282]
+  notes: |
+    [chump harvest check 'while']
+    === primitives_index match for 'while' ===
+    
+    === cluster keyword match for 'while' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'while' ===
+    
+    === repo-description match for 'while' ===
+    
+    === HARVEST_ROADMAP.md mention of 'while' (deep-scan findings) ===
+      130:**Actual state (per CP-007 investigation):** the fork is **0 ahead, 276 BEHIND** upstream. Jeff's fork is **stale, not divergent** — taken once on 2026-04-16 and never touched while upstream marched 276 hourly-bot commits. Zero original divergence.
+      256:The single most important finding from this entire pass isn't any individual primitive. It's the **echeo tree-sitter DRY catch**. We just shipped a tree-sitter crawler in INFRA-1719 (Sonnet's work, 2 days ago) while an existing one sat in echeo. Whether it was harvested-but-unacknowledged or reinvented, **the Harvester catalog would have flagged it at decompose time** if it had been live.
+    
+    === cross-pollination briefs mentioning 'while' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: INFRA-7284
+  domain: INFRA
+  title: "INFRA: Deploy policy changes to production and monitor for regressions (INFRA-3604 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Policy changes are released to the production environment without deployment errors
+    - Monitoring for 24 hours shows zero instances of manually‑closed stale PRs being reopened
+    - Merge‑queue health metrics remain stable (no new jams)
+  depends_on: [INFRA-7281, INFRA-7283]
+  notes: |
+    [chump harvest check 'while']
+    === primitives_index match for 'while' ===
+    
+    === cluster keyword match for 'while' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'while' ===
+    
+    === repo-description match for 'while' ===
+    
+    === HARVEST_ROADMAP.md mention of 'while' (deep-scan findings) ===
+      130:**Actual state (per CP-007 investigation):** the fork is **0 ahead, 276 BEHIND** upstream. Jeff's fork is **stale, not divergent** — taken once on 2026-04-16 and never touched while upstream marched 276 hourly-bot commits. Zero original divergence.
+      256:The single most important finding from this entire pass isn't any individual primitive. It's the **echeo tree-sitter DRY catch**. We just shipped a tree-sitter crawler in INFRA-1719 (Sonnet's work, 2 days ago) while an existing one sat in echeo. Whether it was harvested-but-unacknowledged or reinvented, **the Harvester catalog would have flagged it at decompose time** if it had been live.
+    
+    === cross-pollination briefs mentioning 'while' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
 
 - id: INFRA-739
   domain: INFRA
