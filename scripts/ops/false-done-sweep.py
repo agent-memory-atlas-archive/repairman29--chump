@@ -75,6 +75,13 @@ JSON array (81 entries against the live registry that day, not 79 — see the
 drift note above), and `scripts/ci/test-false-done-sweep.sh` still passes,
 confirming the exit-0/non-zero contract. No behavior change needed.
 
+CREDIBLE-1330 re-verified the same three AC again on 2026-09-18: file
+present + executable, `scripts/ci/test-false-done-sweep.sh` still passes
+(7/7, including the deterministic --multi-close-only --json fixture that
+asserts the exact BOOKKEEPING/non-BOOKKEEPING classification), and a live
+run reports 81 bookkeeping-closed gaps (still not 79 — same drift, unchanged
+since CREDIBLE-1264). No behavior change needed.
+
 Usage:
   python3 scripts/ops/false-done-sweep.py --multi-close-only      # cheapest, highest yield
   python3 scripts/ops/false-done-sweep.py --all --limit 400       # broader
