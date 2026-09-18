@@ -6,6 +6,7 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch: {}
 
 jobs:
   smoke:
@@ -15,8 +16,21 @@ jobs:
       - name: Scaffold smoke
         run: echo "OK — add build steps when the project has a stack."
 
+  # EFFECTIVE-358 L1: chump intake happens upstream of this repo's CI (the
+  # umbrella gap + requirement set already exist by the time code lands), so
+  # this job is a placeholder checkpoint — it exists to give design-pass an
+  # explicit `needs:` predecessor per docs/design-pass-stage.md's pipeline
+  # order (intake -> design pass -> implement -> CSS token gate).
+  intake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Intake checkpoint (placeholder)
+        run: echo "OK — intake requirement set is produced upstream by 'chump intake' before code lands."
+
   design-pass:
-    if: github.event_name == 'pull_request'
+    needs: intake
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
