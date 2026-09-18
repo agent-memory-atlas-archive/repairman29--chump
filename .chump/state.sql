@@ -40668,9 +40668,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Create `docs/roadmap-code-paths.md` to document the primary source files, modules, and scripts implementing the roadmap track (DOCS-002 slice), explicitly detailing `crates/chump-preflight/src/preflight.rs` (including `discover_test_scripts` and `run`) and `scripts/ab-harness/run-ablation-sweep.py`.
+    
+    Target file(s):
+    - docs/roadmap-code-paths.md
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A list of source files and modules where the roadmap track is currently implemented is documented in a markdown file.
-    - The identified locations are reviewed and approved by a senior developer.
+    - "`docs/roadmap-code-paths.md` exists and includes a structured inventory of DOCS roadmap code paths."
+    - "`docs/roadmap-code-paths.md` references `crates/chump-preflight/src/preflight.rs` and `scripts/ab-harness/run-ablation-sweep.py` with descriptions of their roles."
+    - "`docs/roadmap-code-paths.md` contains a section summarizing preflight test discovery and ablation harness execution paths."
   notes: |
     [chump harvest check 'roadmap']
     === primitives_index match for 'roadmap' ===
@@ -52980,10 +52988,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add launchd scheduling support for running `effective-sweep` weekly on Sundays at 02:00 UTC by documenting the `com.effective.sweep.plist` specification in `docs/process/SCHEDULING_LAYERS.md` and updating `scripts/coord/gap-doctor.py` to ensure `cmd_safe_sweep` logs execution start and end timestamps into `sweep.log`.
+    
+    Target file(s):
+    - docs/process/SCHEDULING_LAYERS.md
+    - scripts/coord/gap-doctor.py
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A `com.effective.sweep.plist` file is installed in `~/Library/LaunchAgents/`
-    - "Launchd runs `effective-sweep` every Sunday at 02:00 UTC"
-    - Log file (`sweep.log`) is created and contains start/end timestamps for each scheduled run
+    - "`com.effective.sweep.plist` configuration is defined in `docs/process/SCHEDULING_LAYERS.md` with `StartCalendarInterval` set to Weekday 0 (Sunday) at Hour 2, Minute 0."
+    - "`scripts/coord/gap-doctor.py` writes ISO-8601 formatted start and end timestamps to `sweep.log` when `cmd_safe_sweep` executes."
+    - "`docs/process/SCHEDULING_LAYERS.md` specifies installing `com.effective.sweep.plist` into `~/Library/LaunchAgents/` with standard output and error redirected to `sweep.log`."
   depends_on: [EFFECTIVE-1284]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -53957,10 +53973,18 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Modify the `verify_proof_of_merge` function in `crates/chump-gap-store/src/lib.rs` to compute the line‑count of each leaf‑gap diff, reject any diff larger than 15 lines, detect any overlapping line ranges between diffs, and expose a small helper `report_leaf_gap_metrics` that CI can invoke to print the size and overlap status of all leaf‑gaps.
+    
+    Target file(s):
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Applying a leaf‑gap ticket results in a diff of ≤ 15 lines.
-    - Diffs for different tickets do not overlap (no shared lines).
-    - CI reports the diff size for each leaf‑gap and confirms it meets the threshold.
+    - In `crates/chump-gap-store/src/lib.rs`, `verify_proof_of_merge` returns an `Err` with the message “leaf‑gap diff exceeds 15 lines” when a generated leaf‑gap diff contains more than 15 lines.
+    - In `crates/chump-gap-store/src/lib.rs`, `verify_proof_of_merge` returns an `Err` with the message “leaf‑gap diffs overlap” when any two leaf‑gap diffs share at least one line number.
+    - "The test `proof_of_merge_tests::test_leaf_gap_validation` (added in `crates/chump-gap-store/src/lib.rs`) passes for a valid leaf‑gap (≤15 lines, disjoint) and fails for an oversized or overlapping leaf‑gap, confirming the new validation logic."
+    - "Running the CI helper command `cargo run --bin leaf_gap_check` prints a line “Leaf‑gap diff size: X lines” for each leaf‑gap and a final line “All leaf‑gaps within threshold and disjoint” only when every diff is ≤15 lines and no overlaps exist."
   depends_on: [EFFECTIVE-1315]
   notes: |
     [chump harvest check 'PILOT']
@@ -256146,7 +256170,7 @@ gaps:
 - id: INFRA-7351
   domain: INFRA
   title: "INFRA: Create bootstrap entrypoint script (chump-node-install.sh) that runs on a bare box (INFRA-3657 slice)"
-  status: open
+  status: done
   priority: P1
   effort: s
   acceptance_criteria:
@@ -256182,6 +256206,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+  closed_date: '2026-09-18'
+  closed_pr: 4741
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4741 titled 'INFRA-7351: ...' merged 2026-09-18; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-7352
   domain: INFRA
