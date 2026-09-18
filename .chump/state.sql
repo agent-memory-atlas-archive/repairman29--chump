@@ -34110,10 +34110,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add a new test function `test_high_scoring_dormant_champion` to `scripts/ci/test-nba-dispatch-beat.sh` that creates a dormant‑champion entry with high fan‑in and emission values, asserts that its `crit.value` exceeds the defined high‑score threshold and that its `need` field equals `StillWired`, and registers the test with the script’s existing CI test harness so it runs automatically.
+    
+    Target file(s):
+    - scripts/ci/test-nba-dispatch-beat.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Test creates a dormant‑champion entry with high fan‑in and emission values.
-    - Assert that its `crit.value` is high and `need` is `StillWired`.
-    - Test fails before the implementation and passes after.
+    - The function `test_high_scoring_dormant_champion` is defined in `scripts/ci/test-nba-dispatch-beat.sh` after line 106 and is added to the script’s test registration list.
+    - Running `bash scripts/ci/test-nba-dispatch-beat.sh` outputs a line containing `PASS test_high_scoring_dormant_champion`.
+    - Modifying the test to set `crit.value` below the high‑score threshold or `need` to a value other than `StillWired` causes the script to exit with a non‑zero status, confirming the assertions are enforced.
   depends_on: [CREDIBLE-896, CREDIBLE-897]
   notes: |
     [chump harvest check 'Index']
@@ -135811,7 +135818,7 @@ gaps:
     - "Idempotent and safe to re-run: never reverts a terminal-status row (respects the INFRA-3606 guard); no-op with a clear warning if the substrate is unreachable"
     - self_test reports post-seed gap count > 0 and it matches `ls docs/gaps/*.yaml` (minus terminal)
   notes: |
-    Decomposed into 3 slices: INFRA-6813, INFRA-6814, INFRA-6815
+    Decomposed into 3 slices: INFRA-7308, INFRA-7309, INFRA-7310
   opened_date: '2026-08-21'
 
 - id: INFRA-3634
@@ -254047,7 +254054,7 @@ gaps:
 - id: INFRA-7303
   domain: INFRA
   title: "INFRA: INFRA-6804: Install PostgREST binary and generate configuration (INFRA-3631 slice)"
-  status: open
+  status: done
   priority: P1
   effort: s
   acceptance_criteria:
@@ -254082,6 +254089,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+  closed_date: '2026-09-18'
+  closed_pr: 4733
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4733 titled 'INFRA-7303: ...' merged 2026-09-18; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: INFRA-7304
   domain: INFRA
@@ -254213,6 +254224,128 @@ gaps:
     - The response does not contain the PostgREST error code `PGRST205`.
     - The verification script exits with status 0 only when the above condition is met.
   depends_on: [INFRA-7301, INFRA-7302, INFRA-7303, INFRA-7304]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7308
+  domain: INFRA
+  title: "INFRA: INFRA-6813: Wire sync_pull into ensure_seed phase (INFRA-3633 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - "chump-node-install.sh::ensure_seed calls crates/chump-gap-store/src/sync.rs::sync_pull with the repository root derived from docs/gaps"
+    - The call runs as a one‑shot operation during first‑boot seed and returns success when all YAML files are processed
+    - Logs a concise success message indicating number of gaps loaded
+    - Running the script on a freshly‑cloned box creates at least one non‑terminal gap row in the canonical store
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7309
+  domain: INFRA
+  title: "INFRA: INFRA-6814: Make sync_pull idempotent and safe for terminal‑status rows (INFRA-3633 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - sync_pull checks each GapRow with is_terminal_status and never updates or deletes such rows
+    - When the substrate (state.db) is unreachable, sync_pull exits with a non‑zero status and prints a clear warning message
+    - Re‑running sync_pull after a successful seed leaves terminal‑status rows unchanged (no drift reported)
+    - Unit test verifies that a terminal‑status row present before sync_pull remains identical after the call
+  depends_on: [INFRA-7308]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7310
+  domain: INFRA
+  title: "INFRA: INFRA-6815: Extend self_test to verify post‑seed gap count (INFRA-3633 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - self_test (scripts/setup/chump-node-install.sh) runs after ensure_seed and queries the canonical store for gap count
+    - It asserts that the count is greater than zero
+    - It asserts that the count equals the number of files matching docs/gaps/*.yaml minus any gaps whose status is terminal
+    - If the assertion fails, self_test exits with a non‑zero status and prints a descriptive error
+  depends_on: [INFRA-7308]
   notes: |
     [chump harvest check 'MISSION']
     === primitives_index match for 'MISSION' ===
