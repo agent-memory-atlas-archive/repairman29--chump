@@ -111,6 +111,25 @@ AM="$TMP/almanac-missing.jsonl"; : > "$AM"
 _notemitted "missing acuity state → unknown coverage, no page (not treated as 0%)" \
     "$AM" '"board_vitals_page_(dryrun|sent)".*"almanac_coverage_low"'
 
+# ── CREDIBLE-1340: guard is a strict >95%, not >=95% ────────────────────────
+# The mission floor is "summarized_pct must be >95%" (CREDIBLE-300) — the
+# check in board-vitals.sh is `coverage <= almanac_floor`, so a repo sitting
+# exactly AT 95% must still page. If the guard were ever loosened to `<`
+# (i.e. only strictly-below-floor pages), this is the case that would go
+# silent first and this assertion would fail.
+echo "[test-board-vitals] almanac coverage exactly AT the 95% floor still pages (strict >95% guard)"
+AB="$TMP/almanac-boundary.jsonl"; : > "$AB"
+ALSTATE_BOUNDARY="$TMP/almanac-boundary.state"; printf '50 95\n' > "$ALSTATE_BOUNDARY"  # summary_pct=95, exactly at floor
+( set -a
+  CHUMP_AMBIENT_LOG="$AB"; CHUMP_BOARD_VITALS_STATE_DIR="$TMP/state-almanac-boundary"
+  CHUMP_BOARD_VITALS_DRY_RUN=1; CHUMP_BOARD_VITALS_ESCALATE=0
+  CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+  CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+  CHUMP_BOARD_VITALS_ALMANAC_STATE="$ALSTATE_BOUNDARY"
+  set +a
+  source "$LIB"; board_vitals_check ) >/dev/null 2>&1
+_emitted "exactly 95% (not >95) → still pages almanac_coverage_low" "$AB" '"board_vitals_page_dryrun".*"almanac_coverage_low"'
+
 # ── clean cycle never pages ──────────────────────────────────────────────────
 echo "[test-board-vitals] clean cycle is phone-quiet"
 B="$TMP/clean.jsonl"; : > "$B"
