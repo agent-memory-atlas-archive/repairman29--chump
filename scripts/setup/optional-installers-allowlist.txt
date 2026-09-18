@@ -175,3 +175,8 @@ install-oauth-refresh-systemd.sh
 install-almanac.sh
 # RESILIENT-1052 — anti-Memento fleet-health sentinel --user timer (per-node organ; also lands via chump-node-install common_organs)
 install-fleet-health-sentinel.sh
+# INFRA-7303 (INFRA-6804 / INFRA-3631 slice) — situational PostgREST
+# binary+conf install, called on-demand by install-gap-substrate.sh's
+# broader postgres+postgrest provisioning flow, not a universal
+# fresh-bootstrap requirement.
+install-postgrest.sh
