@@ -52310,9 +52310,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Add publisher tracking and logging handlers in `crates/chump-coord/src/rpc.rs` alongside `register_worker_rpc_handlers`. Each draft publish action persists a log entry containing draft_id, platform, timestamp, and response status, and a query handler exposes these logs via the `/api/publisher/logs?draftId=` endpoint filtered by draft_id.
+    
+    Target file(s):
+    - crates/chump-coord/src/rpc.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Every send action creates a log entry with draft_id, platform, timestamp, and response status
-    - Logs are queryable via `/api/publisher/logs?draftId=` endpoint
+    - In `crates/chump-coord/src/rpc.rs`, send actions save structured logs containing `draft_id`, `platform`, `timestamp`, and `status`.
+    - In `crates/chump-coord/src/rpc.rs`, the endpoint `/api/publisher/logs?draftId=` returns all matching log records for the given draftId parameter.
+    - Running `cargo test -p chump-coord` succeeds and asserts that published draft log entries are correctly created and queryable.
   depends_on: [EFFECTIVE-1270, EFFECTIVE-1271, EFFECTIVE-1272]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -53200,10 +53208,18 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Update contract definitions in crates/chump-handoff/src/contracts.rs to define review ticket payloads containing sentence, citation, and error details, and update processing in crates/chump-gap-store/src/lib.rs to record a curator review ticket and fire a notification when an AC-writer step returns an unshapeable error.
+    
+    Target file(s):
+    - crates/chump-handoff/src/contracts.rs
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - If AC‑writer returns an error or indicates the idea cannot be shaped, the digest job creates a review ticket in the curator backlog
-    - The ticket contains the original sentence, citation, and error details
-    - Curator receives a notification (email or in‑app) about the new review ticket
+    - crates/chump-handoff/src/contracts.rs defines the review ticket contract fields for original sentence, citation, and error details.
+    - When processing an unshapeable idea error in crates/chump-gap-store/src/lib.rs, a review ticket containing original sentence, citation, and error details is written to the curator backlog.
+    - crates/chump-gap-store/src/lib.rs emits a curator notification event whenever an unshapeable review ticket is generated.
   depends_on: [EFFECTIVE-1294, EFFECTIVE-1295]
   notes: |
     [chump harvest check 'EFFECTIVE']
@@ -54638,10 +54654,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Update build_domain_report, build_report, and render_text in crates/chump-waste-tally/src/waste_tally.rs to compute and output the realized_ev_incidents_prevented meta-gauge whenever a predicted breakage is caught before occurrence.
+    
+    Target file(s):
+    - crates/chump-waste-tally/src/waste_tally.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A new meta‑gauge `realized_ev_incidents_prevented` is emitted whenever a predicted breakage is caught before it occurs.
-    - Gauge value increments correctly in integration tests simulating a prevented incident.
-    - Metric appears in the monitoring dashboard without affecting existing gauges.
+    - crates/chump-waste-tally/src/waste_tally.rs computes the realized_ev_incidents_prevented metric within build_domain_report and build_report.
+    - render_text in crates/chump-waste-tally/src/waste_tally.rs includes realized_ev_incidents_prevented in the rendered metrics output without modifying existing gauge outputs.
+    - cargo test -p chump-waste-tally passes and includes a test verifying realized_ev_incidents_prevented increments when a prevented incident event is processed.
   depends_on: [EFFECTIVE-1338]
   notes: |
     [chump harvest check 'phase']
@@ -54678,10 +54701,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    Add Mean Time To Recovery (MTTR) gauge calculation in `crates/chump-coord/src/rpc.rs` within worker RPC outcome handlers, recording the duration between incident trigger and resolution outcome timestamps to update the exposed `mttr_seconds` Prometheus gauge.
+    
+    Target file(s):
+    - crates/chump-coord/src/rpc.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - Mean Time To Recovery (MTTR) is calculated from outcome timestamps and exposed as a gauge.
-    - MTTR updates after each resolved incident and matches manual calculations in a test scenario.
-    - No impact on performance thresholds of existing metrics.
+    - "`crates/chump-coord/src/rpc.rs` calculates recovery duration from incident outcome timestamps and exports the updated average as a metric gauge."
+    - Unit tests in `crates/chump-coord/src/rpc.rs` confirm that resolving simulated incident outcomes updates the MTTR gauge matching manual arithmetic calculations.
+    - Running `cargo test -p chump-coord` passes and verifies existing worker RPC handlers complete without performance regression.
   depends_on: [EFFECTIVE-1339]
   notes: |
     [chump harvest check 'phase']
@@ -54707,10 +54737,17 @@ gaps:
   status: open
   priority: P2
   effort: xs
+  description: |
+    In `crates/chump-preflight/src/preflight.rs`, introduce the `p0_pre_breakage_caught` counter metric to track when an auto-filed P0 issue is created prior to an actual breakage. Increment this counter during preflight P0 generation, expose it via the existing metrics endpoint output, and ensure it persists across execution cycles.
+    
+    Target file(s):
+    - crates/chump-preflight/src/preflight.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - A counter `p0_pre_breakage_caught` increments each time the auto‑filed P0 is created before an actual breakage.
-    - Counter is persisted across restarts and visible via the metrics endpoint.
-    - Test confirms counter increments exactly once per predicted breakage.
+    - "`crates/chump-preflight/src/preflight.rs` increments the `p0_pre_breakage_caught` counter whenever an auto-filed P0 is created before a breakage."
+    - The metrics output endpoint in `crates/chump-preflight/src/preflight.rs` includes the `p0_pre_breakage_caught` counter and its current value.
+    - Unit tests in `crates/chump-preflight/src/preflight.rs` verify that `p0_pre_breakage_caught` increments exactly once per predicted breakage event.
   depends_on: [EFFECTIVE-1340]
   notes: |
     [chump harvest check 'phase']
@@ -54736,10 +54773,17 @@ gaps:
   status: open
   priority: P2
   effort: s
+  description: |
+    Extend scripts/ci/test-calibration-brier-canonical.sh to include test assertions verifying the full dispatch, escalation, outcome settlement, and Brier score calibration pipeline, asserting success via standard test output and triggering _fail on invalid states.
+    
+    Target file(s):
+    - scripts/ci/test-calibration-brier-canonical.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - At least one `cargo test` verifies the full dispatch → outcome → Brier calibration flow.
-    - Tests fail when the new code is removed, proving they assert the new behavior.
-    - All new tests pass and existing test suite remains green.
+    - Executing `bash scripts/ci/test-calibration-brier-canonical.sh` runs the dispatch, outcome settlement, and Brier calibration test suite to completion with exit code 0.
+    - The test script invokes `_fail` if dispatch outcome records or Brier score calculations deviate from expected values.
+    - Modifying Brier calibration inputs in `scripts/ci/test-calibration-brier-canonical.sh` to invalid values causes the script to fail explicitly.
   depends_on: [EFFECTIVE-1336, EFFECTIVE-1337, EFFECTIVE-1338]
   notes: |
     [chump harvest check 'phase']
@@ -136107,7 +136151,7 @@ gaps:
     - Revive is backoff-guarded (reuse organ-reconcile CHUMP_ORGAN_RECONCILE_BACKOFF_DIR) so an organ that dies again immediately is not respawn-looped every tick.
     - "DEPTH: happy-path revive + adversarial repeated-death backoff, stubbed detector/launcher; gaps named."
   notes: |
-    Decomposed into 5 slices: INFRA-7093, INFRA-7094, INFRA-7095, INFRA-7096, INFRA-7097
+    Decomposed into 5 slices: INFRA-7330, INFRA-7331, INFRA-7332, INFRA-7333, INFRA-7334
   opened_date: '2026-08-21'
 
 - id: INFRA-3650
@@ -255165,6 +255209,202 @@ gaps:
     - Roll-call test passes on standard happy-path configuration.
     - Roll-call test fails when an adversarial launched organ wrapper is missing from node-organ-manifest.txt.
   depends_on: [INFRA-7327, INFRA-7328]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7330
+  domain: INFRA
+  title: "INFRA: INFRA-7093: Implement svc_is_alive and svc_revive abstraction for systemd and process organs (INFRA-3649 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Implement `svc_is_alive` and `svc_revive` functions abstraction selecting supervisor based on node capability.
+    - Systemd mechanism executes `systemctl reset-failed` and `systemctl restart` for systemd unit organs.
+    - Process mechanism detects whether process-organ is alive and re-executes `~/.chump/organs/<name>.sh` detached using `setsid`/`nohup` if dead.
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7331
+  domain: INFRA
+  title: "INFRA: INFRA-7094: Add backoff guard to process-organ revive using CHUMP_ORGAN_RECONCILE_BACKOFF_DIR (INFRA-3649 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Integrate `CHUMP_ORGAN_RECONCILE_BACKOFF_DIR` backoff check into `svc_revive` before respawning dead organs.
+    - Record backoff timestamp on revive attempts to suppress per-tick respawn loops when an organ repeatedly crashes.
+  depends_on: [INFRA-7330]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7332
+  domain: INFRA
+  title: "INFRA: INFRA-7095: Emit organ_self_healed event to ambient.jsonl on organ revive (INFRA-3649 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Modify `svc_revive` to emit an ambient JSON event with `kind=organ_self_healed`, `organ`, `node`, and `mechanism` (`systemd` or `process`).
+    - Ensure event output matches the contract established in `organ-watchdog.sh`.
+  depends_on: [INFRA-7330]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7333
+  domain: INFRA
+  title: "INFRA: INFRA-7096: Update node-orchestrator.sh heal() to use svc abstraction for housekeeping organs (INFRA-3649 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Refactor `heal()` in `scripts/ops/node-orchestrator.sh` to use `svc_is_alive` and `svc_revive` instead of hardcoded `systemctl is-active` calls.
+    - Ensure CJ node housekeeping organs (such as `rot-reaper`) are correctly routed to the process supervisor path.
+  depends_on: [INFRA-7330, INFRA-7331, INFRA-7332]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+
+- id: INFRA-7334
+  domain: INFRA
+  title: "INFRA: INFRA-7097: Validate happy-path revive and adversarial backoff for process-organs (INFRA-3649 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Verify happy-path revive by terminating a `rot-reaper` wrapper on CJ and observing respawn within one tick.
+    - Verify adversarial repeated-death backoff prevents rapid respawn loops.
+    - Verify `ambient.jsonl` records correct `kind=organ_self_healed` events for both mechanisms.
+  depends_on: [INFRA-7333]
   notes: |
     [chump harvest check 'MISSION']
     === primitives_index match for 'MISSION' ===
