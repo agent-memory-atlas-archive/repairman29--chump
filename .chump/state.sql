@@ -115909,7 +115909,7 @@ gaps:
   acceptance_criteria:
     - Running Claude Code sessions poll URGENT-INBOX mid-session and act on fix_trunk signals within a bounded interval; a test signal is picked up without a session restart.
   notes: |
-    Decomposed into 9 slices: INFRA-7023, INFRA-7024, INFRA-7025, INFRA-7026, INFRA-7027, INFRA-7028, INFRA-7029, INFRA-7030, INFRA-7031
+    Decomposed into 9 slices: INFRA-7259, INFRA-7260, INFRA-7261, INFRA-7262, INFRA-7263, INFRA-7264, INFRA-7265, INFRA-7266, INFRA-7267
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -252566,6 +252566,30 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
 
+- id: INFRA-7259
+  domain: INFRA
+  title: "INFRA: Design polling architecture for URGENT-INBOX within Claude sessions (INFRA-2342 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Architecture diagram includes polling loop, bounded interval, and signal handler
+    - Design review approved by infra lead
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
 - id: INFRA-726
   domain: INFRA
   title: "ZERO-WASTE: split main.rs phase 5 — extract mod declarations into lib.rs and wire crate-level pub use"
@@ -252582,6 +252606,207 @@ gaps:
     [2026-08-28T19:47:07Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=143, rc=143, cycle_log=0B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
+
+- id: INFRA-7260
+  domain: INFRA
+  title: "INFRA: Implement polling service that reads URGENT-INBOX (INFRA-2342 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Service can be started/stopped independently
+    - Polls URGENT-INBOX at configurable interval and logs each poll
+  depends_on: [INFRA-7259]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-7261
+  domain: INFRA
+  title: "INFRA: Add configurable bounded interval for polling (INFRA-2342 slice)"
+  status: open
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Interval can be set via environment variable or config file
+    - Default interval is 30 seconds
+    - Invalid values fall back to default
+  depends_on: [INFRA-7259]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-7262
+  domain: INFRA
+  title: "INFRA: Integrate polling service into Claude session lifecycle (INFRA-2342 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Polling starts when a Claude session starts and stops on session end
+    - No duplicate polling instances for concurrent sessions
+  depends_on: [INFRA-7260, INFRA-7261]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-7263
+  domain: INFRA
+  title: "INFRA: Implement fix_trunk signal handler (INFRA-2342 slice)"
+  status: open
+  priority: P1
+  effort: s
+  acceptance_criteria:
+    - Handler receives fix_trunk messages from URGENT-INBOX
+    - Handler triggers the expected trunk‑fix workflow without restarting the session
+  depends_on: [INFRA-7262]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-7264
+  domain: INFRA
+  title: "INFRA: Write unit tests for polling detection and signal handling (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Tests verify that a mock fix_trunk message is detected within one poll interval
+    - Tests assert that the handler is invoked exactly once per message
+  depends_on: [INFRA-7263]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-7265
+  domain: INFRA
+  title: "INFRA: Create integration test for mid‑session fix_trunk signal (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Test launches a Claude session, injects a fix_trunk signal into URGENT-INBOX, and confirms the session processes it without restart
+    - Test fails if processing exceeds the bounded interval
+  depends_on: [INFRA-7264]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-7266
+  domain: INFRA
+  title: "INFRA: Update deployment scripts to include new polling config (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Deployment packages the polling service and config files
+    - Scripts set the default interval and allow overrides
+  depends_on: [INFRA-7261]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+
+- id: INFRA-7267
+  domain: INFRA
+  title: "INFRA: Document polling feature and operational runbooks (INFRA-2342 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Documentation describes how polling works, config options, and troubleshooting steps
+    - Runbook includes steps to verify polling is active in a live session
+  depends_on: [INFRA-7265, INFRA-7266]
+  notes: |
+    [chump harvest check 'polling']
+    === primitives_index match for 'polling' ===
+    
+    === cluster keyword match for 'polling' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'polling' ===
+    
+    === repo-description match for 'polling' ===
+    
+    === HARVEST_ROADMAP.md mention of 'polling' (deep-scan findings) ===
+    
+    === cross-pollination briefs mentioning 'polling' ===
+      /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
 
 - id: INFRA-739
   domain: INFRA
