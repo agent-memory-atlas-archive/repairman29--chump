@@ -1371,6 +1371,11 @@ jobs:
       - name: gap-reserve no stale-checkout collision (INFRA-3687)
         run: bash scripts/ci/test-gap-reserve-no-stale-collision.sh
 
+      - name: gap-reserve --acceptance-criteria gate (CREDIBLE-1300)
+        run: |
+          export PATH="${CARGO_TARGET_DIR:-$(pwd)/target}/debug:$PATH"
+          bash scripts/ci/test-chump-gap-reserve-acceptance-criteria.sh
+
       - name: gap-ID cross-session collision prevention (CREDIBLE-052)
         run: |
           export PATH="${CARGO_TARGET_DIR:-$(pwd)/target}/debug:$PATH"
