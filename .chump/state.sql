@@ -11487,7 +11487,7 @@ gaps:
 - id: CREDIBLE-1300
   domain: CREDIBLE
   title: "CREDIBLE: CREDIBLE-1270: Add --acceptance-criteria flag and validation for P0/P1 gaps (CREDIBLE-284 slice)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -11517,6 +11517,10 @@ gaps:
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+  closed_date: '2026-09-18'
+  closed_pr: 4722
+  evidence: |
+    merged-pr-title closure (EFFECTIVE-1543): PR #4722 titled 'CREDIBLE-1300: ...' merged 2026-09-18; canonical gap was left open (closed_pr NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles.
 
 - id: CREDIBLE-1301
   domain: CREDIBLE
