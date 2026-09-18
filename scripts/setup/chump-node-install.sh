@@ -853,7 +853,11 @@ ensure_seed() {
   fi
   local out
   if out="$(run_timeout "${CHUMP_SEED_TIMEOUT_S:-60}" "$bin" gap sync --pull --state-db "$STATE_DB" --gaps-dir "$gaps_dir" --json 2>&1)"; then
-    ok "seed: canonical store synced from docs/gaps ($out)"
+    # INFRA-7308: concise success message (count, not the raw JSON blob) —
+    # inserted+updated is "gaps loaded" from the docs/gaps YAML mirror this cycle.
+    local loaded
+    loaded="$(printf '%s' "$out" | jq -r '(.inserted // 0) + (.updated // 0)' 2>/dev/null || echo "?")"
+    ok "seed: canonical store synced from docs/gaps ($loaded gap(s) loaded)"
   else
     # AC2: substrate-unreachable (missing state.db dir, locked db, etc.) is a
     # clear warning, not a hard install failure — the node is still usable
