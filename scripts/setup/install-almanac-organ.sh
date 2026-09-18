@@ -31,7 +31,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LIVENESS_SCRIPT="$REPO_ROOT/scripts/ops/almanac-liveness-refresh.sh"
 export CHUMP_STATE_DIR="${CHUMP_STATE_DIR:-$HOME/.chump}"
 export CHUMP_ALMANAC_REPO="${CHUMP_ALMANAC_REPO:-$HOME/Projects/almanac}"
-export CHUMP_ALMANAC_BIN="${CHUMP_ALMANAC_BIN:-$ALMANAC_REPO/target/release/almanac}"
+export CHUMP_ALMANAC_BIN="${CHUMP_ALMANAC_BIN:-$CHUMP_ALMANAC_REPO/target/release/almanac}"
+# Bare aliases so the rest of this script (written before RESILIENT-1111's
+# rename to exported CHUMP_* vars) keeps working without a full rename.
+STATE_DIR="$CHUMP_STATE_DIR"
+ALMANAC_REPO="$CHUMP_ALMANAC_REPO"
+ALMANAC_BIN="$CHUMP_ALMANAC_BIN"
 
 MODE="install"; DRY=0
 for a in "$@"; do
@@ -96,8 +101,8 @@ if [ ! -d "$ALMANAC_REPO" ] && [ "$MODE" != "check" ]; then
       bash "$installer" || { no "install-almanac.sh failed — see above"; exit 1; }
     fi
   else
-    info "install-almanac.sh not found — stopping before clone/build"
-    exit 0
+    no "no almanac checkout at $ALMANAC_REPO and install-almanac.sh not found — cannot provision eyes"
+    exit 1
   fi
 fi
 
