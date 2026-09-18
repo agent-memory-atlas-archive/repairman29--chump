@@ -249388,7 +249388,7 @@ gaps:
 - id: INFRA-7171
   domain: INFRA
   title: "INFRA: Decide vendoring vs lightweight‑crate and add lineage comment (INFRA-1816 slice)"
-  status: open
+  status: blocked
   priority: P2
   effort: s
   acceptance_criteria:
@@ -249411,6 +249411,7 @@ gaps:
     === cross-pollination briefs mentioning 'INFRA-1816' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+    [2026-09-18T00:03:55Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=1105B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
 
 - id: INFRA-7172
   domain: INFRA
@@ -256125,7 +256126,7 @@ gaps:
   acceptance_criteria:
     - the ~30 fast-checks test-*.sh run as a CI matrix rather than sequentially; total fast-checks wall-clock drops measurably; all checks still report to the aggregator.
   notes: |
-    Decomposed into 5 slices: META-655, META-656, META-657, META-658, META-659
+    Decomposed into 5 slices: META-784, META-785, META-786, META-787, META-788
   opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
@@ -273793,6 +273794,65 @@ gaps:
     
     === cross-pollination briefs mentioning 'RESILIENT' ===
       /home/jeff/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+
+- id: META-784
+  domain: META
+  title: "META: META-655: Analyze current sequential fast-checks execution (META-202 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - List all test-*.sh scripts currently executed in the fast-checks stage.
+    - Document the current sequential execution flow and how results are aggregated.
+    - Confirm that each script can be invoked independently without side‑effects.
+
+- id: META-785
+  domain: META
+  title: "META: META-656: Design CI matrix for parallel fast-checks (META-202 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Create a matrix definition (e.g., GitHub Actions, Azure Pipelines) that includes a separate job for each test-*.sh script.
+    - Ensure the matrix can scale to ~30 jobs and is configurable for future additions.
+    - Document how the matrix will feed each script name into the job runtime.
+  depends_on: [META-784]
+
+- id: META-786
+  domain: META
+  title: "META: META-657: Implement CI matrix configuration (META-202 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Update the CI pipeline YAML to include the matrix from META-656.
+    - Each matrix job runs its assigned test-*.sh script and exits with the script’s exit code.
+    - The pipeline reports success only when all matrix jobs succeed.
+  depends_on: [META-785]
+
+- id: META-787
+  domain: META
+  title: "META: META-658: Update aggregator to collect parallel results (META-202 slice)"
+  status: open
+  priority: P2
+  effort: s
+  acceptance_criteria:
+    - Modify the result‑aggregation step to ingest results from all parallel jobs.
+    - Aggregated report includes each test‑*.sh outcome and matches the format of the previous sequential report.
+    - No duplicate or missing entries appear in the final aggregated output.
+  depends_on: [META-786]
+
+- id: META-788
+  domain: META
+  title: "META: META-659: Verify performance improvement and regression (META-202 slice)"
+  status: open
+  priority: P2
+  effort: xs
+  acceptance_criteria:
+    - Measure wall‑clock time of the fast‑checks stage and confirm a measurable reduction (e.g., ≥30% faster).
+    - All 30 test‑*.sh scripts pass in the new parallel execution.
+    - Aggregated results are identical to those from the sequential run (aside from timing).
+  depends_on: [META-787]
 
 - id: MISSION-001
   domain: MISSION
