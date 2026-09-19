@@ -82,6 +82,15 @@ asserts the exact BOOKKEEPING/non-BOOKKEEPING classification), and a live
 run reports 81 bookkeeping-closed gaps (still not 79 — same drift, unchanged
 since CREDIBLE-1264). No behavior change needed.
 
+CREDIBLE-1366 re-verified the same three AC again on 2026-09-19: file
+present + executable + tracked in git, `--multi-close-only`/`--json` flags
+work, `scripts/ci/test-false-done-sweep.sh` still passes (7/7, including the
+deterministic --multi-close-only --json fixture the reproducibility claim
+actually rests on — a live registry count is not reproducible by
+construction, see the drift note above), and a live run reports 81
+bookkeeping-closed gaps (same as CREDIBLE-1330, drift unchanged since
+CREDIBLE-1264). No behavior change needed.
+
 Usage:
   python3 scripts/ops/false-done-sweep.py --multi-close-only      # cheapest, highest yield
   python3 scripts/ops/false-done-sweep.py --all --limit 400       # broader
