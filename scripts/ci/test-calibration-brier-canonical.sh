@@ -92,11 +92,29 @@ faculty_eq="$(awk -v a="$faculty_val" -v b="$EXPECT" 'BEGIN{print (a+0==b+0)?1:0
   && _ok "faculty-collector know_score.value == $EXPECT (got $faculty_val)" \
   || _fail "faculty-collector know_score.value expected $EXPECT, got '$faculty_val'"
 
+# ── 3b. pr-book.sh board mode (cockpit's pr_book_odds reader) cites the SAME
+#       canonical column too — this is the third surface (web/cockpit-live's
+#       "manage-PRs casino ... Brier" panel reads p.brier off pr_book_odds).
+echo "[test-calibration-brier-canonical] pr-book.sh board mode (cockpit reader)"
+BOARD_FIXTURE="$TMP/board.json"
+cat > "$BOARD_FIXTURE" <<'J'
+[]
+J
+BOARD_AMBIENT="$TMP/board-ambient.jsonl"
+PR_BOOK_RAW_FIXTURE="$BOARD_FIXTURE" PR_BOOK_LEDGER="$TMP/board-ledger.jsonl" \
+  PR_BOOK_CALIB="$CALIB" CHUMP_AMBIENT_LOG="$BOARD_AMBIENT" \
+  bash "$PRBOOK" >/dev/null 2>&1
+odds_brier="$(tail -n1 "$BOARD_AMBIENT" 2>/dev/null | jq -r 'select(.kind=="pr_book_odds") | .brier // empty')"
+odds_eq="$(awk -v a="$odds_brier" -v b="$EXPECT" 'BEGIN{print (a+0==b+0)?1:0}')"
+[[ "$odds_eq" == "1" ]] \
+  && _ok "pr_book_odds.brier == $EXPECT (got $odds_brier)" \
+  || _fail "pr_book_odds.brier expected $EXPECT, got '$odds_brier'"
+
 # ── 4. all three agree with each other, not just with EXPECT ────────────────
-agree="$(awk -v a="$vital_val" -v b="$faculty_val" 'BEGIN{print (a+0==b+0)?1:0}')"
+agree="$(awk -v a="$vital_val" -v b="$faculty_val" -v c="$odds_brier" 'BEGIN{print (a+0==b+0 && b+0==c+0)?1:0}')"
 [[ "$agree" == "1" ]] \
-  && _ok "vital-signs and faculty-collector agree ($vital_val == $faculty_val)" \
-  || _fail "vital-signs ($vital_val) and faculty-collector ($faculty_val) DISAGREE"
+  && _ok "vital-signs, faculty-collector, and pr_book_odds all agree ($vital_val == $faculty_val == $odds_brier)" \
+  || _fail "vital-signs ($vital_val), faculty-collector ($faculty_val), pr_book_odds ($odds_brier) DISAGREE"
 
 # ── 5. divergence probe: authoritative summary != naive per-row recompute ────
 # A hand-built log where the naive mean-squared-error over the per-row

@@ -117,11 +117,19 @@ printf "  -- EV %.1f of %s open  |  lock>=70:%s flip:%s long<40:%s\n" "$EV" "$N"
 # append predictions to the ledger (fuel for --settle)
 echo "$RAW" | jq -c "$M"' .[]|{ts:"'"$TS"'",pr:.number,sha:.headRefOid,price:(price),state:.mergeStateStatus}' 2>/dev/null >> "$LEDGER"
 
+# emit odds onto the shared ambient board so the OS can consume the score.
+# Brier: read the SAME canonical trailing {kind:pr_book_calibration,brier}
+# summary row (by reference, tail -n1) that vital-signs.sh/faculty-collector.sh
+# cite — cockpit is a third reader of the one column, never a recompute.
+CAL_BRIER="$(tail -n1 "$CALIB" 2>/dev/null | jq -r 'select(.kind=="pr_book_calibration") | .brier // empty' 2>/dev/null)"
+[[ "$CAL_BRIER" =~ ^[0-9]+([.][0-9]+)?$ ]] || CAL_BRIER="null"
+
 # emit odds onto the shared ambient board so the OS can consume the score
 # scanner-anchor: "kind":"pr_book_odds"
 ODDS="$(jq -cn --arg ts "$TS" --argjson ev "$(printf %.1f "$EV")" --argjson open "$N" \
   --argjson lock "$LOCK" --argjson flip "$FLIP" --argjson long "$LONG" \
-  '{ts:$ts,kind:"pr_book_odds",ev:$ev,open:$open,bands:{lock:$lock,flip:$flip,long:$long}}')"
+  --argjson brier "$CAL_BRIER" \
+  '{ts:$ts,kind:"pr_book_odds",ev:$ev,open:$open,bands:{lock:$lock,flip:$flip,long:$long},brier:$brier}')"
 if [[ -n "$ODDS" ]]; then
   mkdir -p "$(dirname "$AMBIENT")" 2>/dev/null || true
   echo "$ODDS" >> "$AMBIENT" 2>/dev/null || true
