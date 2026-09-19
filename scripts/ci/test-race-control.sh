@@ -199,5 +199,54 @@ else
     pass "Test 9: fleet-status.sh not found — skipping render test (optional)"
 fi
 
+
+# ── Test 10: producer/consumer schema parity end-to-end (INFRA-7638) ─────────
+# Test 9 proves fleet-status.sh reads race-control.jsonl's field names via a
+# HAND-WRITTEN fixture row. This test closes the remaining gap: run the real
+# race-control.sh emitter (the ONLY merge-mix emitter left post-INFRA-3844)
+# against a fixture, then feed its ACTUAL JSONL row — not a hand-written
+# stand-in — into fleet-status.sh's render_merge_mix(). If the producer ever
+# renamed/dropped a field the consumer depends on, this fails; if a second
+# emitter were reintroduced with a different schema, the retired-script check
+# below fails first. Together they prove "single canonical emitter, zero
+# field drift" rather than merely asserting it via comment.
+if [[ -f "$FLEET_STATUS" ]]; then
+    cat > "$FIXTURE" <<'JSON'
+[
+  {"number": 1, "title": "gaps(INFRA-1502): reconcile stale per-file gap YAML — already shipped via #4087", "labels": []},
+  {"number": 2, "title": "fix(RESILIENT-366): backlog-sync writer roll-call — close the roster/manifest coherence gap", "labels": []},
+  {"number": 3, "title": "docs(INFRA-1386): fix stale 'pending decision' comment — all 3 gates already dispositioned", "labels": []},
+  {"number": 4, "title": "docs(governance): add Role Registry — operational ownership map", "labels": []},
+  {"number": 5, "title": "chore(ci): tighten clippy lint", "labels": []},
+  {"number": 6, "title": "feat(product): add onboarding flow", "labels": []}
+]
+JSON
+    rm -f "$METRICS_DIR/race-control.jsonl" "$METRICS_DIR/merge-mix-board.jsonl"
+    "${BASE_ENV[@]}" bash "$SCRIPT" --json > /dev/null 2>&1 || true
+    REAL_ROW="$(tail -1 "$METRICS_DIR/race-control.jsonl" 2>/dev/null || echo "")"
+    if [[ -z "$REAL_ROW" ]]; then
+        fail "Test 10: race-control.sh did not write a row to $METRICS_DIR/race-control.jsonl"
+    fi
+    RENDER_FN="$(awk '/^render_merge_mix\(\)/,/^}/' "$FLEET_STATUS")"
+    FLEET_OUT="$(CHUMP_METRICS_DIR="$METRICS_DIR" bash -c "$RENDER_FN"$'\n'"render_merge_mix" 2>/dev/null || true)"
+    if echo "$FLEET_OUT" | grep -q "merge-mix: user-value=17% self-maint=33% reconcile-waste=50%"; then
+        pass "Test 10: fleet-status render_merge_mix parses race-control.sh's real emitted row (no drift)"
+    else
+        fail "Test 10: real race-control.sh row unreadable by render_merge_mix (schema drift): row=$REAL_ROW rendered=$FLEET_OUT"
+    fi
+else
+    pass "Test 10: fleet-status.sh not found — skipping parity test (optional)"
+fi
+
+# ── Test 11: no second merge-mix emitter has been reintroduced (INFRA-7638) ──
+# INFRA-3844 retired scripts/coord/merge-mix-board.sh so race-control.sh is
+# the sole emitter. This guards against silent reintroduction of a second
+# emitter (which is exactly how field drift happens in the first place).
+if [[ -f "$REPO_ROOT/scripts/coord/merge-mix-board.sh" ]]; then
+    fail "Test 11: scripts/coord/merge-mix-board.sh has been reintroduced — a second merge-mix emitter re-creates field-drift risk (INFRA-3844/INFRA-7638)"
+else
+    pass "Test 11: no second merge-mix emitter present — race-control.sh remains sole canonical source"
+fi
+
 echo ""
-echo "All CREDIBLE-296 race-control checks passed (9/9)."
+echo "All CREDIBLE-296 / INFRA-7638 race-control checks passed (11/11)."
