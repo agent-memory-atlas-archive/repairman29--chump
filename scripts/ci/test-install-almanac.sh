@@ -46,8 +46,38 @@ RC_FILE="$TMP/fake-rc"
 touch "$RC_FILE"
 
 BUILD_LOG="$TMP/build-calls.log"
+HOOK_CALL_LOG="$TMP/hook-calls.log"
+# Fake `almanac` understands just enough of `repos` / `index` / `hook
+# install` / `hook status` to exercise install-almanac.sh's INFRA-7576
+# wiring without a real almanac checkout: it always reports the target repo
+# as already-registered (so the test proves the hook-install call itself,
+# not the register-then-retry fallback) and always reports both managed
+# hooks as present. Written straight to a file (not embedded in an eval'd
+# string) so its own "$1"/"$2"/"$*" references aren't consumed by the outer
+# eval in install-almanac.sh's build_almanac().
+FAKE_ALMANAC_SRC="$TMP/fake-almanac-source.sh"
+cat > "$FAKE_ALMANAC_SRC" <<EOF
+#!/bin/sh
+echo "\$*" >> '$HOOK_CALL_LOG'
+case "\$1" in
+  repos) echo "  fakerepo  deadbeef  worktree  [$TMP]" ;;
+  index) echo fake-index-ok ;;
+  hook)
+    case "\$2" in
+      install) echo "hooks installed for \$3" ;;
+      status)
+        echo "hooks for \$3:"
+        echo "  post-commit    present   \$3/.git/hooks/post-commit"
+        echo "  post-merge     present   \$3/.git/hooks/post-merge"
+        ;;
+    esac
+    ;;
+  *) echo fake-almanac ;;
+esac
+EOF
+chmod +x "$FAKE_ALMANAC_SRC"
 FAKE_BUILD="echo ran >> '$BUILD_LOG'; mkdir -p '$REPO/target/release'; \
-printf '#!/bin/sh\necho fake-almanac\n' > '$REPO/target/release/almanac'; \
+cp '$FAKE_ALMANAC_SRC' '$REPO/target/release/almanac'; \
 printf '#!/bin/sh\necho fake-almanac-mcp\n' > '$REPO/target/release/almanac-mcp'; \
 chmod +x '$REPO/target/release/almanac' '$REPO/target/release/almanac-mcp'"
 
@@ -95,6 +125,23 @@ if grep -q "chump env (RESILIENT-403" "$RC_FILE"; then
     ok "rc file sources the chump env file"
 else
     fail "rc file was not wired to source the chump env file"
+fi
+
+# ── INFRA-7576: chump-mcp.json wiring + dynamic hook install ────────────────
+MCP_CONFIG="$TMP/chump-mcp.json"
+if grep -q '"almanac"' "$MCP_CONFIG" 2>/dev/null \
+   && grep -q "\"command\": \"$INSTALL_DIR/almanac-mcp\"" "$MCP_CONFIG" 2>/dev/null; then
+    ok "chump-mcp.json contains the 'almanac' server entry"
+else
+    fail "chump-mcp.json missing (or wrong) 'almanac' server entry"
+    cat "$MCP_CONFIG" 2>/dev/null || echo "(no such file: $MCP_CONFIG)"
+fi
+
+if grep -q "^hook install $TMP\$" "$HOOK_CALL_LOG" 2>/dev/null; then
+    ok "git hooks installed via 'almanac hook install' (not a hardcoded link)"
+else
+    fail "'almanac hook install' was not called for $TMP"
+    cat "$HOOK_CALL_LOG" 2>/dev/null || true
 fi
 
 # ── Test 2: --check reports success after install ───────────────────────────

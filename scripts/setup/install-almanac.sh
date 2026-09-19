@@ -16,16 +16,28 @@
 # This script closes both gaps: clone-if-absent (else update) + build +
 # install the binaries where PATH and chump's own config both find them.
 #
+# INFRA-7576 (INFRA-3637 slice) extends this with the two remaining
+# post-install wiring steps that used to require a separate hand-run of
+# `almanac init` / manual git-hook symlinks: writing the 'almanac' MCP
+# server entry into chump-mcp.json directly (no full reindex needed — the
+# entry only names the binary path + embed host), and installing the
+# managed post-commit/post-merge freshness hooks via `almanac hook install`
+# instead of a hardcoded hook-script symlink. Both steps are best-effort:
+# a fresh node where chump isn't registered with almanac yet degrades to a
+# loud failure event, not a broken install.
+#
 # Usage:
-#   scripts/setup/install-almanac.sh              # clone/update + build + install + wire config
+#   scripts/setup/install-almanac.sh              # clone/update + build + install + wire config + wire mcp + install hooks
 #   scripts/setup/install-almanac.sh --check       # verify only, exit non-zero if incomplete
 #   scripts/setup/install-almanac.sh --dry-run
 #
 # Idempotent: re-running updates an existing checkout (git pull --ff-only,
 # skipped with a warning if the tree is dirty), always rebuilds+reinstalls
-# (cargo itself is a no-op on an unchanged tree), and rewrites the
+# (cargo itself is a no-op on an unchanged tree), rewrites the
 # CHUMP_ALMANAC_MCP_BIN line in $CHUMP_ENV_FILE in place instead of
-# appending duplicates.
+# appending duplicates, rewrites (not duplicates) the 'almanac' entry in
+# chump-mcp.json, and `almanac hook install` itself appends-or-updates a
+# single marked block rather than stacking hooks on re-run.
 #
 # Env overrides:
 #   CHUMP_ALMANAC_REPO    almanac source checkout      (default: $HOME/Projects/almanac)
@@ -33,9 +45,14 @@
 #   ALMANAC_BUILD_CMD     override the build command    (default: cargo build --release --manifest-path <repo>/Cargo.toml)
 #   ALMANAC_INSTALL_DIR   where binaries land            (default: /usr/local/bin, falls back to $HOME/.local/bin)
 #   CHUMP_ENV_FILE        chump config env file          (default: $HOME/.chump/env)
-#   CHUMP_REPO_ROOT        chump checkout whose ambient.jsonl to emit to
+#   CHUMP_REPO_ROOT        chump checkout whose ambient.jsonl to emit to (also the repo whose
+#                          chump-mcp.json is wired and whose git hooks are installed)
+#   CHUMP_MCP_CONFIG      path to chump-mcp.json         (default: $CHUMP_REPO_ROOT/chump-mcp.json)
+#   ALMANAC_EMBED_URL     embed/rerank inference host written into the MCP entry
+#                          (default: http://100.101.188.30:11434)
 #
-# Emits ambient kinds: almanac_install_completed, almanac_install_failed
+# Emits ambient kinds: almanac_install_completed, almanac_install_failed,
+#   almanac_mcp_wire_failed, almanac_hook_install_failed
 set -uo pipefail
 
 REPO_ROOT="${CHUMP_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -47,6 +64,8 @@ ALMANAC_CLONE_URL="${ALMANAC_CLONE_URL:-https://github.com/repairman29/almanac.g
 ALMANAC_BUILD_CMD="${ALMANAC_BUILD_CMD:-cargo build --release --manifest-path \"$ALMANAC_REPO/Cargo.toml\"}"
 ALMANAC_INSTALL_DIR="${ALMANAC_INSTALL_DIR:-/usr/local/bin}"
 CHUMP_ENV_FILE="${CHUMP_ENV_FILE:-$HOME/.chump/env}"
+CHUMP_MCP_CONFIG="${CHUMP_MCP_CONFIG:-$REPO_ROOT/chump-mcp.json}"
+ALMANAC_EMBED_URL="${ALMANAC_EMBED_URL:-http://100.101.188.30:11434}"
 
 MODE="install"; DRY=0
 for a in "$@"; do
@@ -181,6 +200,70 @@ wire_config() {  # wire_config <mcp_bin_path>
   export CHUMP_ALMANAC_MCP_BIN="$mcp_bin"
 }
 
+# ---------- 5. wire chump-mcp.json (idempotent, no reindex) ----------
+wire_mcp_json() {  # wire_mcp_json <mcp_bin_path>
+  local mcp_bin="$1"
+  if [ "$DRY" = 1 ]; then
+    echo "  DRY: wire 'almanac' server (command=$mcp_bin) -> $CHUMP_MCP_CONFIG"
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    no "python3 not found — cannot wire $CHUMP_MCP_CONFIG"
+    return 1
+  fi
+  if ! ALMANAC_MCP_BIN_ENV="$mcp_bin" ALMANAC_EMBED_URL_ENV="$ALMANAC_EMBED_URL" \
+    python3 - "$CHUMP_MCP_CONFIG" <<'PY'
+import json, os, sys
+
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        cfg = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    cfg = {}
+if not isinstance(cfg.get("mcpServers"), dict):
+    cfg["mcpServers"] = {}
+cfg["mcpServers"]["almanac"] = {
+    "command": os.environ["ALMANAC_MCP_BIN_ENV"],
+    "args": [],
+    "env": {
+        "ALMANAC_EMBED_URL": os.environ["ALMANAC_EMBED_URL_ENV"],
+        "ALMANAC_DEFAULT_REPO": "chump",
+    },
+    "enabled": True,
+}
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
+PY
+  then
+    no "failed to wire 'almanac' server into $CHUMP_MCP_CONFIG"
+    return 1
+  fi
+  ok "wired 'almanac' MCP server -> $CHUMP_MCP_CONFIG"
+}
+
+# ---------- 6. install dynamic git hooks (post-commit/post-merge) ----------
+install_git_hooks() {  # install_git_hooks <almanac_bin_path>
+  local almanac_bin="$1"
+  if [ "$DRY" = 1 ]; then
+    echo "  DRY: '$almanac_bin' hook install '$REPO_ROOT'"
+    return 0
+  fi
+  if ! "$almanac_bin" repos 2>/dev/null | grep -qF "[$REPO_ROOT]"; then
+    info "repo not yet registered with almanac — indexing $REPO_ROOT before hook install"
+    run "'$almanac_bin' index '$REPO_ROOT' --json >/tmp/almanac-index-for-hooks.log 2>&1" || {
+      no "'$almanac_bin' index '$REPO_ROOT' failed — see /tmp/almanac-index-for-hooks.log"
+      return 1
+    }
+  fi
+  if ! run "'$almanac_bin' hook install '$REPO_ROOT' >/tmp/almanac-hook-install.log 2>&1"; then
+    no "'$almanac_bin' hook install '$REPO_ROOT' failed — see /tmp/almanac-hook-install.log"
+    return 1
+  fi
+  ok "git hooks installed via 'almanac hook install' -> $REPO_ROOT"
+}
+
 do_install() {
   # scanner-anchor: "kind":"almanac_install_failed"
   clone_or_update || { emit almanac_install_failed '"reason":"clone_or_update_failed"'; exit 1; }
@@ -191,6 +274,12 @@ do_install() {
   mcp_dest="$(install_bin almanac-mcp)" || { emit almanac_install_failed '"reason":"install_almanac_mcp_bin_failed"'; exit 1; }
 
   wire_config "$mcp_dest"
+
+  # scanner-anchor: "kind":"almanac_mcp_wire_failed"
+  wire_mcp_json "$mcp_dest" || emit almanac_mcp_wire_failed "\"config\":\"$CHUMP_MCP_CONFIG\""
+
+  # scanner-anchor: "kind":"almanac_hook_install_failed"
+  install_git_hooks "$almanac_dest" || emit almanac_hook_install_failed "\"repo\":\"$REPO_ROOT\""
 
   # scanner-anchor: "kind":"almanac_install_completed"
   emit almanac_install_completed "\"repo\":\"$ALMANAC_REPO\",\"almanac_bin\":\"$almanac_dest\",\"almanac_mcp_bin\":\"$mcp_dest\""
@@ -212,6 +301,22 @@ do_check() {
     ok "CHUMP_ALMANAC_MCP_BIN wired in $CHUMP_ENV_FILE"
   else
     no "CHUMP_ALMANAC_MCP_BIN NOT wired in $CHUMP_ENV_FILE"; fail=1
+  fi
+
+  if grep -q '"almanac"' "$CHUMP_MCP_CONFIG" 2>/dev/null; then
+    ok "chump-mcp.json contains 'almanac' server entry: $CHUMP_MCP_CONFIG"
+  else
+    no "chump-mcp.json missing 'almanac' server entry: $CHUMP_MCP_CONFIG"; fail=1
+  fi
+
+  if [ -x "$dest_dir/almanac" ]; then
+    local hook_status; hook_status="$("$dest_dir/almanac" hook status "$REPO_ROOT" 2>/dev/null)"
+    if printf '%s' "$hook_status" | grep -q 'post-commit *present' \
+      && printf '%s' "$hook_status" | grep -q 'post-merge *present'; then
+      ok "git hooks active (post-commit + post-merge) via 'almanac hook status'"
+    else
+      no "git hooks NOT active — run '$dest_dir/almanac hook install $REPO_ROOT'"; fail=1
+    fi
   fi
 
   [ "$fail" = 0 ] && ok "almanac install: complete + idempotent" || no "almanac install: incomplete"

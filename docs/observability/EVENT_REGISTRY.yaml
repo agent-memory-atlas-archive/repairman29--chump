@@ -7208,6 +7208,24 @@ events:
     consumers: [fleet-brief, ops-audit]
     fields_required: [ts, kind, reason]
 
+  - kind: almanac_mcp_wire_failed
+    effect_metric: self
+    emitter: scripts/setup/install-almanac.sh (INFRA-7576)
+    trigger: install-almanac.sh could not write the 'almanac' MCP server
+      entry into chump-mcp.json (missing python3, or the write itself
+      failed) — chump-mcp.json is left as it was found.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, config]
+
+  - kind: almanac_hook_install_failed
+    effect_metric: self
+    emitter: scripts/setup/install-almanac.sh (INFRA-7576)
+    trigger: install-almanac.sh could not run 'almanac hook install' for the
+      chump checkout — usually because the repo isn't registered with
+      almanac yet and the best-effort 'almanac index' fallback also failed.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, repo]
+
   - kind: almanac_fleet_index_started
     effect_metric: self
     emitter: scripts/index-almanac.sh (RESILIENT-404)
