@@ -18,6 +18,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -570,6 +571,13 @@ def build():
     print(f"clusters: {len(out['clusters'])}, duplications: {len(out['duplications'])}, alerts: {len(out['alerts'])}")
 
     _emit_arsenal_rebuilt(out)
+
+    high_alerts = [a for a in out["alerts"] if a["severity"] == "high"]
+    if high_alerts:
+        print(f"harvest scan: {len(high_alerts)} high-severity alert(s) — see GLOBAL_ARSENAL.md § Alerts", file=sys.stderr)
+        for a in high_alerts:
+            print(f"  - [{a['severity']}] {a['kind']} — {a.get('action', '')}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _emit_arsenal_rebuilt(out: dict) -> None:
