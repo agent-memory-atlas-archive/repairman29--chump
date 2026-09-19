@@ -652,6 +652,22 @@ impl GapStore {
             ",
         );
 
+        // RESILIENT-1364: register `decomposed` — the status `chump gap
+        // decompose --apply` flips a parent umbrella to, instead of leaving
+        // it `open`. Being a distinct, non-'open' status IS the whole fix:
+        // every picker/worker path reads `status='open'` (`chump gap list
+        // --status open`), so a decomposed parent simply stops being
+        // pickable the moment this status lands — no picker-side "has open
+        // children" filter needed. `auto_close_decomposed_parents()` later
+        // flips it to `done` once every child slice named in its notes
+        // reaches `done`.
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO gap_status_registry (status, added_by, note)
+             VALUES ('decomposed', 'RESILIENT-1364',
+               'umbrella parent taken out of the pick pool by chump gap decompose --apply; auto-closes to done once all child slices (parsed from notes) reach done')",
+            [],
+        );
+
         // MISSION-008: additive, non-destructive migrations for first-class
         // Outcome objects. Two changes:
         //   (a) CREATE TABLE IF NOT EXISTS outcomes — new table, never existed.
@@ -5566,6 +5582,143 @@ impl GapStore {
     }
 }
 
+// ────────── decomposed umbrella gaps (RESILIENT-1364) ──────────
+
+/// RESILIENT-1364: parse the child gap IDs recorded by `chump gap decompose
+/// --apply` in a parent's notes field: "Decomposed into N slices: ID, ID,
+/// ...". This free-text line is, today, the ONLY link between an umbrella
+/// and its slices (no parent_id column) — this is the single extraction
+/// point so a future structured link only has to change one function.
+/// Returns an empty vec if the marker isn't present or nothing parses.
+pub fn parse_decomposed_children(notes: &str) -> Vec<String> {
+    const MARKER: &str = "Decomposed into";
+    let Some(marker_pos) = notes.find(MARKER) else {
+        return Vec::new();
+    };
+    let after_marker = &notes[marker_pos..];
+    let Some(colon_pos) = after_marker.find(':') else {
+        return Vec::new();
+    };
+    let ids_part = &after_marker[colon_pos + 1..];
+    // Stop at end of line — notes may carry more content after this marker.
+    let ids_line = ids_part.lines().next().unwrap_or("");
+    ids_line
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Advisory rollup of one decomposed umbrella's children, mirroring
+/// `outcome_status`'s open_children pattern above for gap-to-gap umbrellas
+/// instead of outcome-to-gap.
+#[derive(Debug, Clone)]
+pub struct DecomposedParentRollup {
+    pub parent_id: String,
+    pub child_ids: Vec<String>,
+    /// Children that resolved to a real gap row.
+    pub total: usize,
+    pub open: usize,
+    pub done: usize,
+}
+
+impl GapStore {
+    /// Rollup of a decomposed parent's children, parsed from its notes.
+    /// Returns `None` if `parent_id` doesn't exist or has no parseable
+    /// "Decomposed into" marker.
+    pub fn decomposed_parent_rollup(
+        &self,
+        parent_id: &str,
+    ) -> Result<Option<DecomposedParentRollup>> {
+        let parent = match self.get(parent_id)? {
+            Some(g) => g,
+            None => return Ok(None),
+        };
+        let child_ids = parse_decomposed_children(&parent.notes);
+        if child_ids.is_empty() {
+            return Ok(None);
+        }
+        let mut total = 0usize;
+        let mut open = 0usize;
+        let mut done = 0usize;
+        for cid in &child_ids {
+            if let Some(child) = self.get(cid)? {
+                total += 1;
+                if child.status == "open" || child.status == "claimed" {
+                    open += 1;
+                } else if child.status == "done" {
+                    done += 1;
+                }
+            }
+        }
+        Ok(Some(DecomposedParentRollup {
+            parent_id: parent_id.to_string(),
+            child_ids,
+            total,
+            open,
+            done,
+        }))
+    }
+
+    /// RESILIENT-1364 fix #2: scan every gap with status='decomposed' and
+    /// auto-close (status -> done) any whose children are ALL 'done'.
+    /// Mirrors the outcomes open_children pattern above, extended into an
+    /// action here because a decomposed umbrella (unlike an outcome) has no
+    /// other route out of limbo once its slices land.
+    ///
+    /// The closing UPDATE excludes only the deliberate terminal statuses
+    /// (CREDIBLE-218 shape) rather than gating on `WHERE status='decomposed'`
+    /// — so a parent that drifted to some other status between the read
+    /// above and this write (e.g. an operator hand-closed it in the
+    /// meantime) is never double-closed or ghosted; the UPDATE affects 0
+    /// rows and is simply skipped.
+    ///
+    /// A child ID that doesn't resolve to a real gap is treated as "not
+    /// done" (never auto-closes on unverifiable data) rather than being
+    /// silently ignored.
+    ///
+    /// Returns the IDs of parents that were auto-closed.
+    pub fn auto_close_decomposed_parents(&self) -> Result<Vec<String>> {
+        let parents = self.list(Some("decomposed"))?;
+        let mut closed = Vec::new();
+        let now = unix_now();
+        let iso = unix_to_iso_date(now);
+        for parent in parents {
+            let child_ids = parse_decomposed_children(&parent.notes);
+            if child_ids.is_empty() {
+                continue;
+            }
+            let mut all_done = true;
+            for cid in &child_ids {
+                match self.get(cid)? {
+                    Some(child) if child.status == "done" => {}
+                    _ => {
+                        all_done = false;
+                        break;
+                    }
+                }
+            }
+            if !all_done {
+                continue;
+            }
+            let changed = self.conn.execute(
+                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2
+                 WHERE id=?3 AND status NOT IN
+                   ('done','superseded','wontfix','wont_fix','closed','closed_not_a_bug','already_satisfied')",
+                params![now, iso, parent.id],
+            )?;
+            if changed > 0 {
+                let _ = self
+                    .conn
+                    .execute("DELETE FROM leases WHERE gap_id=?1", params![parent.id]);
+                closed.push(parent.id);
+            }
+        }
+        Ok(closed)
+    }
+}
+
 // ────────── repos table (MISSION-033) ──────────
 
 impl GapStore {
@@ -6683,6 +6836,192 @@ mod tests {
     }
 
     // ── INFRA-100: cross-source picker tests ──────────────────────────
+
+    // ── RESILIENT-1364: decomposed-umbrella pick-pool + auto-close ────
+
+    #[test]
+    fn parse_decomposed_children_extracts_ids_from_notes() {
+        let notes = "Decomposed into 3 slices: RESILIENT-1353, RESILIENT-1354, RESILIENT-1355";
+        let ids = parse_decomposed_children(notes);
+        assert_eq!(
+            ids,
+            vec!["RESILIENT-1353", "RESILIENT-1354", "RESILIENT-1355"]
+        );
+
+        assert!(parse_decomposed_children("no marker here").is_empty());
+        assert!(parse_decomposed_children("").is_empty());
+    }
+
+    #[test]
+    fn decomposed_status_is_registered() {
+        // RESILIENT-1364: the picker at every call site keys off
+        // gap_status_registry-known statuses; 'decomposed' must be present
+        // from a fresh store, the same way 'ready_to_ship' etc. are.
+        let (store, _dir) = test_store();
+        let known = store.known_statuses().unwrap();
+        assert!(
+            known.iter().any(|k| k == "decomposed"),
+            "registry must contain 'decomposed': {known:?}"
+        );
+    }
+
+    #[test]
+    fn decomposed_parent_is_excluded_from_the_open_pick_pool() {
+        // RESILIENT-1364 fix #1: this is the exact failure mode from the
+        // gap report — a just-sliced umbrella must never again be returned
+        // by `chump gap list --status open` (store.list(Some("open"))),
+        // which is what every worker/curator reads to pick its next gap.
+        let (store, _dir) = test_store();
+        let parent = store
+            .reserve("RESILIENT", "umbrella parent", "P1", "m")
+            .unwrap();
+        let child1 = store.reserve("RESILIENT", "slice one", "P2", "s").unwrap();
+        let child2 = store.reserve("RESILIENT", "slice two", "P2", "s").unwrap();
+
+        // Before the fix, decompose left status='open' (only priority was
+        // demoted) — that's exactly the bug. Simulate the fixed
+        // `chump gap decompose --apply` write path.
+        store
+            .set_fields(
+                &parent,
+                GapFieldUpdate {
+                    priority: Some("P2".into()),
+                    status: Some("decomposed".into()),
+                    notes: Some(format!("Decomposed into 2 slices: {child1}, {child2}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let open = store.list(Some("open")).unwrap();
+        assert!(
+            !open.iter().any(|g| g.id == parent),
+            "decomposed parent must not be in the open pick pool: {:?}",
+            open.iter().map(|g| &g.id).collect::<Vec<_>>()
+        );
+        // Its slices, meanwhile, ARE pickable — that's the whole point.
+        assert!(open.iter().any(|g| g.id == child1));
+        assert!(open.iter().any(|g| g.id == child2));
+    }
+
+    #[test]
+    fn auto_close_decomposed_parents_waits_for_all_children_then_closes() {
+        // RESILIENT-1364 fix #2, mirroring the outcomes open_children
+        // pattern: a decomposed parent must stay open (as a tracking row)
+        // while ANY child slice is unfinished, and auto-close to 'done'
+        // only once every child named in its notes has reached 'done'.
+        let (store, _dir) = test_store();
+        let parent = store
+            .reserve("RESILIENT", "umbrella parent", "P1", "m")
+            .unwrap();
+        let child1 = store.reserve("RESILIENT", "slice one", "P2", "s").unwrap();
+        let child2 = store.reserve("RESILIENT", "slice two", "P2", "s").unwrap();
+
+        store
+            .set_fields(
+                &parent,
+                GapFieldUpdate {
+                    status: Some("decomposed".into()),
+                    notes: Some(format!("Decomposed into 2 slices: {child1}, {child2}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Neither child done yet -> no auto-close.
+        let closed = store.auto_close_decomposed_parents().unwrap();
+        assert!(
+            closed.is_empty(),
+            "must not auto-close while both children are open"
+        );
+        assert_eq!(store.get(&parent).unwrap().unwrap().status, "decomposed");
+
+        // One child done, one still open -> still no auto-close.
+        store
+            .set_fields(
+                &child1,
+                GapFieldUpdate {
+                    status: Some("done".into()),
+                    closed_pr: Some(101),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let closed = store.auto_close_decomposed_parents().unwrap();
+        assert!(
+            closed.is_empty(),
+            "must not auto-close with one child still open"
+        );
+        assert_eq!(store.get(&parent).unwrap().unwrap().status, "decomposed");
+
+        // Both children done -> parent auto-closes.
+        store
+            .set_fields(
+                &child2,
+                GapFieldUpdate {
+                    status: Some("done".into()),
+                    closed_pr: Some(102),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let closed = store.auto_close_decomposed_parents().unwrap();
+        assert_eq!(closed, vec![parent.clone()]);
+        assert_eq!(store.get(&parent).unwrap().unwrap().status, "done");
+
+        // Idempotent: running again is a no-op (already done, excluded by
+        // the terminal-status guard in the UPDATE).
+        let closed_again = store.auto_close_decomposed_parents().unwrap();
+        assert!(closed_again.is_empty());
+    }
+
+    #[test]
+    fn decomposed_parent_rollup_reports_counts() {
+        let (store, _dir) = test_store();
+        let parent = store
+            .reserve("RESILIENT", "umbrella parent", "P1", "m")
+            .unwrap();
+        let child1 = store.reserve("RESILIENT", "slice one", "P2", "s").unwrap();
+        let child2 = store.reserve("RESILIENT", "slice two", "P2", "s").unwrap();
+        store
+            .set_fields(
+                &parent,
+                GapFieldUpdate {
+                    status: Some("decomposed".into()),
+                    notes: Some(format!("Decomposed into 2 slices: {child1}, {child2}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let rollup = store
+            .decomposed_parent_rollup(&parent)
+            .unwrap()
+            .expect("parent has a parseable decompose marker");
+        assert_eq!(rollup.total, 2);
+        assert_eq!(rollup.open, 2);
+        assert_eq!(rollup.done, 0);
+
+        store
+            .set_fields(
+                &child1,
+                GapFieldUpdate {
+                    status: Some("done".into()),
+                    closed_pr: Some(201),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let rollup = store.decomposed_parent_rollup(&parent).unwrap().unwrap();
+        assert_eq!(rollup.open, 1);
+        assert_eq!(rollup.done, 1);
+
+        // A plain gap with no decompose marker in its notes has no rollup.
+        let plain = store
+            .reserve("RESILIENT", "not an umbrella", "P2", "s")
+            .unwrap();
+        assert!(store.decomposed_parent_rollup(&plain).unwrap().is_none());
+    }
 
     #[test]
     fn known_statuses_reads_the_registry() {

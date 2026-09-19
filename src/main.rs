@@ -15180,11 +15180,21 @@ async fn main() -> Result<()> {
                         }
                     }
 
-                    // Demote parent to P2
+                    // RESILIENT-1364: demote parent to P2 AND take it out of
+                    // the pick pool. Before this fix the parent stayed
+                    // status='open' after decompose, so `chump gap list
+                    // --status open` (what every worker/curator picks from)
+                    // kept re-surfacing the umbrella itself alongside its own
+                    // slices — a worker would grab it, fail (it isn't
+                    // implementable, it's a tracking gap), and INFRA-3832
+                    // auto-blocked it 3 cycles later. status='decomposed' is
+                    // registered in gap_status_registry and is simply never
+                    // 'open', so no picker-side filter change is needed.
                     let _ = store.set_fields(
                         &gap_id,
                         gap_store::GapFieldUpdate {
                             priority: Some("P2".into()),
+                            status: Some("decomposed".into()),
                             notes: Some(format!(
                                 "Decomposed into {} slices: {}",
                                 filed_ids.len(),
@@ -15195,7 +15205,7 @@ async fn main() -> Result<()> {
                     );
                     eprintln!();
                     eprintln!(
-                        "Decomposed {gap_id} into {} slices. Parent demoted to P2.",
+                        "Decomposed {gap_id} into {} slices. Parent demoted to P2 and marked decomposed (out of the pick pool; auto-closes once every slice ships — see `chump gap close-decomposed`).",
                         filed_ids.len()
                     );
 
@@ -15213,6 +15223,43 @@ async fn main() -> Result<()> {
                     }
                 }
 
+                return Ok(());
+            }
+            "close-decomposed" => {
+                // RESILIENT-1364 fix #2: sweep every status='decomposed'
+                // umbrella and auto-close (-> done) any whose slices
+                // (parsed from its "Decomposed into N slices: ..." notes)
+                // are ALL 'done'. Mirrors the outcomes open_children rollup
+                // (chump-gap-store) but turns it into an action, since a
+                // decomposed umbrella has no other route out of limbo once
+                // its slices land — unlike an outcome, which just sits
+                // advisory-open. Safe to run repeatedly / on a cron: a
+                // parent with any non-done child is a no-op.
+                if args
+                    .iter()
+                    .skip(3)
+                    .any(|a| matches!(a.as_str(), "--help" | "-h"))
+                {
+                    println!("Usage: chump gap close-decomposed [--json]");
+                    println!();
+                    println!("Auto-closes decomposed umbrella parents whose child slices are all 'done'.");
+                    return Ok(());
+                }
+                let json_out = args.iter().skip(3).any(|a| a == "--json");
+                let closed = store.auto_close_decomposed_parents()?;
+                if json_out {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({ "closed": closed }))
+                            .unwrap_or_default()
+                    );
+                } else if closed.is_empty() {
+                    println!("no decomposed parents ready to auto-close.");
+                } else {
+                    for id in &closed {
+                        println!("auto-closed {id}: all child slices done.");
+                    }
+                }
                 return Ok(());
             }
             "scaffold-holes" => {
