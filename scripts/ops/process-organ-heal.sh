@@ -35,12 +35,35 @@
 # Usage:
 #   scripts/ops/process-organ-heal.sh              # scan + heal, real spawn
 #   scripts/ops/process-organ-heal.sh --dry-run     # report only, no spawn
+#   scripts/ops/process-organ-heal.sh --check       # health report only, no
+#                                                    # spawn, no ambient writes
+#                                                    # (INFRA-7588) — see below
 #   scripts/ops/process-organ-heal.sh --registry PATH   # override registry
+#
+# --check mode (INFRA-7588, process-organ health reporting):
+#   Runs each registered organ's pgrep detector and prints one line per organ:
+#     DETECTED-ALIVE <name>   pgrep found a matching process
+#     DETECTED-DEAD  <name>   pgrep ran cleanly and found nothing (and no
+#                              fresh optional heartbeat file covers for it —
+#                              see CHUMP_PROCESS_ORGAN_HEARTBEAT_MAX_AGE_S)
+#     UNKNOWN        <name>   pgrep itself errored (rc>=2) — can't tell
+#   Never spawns anything and never touches ambient.jsonl — this is a pure
+#   read-only report, deliberately separate from the heal path above so a
+#   monitoring cron can run --check on a tight cadence without side effects.
+#   Detection is solely pgrep + the optional heartbeat file — NEVER systemctl
+#   (this repo runs on nodes that are not always systemd-supervised).
+#   Exit codes: 0 all organs DETECTED-ALIVE or UNKNOWN; 1 one or more
+#   DETECTED-DEAD; 2 registry unreadable.
 #
 # Env:
 #   CHUMP_PROCESS_ORGAN_REGISTRY  — override registry path
 #   CHUMP_PROCESS_ORGAN_PGREP_BIN — override `pgrep` binary (test hook)
 #   CHUMP_AMBIENT_LOG             — override ambient.jsonl path
+#   CHUMP_PROCESS_ORGAN_HEARTBEAT_MAX_AGE_S — --check only: an organ whose
+#     pgrep detector reports dead is still DETECTED-ALIVE if
+#     process-organ-logs/<name>.heartbeat exists and was touched within this
+#     many seconds (default 300). Organs opt in by touching that file
+#     themselves; most won't have one, which is fine — pgrep is authoritative.
 #   REPO_ROOT / CHUMP_REPO_ROOT   — repo checkout organs are relative to
 #
 # Exit codes:
@@ -56,9 +79,12 @@ PGREP_BIN="${CHUMP_PROCESS_ORGAN_PGREP_BIN:-pgrep}"
 LOG_DIR="$(dirname "$AMBIENT_LOG")/process-organ-logs"
 
 DRY_RUN=0
+CHECK=0
+HEARTBEAT_MAX_AGE_S="${CHUMP_PROCESS_ORGAN_HEARTBEAT_MAX_AGE_S:-300}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=1; shift ;;
+        --check) CHECK=1; shift ;;
         --registry) REGISTRY="$2"; shift 2 ;;
         -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
@@ -79,6 +105,54 @@ emit() {  # kind, extra-json (no leading/trailing comma)
 if [[ ! -f "$REGISTRY" ]]; then
     echo "[process-organ-heal] ERROR: registry not found: $REGISTRY" >&2
     exit 2
+fi
+
+if [[ "$CHECK" == "1" ]]; then
+    if ! command -v "$PGREP_BIN" >/dev/null 2>&1; then
+        echo "[process-organ-heal] UNKNOWN: $PGREP_BIN unavailable — cannot determine liveness for any organ" >&2
+    fi
+
+    any_dead=0
+    checked=0
+    while IFS='|' read -r name relpath args; do
+        [[ -z "$name" ]] && continue
+        [[ "$name" =~ ^[[:space:]]*# ]] && continue
+        name="$(echo "$name" | xargs)"
+        relpath="$(echo "$relpath" | xargs)"
+        [[ -z "$name" || -z "$relpath" ]] && continue
+
+        checked=$((checked + 1))
+        status="UNKNOWN"
+
+        if command -v "$PGREP_BIN" >/dev/null 2>&1; then
+            "$PGREP_BIN" -f "$relpath" >/dev/null 2>&1
+            rc=$?
+            if [[ "$rc" -eq 0 ]]; then
+                status="DETECTED-ALIVE"
+            elif [[ "$rc" -eq 1 ]]; then
+                status="DETECTED-DEAD"
+                # Optional heartbeat file fallback: an organ that touches its
+                # own process-organ-logs/<name>.heartbeat within the freshness
+                # window counts as alive even if pgrep's -f substring match
+                # missed it (e.g. mid-restart). Still no systemctl anywhere.
+                heartbeat="$LOG_DIR/${name}.heartbeat"
+                if [[ -f "$heartbeat" ]]; then
+                    hb_epoch=$(stat -c %Y "$heartbeat" 2>/dev/null || stat -f %m "$heartbeat" 2>/dev/null || echo 0)
+                    now_epoch=$(date -u +%s)
+                    if [[ "$hb_epoch" -gt 0 ]] && [[ "$((now_epoch - hb_epoch))" -le "$HEARTBEAT_MAX_AGE_S" ]]; then
+                        status="DETECTED-ALIVE"
+                    fi
+                fi
+            fi
+        fi
+
+        [[ "$status" == "DETECTED-DEAD" ]] && any_dead=1
+        printf '[process-organ-heal] %s: %s (%s)\n' "$status" "$name" "$relpath"
+    done < "$REGISTRY"
+
+    echo "[process-organ-heal] --check complete: checked=$checked any_dead=$any_dead"
+    [[ "$any_dead" == "1" ]] && exit 1
+    exit 0
 fi
 
 if ! command -v "$PGREP_BIN" >/dev/null 2>&1; then

@@ -2906,3 +2906,8 @@ CHUMP_NODE_INSTALL_CLONE_DIR
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_MCP_CONFIG
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_PROCESS_ORGAN_HEARTBEAT_MAX_AGE_S
