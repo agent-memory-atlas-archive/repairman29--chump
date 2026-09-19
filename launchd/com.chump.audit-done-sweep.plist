@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  com.chump.audit-done-sweep — CREDIBLE-1369 (CREDIBLE-279 slice) LaunchAgent.
+
+  Runs scripts/coord/audit-done-sweep.sh once a day, which invokes
+  `chump gap audit-done` (the INFRA-3495 anti-over-claim watchdog) and:
+    - appends the full render() to /tmp/chump-audit-done-sweep.log
+    - emits kind=audit_done_sweep_completed to ambient.jsonl every run
+      (per-flag kind=over_claim_suspected events come from done_auditor.rs
+      itself)
+
+  Before this daemon, nothing ever invoked audit-done — CREDIBLE-279 named
+  this directly: "a working watchdog produced zero operator signal".
+
+  INSTALLATION:
+    1. Edit this file: replace /path/to/Chump with your repo path,
+       and /path/to/HOME with your $HOME.
+    2. cp launchd/com.chump.audit-done-sweep.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.chump.audit-done-sweep.plist
+    4. Verify: launchctl list | grep com.chump.audit-done-sweep
+    5. Manual run: launchctl start com.chump.audit-done-sweep
+       Logs: tail /tmp/chump-audit-done-sweep.log
+             tail .chump-locks/ambient.jsonl | grep audit_done_sweep
+
+  UNINSTALL:
+    launchctl unload ~/Library/LaunchAgents/com.chump.audit-done-sweep.plist
+    rm ~/Library/LaunchAgents/com.chump.audit-done-sweep.plist
+-->
+<dict>
+  <key>Label</key>
+  <string>com.chump.audit-done-sweep</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/path/to/Chump/scripts/coord/audit-done-sweep.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/path/to/Chump</string>
+
+  <!-- Once a day (86400 seconds). Sleep-aware (skipped while laptop sleeping). -->
+  <key>StartInterval</key>
+  <integer>86400</integer>
+
+  <!-- Don't start at load — wait for the first tick. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/chump-audit-done-sweep.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/chump-audit-done-sweep.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/path/to/HOME</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
+    <!-- chump, gh, git must be on PATH. -->
+  </dict>
+
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+</dict>
+</plist>

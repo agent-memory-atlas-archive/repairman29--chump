@@ -130,6 +130,12 @@ events:
     trigger: `chump gap audit-done` finds a DONE gap whose closed PR left acceptance bullets uncovered + unwaived (umbrella-done != actually-done) — pr_ac_coverage re-run after the fact
     consumers: [gap-registry-health (future), observability]
     fields_required: [ts, kind, gap_id, closed_pr, uncovered_bullets, total_bullets]
+  - kind: audit_done_sweep_completed
+    effect_metric: self
+    emitter: scripts/coord/audit-done-sweep.sh (CREDIBLE-1369, CREDIBLE-279 slice)
+    trigger: "the scheduled (launchd/CI) audit-done sweep finishes a run — one event per invocation, so a clean (0-flagged) run is still visible in ambient.jsonl rather than looking identical to 'never ran'"
+    consumers: [operator visibility, gap-registry-health (future)]
+    fields_required: [ts, kind, audited, flagged, skipped_no_pr, skipped_no_ac, fetch_errors]
   - kind: ci_lesson_captured
     effect_metric: self
     emitter: src/ci_lesson.rs (INFRA-1765 cross-agent CI-failure lesson propagation)
