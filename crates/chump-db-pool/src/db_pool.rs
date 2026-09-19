@@ -132,6 +132,21 @@ fn init_schema(conn: &rusqlite::Connection) -> Result<()> {
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
         CREATE INDEX IF NOT EXISTS idx_web_messages_session ON chump_web_messages(session_id, created_at);
+        CREATE VIRTUAL TABLE IF NOT EXISTS web_messages_fts USING fts5(
+            content,
+            content='chump_web_messages',
+            content_rowid='id'
+        );
+        CREATE TRIGGER IF NOT EXISTS web_messages_fts_insert AFTER INSERT ON chump_web_messages BEGIN
+            INSERT INTO web_messages_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS web_messages_fts_delete AFTER DELETE ON chump_web_messages BEGIN
+            INSERT INTO web_messages_fts(web_messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS web_messages_fts_update AFTER UPDATE ON chump_web_messages BEGIN
+            INSERT INTO web_messages_fts(web_messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+            INSERT INTO web_messages_fts(rowid, content) VALUES (new.id, new.content);
+        END;
         -- web_uploads (PWA Tier 2 Phase 1.2)
         CREATE TABLE IF NOT EXISTS chump_web_uploads (
             file_id TEXT PRIMARY KEY,
