@@ -629,6 +629,13 @@ def main() -> int:
     effort_filter = [e.lower() for e in csv("FLEET_EFFORT_FILTER")]
     worker_model = os.environ.get("FLEET_MODEL", "haiku").lower()
     exclude_re = re.compile(os.environ.get("EXCLUDE_RE", "^$"))
+    # META-937: waste-SLO-breach corrective-keyword exception. When the fleet
+    # is paused on a waste-SLO breach (.chump/fleet-paused), worker.sh sets
+    # this to "corrective" so ONLY gaps whose title contains that keyword
+    # remain pickable — the pause still blocks ordinary work, but a gap
+    # explicitly framed as fixing the breach itself can still be claimed.
+    # Unset/empty outside a pause: no restriction (default fleet behavior).
+    require_title_substrs = [s.lower().strip() for s in csv("FLEET_REQUIRE_TITLE_SUBSTR") if s.strip()]
     active = set(os.environ.get("ACTIVE_GAPS", "").split())
     # RESILIENT-332 (anti-spin, Layer B): gaps that already have an open PR /
     # in-progress branch on origin must NEVER be offered — a completed-but-
@@ -702,6 +709,12 @@ def main() -> int:
         # (banned by CLAUDE.md Mission-Driver §2) — see helper docstring above.
         if is_manufactured_pillar_starved_junk(g.get("title", "")):
             continue
+        # META-937: waste-SLO-breach corrective-keyword exception (see
+        # require_title_substrs comment above).
+        if require_title_substrs:
+            title_l = (g.get("title") or "").lower()
+            if not any(sub in title_l for sub in require_title_substrs):
+                continue
         p = (g.get("priority") or "").upper()
         if prio_filter and p not in prio_filter:
             continue

@@ -21,7 +21,31 @@
 #   scripts/dispatch/worker.sh
 #     - Checks .chump/fleet-paused (CHUMP_FLEET_PAUSE_FILE) at top of each
 #       claim cycle. Emits kind=worker_paused_waste_spike and sleeps when
-#       sentinel is present. No bypass env var — pause is unconditional.
+#       sentinel is present.
+#
+#   "corrective" keyword exception (META-937 / META-823 slice, 2026-09-19):
+#     A gap whose TITLE contains the case-insensitive substring "corrective"
+#     is exempt from the fleet-pause described above. Rationale: a gap that
+#     exists specifically to fix the condition causing the waste-SLO breach
+#     (e.g. a waste-tally false-positive, a runaway daemon) must be claimable
+#     WHILE the breach it fixes is still active — blocking it alongside
+#     ordinary work is self-defeating and can wedge the fleet in the paused
+#     state indefinitely.
+#       - worker.sh: when .chump/fleet-paused is present, checks
+#         `chump gap list --status open --json` for any title containing
+#         "corrective". If found, the cycle proceeds (does NOT sleep/skip)
+#         with FLEET_REQUIRE_TITLE_SUBSTR=corrective exported; if none found,
+#         falls back to the original unconditional pause/sleep.
+#       - scripts/dispatch/_pick_and_claim_gap.py: when
+#         FLEET_REQUIRE_TITLE_SUBSTR is set (comma-separated, case-insensitive
+#         substrings), candidates whose title does not contain any listed
+#         substring are filtered out — so ONLY corrective-tagged gaps remain
+#         pickable while the pause is active. Empty/unset (the normal,
+#         unpaused path) applies no restriction.
+#     This is deliberately narrower than the deleted CHUMP_IGNORE_WASTE_PAUSE
+#     env var (INFRA-2424 below): it does not lift the pause fleet-wide, only
+#     for gaps explicitly framed as fixing the breach.
+#     Test: scripts/ci/test-corrective-keyword-exception.sh
 #
 # ── Consumers that EMIT slo_breach ───────────────────────────────────────────
 #

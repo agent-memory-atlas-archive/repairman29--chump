@@ -1283,6 +1283,9 @@ jobs:
       - name: pick-and-claim lock-dir resolves to main repo from linked worktree (INFRA-466/467)
         run: bash scripts/ci/test-pick-and-claim-lockdir.sh
 
+      - name: corrective-keyword waste-SLO-pause exception (META-937/META-823)
+        run: bash scripts/ci/test-corrective-keyword-exception.sh
+
       - name: submodule-sanity guard (INFRA-158)
         run: bash scripts/ci/test-submodule-guard.sh
 

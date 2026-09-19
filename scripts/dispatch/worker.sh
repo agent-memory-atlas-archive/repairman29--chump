@@ -669,14 +669,36 @@ while :; do
     # .chump/fleet-paused sentinel before each claim cycle. The sentinel blocks
     # claim (work); it does NOT block gap reserve (filing is always allowed).
     # See INFRA-2424 for the reserve/claim split rationale.
+    #
+    # META-937 (META-823 slice): a gap whose title contains the "corrective"
+    # keyword is exempt from this pause — it exists specifically to fix the
+    # condition that caused the waste-SLO breach, so blocking it alongside
+    # ordinary work is self-defeating. When paused, check whether at least
+    # one open+pickable "corrective" gap exists; if so, let the cycle
+    # continue but restrict the picker (FLEET_REQUIRE_TITLE_SUBSTR) so it can
+    # ONLY claim corrective-tagged gaps while the pause is active.
+    unset FLEET_REQUIRE_TITLE_SUBSTR
     _pause_file="${CHUMP_FLEET_PAUSE_FILE:-$REPO_ROOT/.chump/fleet-paused}"
     if [[ -f "$_pause_file" ]]; then
-        log "FLEET-054: fleet-paused sentinel present ($( cat "$_pause_file" | head -1 )) — waste spike in progress; sleeping ${IDLE_SLEEP_S}s before retry"
-        _amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
-        printf '{"ts":"%s","kind":"worker_paused_waste_spike","agent_id":"%s","pause_file":"%s"}\n' \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$AGENT_ID" "$_pause_file" >> "$_amb" 2>/dev/null || true
-        sleep "${IDLE_SLEEP_S:-60}"
-        continue
+        _corrective_count="$(chump gap list --status open --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    gaps = json.load(sys.stdin)
+except Exception:
+    gaps = []
+print(sum(1 for g in gaps if "corrective" in (g.get("title") or "").lower()))
+' 2>/dev/null || echo 0)"
+        if [[ "${_corrective_count:-0}" -gt 0 ]]; then
+            log "FLEET-054/META-937: fleet-paused sentinel present, but $_corrective_count corrective gap(s) pickable — bypassing pause for corrective work only"
+            export FLEET_REQUIRE_TITLE_SUBSTR="corrective"
+        else
+            log "FLEET-054: fleet-paused sentinel present ($( cat "$_pause_file" | head -1 )) — waste spike in progress; sleeping ${IDLE_SLEEP_S}s before retry"
+            _amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+            printf '{"ts":"%s","kind":"worker_paused_waste_spike","agent_id":"%s","pause_file":"%s"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$AGENT_ID" "$_pause_file" >> "$_amb" 2>/dev/null || true
+            sleep "${IDLE_SLEEP_S:-60}"
+            continue
+        fi
     fi
 
     # ── RESILIENT-069: farmer readiness gate ────────────────────────────────
@@ -819,6 +841,7 @@ PY
             WORKER_INDEX="$AGENT_ID" \
             WORKER_ID="$AGENT_ID" \
             COOLDOWN_DIR="$REPO_ROOT/.chump-locks/cooldown" \
+            FLEET_REQUIRE_TITLE_SUBSTR="${FLEET_REQUIRE_TITLE_SUBSTR:-}" \
             python3 "$REPO_ROOT/scripts/dispatch/_pick_and_claim_gap.py" 2>/dev/null || true)"
     rm -f "$gap_json_file"
 
