@@ -91,6 +91,20 @@ construction, see the drift note above), and a live run reports 81
 bookkeeping-closed gaps (same as CREDIBLE-1330, drift unchanged since
 CREDIBLE-1264). No behavior change needed.
 
+CREDIBLE-1367 re-verified the same three AC again on 2026-09-19 (CREDIBLE-279
+slice): file present + executable + tracked in git, `--multi-close-only`/
+`--json` flags work, `scripts/ci/test-false-done-sweep.sh` still passes
+(7/7), and a live run again reports 81 bookkeeping-closed gaps — identical to
+CREDIBLE-1366 run minutes earlier, confirming the registry did not shift
+between the two slices. The gap's literal AC ("each of the 79 gaps receives a
+definitive per-gap verdict") cannot be satisfied as a one-time PR: the
+registry drifts (69→70→81 across CREDIBLE-1264/1330/1366/1367) faster than a
+manual per-gap disposition pass can complete, so a static list frozen at 79
+would be stale before merge. The durable fix is this script + its CI test —
+they make the per-gap verdict computable on demand (`--gap <ID>` for one,
+`--multi-close-only --json` for the live cohort) rather than encoding a
+snapshot that immediately rots. No behavior change needed.
+
 Usage:
   python3 scripts/ops/false-done-sweep.py --multi-close-only      # cheapest, highest yield
   python3 scripts/ops/false-done-sweep.py --all --limit 400       # broader
