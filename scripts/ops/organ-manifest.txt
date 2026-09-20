@@ -579,3 +579,45 @@ enabled     chump-decomposition-hint-tracker.timer  role=data requires=bin:chump
 enabled     chump-refresh-model-prices.timer  role=data requires=bin:chump platforms=launchd  # refresh-model-prices-launchd: weekly diff of model_rates.yaml/model_registry.yaml against LiteLLM upstream. Not traced to a Linux unit. Linux port: TODO.
 enabled     chump-fleet-version-skew-detect.timer  role=data requires=bin:chump,bin:git platforms=launchd  # fleet-version-skew-detect-launchd: 6h ALERT when working-tree worker.sh drifts from origin/main unrelaunched. Not traced to a Linux unit. Linux port: TODO.
 enabled     chump-mission-grade.timer  role=data requires=bin:chump platforms=launchd  # mission-grade-cron: emits kind=mission_grade via `chump mission-grade` on a 30-min cadence. Genuinely cross-platform BY DESIGN (delegates to `chump cron install`, which renders launchd on macOS and a systemd --user timer of this EXACT name on Linux, INFRA-2057) -- but the Linux side is --user scope, outside this system-scope organ-reconcile's reach until slice B's rootless --user rendering lands, so platforms= stays launchd-only here to avoid this reconcile attempting a system-scope `systemctl enable` against a unit that only ever exists at --user scope. Not a Linux GAP like the lines above (the Linux mechanism already exists); a scoping mismatch slice B resolves.
+
+# --- install-node-housekeeping.sh's 10-organ roster, folded in (INFRA-7766,
+# docs/strategy/ONE_COMMAND_INSTALL.md section 1, one-command-install BOM
+# unification INFRA-7756). These are NOT rendered by organ-reconcile in the
+# usual "place the unit file" sense -- install-node-housekeeping.sh still
+# writes + installs its own generic loop-runner systemd units directly (its
+# write_runner()/install_systemd() functions, unchanged by this slice) — but
+# it now READS the (name, script, cadence) triple for each organ from the
+# `housekeeping=<script>|<cadence>|<args>` token on the matching line below
+# instead of a second hardcoded ORGANS= heredoc (scripts/ops/lib/node-
+# housekeeping-roster-lib.sh), so there is exactly ONE declared roster.
+# `requires=file:~/.chump/organs/<name>.sh` is deliberate: that per-organ
+# runner script only exists on a node where install-node-housekeeping.sh has
+# actually run (its write_runner() writes it), so organ-reconcile.sh SKIPS
+# these entirely (never attempts an `enable`) on any node that hasn't
+# installed the housekeeping suite — exactly the file: idiom the CJ-legacy
+# chump-cj-* lines above already use to keep a host-specific organ from
+# being force-installed into an eternal backoff on a node where it doesn't
+# apply (see this file's header). On a node where housekeeping HAS run,
+# `systemctl enable --now` on an already-enabled-and-active unit is a
+# documented no-op (this file's header), so this only ADDS the self-heal
+# peer-heartbeat every other organ in this manifest already relies on — it
+# changes nothing observable today. Verified live on CJ (2026-09-20): all 8
+# of these unit names are ALREADY `active running` systemd services there.
+#
+# pr-lander and rot-reaper are DELIBERATELY EXCLUDED from this roll-call:
+# install-node-housekeeping.sh's fixed chump-$name.service naming collides
+# with two OTHER, older organs that already own those exact unit names
+# (chump-pr-lander.timer's sibling .service / RESILIENT-288, and a
+# standalone RESILIENT-324 chump-rot-reaper.service) — adding an `enabled`
+# line here would make organ-reconcile start enabling a unit name that's
+# ambiguous between two unrelated capabilities, a NEW behavior this
+# zero-behavior-change slice must not introduce. See node-housekeeping-
+# roster-lib.sh's own comment and INFRA-7772 (filed) for the fix.
+enabled     chump-node-orchestrator.service  role=brain requires=file:~/.chump/organs/node-orchestrator.sh housekeeping=scripts/ops/node-orchestrator.sh|0|
+enabled     chump-worktree-reaper.service  role=janitor requires=file:~/.chump/organs/worktree-reaper.sh housekeeping=scripts/ops/stale-worktree-reaper.sh|900|--execute
+enabled     chump-disk-monitor.service  role=janitor requires=file:~/.chump/organs/disk-monitor.sh housekeeping=scripts/ops/disk-health-monitor.sh|300|
+enabled     chump-main-health-watchdog.service  role=brain requires=file:~/.chump/organs/main-health-watchdog.sh housekeeping=scripts/ops/main-health-watchdog.sh|600|
+enabled     chump-cargo-sweep-gc.service  role=janitor requires=file:~/.chump/organs/cargo-sweep-gc.sh housekeeping=scripts/ops/cargo-sweep-gc.sh|3600|
+enabled     chump-reviver.service  role=brain requires=file:~/.chump/organs/reviver.sh housekeeping=scripts/coord/post-push-integrity-watch.sh|60|
+enabled     chump-pr-stuck-live-scan.service  role=brain requires=file:~/.chump/organs/pr-stuck-live-scan.sh housekeeping=scripts/ops/stuck-pr-filer.sh|3600|
+enabled     chump-pr-stuck-cluster-detector.service  role=brain requires=file:~/.chump/organs/pr-stuck-cluster-detector.sh housekeeping=scripts/coord/pr-stuck-cluster-detector.sh|1800|--apply

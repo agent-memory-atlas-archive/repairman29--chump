@@ -32,16 +32,18 @@ else SUP=nohup; fi
 log "supervisor=$SUP repo=$REPO user=$USER_N"
 
 # organ table: name|repo-relative-script[ args]|cadence-seconds (0 = script self-loops, e.g. orchestrator)
-ORGANS="node-orchestrator|scripts/ops/node-orchestrator.sh|0
-rot-reaper|scripts/ops/rot-reaper.sh|1800
-worktree-reaper|scripts/ops/stale-worktree-reaper.sh --execute|900
-disk-monitor|scripts/ops/disk-health-monitor.sh|300
-main-health-watchdog|scripts/ops/main-health-watchdog.sh|600
-pr-lander|scripts/dispatch/pr-lander-beat.sh|600
-cargo-sweep-gc|scripts/ops/cargo-sweep-gc.sh|3600
-reviver|scripts/coord/post-push-integrity-watch.sh|60
-pr-stuck-live-scan|scripts/ops/stuck-pr-filer.sh|3600
-pr-stuck-cluster-detector|scripts/coord/pr-stuck-cluster-detector.sh --apply|1800"
+#
+# INFRA-7766 (docs/strategy/ONE_COMMAND_INSTALL.md section 1, INFRA-7756):
+# sourced from scripts/ops/organ-manifest.txt's housekeeping= tokens via the
+# shared node-housekeeping-roster-lib.sh (falls back to the pre-INFRA-7766
+# built-in roster + a WARN if the manifest is missing/old-shape) instead of
+# a hardcoded heredoc here — so this roster and organ-reconcile.sh's
+# self-heal roll-call are the SAME declared list instead of two that can
+# silently drift apart (the exact disease this slice fixes).
+# shellcheck source=lib/node-housekeeping-roster-lib.sh
+source "$REPO/scripts/ops/lib/node-housekeeping-roster-lib.sh"
+ORGAN_MANIFEST_FILE="${CHUMP_ORGAN_MANIFEST:-$REPO/scripts/ops/organ-manifest.txt}"
+ORGANS="$(housekeeping_organs_from_manifest "$ORGAN_MANIFEST_FILE")"
 
 # write the self-contained loop-runner for an organ (sources creds, sets PATH, loops at cadence)
 write_runner() {
