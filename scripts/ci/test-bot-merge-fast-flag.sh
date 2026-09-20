@@ -38,8 +38,12 @@ assert() {
 }
 
 # ── Contract checks ─────────────────────────────────────────────────────────
-assert "FAST default initialized to 0" \
-       '^FAST=0$'
+# RESILIENT-1407: default init changed from a bare `FAST=0` to `FAST=${FAST:-0}`
+# so the CHUMP_DISPATCH_DEPTH=1 block (which pre-sets FAST=1) doesn't get
+# silently clobbered on the very next line — see test-bot-merge-no-local-build.sh
+# for the regression this fixes.
+assert "FAST default initialized to 0 (preserving any pre-set value)" \
+       'FAST=\$\{FAST:-0\}'
 
 assert "--fast flag is in the case statement" \
        'FAST=1; SKIP_TESTS=1'
@@ -51,7 +55,7 @@ assert "clippy stage is gated on FAST" \
        '\[\[ \$FAST -eq 1 \]\]'
 
 assert "clippy gate has user-facing skip message" \
-       'Skipping local clippy \(--fast\)'
+       'Skipping local clippy \(--fast, no cargo\)'
 
 assert "INFRA-252 reference present" \
        'INFRA-252'

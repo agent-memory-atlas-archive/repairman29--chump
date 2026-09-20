@@ -31,7 +31,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/discover-flock.sh"
 # full pre-merge checklist, pushes to origin, and opens (or updates) a GitHub PR.
 #
 # Usage:
-#   scripts/coord/bot-merge.sh [--gap GAP-ID ...] [--stack-on PREV-GAP-ID] [--auto-merge] [--lane internal|user-facing|critical] [--skip-tests] [--dry-run] [--no-merge-driver]
+#   scripts/coord/bot-merge.sh [--gap GAP-ID ...] [--stack-on PREV-GAP-ID] [--auto-merge] [--lane internal|user-facing|critical] [--skip-tests] [--fast] [--no-local-build] [--dry-run] [--no-merge-driver]
 #                              [--branch-prefix PREFIX] [--pr-template PATH] [--required-checks CHECK1,CHECK2,...]
 #
 #   --stack-on PREV-GAP-ID
@@ -54,7 +54,26 @@ source "$(dirname "${BASH_SOURCE[0]}")/../lib/discover-flock.sh"
 #                  agent-driven shipping fits inside the ~10-15 min subagent
 #                  task budget. Implies --skip-tests. Default OFF; pass
 #                  explicitly when running from chump dispatch / Agent tool /
-#                  any context with a tight task budget. (INFRA-252)
+#                  any context with a tight task budget. (INFRA-252) NOTE:
+#                  --fast still runs a short local `cargo clippy --bin chump
+#                  --fix` pre-flight (a real compile) — see --no-local-build
+#                  below if even that is too heavy for the caller's box.
+#   --no-local-build
+#                  RESILIENT-1407 (the lean-on-CI land path): skip EVERY local
+#                  cargo invocation, including the `cargo clippy --fix`
+#                  pre-flight that --fast still runs. Implies --fast and
+#                  --skip-tests. push → GitHub Actions CI builds/verifies →
+#                  the pr-lander/verified organ lands it. Use this on a loaded
+#                  coordinator (e.g. CJ) where even a short compile risks
+#                  swap-thrashing. `cargo fmt --all` still runs locally (no
+#                  compile, just formatting) and CI remains the real gate for
+#                  clippy/tests — auto-merge will not land a red PR.
+#                  Automatically implied when CHUMP_DISPATCH_DEPTH=1 (dispatched
+#                  subagents never compile locally by default); pass explicitly
+#                  for manual/human invocations on a loaded box. Env mode
+#                  selector (not a skip/bypass flag — INFRA-2429):
+#                  CHUMP_BOT_MERGE_LAND_MODE=ci   (equivalent to --no-local-build)
+#                  CHUMP_BOT_MERGE_LAND_MODE=local (default; current behavior)
 #   --dry-run      Print every step without executing git push or gh commands.
 #   --no-merge-driver
 #                  Disable custom git merge drivers (INFRA-310) during rebase.
@@ -525,8 +544,19 @@ if [[ "${CHUMP_DISPATCH_DEPTH:-0}" == "1" ]]; then
     export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-chump-dispatch@chump.bot}"
     export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Chump Dispatched}"
     export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-chump-dispatch@chump.bot}"
-    # RESILIENT-1406: dispatched agents should not run local build; rely on CI
+    # RESILIENT-1406 set FAST=1 here, but the "── Flags ──" block below
+    # unconditionally re-initialized FAST=0 (and SKIP_TESTS=0), silently
+    # clobbering this before a single arg was parsed — dispatched agents kept
+    # compiling locally exactly as before, which is why RESILIENT-1406 landed
+    # as a false-done no-op. RESILIENT-1407: set the full lean-on-CI trio here
+    # (FAST + SKIP_TESTS + the new NO_LOCAL_BUILD, which additionally skips
+    # the `cargo clippy --fix` pre-flight that --fast alone still ran) and
+    # have the Flags block below read these back with ${VAR:-0} instead of
+    # stomping them, so a dispatched agent never triggers a local cargo build
+    # unless it opts back in.
     FAST=1
+    SKIP_TESTS=1
+    NO_LOCAL_BUILD=1
 fi
 
 # ── INFRA-209: ensure pre-commit hooks are installed in this worktree ────────
@@ -562,9 +592,30 @@ if [[ "${CHUMP_AUTO_INSTALL_HOOKS:-1}" != "0" ]]; then
 fi
 
 # ── Flags ────────────────────────────────────────────────────────────────────
+# RESILIENT-1407: read pre-set values back with ${VAR:-0} rather than
+# unconditionally assigning 0 — the CHUMP_DISPATCH_DEPTH=1 block above may
+# already have set FAST/SKIP_TESTS/NO_LOCAL_BUILD before this block runs, and
+# a bare `FAST=0` here silently discarded that (the RESILIENT-1406 bug).
 AUTO_MERGE=0
-SKIP_TESTS=0
-FAST=0
+SKIP_TESTS=${SKIP_TESTS:-0}
+FAST=${FAST:-0}
+# RESILIENT-1407: --no-local-build / CHUMP_BOT_MERGE_LAND_MODE=ci — skip
+# every local cargo invocation (including the `cargo clippy --fix` pre-flight
+# that --fast alone still runs). push → CI builds/verifies → pr-lander lands.
+# INFRA-2429: CHUMP_BOT_MERGE_LAND_MODE is a MODE SELECTOR (ci|local), not a
+# skip/bypass-shaped var — an earlier attempt named the env override with a
+# "no-local-build"-style suffix and was correctly bounced by the bypass-debt-
+# ceiling gate (that suffix reads as skip-class even though the semantics are
+# a legitimate mode choice, not a safety-gate bypass). Only derive from the
+# env var when the caller hasn't already pre-set NO_LOCAL_BUILD (e.g. the
+# CHUMP_DISPATCH_DEPTH=1 block above).
+if [[ -z "${NO_LOCAL_BUILD:-}" ]]; then
+    if [[ "${CHUMP_BOT_MERGE_LAND_MODE:-local}" == "ci" ]]; then
+        NO_LOCAL_BUILD=1
+    else
+        NO_LOCAL_BUILD=0
+    fi
+fi
 DRY_RUN=0
 NO_MERGE_DRIVER=0
 # INFRA-193: speculative execution opt-in. With --speculative, chump claim
@@ -655,6 +706,7 @@ for arg in "$@"; do
         --auto-merge)         AUTO_MERGE=1; AUTO_MERGE_EXPLICIT=1 ;;
         --skip-tests)         SKIP_TESTS=1 ;;
         --fast)               FAST=1; SKIP_TESTS=1 ;;
+        --no-local-build)     NO_LOCAL_BUILD=1; FAST=1; SKIP_TESTS=1 ;;  # RESILIENT-1407
         --dry-run)            DRY_RUN=1 ;;
         --speculative)        SPECULATIVE=1 ;;
         --no-merge-driver)    NO_MERGE_DRIVER=1 ;;
@@ -2815,6 +2867,14 @@ _run_cargo_with_lock_detect() {
 # a 1-line README diff before this gate landed).
 if [[ "${DOC_ONLY:-0}" -eq 1 ]]; then
     info "[bot-merge] DOC_ONLY=1 — skipping cargo clippy entirely (INFRA-1042)"
+elif [[ $NO_LOCAL_BUILD -eq 1 ]]; then
+    # RESILIENT-1407: --no-local-build (or CHUMP_DISPATCH_DEPTH=1) means even
+    # the --fast pre-flight below is too heavy — `cargo clippy --fix --bin
+    # chump` still compiles the bin, which is exactly the synchronous local
+    # build that swap-thrashes a loaded coordinator. Skip it entirely; the
+    # branch pushes as-is and GitHub Actions CI clippy is the sole gate
+    # (auto-merge refuses to land a red PR either way).
+    info "[bot-merge] --no-local-build — skipping ALL local cargo clippy (including --fast pre-flight); CI clippy is the sole gate"
 elif [[ $FAST -eq 1 ]]; then
     # 2026-05-07: Even in --fast mode, run a `cargo clippy --fix` auto-correction
     # pass. This catches the wave of fleet PRs that ship doc-list-overindented /

@@ -54,6 +54,8 @@ GH_TOKEN
 GITHUB_TOKEN
 SSH_KEY_PATH
 CHUMP_PROFILE_KEY_PATH
+CHUMP_BOT_MERGE_LAND_MODE
+CHUMP_AUTO_INSTALL_HOOKS
 
 # ── Tier 3: fleet automation flags ────────────────────────────────────────
 CHUMP_ALLOW_GAP_REWRITE
