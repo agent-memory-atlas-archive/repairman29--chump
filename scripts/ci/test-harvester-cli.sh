@@ -47,6 +47,12 @@ echo "using binary: $BIN"
 # ── Fixture repo: isolated CHUMP_REPO so scan/check/brief/deep-scan never
 #    touch the real docs/arsenal/ catalog. ──────────────────────────────────
 FIXTURE="$(mktemp -d)"
+# The harvester keeps the operator's full catalog OUTSIDE the repo (default ~/.chump/arsenal).
+# Point it at the fixture, or this test would read, and `scan` would overwrite, a developer's real
+# private catalog. Same for the exclude list and the curation file.
+export CHUMP_ARSENAL_DIR="$FIXTURE/.private-arsenal"
+export CHUMP_ARSENAL_EXCLUDE_FILE="$FIXTURE/.no-exclude-list"
+export CHUMP_ARSENAL_CURATION="$FIXTURE/.no-curation.json"
 trap 'rm -rf "$FIXTURE"' EXIT
 
 mkdir -p "$FIXTURE/docs/arsenal/raw" "$FIXTURE/docs/arsenal/cross-pollination" "$FIXTURE/scripts/arsenal" "$FIXTURE/.chump-locks"

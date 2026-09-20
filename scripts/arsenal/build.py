@@ -22,37 +22,43 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-ARSENAL = ROOT / "docs" / "arsenal"
-RAW = ARSENAL / "raw" / "github_repos.json"
 HOME = Path(os.path.expanduser("~"))
 PROJECTS = HOME / "Projects"
+# This repo is PUBLIC. The catalog committed under docs/arsenal/ therefore lists PUBLIC repos only
+# and carries no local paths (CHUMP_ARSENAL_PUBLIC_ONLY=1). The operator's full catalog, private
+# repos included, is built into CHUMP_ARSENAL_DIR, which defaults to a directory outside every
+# git tree. `harvest.sh scan` builds both.
+PUBLIC_ONLY = os.environ.get("CHUMP_ARSENAL_PUBLIC_ONLY") == "1"
+ARSENAL = Path(os.environ.get("CHUMP_ARSENAL_DIR") or (ROOT / "docs" / "arsenal"))
+RAW = ARSENAL / "raw" / "github_repos.json"
+# Hand curation (cluster patterns, curated primitives per repo) names private repos, so it is
+# data, not source: it lives beside the private catalog and is simply absent on a fresh clone.
+CURATION = Path(os.environ.get("CHUMP_ARSENAL_CURATION") or (HOME / ".chump" / "arsenal" / "curation.json"))
 
-# Cluster heuristics — name/description patterns → cluster label
-CLUSTERS = [
-    ("chump-engine",      r"^chump$|^chump-|^homebrew-chump$"),
-    ("echeo-resonant",    r"^echeo"),
-    ("jarvis-assistant",  r"^jarvis|^JARVIS"),
-    ("beast-mode-qi",     r"^beast-mode|^BEAST-MODE"),
-    ("smugglers-rpg",     r"^smuggler|smugglers|^MythSeeker|^mythseeker|^ai-gm-|^auth-platform|^combat-system|^character-system|^mission-engine|^chat-platform|^payment-platform|^economy-system|^marketplace-system|^code-generation|^asset-management|^audio-generation|^analytics-platform|^commercial-platform|^mock-services|^service-frontends|^services-dashboard|^bot-simulation|^internal-zendesk|^zendesk-background"),
-    ("upshift-deps",      r"^upshift$"),
-    ("content-apps",      r"^slidemate|^mixdown|^coloringbook|^postsub|^echeovid|^olive|^pvc|^dice|^berry-avenue|^sheckleshare|^biomeweavers|^messaging-demo|^trove"),
-    ("political-strat",   r"^project2029|^2029|^ims$"),
-    ("tools-platform",    r"^daisy-chain|^code-roach|^coderoach|^oracle|^neural-farm|^slides|^workbench|^pixel-edge|^openclaw"),
-    ("marketing-sites",   r"^acg|^repairman29-website|^beast-mode-website|^echeo-web|^echeo-internal"),
-    ("misc",              r".*"),
+
+def _load_curation() -> dict:
+    try:
+        return json.loads(CURATION.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+_CURATION = _load_curation()
+
+# Cluster heuristics — name/description patterns → cluster label. Operator patterns come from the
+# private curation file; the default knows only this repo's own family.
+CLUSTERS = [tuple(c) for c in _CURATION.get("clusters", [])] or [
+    ("chump-engine", r"^chump$|^chump-|^homebrew-chump$"),
 ]
 
-PRIMITIVE_PATTERNS = {
-    "auth":          r"auth|oauth|login|jwt|session",
-    "payment":       r"payment|stripe|billing|checkout|monetiz",
-    "chat":          r"chat|messaging|discord|message",
-    "ai-generation": r"ai-gm|code-generation|audio-generation|content-generation|llm|inferr|neural-farm",
-    "ci-cd":         r"vercel|railway|github.*actions|cargo-dist|homebrew-chump",
-    "marketplace":   r"marketplace|economy",
-    "calendar":      r"calendar|scheduler|cron",
-    "list-mgmt":     r"olive|trove|sheckleshare",
-    "video":         r"echeovid|video",
-    "rpg-mechanic":  r"mythseeker|smuggler|combat|character|mission",
+# Primitive detection patterns. Operator patterns (which name private repos) come from the private
+# curation file; the defaults are generic words only.
+PRIMITIVE_PATTERNS = _CURATION.get("primitive_patterns") or {
+    "auth":     r"auth|oauth|login|session",
+    "payment":  r"payment|stripe|billing|checkout",
+    "chat":     r"chat|messaging|message",
+    "ci-cd":    r"github.*actions|cargo-dist",
+    "calendar": r"calendar|scheduler|cron",
 }
 
 
@@ -68,153 +74,7 @@ PRIMITIVE_PATTERNS = {
 # reads already happened (74/76 = 97% coverage per Wave 3), this closes the
 # loop by making those findings queryable via `chump harvest check` instead
 # of living only in prose.
-EXTRACTED_PRIMITIVES: dict[str, list[str]] = {
-    "BEAST-MODE": ["HITL approval flow (Approve/Reject endpoints)", "requiresHumanApproval flag", "executionMode DRAFT|SOVEREIGN state machine", "enterprise AuditLogger pattern", "task hierarchy (Roadmap->Feature->Task)"],
-    "chump-proprietary": ["crates/coord::Executor", "crates/coord consensus", "crates/coord::mesh::MeshTransport"],
-    "echeo": ["Matchmaker::calculate_ship_velocity_score() (cosine sim + language/type boosts, 0-1.0)", "src/shredder.rs tree-sitter AST extraction (TS/Rust/Python/Go, authorship metadata)"],
-    "openclaw": ["SQLite + FTS memory schema", "LanceDB embeddings cache", "memory-tool agent registry integration"],
-    "neural-farm": ["OpenAI-compat /v1 proxy", "LiteLLM/InferrLM router"],
-    "upshift": ["upshift fix --dry-run --json (dependency-upgrade safety check)"],
-    "registry": ["ACP fork (agentclientprotocol/registry, JSON-RPC editor<->agent standard)"],
-    "pixel-edge-server": ["bicameral-mind architecture: Reflexive on-device + Neocortex cloud routing (docs/claude-gateway.md, claude-gateway/server.js:213-269)"],
-    "ai-gm-service": ["aiGMMultiModelEnsembleService.js (Together.ai -> Qwen 72B -> Mistral fallback chain)", "togetherAIService.js"],
-    "auth-platform-service": ["enterpriseSSOService.js (JWT+MFA+SSO)", "mfaService.js (DDoS + Redis rate-limit)"],
-    "postsub": ["server.js Stripe tiered billing (PLATFORM_FEES: basic 5%, pro 8%, enterprise 3%, creator revenue split)"],
-    "project-forge": ["initiative hierarchy schema (Next.js + Node + Postgres)", "AI-insights pipeline (GCloud deploy)"],
-    "bot-simulation-service": ["synthetic-load generator", "5 bot archetypes + fatigue simulation", "funnel analytics (Railway-native)"],
-    "mock-services": ["containerized mock Anthropic API server", "containerized mock OpenAI API server", "containerized mock Stripe API server", "containerized mock Supabase API server"],
-    "economy-system-service": ["MarketSimulationEngine (elasticity-based, sector-stratified pricing, beginner-mode variant)"],
-    "ims": ["Flask + SQLAlchemy Initiative Tracker", "Chart.js dashboard + role-based auth REST API"],
-    "coderoach": ["autonomous code-quality self-learning fixer patterns"],
-    "character-system-service": ["persistent-state character domain logic (data/ dir)"],
-    "combat-system-service": ["persistent-state combat domain logic (data/ dir)"],
-    "analytics-platform-service": ["aiInsightsEngine.js (weighted-model retention scoring, conversion thresholds, churn risk)"],
-    "audio-generation-service": ["voice synthesis with emotion profiles + quality presets (draft/standard/premium/cinematic)"],
-    "asset-management-service": ["dual AI generator (image + 3D), style matrix (10 art styles x 4 quality tiers)"],
-    "mythseeker2": ["agent persona system (Firebase Cloud Functions + Vertex AI -> OpenAI fallback)"],
-    "mission-engine-service": ["Supabase + Redis + LLM choreographer pattern"],
-    "zendesk-background-agent": ["Vercel + OpenAI embeddings semantic ticket matching"],
-    "dice": ["TTRPG expression parser + modifier resolution"],
-    "trove-web": ["Next.js SPA + Firebase + GCS bucket integration"],
-    "coloringbook": ["React + FastAPI image-processing proxy (compute-offload pattern)"],
-    "mixdown": ["Python + Flask + AI metadata enrichment audio pipeline"],
-    "echeovid": ["multi-channel content-repurposing pipeline"],
-    "sheckleshare": ["Grow Garden Calculator pricing engine"],
-    "internal-zendesk-tools": ["React 18 + TS + Vite + Tailwind assessment questionnaire (dashboard architecture reference)"],
-    # INFRA-1823 AC7 coverage push, wave 4 (2026-08-13) — closes the 45-repo gap.
-    "acg": ["Next.js App Router marketing/blog site with server actions in web/app/contact/actions.ts and markdown-rendered blog via web/components/blog-markdown.tsx"],
-    "chump-chassis": [
-        "GitHub read-tool primitive (repo file/dir fetch + clone/pull, allowlist-scoped) in src/github_tools.rs (validate_repo_path, github_token, GITHUB_API_BASE)",
-        "SQLite pool bootstrap via sqlx::sqlite::SqlitePoolOptions in src/db.rs",
-    ],
-    "jarvis-gateway": [
-        "Multi-provider LLM gateway config (Groq/OpenAI-compatible routing across ~12 providers) in clawdbot.json (models.providers.groq block)",
-        "npx-based gateway launcher in start.sh / package.json start script (CLAWDBOT_GATEWAY_PORT env passthrough)",
-    ],
-    "pvc": ["Cursor sub-agent role definitions (dev/ops/verifier) with skeptical-verification prompt pattern in .cursor/agents/verifier.md"],
-    "JARVIS": ["Skill-marketplace skill.json schema (pricing/marketplace/dependencies fields) shared with JARVIS-Premium — see apps/jarvis-ui + .cursor/skills/keep-clis-sharp/SKILL.md"],
-    "slidemate": [
-        "Multi-platform CLI SDK for AI-generated slide content in packages/cli/src/commands/generate.ts (also bulk.ts, deploy.ts, export.ts)",
-        "Postgres schema/migrations for AI-content tracking in backend/db/migrations/003_ai_content_tracking.sql",
-    ],
-    "berry-avenue-codes": ["iOS WKWebView wrapper pattern (native shell around a web app) in iOS-Wrapper/ContentView.swift (WebView: UIViewRepresentable)"],
-    "project2029": ["Flask-Mail password-reset email service in app/services/email_service.py (EmailService.send_password_reset_email)"],
-    "JARVIS-Premium": ["Commercial skill packaging schema (pricing/trial/marketplace/env/dependencies) in skills/focus-pro/skill.json"],
-    "workbench": ["Google Calendar availability/event service scaffold in backend/src/services/CalendarService.ts (CalendarService.getAvailability, mock-then-real API pattern)"],
-    "echeo-internal": ["Fleet/portfolio repo-catalog generator artifacts (COMPLETE_CATALOG.json/.md) in docs/repo-catalog/ — a prior-generation analog of Harvester's GLOBAL_ARSENAL"],
-    "biomeweavers": ["Excalibur.js-based 2D actor/game-entity pattern in client/src/actors/EssenceSource.ts (Actor subclass, CollisionType.Passive, GameConfig-driven color/type)"],
-    "2029-versioned": [
-        "Shared SQLAlchemy TimestampMixin (created_at/updated_at auto-columns) in shared/models/mixins.py",
-        "Standalone news-crawler CLI in version1/app/services/crawler/cli.py (NewsCrawler + ContentProcessor pipeline)",
-    ],
-    "echeo-archived": ["Automated credential-rotation / secret-age auditor in butler/actions/securitySentry.js (checkCredentialRotation, SBOM generation)"],
-    "echeo-web": ["Trust/matching scoring model config (qualityThreshold/qualityWeight/capabilityWeight) in .echeo/models/matching-model.json + matching-model.json / trust-score-model.json pair"],
-    "daisy-chain": [
-        "EventEmitter-based workflow orchestrator with auto-scaling + multi-tenant clustering in src/services/daisyChainOrchestrator.js (DaisyChainOrchestrator)",
-        "Thin automation-engine facade wrapping the orchestrator in src/services/automation-engine.js",
-    ],
-    "oracle": ["Vector-embeddings semantic search service (with unified-embeddings + echeo fallback chain) in scripts/oracle-vector-embeddings.js"],
-    "project_forge": ["Express + Objection.js OKR/KeyResult REST controller with transaction support in backend/src/controllers/OKRController.ts"],
-    # INFRA-6117: coverage push, wave 5 (2026-09-14) — deep-scan of the 50 repos
-    # added to the fleet since Wave 4 (fleet_size grew 76 -> 101). Findings via
-    # gh api (no local clones), per-repo verify-at-source discipline.
-    "olive": [
-        "Bounded tool-calling LLM orchestrator loop with honesty-rail/human-gate guarantees (src/lib/agent/orchestrator.ts)",
-        "Deterministic fallback-narration generator for degraded LLM turns (src/lib/agent/fallback.ts)",
-        "Kroger pricing/catalog engine (src/lib/kroger/engine.ts, priceList.ts)",
-    ],
-    "workspace-docs": ["Prose voice-fingerprinting statistical analyzer comparing draft text against a ground-truth corpus by register (content/voice-fingerprint.mjs) with companion corpus-builder (content/voice-corpus.mjs)"],
-    "almanac": [
-        "Reciprocal Rank Fusion multi-retriever hybrid search (crates/almanac-core/src/fusion.rs)",
-        "Cross-encoder reranker HTTP client with multi-schema response parsing (crates/almanac-core/src/rerank.rs)",
-    ],
-    "games-workspace": [
-        "Time-windowed combo/multiplier scoring system (extractions/neon-shmup/ComboManager.ts)",
-        "Pixi.js particle-emitter system with lifecycle management (extractions/neon-shmup/ParticleSystem.ts)",
-        "Shared leaderboard/feedback-widget modules (shared/leaderboard.js, shared/feedback-widget.js)",
-    ],
-    "grave-dancer": ["Pure, unit-testable horizontal movement/physics stepper decoupled from the game engine (src/lib/movement.js: stepHorizontalVelocity with accel/friction/clamp logic)"],
-    "holler": [
-        "Self-contained feedback-widget library with offline retry queue distinguishing permanent (4xx) vs transient (429/5xx) failures and deduped error capture (holler.js)",
-        "CLI triage/inbox tool with since-last-run diffing (inbox.mjs)",
-    ],
-    "privateer": ["Deterministic capability-need tracker/chart generator that separates mechanical bookkeeping from AI judgment, emits a portable cross-harness launch prompt (voyage.mjs)"],
-    "jarvis-rog-ed": ["Modular skill-plugin architecture with per-skill index.js entrypoints (jarvis/skills/*/index.js pattern, e.g. clipboard-history, window-manager, workflow-automation)"],
-    "echeo_old": ["Generic paginated CRUD base repository over Prisma (apps/notification-service/src/repositories/BaseRepository.ts — abstract class with findWithPagination, typed PaginatedResult<T>, DatabaseError wrapper)"],
-    "posse": [
-        "Headless-browser autonomous playtest bot with hazard-learning/stall-detection heuristics (bot.mjs)",
-        "Deterministic world-graph edge-coverage surveyor with verdict classification (surveyor.mjs, NO_TRANSITION/WRONG_TARGET/SPAWN_MISMATCH logic)",
-    ],
-    "realm-of-shadows": ["Real-time combat system with hitstop/parry/attack-cooldown state machine (src/systems/CombatSystem.js)"],
-    "upshift-cli": [
-        "Timestamped backup/rollback manager for filesystem changes with interactive restore flow (src/lib/rollback.ts)",
-        "Commander-based CLI command pattern with zod-style input validation (src/commands/fix.ts + src/lib/validate.ts)",
-    ],
-    "crystal-rush": ["PIXI.js entity classes with hand-drawn vector sprite composition and animation state (src/entities.js Player class)"],
-    "roblox-game-manager": ["Async Roblox Open Cloud API client wrapper with typed HTTP verb dispatch and error handling (roblox_api_manager.py RobloxAPIManager class)"],
-    "kosmos": ["Gmail OAuth token-refresh + AI-driven email auto-processing pipeline (lib/token-refresh.ts, lib/ai-email-processor.ts, app/api/ai-email-manager/auto-process/route.ts)"],
-    "MythSeeker": [
-        "Typed combat engine with encounter/turn/event-handler state machine (src/services/combatEngine.ts, class CombatEngine)",
-        "D&D5e rules engine with typed Spell/Character/Monster models driving spell/monster JSON data (src/services/rulesEngine.ts)",
-    ],
-    "smuggler-discord-bot": [
-        "d100 outcome-band dice resolver with canon success/failure tiers (src/dice.js)",
-        "Session budget-cap surfacing with warn/degrade thresholds (src/budget.js)",
-        "Discord channel/thread topology builder for session play (src/channelTopology.js)",
-        "Layered ephemeral character-picker flow with TTL'd custom IDs (src/picker.js)",
-    ],
-    "bulwark": [
-        "CircuitBreaker state machine CLOSED/OPEN/HALF_OPEN (src/circuit-breaker.js)",
-        "Token-bucket RateLimiter with refill+block (src/rate-limiter.js)",
-        "Exponential-backoff RetryHandler with retryable-error classification (src/retry-patterns.js)",
-        "ResilientClient composing rate-limit+circuit-breaker+retry (src/resilience.js)",
-    ],
-    "smuggler": [
-        "Pure game-logic core modules: d100 dice with advantage/disadvantage (core/dice.js), heat threshold/consequence system (core/heat.js), plus core/combat.js, core/economy.js, core/reputation.js, core/ships.js",
-    ],
-    "derelict": [
-        "ElectroDB entity + service + tRPC router CRUD pattern with real game-lifecycle business logic — roster/guild validation, scenario slug-collision suffixing (packages/backend/db/services/game.service.ts)",
-        "Ownership-checked tRPC mutation pattern for creator/admin authorization (packages/backend/lambda/api/scenario.router.ts)",
-    ],
-    "trove-app": ["Configurable multi-mode (spinner/progress/skeleton) loading overlay component (frontend/src/components/LoadingOverlay.tsx)"],
-    "services-dashboard": ["SmugglerOSLoader — configurable, timed-message boot/loading-screen class with options-merge constructor and DOM lifecycle (create/progress/complete) (js/components/SmugglerOSLoader.js)"],
-    "service-frontends": ["SmugglerOSLoader class (duplicate of services-dashboard's) across sub-apps (ai-gm/js/components/SmugglerOSLoader.js, character-system/js/components/SmugglerOSLoader.js) — candidate for de-duplication into a shared package"],
-    "commercial-platform": ["Game-economy monetization engine with CAC/LTV/ARPU/ROI calculators, black-market pricing + listing-risk scoring, and smuggling-route risk/toll calculators (server.js, calculateCAC/calculateLTV/calculateBlackMarketPrice/calculateListingRisk/calculateRouteRisk)"],
-    "chat-platform-service": [
-        "Rule-based multi-category toxicity/content moderation engine with regex pattern banks and contextual escalation/de-escalation tracking (src/services/AIChatModerationService.js)",
-        "Multi-language translation config/quality-scoring + language-family grouping for pair selection (src/services/RealtimeTranslationService.js)",
-    ],
-    "payment-platform-service": [
-        "Fraud-detection rule engine with velocity checks, geographic-anomaly thresholds, and typed fraud/risk taxonomies (src/services/AIFraudDetectionService.js)",
-        "Dynamic regional pricing engine combining GDP/purchasing-power/exchange-rate data with market-demand/competition weighting (src/services/RegionalPricingService.js)",
-    ],
-    "marketplace-system-service": ["Cross-game/NFT trading service with real async escrow, trade-fee/NFT-fee/complexity calculators, and multi-chain NFT mint/transfer flow (src/services/CrossGameTradingService.js: createTradeOffer/executeTrade/initializeEscrow/calculateTradeFees)"],
-    "code-generation-service": ["Multi-language code generation/refactor/convert/test/doc pipeline with per-language ecosystem metadata and post-processing stages (src/services/MultiLanguageCodeGenerator.js: generateCode/refactorCode/convertCode/generateTests/generateDocumentation)"],
-    "smugglers": ["Full game implementation (1.2M+ size) — tree-level scan only; flagged for a dedicated follow-up deep-scan pass rather than a verified per-file citation"],
-    "code-roach": ["Raw Node http-based CLI-to-server client with config management, integration setup flows, and parallel-crawl dispatcher (cli/code-roach.js: crawlParallel/parseArgs/commands.quality)"],
-    "echeodev": ["Typed error-handling hierarchy (AppError/ValidationError) with structured logging + singleton controller pattern in an OKR/goals backend auth flow (backend/src/controllers/AuthController.ts)"],
-    "echeo-dev": ["Same AuthController.ts primitives as echeodev (byte-identical auth controller header) — earlier duplicate/fork; echeodev is the canonical citation"],
-}
+EXTRACTED_PRIMITIVES: dict = _CURATION.get("extracted_primitives", {})
 
 
 def extracted_primitives_for(name: str) -> list[str]:
@@ -427,40 +287,18 @@ def scan_all_local_roots(known_paths: set[str]) -> list[dict]:
 
 
 def find_duplications(repos: list[dict]) -> list[dict]:
-    """Find name-similar repos that may be duplicates."""
+    """Find name-similar repos that may be duplicates. The families to look for name private
+    repos, so they are data in the private curation file: [{label, regex, recommendation}]."""
     dups = []
-    # Echeo cluster
-    echeo = [r["name"] for r in repos if re.match(r"^echeo", r["name"], re.IGNORECASE)]
-    if len(echeo) > 1:
-        dups.append({
-            "pattern": "echeo-*",
-            "variants": echeo,
-            "recommendation": "consolidate to one active variant + archive the rest; pick the most recently pushed as primary",
-        })
-    # MythSeeker
-    myth = [r["name"] for r in repos if re.search(r"mythseeker", r["name"], re.IGNORECASE)]
-    if len(myth) > 1:
-        dups.append({"pattern": "mythseeker-*", "variants": myth, "recommendation": "v1 vs v2 — pick survivor, archive other"})
-    # Smugglers
-    smug = [r["name"] for r in repos if re.search(r"^smuggler", r["name"], re.IGNORECASE)]
-    if len(smug) > 1:
-        dups.append({"pattern": "smuggler-*", "variants": smug, "recommendation": "core vs full — clarify which is the active engine"})
-    # code-roach / coderoach
-    cr = [r["name"] for r in repos if re.search(r"code-?roach", r["name"], re.IGNORECASE)]
-    if len(cr) > 1:
-        dups.append({"pattern": "coderoach/code-roach", "variants": cr, "recommendation": "rename collision — one is archived; archive the other or merge"})
-    # project-forge / project_forge
-    pf = [r["name"] for r in repos if re.search(r"project[-_]forge", r["name"], re.IGNORECASE)]
-    if len(pf) > 1:
-        dups.append({"pattern": "project[-_]forge", "variants": pf, "recommendation": "underscore vs hyphen — both archived; collapse"})
-    # 2029 family
-    yr = [r["name"] for r in repos if re.search(r"2029", r["name"], re.IGNORECASE)]
-    if len(yr) > 1:
-        dups.append({"pattern": "2029-*", "variants": yr, "recommendation": "three repos for one initiative — pick one canonical"})
-    # JARVIS family
-    jv = [r["name"] for r in repos if re.search(r"jarvis", r["name"], re.IGNORECASE)]
-    if len(jv) > 1:
-        dups.append({"pattern": "jarvis-*", "variants": jv, "recommendation": "platform variants (ROG Ally, Android, gateway, premium) — confirm intentional vs accidental fork"})
+    for rule in _CURATION.get("duplication_rules", []):
+        try:
+            rx = re.compile(rule["regex"], re.IGNORECASE)
+        except (KeyError, re.error):
+            continue
+        variants = [r["name"] for r in repos if rx.search(r["name"])]
+        if len(variants) > 1:
+            dups.append({"pattern": rule.get("label", rule["regex"]), "variants": variants,
+                         "recommendation": rule.get("recommendation", "")})
     return dups
 
 
@@ -504,10 +342,12 @@ def find_alerts(repos: list[dict], local_roots: list[dict]) -> list[dict]:
 
 def build():
     raw = json.loads(RAW.read_text())
+    if PUBLIC_ONLY:
+        raw = [r for r in raw if (r.get("visibility") or "").upper() == "PUBLIC"]
     signatures = _load_signatures()
     repos = []
     for r in raw:
-        clone = local_clone_for(r["name"])
+        clone = None if PUBLIC_ONLY else local_clone_for(r["name"])
         curated = extracted_primitives_for(r["name"])
         scanned: list[dict] = []
         if clone and signatures:
@@ -536,21 +376,22 @@ def build():
         })
 
     known_paths = {r["local_clone"]["path"] for r in repos if r["local_clone"]}
-    local_roots = scan_all_local_roots(known_paths)
+    local_roots = [] if PUBLIC_ONLY else scan_all_local_roots(known_paths)
     unmatched_roots = [l for l in local_roots if not l["is_primary_clone"]]
 
     out = {
         "metadata": {
             "generated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "generator": "scripts/arsenal/build.py v0",
-            "operator": "repairman29 (Jeff Adkins)",
+            "operator": "repairman29",
+            "scope": "public repos only" if PUBLIC_ONLY else "operator full catalog",
             "fleet_size_github": len(repos),
             "fleet_size_local_clones": sum(1 for r in repos if r["local_clone"]),
             "fleet_size_unmatched_local_roots": len(unmatched_roots),
         },
         "clusters": {},
         "duplications": find_duplications(repos),
-        "alerts": find_alerts(repos, local_roots),
+        "alerts": [] if PUBLIC_ONLY else find_alerts(repos, local_roots),
         "primitives_index": {},
         "repos_by_name": {r["name"]: r for r in repos},
         "unmatched_local_roots": unmatched_roots,

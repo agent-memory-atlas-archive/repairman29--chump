@@ -1,0 +1,14 @@
+# fleet-nodes.conf — node topology for fleet-health-sentinel.sh --fleet grade.
+# EXAMPLE. Copy to ~/.chump/fleet-nodes.conf (or point CHUMP_FLEET_NODES_CONF at it) and fill in
+# your own nodes. The real file stays out of this public repo: it holds SSH targets.
+# RESILIENT-1052.
+#
+# TAB-separated: <name>\t<ssh_target>\t<ssh_opts>
+#   name        node id (matches `hostname` on that node)
+#   ssh_target  user@host for the --fleet grader to reach it; EMPTY for the
+#               host the grader itself runs on (it reads the local heartbeat).
+#   ssh_opts    extra ssh options (identity file, etc.), space-separated.
+#
+node-a	deploy@node-a.example.internal	-i ~/.ssh/fleet_node_key -o IdentitiesOnly=yes
+node-b	deploy@node-b.example.internal	-i ~/.ssh/fleet_node_key -o IdentitiesOnly=yes
+node-c	node-c

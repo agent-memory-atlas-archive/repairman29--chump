@@ -60,7 +60,7 @@
 #   --dry-run            detect + report only; never heal, never page.
 #   --loop [--cadence-min N]  run forever, one pass every N min (default 5) —
 #                        for the Restart=always organ-service supervisor path.
-#   --nodes FILE         node topology (default scripts/ops/fleet-nodes.conf).
+#   --nodes FILE         node topology (default $CHUMP_FLEET_NODES_CONF, else ~/.chump/fleet-nodes.conf).
 #
 # ENV:
 #   CHUMP_STATE_DIR              heartbeat dir (default ~/.chump)
@@ -178,7 +178,9 @@ fi
 MODE="local"
 DRY=0
 LOOP=0
-NODES_FILE="$SCRIPT_DIR/fleet-nodes.conf"
+# Node topology carries SSH targets and public addresses, and this repo is PUBLIC, so the real file
+# lives outside the tree. scripts/ops/fleet-nodes.conf.example shows the format.
+NODES_FILE="${CHUMP_FLEET_NODES_CONF:-$HOME/.chump/fleet-nodes.conf}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

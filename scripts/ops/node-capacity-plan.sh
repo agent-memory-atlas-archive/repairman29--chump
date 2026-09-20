@@ -135,7 +135,7 @@ emit_ambient() {
 
 plan() {
   NODE="$(hostname -s 2>/dev/null || hostname)"
-  local manifest="$REPO/docs/fleet/nodes/${NODE}.json"
+  local manifest="${CHUMP_NODE_REGISTRY_DIR:-$HOME/.chump/fleet/nodes}/${NODE}.json"
 
   # cores: prefer the declared manifest, fall back to live nproc.
   CORES="$(declared_field "$manifest" cpu_cores)"

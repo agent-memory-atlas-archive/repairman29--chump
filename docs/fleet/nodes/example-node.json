@@ -1,0 +1,12 @@
+{
+  "node_id": "node-a",
+  "tailnet_ip": "192.0.2.10",
+  "os": "linux",
+  "hardware": {"cores": 4, "ram_gb": 16, "disk_free_gb": 100},
+  "roles_fit": ["muscle"],
+  "services_running": [],
+  "capability": {},
+  "role_assigned": null,
+  "probed_at": "1970-01-01T00:00:00Z",
+  "probe_source": "example"
+}

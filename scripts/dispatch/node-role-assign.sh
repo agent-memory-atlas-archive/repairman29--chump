@@ -44,7 +44,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 MODE="apply"
-NODES_DIR="$REPO_ROOT/docs/fleet/nodes"
+# The node registry names machines, tailnet addresses and what runs where, and this repo is
+# PUBLIC, so it lives outside the tree. One variable for every reader and writer.
+NODES_DIR="${CHUMP_NODE_REGISTRY_DIR:-$HOME/.chump/fleet/nodes}"
 HOST_FILTER=""
 
 while [[ $# -gt 0 ]]; do

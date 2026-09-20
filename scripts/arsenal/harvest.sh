@@ -39,16 +39,27 @@
 #   scripts/arsenal/harvest.sh check auth
 #   scripts/arsenal/harvest.sh check INFRA-1486
 #   scripts/arsenal/harvest.sh brief echo-chamber operator-ui-lists
-#   scripts/arsenal/harvest.sh deep-scan smugglers-rpg
+#   scripts/arsenal/harvest.sh deep-scan game-services
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ARSENAL="$ROOT/docs/arsenal"
+BUILD_PY="$ROOT/scripts/arsenal/build.py"
+# Two catalogs. This repo is PUBLIC, so docs/arsenal/ holds PUBLIC repos only and no local paths.
+# The operator's full catalog (private repos, local clones, cross-pollination briefs, curation)
+# lives in PRIVATE_ARSENAL, outside every git tree. `scan` builds both. Every read-side command
+# (check, brief, deep-scan) uses the private catalog when it exists and the public one otherwise,
+# so a fresh clone still works, against less.
+PUBLIC_ARSENAL="$ROOT/docs/arsenal"
+PRIVATE_ARSENAL="${CHUMP_ARSENAL_DIR:-$HOME/.chump/arsenal}"
+if [ -f "$PRIVATE_ARSENAL/GLOBAL_ARSENAL.json" ] || [ "${1:-}" = "scan" ]; then
+  ARSENAL="$PRIVATE_ARSENAL"
+else
+  ARSENAL="$PUBLIC_ARSENAL"
+fi
 RAW="$ARSENAL/raw/github_repos.json"
 CATALOG="$ARSENAL/GLOBAL_ARSENAL.json"
 CP_DIR="$ARSENAL/cross-pollination"
-BUILD_PY="$ROOT/scripts/arsenal/build.py"
 
 cmd=${1:-help}
 [ $# -gt 0 ] && shift || true
@@ -62,7 +73,7 @@ require_catalog() {
 
 case "$cmd" in
   scan)
-    mkdir -p "$(dirname "$RAW")"
+    mkdir -p "$(dirname "$RAW")"; chmod 700 "$ARSENAL" 2>/dev/null || true
     echo "→ refreshing $RAW from gh repo list" >&2
     gh repo list --limit 200 --json name,description,primaryLanguage,visibility,pushedAt,isArchived,isFork,sshUrl,url,createdAt,updatedAt,diskUsage,repositoryTopics > "$RAW.tmp"
     # Operator exclude list. This catalog is committed to a PUBLIC repo, and `gh repo list`
@@ -86,8 +97,22 @@ case "$cmd" in
     else
       mv "$RAW.tmp" "$RAW"
     fi
-    echo "→ rebuilding catalog via $BUILD_PY" >&2
-    python3 "$BUILD_PY"
+    echo "→ rebuilding the operator catalog in $ARSENAL" >&2
+    CHUMP_ARSENAL_DIR="$ARSENAL" CHUMP_ARSENAL_PUBLIC_ONLY=0 python3 "$BUILD_PY"
+    # The committed catalog: PUBLIC repos only, filtered BEFORE it is written, no local paths.
+    mkdir -p "$PUBLIC_ARSENAL/raw"
+    jq -c 'map(select((.visibility // "") | ascii_upcase == "PUBLIC"))' "$RAW" > "$PUBLIC_ARSENAL/raw/github_repos.json.tmp" \
+      && mv "$PUBLIC_ARSENAL/raw/github_repos.json.tmp" "$PUBLIC_ARSENAL/raw/github_repos.json" \
+      || { rm -f "$PUBLIC_ARSENAL/raw/github_repos.json.tmp"; echo "harvest scan: public filter failed; public catalog left untouched" >&2; exit 4; }
+    echo "→ rebuilding the public catalog in $PUBLIC_ARSENAL ($(jq length "$PUBLIC_ARSENAL/raw/github_repos.json") public repo(s))" >&2
+    CHUMP_ARSENAL_DIR="$PUBLIC_ARSENAL" CHUMP_ARSENAL_PUBLIC_ONLY=1 python3 "$BUILD_PY"
+    # The public catalog carries no alerts by design, so the high-severity signal (an embedded
+    # token in a clone's remote, INFRA-6616) has to be raised from the operator catalog here.
+    high=$(jq '[.alerts[]? | select(.severity == "high")] | length' "$CATALOG" 2>/dev/null || echo 0)
+    if [ "${high:-0}" -gt 0 ]; then
+      echo "harvest scan: $high high-severity alert(s) in the operator catalog; see .alerts in $CATALOG" >&2
+      exit 5
+    fi
     ;;
 
   check)
@@ -170,7 +195,7 @@ case "$cmd" in
     target=${2:-}
     if [ -z "$src" ] || [ -z "$target" ]; then
       echo "harvest brief: source repo and target need required" >&2
-      echo "  example: harvest.sh brief postsub stripe-billing-for-marketplace" >&2
+      echo "  example: harvest.sh brief billing-service stripe-billing-for-marketplace" >&2
       exit 1
     fi
     mkdir -p "$CP_DIR"

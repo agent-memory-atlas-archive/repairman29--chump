@@ -86,8 +86,8 @@ python3 scripts/arsenal/build.py
 | Field | Meaning |
 |---|---|
 | `metadata` | counts: GH repos, local clones, unmatched local roots |
-| `clusters` | repos grouped by name/desc heuristic (`chump-engine`, `smugglers-rpg`, …) |
-| `duplications` | name-pattern collisions (echeo-*, mythseeker-*, …) → DRY violations |
+| `clusters` | repos grouped by name/desc heuristic (`chump-engine`, `game-services`, …) |
+| `duplications` | name-pattern collisions (product-*, game-*, …) → DRY violations |
 | `alerts` | high-priority findings (credential leaks, stale vendored clones, misplaced .git) |
 | `primitives_index` | label → list of repos that own that primitive (auth, payment, chat, …) |
 | `repos_by_name` | full per-repo record (visibility, language, last push, local_clone, primitives) |
@@ -97,7 +97,7 @@ python3 scripts/arsenal/build.py
 
 ### Per-file primitive indexing (INFRA-1864)
 
-CP-002 found a Discovery Failure footprint: `echeo/src/shredder.rs` had a
+CP-002 found a Discovery Failure footprint: `<repo>/src/shredder.rs` had a
 tree-sitter AST-extraction primitive sitting in the arsenal the whole time,
 but nothing surfaced it to a gap that needed one — the catalog only indexed
 at the *repo* level (name/description keyword match), not the *file* level.
@@ -234,4 +234,4 @@ Full retrospective: [`docs/process/CURATOR_OPUS_LESSONS_2026-05-23.md`](../proce
 2. Zero commits in last 90 days
 3. No description (or description is template-only)
 
-Any single one — or even two — is insufficient. Wave 2 dropped 6 real Smugglers services as "all dormant" based on uniform `pushed_at` dates. Wave 3 found them. If a repo is in the catalog, it gets a deep-scan read before being declared dormant.
+Any single one — or even two — is insufficient. Wave 2 dropped 6 real services in one product family as "all dormant" based on uniform `pushed_at` dates. Wave 3 found them. If a repo is in the catalog, it gets a deep-scan read before being declared dormant.

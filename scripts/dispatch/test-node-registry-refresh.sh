@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Tests for node-registry-refresh.sh. Fake registry, fake `ssh` on PATH — never
-# touches a real node or the real docs/fleet/nodes.
+# touches a real node or the real registry (CHUMP_NODE_REGISTRY_DIR is pinned to the fixture).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 T=$(mktemp -d -t noderegtest); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/root/docs/fleet/nodes" "$T/root/scripts/dispatch" "$T/bin"
 cp "$HERE/node-registry-refresh.sh" "$T/root/scripts/dispatch/"
 REG="$T/root/docs/fleet/nodes"
+# The refresher defaults to the operator's REAL registry (~/.chump/fleet/nodes). Pin it to the
+# fixture, or this test overwrites live node records with fake ones.
+export CHUMP_NODE_REGISTRY_DIR="$REG"
 
 # A describe script that just echoes a valid profile for whatever host it runs on.
 cat > "$T/root/scripts/dispatch/node-describe.sh" <<'DESC'

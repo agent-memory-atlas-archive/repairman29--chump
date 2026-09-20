@@ -93,7 +93,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${CHUMP_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
-NODES_DIR="${CHUMP_APEX_WATCHDOG_NODES_DIR:-$REPO_ROOT/docs/fleet/nodes}"
+# The node registry names machines, tailnet addresses and what runs where, and this repo is
+# PUBLIC, so it lives outside the tree. One variable for every reader and writer.
+NODES_DIR="${CHUMP_APEX_WATCHDOG_NODES_DIR:-${CHUMP_NODE_REGISTRY_DIR:-$HOME/.chump/fleet/nodes}}"
 SELF_NODE="${CHUMP_APEX_WATCHDOG_SELF:-$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)}"
 CURL_BIN="${CHUMP_APEX_WATCHDOG_CURL_BIN:-curl}"
 SSH_BIN="${CHUMP_APEX_WATCHDOG_SSH_BIN:-ssh}"

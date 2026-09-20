@@ -27,7 +27,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-REG="$ROOT/docs/fleet/nodes"
+# The node registry names machines, tailnet addresses and what runs where, and this repo is
+# PUBLIC, so it lives outside the tree. One variable for every reader and writer.
+REG="${CHUMP_NODE_REGISTRY_DIR:-$HOME/.chump/fleet/nodes}"
 DESCRIBE="$ROOT/scripts/dispatch/node-describe.sh"
 DRY="${DRY_RUN:-}"
 SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=${SSH_TIMEOUT:-15} -o StrictHostKeyChecking=accept-new"
