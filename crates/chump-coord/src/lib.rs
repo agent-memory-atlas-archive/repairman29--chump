@@ -109,6 +109,20 @@ pub const EVENTS_SUBJECT: &str = "chump.events";
 /// Default TTL for gap claim entries (4 hours, matches file lease default).
 pub const DEFAULT_GAP_TTL_SECS: u64 = 14_400;
 
+/// KV bucket for the INFRA-2252 local-merge-queue CAS lock (INFRA-7714 slice).
+///
+/// Distinct from [`GAP_BUCKET`]: this is a single well-known key
+/// (`MERGE_QUEUE_LOCK_KEY`) shared by every worker on the local mesh, used to
+/// serialize merges into local `main` when `CHUMP_GITHUB_MODE=offline`.
+pub const MERGE_QUEUE_BUCKET: &str = "chump_merge_queue";
+
+/// The single key inside [`MERGE_QUEUE_BUCKET`] that acts as the lock.
+pub const MERGE_QUEUE_LOCK_KEY: &str = "lock";
+
+/// Default TTL for the merge-queue lock (5 minutes) — a safety net so a
+/// holder that crashes mid-merge doesn't wedge the queue forever.
+pub const DEFAULT_MERGE_LOCK_TTL_SECS: u64 = 300;
+
 // ── Claim record ─────────────────────────────────────────────────────────────
 
 /// Stored in NATS KV `chump_gaps` under key `gap.<gap-id>` when a session claims a gap.
@@ -121,6 +135,16 @@ pub struct GapClaim {
     /// Optional: files the claiming session intends to touch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+}
+
+/// Stored in NATS KV [`MERGE_QUEUE_BUCKET`] under [`MERGE_QUEUE_LOCK_KEY`]
+/// while a worker holds the local-merge-queue lock.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeLockHolder {
+    /// Identity of the lock holder, e.g. `"<pid>@<hostname>"`.
+    pub holder: String,
+    /// RFC3339 timestamp of when the lock was acquired.
+    pub acquired_at: String,
 }
 
 // ── Event record ─────────────────────────────────────────────────────────────
@@ -172,6 +196,8 @@ pub struct CoordClient {
     /// registers the WORKER itself (worker_id, backend, machine, skills,
     /// harness, current_gap, status).
     pub workers_kv: kv::Store,
+    /// INFRA-7714 (INFRA-2252 slice): local-merge-queue CAS lock bucket.
+    pub(crate) merge_queue_kv: kv::Store,
 }
 
 /// Parse credentials out of a `nats://[user[:pass]@]host:port` URL.
@@ -274,6 +300,24 @@ impl CoordClient {
         // CREDIBLE-246 (CREDIBLE-099 slice): worker presence KV bucket.
         let workers_kv = presence::init_workers_bucket(&js).await?;
 
+        // INFRA-7714 (INFRA-2252 slice): local-merge-queue CAS lock bucket.
+        // TTL bounds how long a crashed holder can wedge the queue.
+        let merge_lock_ttl_secs: u64 = std::env::var("CHUMP_MERGE_LOCK_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MERGE_LOCK_TTL_SECS);
+        let merge_queue_bucket_name = std::env::var("CHUMP_NATS_MERGE_QUEUE_BUCKET")
+            .unwrap_or_else(|_| MERGE_QUEUE_BUCKET.to_string());
+        let merge_queue_kv = js
+            .create_key_value(kv::Config {
+                bucket: merge_queue_bucket_name,
+                max_age: Duration::from_secs(merge_lock_ttl_secs),
+                history: 1,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| anyhow!("merge-queue KV bucket setup failed: {}", e))?;
+
         Ok(Self {
             nats,
             js,
@@ -282,6 +326,7 @@ impl CoordClient {
             help_requests_kv,
             capabilities_kv,
             workers_kv,
+            merge_queue_kv,
         })
     }
 
@@ -389,6 +434,57 @@ impl CoordClient {
             }
         }
         Ok(out)
+    }
+
+    // ── Merge-queue CAS lock (INFRA-7714 / INFRA-2252 slice) ────────────────────
+
+    /// Attempt to atomically acquire the local-merge-queue lock for `holder`
+    /// (typically `"<pid>@<hostname>"`). Returns `Ok(true)` if acquired,
+    /// `Ok(false)` if another holder already has it (CAS conflict — this is
+    /// the expected "someone else is merging" case, not an error).
+    ///
+    /// Distinct from [`try_claim_gap`]: this is a single well-known key
+    /// shared by every worker on the mesh, not a per-gap entry.
+    pub async fn try_acquire_merge_lock(&self, holder: &str) -> Result<bool> {
+        let record = MergeLockHolder {
+            holder: holder.to_string(),
+            acquired_at: Utc::now().to_rfc3339(),
+        };
+        let value: Bytes = serde_json::to_vec(&record)?.into();
+
+        match self
+            .merge_queue_kv
+            .create(MERGE_QUEUE_LOCK_KEY, value)
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                if e.kind() == kv::CreateErrorKind::AlreadyExists {
+                    Ok(false)
+                } else {
+                    Err(anyhow!("merge-lock KV create error: {}", e))
+                }
+            }
+        }
+    }
+
+    /// Release the merge-queue lock. No-op if it doesn't exist or already
+    /// expired via TTL.
+    pub async fn release_merge_lock(&self) -> Result<()> {
+        self.merge_queue_kv
+            .purge(MERGE_QUEUE_LOCK_KEY)
+            .await
+            .map_err(|e| anyhow!("merge-lock KV purge error: {}", e))?;
+        Ok(())
+    }
+
+    /// Read the current merge-lock holder, or `None` if unlocked.
+    pub async fn merge_lock_holder(&self) -> Result<Option<MergeLockHolder>> {
+        match self.merge_queue_kv.get(MERGE_QUEUE_LOCK_KEY).await {
+            Ok(Some(bytes)) => Ok(Some(serde_json::from_slice(&bytes)?)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(anyhow!("merge-lock KV get error: {}", e)),
+        }
     }
 
     // ── Event publishing ──────────────────────────────────────────────────────

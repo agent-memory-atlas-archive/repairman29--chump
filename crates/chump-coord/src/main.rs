@@ -8,6 +8,10 @@
 //!   ping                       — check NATS reachability (exit 0 = up)
 //!   claim <gap-id>             — atomic claim (exit 0 = won, 1 = lost to another session)
 //!   release <gap-id>           — release claim
+//!   merge-lock <sub> [args …]  — INFRA-7714 (INFRA-2252 slice): local-merge-queue CAS lock
+//!                                 (acquire <holder>|release|status)
+//!                                 exit 0 = acquired/released, 1 = held by another holder,
+//!                                 2 = usage error, 3 = NATS unreachable
 //!   status                     — show all active claims + recent events
 //!   emit <type> [key=value …]  — publish a structured event
 //!   watch                      — stream live events (ctrl-c to stop)
@@ -201,6 +205,98 @@ async fn main() -> Result<()> {
                 Some(c) => {
                     c.release_gap(gap_id).await?;
                     println!("[chump-coord] RELEASED {}", gap_id);
+                }
+            }
+        }
+
+        // ── merge-lock ────────────────────────────────────────────────────────
+        // INFRA-7714 (INFRA-2252 slice): NATS KV CAS lock serializing the local
+        // merge queue across worker machines on the mesh.
+        //
+        // Exit codes:
+        //   0  acquire: lock won | release: cleared | status: printed
+        //   1  acquire: lock held by another holder (CAS conflict — expected)
+        //   2  usage error
+        //   3  NATS unreachable — distinct from (1) so callers can tell
+        //      "someone else is merging" from "can't reach the coordination
+        //      layer at all" and fall back to file-lock accordingly.
+        "merge-lock" => {
+            let sub = args.get(2).map(|s| s.as_str()).unwrap_or_else(|| {
+                eprintln!("Usage: chump-coord merge-lock {{acquire <holder>|release|status}}");
+                std::process::exit(2);
+            });
+            match sub {
+                "acquire" => {
+                    let holder = args.get(3).map(|s| s.as_str()).unwrap_or_else(|| {
+                        eprintln!("Usage: chump-coord merge-lock acquire <holder>");
+                        std::process::exit(2);
+                    });
+                    match CoordClient::connect().await {
+                        Err(e) => {
+                            eprintln!("[chump-coord] merge-lock: NATS unreachable: {}", e);
+                            std::process::exit(3);
+                        }
+                        Ok(c) => match c.try_acquire_merge_lock(holder).await {
+                            Ok(true) => {
+                                println!("[chump-coord] merge-lock ACQUIRED by {}", holder);
+                                std::process::exit(0);
+                            }
+                            Ok(false) => {
+                                let who = c
+                                    .merge_lock_holder()
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .map(|h| h.holder)
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                eprintln!("[chump-coord] merge-lock CONFLICT: held by '{}'", who);
+                                std::process::exit(1);
+                            }
+                            Err(e) => {
+                                eprintln!("[chump-coord] merge-lock: NATS unreachable: {}", e);
+                                std::process::exit(3);
+                            }
+                        },
+                    }
+                }
+                "release" => match CoordClient::connect().await {
+                    Err(e) => {
+                        eprintln!("[chump-coord] merge-lock: NATS unreachable: {}", e);
+                        std::process::exit(3);
+                    }
+                    Ok(c) => match c.release_merge_lock().await {
+                        Ok(()) => {
+                            println!("[chump-coord] merge-lock RELEASED");
+                            std::process::exit(0);
+                        }
+                        Err(e) => {
+                            eprintln!("[chump-coord] merge-lock: NATS unreachable: {}", e);
+                            std::process::exit(3);
+                        }
+                    },
+                },
+                "status" => match CoordClient::connect().await {
+                    Err(e) => {
+                        eprintln!("[chump-coord] merge-lock: NATS unreachable: {}", e);
+                        std::process::exit(3);
+                    }
+                    Ok(c) => match c.merge_lock_holder().await {
+                        Ok(Some(h)) => {
+                            println!(
+                                "[chump-coord] merge-lock HELD by {} since {}",
+                                h.holder, h.acquired_at
+                            );
+                        }
+                        Ok(None) => println!("[chump-coord] merge-lock UNLOCKED"),
+                        Err(e) => {
+                            eprintln!("[chump-coord] merge-lock: NATS unreachable: {}", e);
+                            std::process::exit(3);
+                        }
+                    },
+                },
+                _ => {
+                    eprintln!("Usage: chump-coord merge-lock {{acquire <holder>|release|status}}");
+                    std::process::exit(2);
                 }
             }
         }
