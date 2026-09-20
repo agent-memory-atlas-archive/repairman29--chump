@@ -689,6 +689,19 @@ jobs:
       - name: Fleet-health sentinel gate (RESILIENT-1052)
         run: bash scripts/ci/test-fleet-health-sentinel.sh
 
+      # INFRA-7769 (docs/strategy/ONE_COMMAND_INSTALL.md section 1, INFRA-7756
+      # slice A): proves a REAL pre-unification organ-manifest.txt (frozen
+      # fixture, lines copied from commit e16215781, the last commit before
+      # INFRA-7764) still parses, cannot render a single launchd-applicable
+      # organ on its own, and trips the documented INFRA-7766 fallback WARN —
+      # while the CURRENT organ-manifest.txt does not. Sibling of the
+      # INFRA-7768 gate (audit.yml shard 4); wired into ci.yml's pr-hygiene
+      # job instead because audit.yml was under an active lease (open PR
+      # #4785) at claim time — same job family (static/deterministic bash
+      # gate, no cargo build, no network).
+      - name: Old-manifest BOM regression gate (INFRA-7769)
+        run: bash scripts/ci/test-bom-old-manifest-regression.sh
+
       # RESILIENT-001: the mirror-converge jam. A node's working tree
       # accumulates generated files (untracked docs/gaps/*.yaml mirrors, local
       # chore(backlog) autocommits); a merge-based advance (`git pull`) then

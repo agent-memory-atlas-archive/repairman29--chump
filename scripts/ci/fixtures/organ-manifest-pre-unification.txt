@@ -1,0 +1,34 @@
+# FROZEN REGRESSION FIXTURE — scripts/ci/test-bom-old-manifest-regression.sh (INFRA-7769)
+#
+# This is a representative excerpt of the REAL scripts/ops/organ-manifest.txt
+# as it existed at commit e16215781d8c388701140f971235951c010141a1 — the last
+# commit BEFORE INFRA-7764 (INFRA-7756 slice A, docs/strategy/ONE_COMMAND_INSTALL.md
+# section 1) added the `platforms=` field, and before INFRA-7765/7766 folded
+# bootstrap-manifest.yaml and install-node-housekeeping.sh's hardcoded roster
+# in. Lines below are copied verbatim (not synthesized) from that commit, so
+# this fixture genuinely has ZERO `platforms=` tokens and ZERO `housekeeping=`
+# tokens — the actual shape of the pre-unification, three-separate-rosters
+# world this slice fixed. NOT sourced via `git show <old-sha>` at test time
+# because CI checkouts are shallow (actions/checkout@v7 default depth=1) and
+# cannot reach that commit — frozen as a static fixture instead.
+#
+# DO NOT "fix" this file to add platforms=/housekeeping= — that defeats the
+# test. If organ-manifest.txt's real format changes again, update
+# docs/ops/ORGAN_ROSTER_AUDIT.md or add a NEW fixture; this one exists to
+# stay old on purpose.
+
+paging_off  chump-heartbeat-monitor.service
+paging_off  chump-sla-scorecard.service
+paging_off  chump-board-ceo-briefing.service
+
+enabled     chump-discord-gateway.service  role=brain
+enabled     chump-pr-lander.timer  role=brain requires=bin:gh
+enabled     chump-ci-flake-rerun.timer  role=brain requires=bin:gh
+enabled     chump-pr-approval.timer  role=brain requires=bin:gh
+enabled     chump-farmer.timer  role=brain requires=bin:chump
+enabled     chump-rot-reaper.timer  role=brain requires=bin:gh
+enabled     chump-trunk-recovery-reviver.timer  role=brain requires=bin:gh
+enabled     chump-cj-worker.service  role=muscle requires=bin:chump,bin:git,file:~/cj-worker-run.sh
+enabled     chump-cj-disk-monitor.service  role=janitor requires=bin:df,file:~/cj-disk-monitor-run.sh
+enabled     chump-cj-sync.service  role=data requires=bin:git,file:~/cj-sync-run.sh
+enabled     chump-digest.timer  role=data

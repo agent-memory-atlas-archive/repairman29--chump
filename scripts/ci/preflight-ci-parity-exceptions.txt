@@ -430,3 +430,14 @@ test-resilient-1055-role-roster.sh   # reason: RESILIENT-1055/1102 — Tier-D in
 ftue-cold-install.sh  # reason: RESILIENT-1050 — Tier-D node-bring-up FTUE harness (builds fleet-server + boots a systemd container); Linux/Docker-only, not preflight-shaped [gap: RESILIENT-1051]
 test-gap-store-single-source.sh  # reason: deterministic source/config inspection (Cargo feature flags + grep + file presence), no chump binary; Tier-D in spirit [gap: RESILIENT-1057]
 test-corrective-keyword-exception.sh  # reason: META-937 — exercises scripts/dispatch/_pick_and_claim_gap.py's FLEET_REQUIRE_TITLE_SUBSTR filter directly with synthetic gap JSON + temp lock dirs, same shape as test-pick-and-claim-dep-resolution.sh (also unmirrored); no chump binary, no state mutation.
+
+# ── INFRA-7769: pre-unification organ-manifest.txt regression guard ─────────
+# Static/deterministic bash gate — sources organ-manifest-lib.sh +
+# node-housekeeping-roster-lib.sh and runs render-organ-roster.sh against a
+# frozen historical fixture (scripts/ci/fixtures/organ-manifest-pre-unification.txt,
+# lines copied verbatim from the pre-INFRA-7764 organ-manifest.txt) plus the
+# real, current organ-manifest.txt. No network, no cargo build, no chump
+# binary — same shape as test-organ-manifest-bom-integration.sh (INFRA-7768,
+# also unmirrored). Allowlisted here rather than adding a preflight.rs mirror
+# so the fixture-vs-live-manifest comparison stays exactly what CI runs.
+test-bom-old-manifest-regression.sh  # reason: INFRA-7769 — regression guard proving a real pre-unification organ-manifest.txt still parses, cannot render a launchd roster alone, and trips the documented INFRA-7766 fallback WARN; same shape/rationale as test-organ-manifest-bom-integration.sh above
