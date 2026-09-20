@@ -10,6 +10,11 @@ on:
     - cron: '0 4 * * *'   # 04:00 UTC nightly
   workflow_dispatch:
 
+# Least-privilege token scope. Every job here only reads the repository;
+# nothing in this workflow writes through GITHUB_TOKEN.
+permissions:
+  contents: read
+
 concurrency:
   group: e2e-dogfood-nightly
   cancel-in-progress: true

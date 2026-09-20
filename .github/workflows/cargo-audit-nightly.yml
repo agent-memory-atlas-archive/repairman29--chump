@@ -25,6 +25,11 @@ on:
       - '.github/workflows/cargo-audit-nightly.yml'
   workflow_dispatch:
 
+# Least-privilege token scope. Every job here only reads the repository;
+# nothing in this workflow writes through GITHUB_TOKEN.
+permissions:
+  contents: read
+
 # INFRA-1378: workflow-level group, do NOT cancel in progress —
 # nightly cron should finish even if a manual dispatch fires.
 concurrency:

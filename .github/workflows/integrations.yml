@@ -25,6 +25,16 @@ on:
         required: false
         default: 'per-pr'
 
+# Least-privilege default: read-only.
+#   pull-requests: read — REQUIRED by dorny/paths-filter in the `changes` job
+#     (lists PR files via the API on pull_request events; the job is
+#     continue-on-error, so a missing scope fails quietly).
+# Jobs that need more (visual-diff posts a PR comment) carry their own
+# job-level `permissions:` block, which replaces this default for that job.
+permissions:
+  contents: read
+  pull-requests: read
+
 # INFRA-1378: cancel superseded PR runs so re-pushes stop burning runners to
 # completion. integrations had NO concurrency block, so every force-push to a PR
 # branch spawned a fresh ~11min run while the old one kept a self-hosted runner
@@ -104,9 +114,9 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          # INFRA-2126: per-run unique key prevents concurrent PRs from fighting over
-          # the same cache slot; only main writes the shared cache.
-          key-suffix: ${{ github.run_id }}
+          # INFRA-2126: only main writes the shared cache. (A `key-suffix` input
+          # used to be passed here; rust-cache@v2 defines no such input, so it was
+          # ignored at runtime. Removed with no change to cache keys.)
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install system dependencies
@@ -130,6 +140,7 @@ jobs:
         # INFRA-1600: honor $CARGO_TARGET_DIR (shared cache redirects build output).
         run: |
           source scripts/ci/lib/ensure-cargo-on-path.sh
+          # shellcheck disable=SC2155  # pwd cannot fail here; keep single-line export
           export REPO_ROOT="$(pwd)"
           source scripts/ci/lib/discover-chump-bin.sh
           bash scripts/ci/test-acp-smoke.sh
@@ -276,14 +287,16 @@ jobs:
         if: always()
         run: |
           DIFF_FILE="tests/fixtures/acp/real-clients/protocol-diffs.txt"
-          echo "## ACP Protocol Diff — ${{ matrix.client.display }}" >> "$GITHUB_STEP_SUMMARY"
-          if [[ -f "$DIFF_FILE" ]]; then
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-            cat "$DIFF_FILE" >> "$GITHUB_STEP_SUMMARY"
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "_No diff file generated._" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "## ACP Protocol Diff — ${{ matrix.client.display }}"
+            if [[ -f "$DIFF_FILE" ]]; then
+              echo '```'
+              cat "$DIFF_FILE"
+              echo '```'
+            else
+              echo "_No diff file generated._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   # Job 3: ACP force-fire fixture (CREDIBLE-057)

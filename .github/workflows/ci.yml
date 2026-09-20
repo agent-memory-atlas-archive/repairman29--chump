@@ -22,6 +22,21 @@ on:
         required: false
         default: ''
 
+# Least-privilege token scope: read-only. No job in this workflow writes
+# through GITHUB_TOKEN.
+#   pull-requests: read — REQUIRED by dorny/paths-filter in the `changes` job
+#     (it lists PR files via the API on pull_request events). That job is
+#     continue-on-error, so without this scope the filter fails quietly, every
+#     path-gated lane skips, and the aggregators count skips as passes. Also
+#     used by the `gh pr view` calls in pr-hygiene.
+#   checks: read — `verified` polls commits/<sha>/check-runs for the
+#     cross-workflow lanes (scripts/ci/poll-cross-workflow-checks.sh).
+# Do not drop a scope without checking that path-gated lanes still RUN on a PR.
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+
 concurrency:
   # Push to main gets a unique group per run (github.run_id) so concurrency never cancels it —
   # we need every main push to complete for the green-main signal (ship_quality grades, bisect, regression diagnosis).
@@ -293,7 +308,9 @@ jobs:
     # RESILIENT-016 (2026-05-17): disabled on PR runs — moved to ci-nightly.yml
     # (cron daily). Selenium timeouts were blocking 5+ PRs (INFRA-1529). The
     # test-e2e aggregator treats skipped as success so no branch-protection impact.
-    if: false
+    # Always-false, written as a comparison because actionlint rejects a
+    # constant `if: false`. The job stays disabled.
+    if: ${{ github.event_name == 'disabled-RESILIENT-016' }}
     continue-on-error: true
     runs-on: ${{ vars.RUNNER_TAURI_COWORK_E2E != '' && fromJSON(vars.RUNNER_TAURI_COWORK_E2E) || 'ubuntu-latest' }}  # INFRA-1542: lane override via repo var (unset → ubuntu-latest)
     steps:
@@ -372,8 +389,9 @@ jobs:
           CHUMP_DESKTOP_API_BASE: http://127.0.0.1:3848
           CHUMP_DESKTOP_AUTO_WEB: '0'
         run: |
-          ${CARGO_TARGET_DIR:-./target}/debug/chump --web &
+          "${CARGO_TARGET_DIR:-./target}"/debug/chump --web &
           CHUMP_PID=$!
+          # shellcheck disable=SC2034  # i is only a retry counter
           for i in $(seq 1 90); do
             if curl -sf http://127.0.0.1:3848/api/health >/dev/null; then
               echo "chump web ready"
@@ -494,6 +512,7 @@ jobs:
           echo "========================================"
 
           # Append to GitHub step summary (shows in PR checks UI).
+          # shellcheck disable=SC2016,SC2129  # literal markdown backticks; per-line appends kept as-is
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
             printf '### CI Shard Classification (INFRA-1002)\n' >> "$GITHUB_STEP_SUMMARY"
             printf '| Category | Shards |\n|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
@@ -2101,8 +2120,9 @@ jobs:
           CHUMP_WEB_PORT=3847 CHUMP_WEB_TOKEN="" \
             CHUMP_LIGHT_CONTEXT="$CHUMP_LIGHT_CONTEXT" \
             OPENAI_API_BASE="$OPENAI_API_BASE" OPENAI_API_KEY="$OPENAI_API_KEY" OPENAI_MODEL="$OPENAI_MODEL" \
-            ${CARGO_TARGET_DIR:-./target}/debug/chump --web &
+            "${CARGO_TARGET_DIR:-./target}"/debug/chump --web &
           CHUMP_WEB_PID=$!
+          # shellcheck disable=SC2034  # i is only a retry counter
           for i in $(seq 1 90); do
             if curl -sf http://127.0.0.1:3847/api/health >/dev/null; then
               echo "chump web ready"

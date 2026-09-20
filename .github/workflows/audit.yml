@@ -30,6 +30,16 @@ on:
     branches: [main, master]
   merge_group:
 
+# Least-privilege token scope: read-only. No job in this workflow writes
+# through GITHUB_TOKEN.
+#   pull-requests: read — REQUIRED by dorny/paths-filter in the `changes` job
+#     (lists PR files via the API on pull_request events; the job is
+#     continue-on-error, so a missing scope fails quietly) and by the
+#     cross-PR contract gate (`gh pr list` / `gh pr view --json files`).
+permissions:
+  contents: read
+  pull-requests: read
+
 # INFRA-2516: the per-SHA group above (INFRA-2452 fix) never collided — every push
 # gets a new SHA, so cancel-in-progress:false or :true made no difference; stale
 # audit runs for commits a PR had already moved past just kept running to

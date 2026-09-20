@@ -23,6 +23,11 @@ on:
         default: "true"
         type: boolean
 
+# Least-privilege default. The `test` job only reads the repository; the
+# `release-plz` and `publish` jobs carry their own job-level write grants.
+permissions:
+  contents: read
+
 env:
   RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
@@ -129,7 +134,7 @@ jobs:
         run: |
           # release-plz will only publish if all checks pass and a release commit exists
           # This step is informational; actual publishing happens via release-plz
-          echo "status=ready" >> $GITHUB_OUTPUT
+          echo "status=ready" >> "$GITHUB_OUTPUT"
 
       - name: Publish (via release-plz)
         if: steps.check-pr.outputs.status == 'ready'

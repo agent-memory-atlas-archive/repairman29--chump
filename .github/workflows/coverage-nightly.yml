@@ -8,6 +8,11 @@ on:
     - cron: '0 6 * * *'   # daily at 06:00 UTC
   workflow_dispatch: {}
 
+# Least-privilege token scope. Every job here only reads the repository;
+# nothing in this workflow writes through GITHUB_TOKEN.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
