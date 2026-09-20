@@ -5,8 +5,8 @@
   "hardware": {
     "cpu_cores": 4,
     "ram_gb": 7,
-    "disk_free_gb": 12,
-    "disk_total_gb": 115,
+    "disk_free_gb": 21,
+    "disk_total_gb": 114,
     "gpu_present": true,
     "gpu_name": "NVIDIA GeForce GTX 970",
     "gpu_vram_mb": 4096,
@@ -15,6 +15,8 @@
   "roles_fit": [
     "gpu-embed",
     "gpu-inference-small",
+    "build-worker",
+    "ci-runner",
     "atc-heartbeat",
     "broker"
   ],
@@ -32,5 +34,7 @@
       "small-inference"
     ]
   },
-  "role_assigned": "gpu-embed"
+  "role_assigned": "gpu-embed",
+  "probed_at": "2026-09-20T03:38:11Z",
+  "probe_source": "node-describe.sh"
 }

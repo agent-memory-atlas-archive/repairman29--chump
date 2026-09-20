@@ -79,9 +79,21 @@ systemctl is-active chump-pr-lander.timer >/dev/null 2>&1 && svc+=("chump-pr-lan
 
 j_arr(){ local out=""; for x in "$@"; do out+="\"$x\","; done; echo "[${out%,}]"; }
 
+# probed_at: the single field that makes this a READING rather than a sentence.
+# Without it a record cannot be known to be stale, so agents trust it when it is
+# wrong. Receipt, 2026-09-19: mugman.json still advertised
+# "services_running": ["ollama:embed/inference","chump-worker","chump-pr-lander"]
+# for a machine terminated that morning, and cuphead.json said 2 cores / 11 GB /
+# 45 GB for a box that is 4 / 23 / 146. Both were written 2026-09-11 and nothing
+# could tell. DESIGN_GAPS_HARDWARE_AWARE.md Gap 2 called this exactly.
+probed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+probe_source="node-describe.sh"
+
 cat <<EOF
 {
   "node_id": "$host",
+  "probed_at": "$probed_at",
+  "probe_source": "$probe_source",
   "tailnet_ip": "$tailnet",
   "os": "$os",
   "hardware": {

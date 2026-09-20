@@ -29,6 +29,9 @@
     ]
   },
   "role_pin": "muscle",
-  "role_pin_reason": "build-worker: 8-core aarch64 — the fleet build box; builds belong here or CJ, NEVER the 2-core Oracle nodes (topology decision 2026-09-07)",
-  "role_assigned": "muscle"
+  "role_pin_reason": "build-worker: 8-core aarch64 \u2014 the fleet build box; builds belong here or CJ, NEVER the 2-core Oracle nodes (topology decision 2026-09-07)",
+  "role_assigned": "muscle",
+  "ssh_target": "droid@100.84.132.93 -p 8022",
+  "reachable": false,
+  "last_probe_failed_at": "2026-09-20T03:38:10Z"
 }
