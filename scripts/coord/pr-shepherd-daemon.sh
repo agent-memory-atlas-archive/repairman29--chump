@@ -1203,6 +1203,14 @@ for p in prs:
 
       # META-186: BLOCKED_GREEN → arm auto-merge (idempotent)
       elif [ "$c" = "BLOCKED_GREEN" ]; then
+        # Guard: only arm auto-merge for trusted authors. This repo is public, main requires
+        # zero approvals and one aggregate check, and merged main deploys to the fleet's nodes.
+        # Without this guard the daemon would arm auto-merge on a stranger's green fork PR.
+        # Same list as the admin-merge tier; an empty author fails closed.
+        if ! _is_trusted_author "$author"; then
+          _emit_pr_action_taken "$pr_num" "arm_auto_merge_skipped" "untrusted_author" "$gap_id"
+          continue
+        fi
         # Guard: trunk-red safe-mode
         if [ "$trunk_red_active" -eq 1 ]; then
           _emit_pr_action_taken "$pr_num" "arm_auto_merge_skipped" "trunk_red" "$gap_id"

@@ -382,6 +382,16 @@ def local_clone_for(name: str) -> dict | None:
     }
 
 
+def _excluded_names() -> set[str]:
+    """Repo/folder names the operator keeps out of this PUBLIC catalog. The list lives outside
+    the tree (default ~/.chump/arsenal-exclude.txt) because it is itself revealing."""
+    f = Path(os.environ.get("CHUMP_ARSENAL_EXCLUDE_FILE", str(Path.home() / ".chump" / "arsenal-exclude.txt")))
+    try:
+        return {l.strip().lower() for l in f.read_text().splitlines() if l.strip() and not l.strip().startswith("#")}
+    except OSError:
+        return set()
+
+
 def scan_all_local_roots(known_paths: set[str]) -> list[dict]:
     """Return every local git root with redacted remote + flags. known_paths suppresses dupes."""
     found = []
@@ -392,10 +402,13 @@ def scan_all_local_roots(known_paths: set[str]) -> list[dict]:
         ).decode()
     except subprocess.CalledProcessError:
         return found
+    excluded = _excluded_names()
     for line in out.splitlines():
         if "/node_modules/" in line or "/target/" in line or "/.venv/" in line:
             continue
         repo = str(Path(line).parent)
+        if Path(repo).name.lower() in excluded:
+            continue  # operator exclude list; see harvest.sh `scan`
         cfg = Path(line) / "config"
         raw_remote = ""
         if cfg.exists():

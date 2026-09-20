@@ -88,7 +88,6 @@ _Generated 2026-09-14T04:13:23Z by scripts/arsenal/build.py v0_
 - **kosmos** [TypeScript] iCloud backup snapshot: Kosmos
 - **fulcrum** [TypeScript] iCloud backup snapshot: Fulcrum
 - **okr** [?] OKR tracking tool (early scaffold).
-- **project-2026-case** [Python] Private case file — 2026DR031402. Do not make public.
 - **pixi-game** [HTML] 
 - **jeffadkins-me** [HTML] Source for jeffadkins.me — personal site (alternate of jeffadkins.dev).
 - **bulwark** [JavaScript] Zero-dependency resilience primitives for Node: circuit breaker, rate limiter, retry, fallback, scheduler, cache.

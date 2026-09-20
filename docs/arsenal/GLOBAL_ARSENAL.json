@@ -3,7 +3,7 @@
     "generated_at": "2026-09-14T04:13:23Z",
     "generator": "scripts/arsenal/build.py v0",
     "operator": "repairman29 (Jeff Adkins)",
-    "fleet_size_github": 101,
+    "fleet_size_github": 100,
     "fleet_size_local_clones": 2,
     "fleet_size_unmatched_local_roots": 1
   },
@@ -51,7 +51,7 @@
       "active_last_30d": 0
     },
     "misc": {
-      "count": 28,
+      "count": 27,
       "repos": [
         "workspace-docs",
         "almanac",
@@ -72,7 +72,6 @@
         "kosmos",
         "fulcrum",
         "okr",
-        "project-2026-case",
         "pixi-game",
         "jeffadkins-me",
         "bulwark",
@@ -1155,23 +1154,6 @@
       "extracted_primitives": [
         "React + FastAPI image-processing proxy (compute-offload pattern)"
       ],
-      "extracted_primitives_by_file": [],
-      "local_clone": null
-    },
-    "project-2026-case": {
-      "name": "project-2026-case",
-      "visibility": "PRIVATE",
-      "language": "Python",
-      "description": "Private case file \u2014 2026DR031402. Do not make public.",
-      "archived": false,
-      "fork": false,
-      "pushed_at": "2026-07-26T17:43:02Z",
-      "url": "https://github.com/repairman29/project-2026-case",
-      "disk_kb": 135687,
-      "topics": [],
-      "cluster": "misc",
-      "primitives": [],
-      "extracted_primitives": [],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },

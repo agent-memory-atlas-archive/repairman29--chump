@@ -210,3 +210,6 @@ docs/business/contracts/
 /path
 /migration.sql
 /schema_migration.sql
+
+# Local provider config. A real key was committed here in April 2026; never track this file.
+config/config.yaml

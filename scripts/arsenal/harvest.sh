@@ -64,7 +64,28 @@ case "$cmd" in
   scan)
     mkdir -p "$(dirname "$RAW")"
     echo "→ refreshing $RAW from gh repo list" >&2
-    gh repo list --limit 200 --json name,description,primaryLanguage,visibility,pushedAt,isArchived,isFork,sshUrl,url,createdAt,updatedAt,diskUsage,repositoryTopics > "$RAW"
+    gh repo list --limit 200 --json name,description,primaryLanguage,visibility,pushedAt,isArchived,isFork,sshUrl,url,createdAt,updatedAt,diskUsage,repositoryTopics > "$RAW.tmp"
+    # Operator exclude list. This catalog is committed to a PUBLIC repo, and `gh repo list`
+    # returns private repos with their names and descriptions. Names listed in the exclude file
+    # never reach $RAW or anything built from it. The file lives OUTSIDE this tree on purpose: a
+    # list of what is being kept out of a public repo is itself revealing. One repo name per
+    # line, case-insensitive, `#` comments allowed. Fails closed: if the file exists and the
+    # filter cannot run, nothing is written.
+    EXCLUDE_FILE=${CHUMP_ARSENAL_EXCLUDE_FILE:-$HOME/.chump/arsenal-exclude.txt}
+    if [ -s "$EXCLUDE_FILE" ]; then
+      if ! jq -c --rawfile ex "$EXCLUDE_FILE" '
+            ($ex | split("\n") | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase)
+                 | map(select(length > 0 and (startswith("#") | not)))) as $x
+            | map(select((.name | ascii_downcase) as $n | ($x | index($n)) == null))' "$RAW.tmp" > "$RAW.filtered"; then
+        rm -f "$RAW.tmp" "$RAW.filtered"
+        echo "harvest scan: exclude filter failed; refusing to write an unfiltered catalog" >&2
+        exit 4
+      fi
+      echo "→ exclude list applied: $(( $(jq length "$RAW.tmp") - $(jq length "$RAW.filtered") )) repo(s) withheld" >&2
+      mv "$RAW.filtered" "$RAW"; rm -f "$RAW.tmp"
+    else
+      mv "$RAW.tmp" "$RAW"
+    fi
     echo "→ rebuilding catalog via $BUILD_PY" >&2
     python3 "$BUILD_PY"
     ;;
