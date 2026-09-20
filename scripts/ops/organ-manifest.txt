@@ -369,7 +369,7 @@ enabled     chump-digest.timer  role=data
 #     installed idempotently by scripts/setup/install-gap-substrate.sh
 #     (INFRA-3631). Node-neutral by construction (systemd unit name is fixed,
 #     not host-suffixed).
-enabled     chump-cj-worker.service  role=muscle requires=bin:chump,bin:git,file:~/cj-worker-run.sh
+
 # RESILIENT-1083 (worker-orphan class, PERMANENT fix — SUPERSEDES #4533): a non-CJ
 # muscle node's concrete worker (mugman's chump-node1-worker.service from
 # ~/node1-worker-run.sh, plus any future node's worker and its node-orchestrator
