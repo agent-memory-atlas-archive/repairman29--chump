@@ -37,6 +37,10 @@ if ! command -v converge_mirror_hard_reset >/dev/null 2>&1; then
   # beats a merge (which aborts on untracked collisions).
   converge_mirror_hard_reset() { git reset --hard "${1:?}"; }
 fi
+# Registry privacy: the registry (.chump/state.sql) is published to the private
+# `registry` git remote, never to the public code repo. See lib/registry-remote.sh.
+# shellcheck source=lib/registry-remote.sh
+source "$_here/lib/registry-remote.sh" || { echo "[backlog-sync] missing lib/registry-remote.sh — refusing to run" >&2; exit 1; }
 REPO="${CHUMP_REPO:-$(git -C "$_here" rev-parse --show-toplevel 2>/dev/null || echo "$HOME/chump-host")}"
 CHUMP="${CHUMP_BIN:-chump}"
 DRY=0; ROLE=""
@@ -72,6 +76,29 @@ reader() {
   if ! converge_mirror_hard_reset origin/main; then
     log "reset --hard origin/main failed — keeping current backlog"; return 1
   fi
+  # Registry privacy: the shared truth comes from the private `registry` remote.
+  # Legacy fallback (state.sql tracked on origin/main) only exists until the
+  # public repo stops tracking it; after that a node without the remote fails
+  # LOUDLY here and keeps its current backlog (never a silent empty rebuild).
+  if [[ -n "$(registry_remote_url "$REPO")" ]]; then
+    log "git fetch $REGISTRY_REMOTE_NAME main"
+    if ! git fetch --quiet "$REGISTRY_REMOTE_NAME" main 2>/dev/null; then
+      log "registry fetch failed (offline or no access) — keeping current backlog"; return 1
+    fi
+    local _tmp=".chump/state.sql.incoming.$$"
+    mkdir -p .chump
+    if ! git show "FETCH_HEAD:.chump/state.sql" > "$_tmp" 2>/dev/null || [[ ! -s "$_tmp" ]]; then
+      rm -f "$_tmp"; log "registry has no .chump/state.sql — keeping current backlog"; return 1
+    fi
+    mv -f "$_tmp" .chump/state.sql
+    log "registry state.sql materialised from $REGISTRY_REMOTE_NAME/main ($(wc -c < .chump/state.sql | tr -d ' ') bytes)"
+  elif registry_legacy_tracked "$REPO"; then
+    log "WARNING: no '$REGISTRY_REMOTE_NAME' remote — using LEGACY tracked state.sql from origin/main"
+  else
+    log "ERROR: no '$REGISTRY_REMOTE_NAME' remote and origin/main no longer tracks state.sql — keeping current backlog"
+    log "fix: git -C $REPO remote add $REGISTRY_REMOTE_NAME <private registry repo url>"
+    return 1
+  fi
   log "chump restore --from-sql"
   "$CHUMP" restore --from-sql >/dev/null 2>&1 || { log "restore failed"; return 1; }
   log "backlog refreshed: $(sqlite3 "$DB" "SELECT COUNT(*) FROM gaps WHERE status='open'" 2>/dev/null) open gaps"
@@ -102,14 +129,42 @@ _gap_id_from_pr() {
 # still exactly one --writer; this only relocates its git I/O off the shared tree.
 BSYNC_TREE="${CHUMP_BACKLOG_SYNC_TREE:-$HOME/.chump/backlog-sync-tree}"
 
-_ensure_isolated_tree() {
-  if [[ -d "$BSYNC_TREE/.git" ]] && git -C "$BSYNC_TREE" rev-parse --git-dir >/dev/null 2>&1; then
-    return 0
+# _publish_url: the ONLY repo the writer may publish to. The private registry
+# remote when configured; the code repo only while it still tracks state.sql
+# (legacy, pre-cutover). Otherwise nothing: the writer refuses to publish rather
+# than ever pushing registry data to the public code repo.
+_publish_url() {
+  local url; url="$(registry_remote_url "$REPO")"
+  if [[ -n "$url" ]]; then
+    if registry_same_repo "$url" "$(git -C "$REPO" remote get-url origin 2>/dev/null)"; then
+      log "ERROR: '$REGISTRY_REMOTE_NAME' remote points at the code repo — refusing to publish" >&2; return 1
+    fi
+    printf '%s' "$url"; return 0
   fi
-  local url; url="$(git -C "$REPO" remote get-url origin 2>/dev/null)"
-  [[ -n "$url" ]] || { log "no origin remote to clone for isolated publish tree"; return 1; }
+  if registry_legacy_tracked "$REPO"; then
+    log "WARNING: no '$REGISTRY_REMOTE_NAME' remote — LEGACY publish to origin/main (pre-cutover only)" >&2
+    git -C "$REPO" remote get-url origin 2>/dev/null; return 0
+  fi
+  log "ERROR: no '$REGISTRY_REMOTE_NAME' remote and origin/main no longer tracks state.sql — refusing to publish" >&2
+  return 1
+}
+
+_ensure_isolated_tree() {
+  local url; url="$(_publish_url)" || return 1
+  [[ -n "$url" ]] || { log "no publish url for isolated publish tree"; return 1; }
+  if [[ -d "$BSYNC_TREE/.git" ]] && git -C "$BSYNC_TREE" rev-parse --git-dir >/dev/null 2>&1; then
+    local have; have="$(git -C "$BSYNC_TREE" remote get-url origin 2>/dev/null)"
+    if registry_same_repo "$have" "$url"; then
+      return 0
+    fi
+    # The existing clone publishes somewhere else (e.g. the pre-cutover clone of
+    # the code repo). Archive it, never delete, and provision a fresh one.
+    local aside; aside="$BSYNC_TREE.retired-$(date +%Y%m%d%H%M%S)"
+    log "isolated tree publishes to a different repo — archiving to $aside"
+    mv "$BSYNC_TREE" "$aside" || { log "could not archive old isolated tree"; return 1; }
+  fi
   log "provisioning isolated publish clone at $BSYNC_TREE"
-  rm -rf "$BSYNC_TREE"
+  [[ -e "$BSYNC_TREE" ]] && { log "unexpected non-git path at $BSYNC_TREE — refusing to overwrite"; return 1; }
   mkdir -p "$(dirname "$BSYNC_TREE")"
   git clone --quiet --single-branch --branch main "$url" "$BSYNC_TREE" \
     || { log "isolated clone failed"; return 1; }
@@ -130,14 +185,22 @@ publish_state_sql() {
       git -C "$BSYNC_TREE" reset --hard FETCH_HEAD || { log "isolated reset failed"; return 1; }
     fi
     git -C "$BSYNC_TREE" clean -fdq -- .chump 2>/dev/null || true
+    mkdir -p "$BSYNC_TREE/.chump"
     # Dump the CANONICAL live DB ($REPO's, via CHUMP_REPO) into the isolated tree.
     if ! CHUMP_REPO="$REPO" "$CHUMP" gap dump > "$BSYNC_TREE/.chump/state.sql" 2>/dev/null; then
       log "gap dump failed"; return 1
     fi
-    if git -C "$BSYNC_TREE" diff --quiet -- .chump/state.sql 2>/dev/null; then
-      log "state.sql already current on origin/main — nothing to push"; return 0
+    # status --porcelain (not `diff --quiet`): also sees a first-ever, still
+    # untracked state.sql in a freshly seeded registry repo.
+    if [[ -z "$(git -C "$BSYNC_TREE" status --porcelain -- .chump/state.sql 2>/dev/null)" ]]; then
+      log "state.sql already current on the publish remote — nothing to push"; return 0
     fi
-    git -C "$BSYNC_TREE" add .chump/state.sql
+    # Deliberately NOT `add -f`: in the code repo the path is gitignored, so once
+    # it is untracked there this add fails and the commit below fails closed. It
+    # can never re-track the registry in the public repo. The registry repo has
+    # no such ignore rule, so the add succeeds there.
+    git -C "$BSYNC_TREE" add .chump/state.sql 2>/dev/null \
+      || { log "state.sql is ignored+untracked in the publish tree — refusing (wrong repo?)"; return 1; }
     # Skip code hooks: automated single-file (state.sql) publish, not a code change;
     # state.sql is auto-allowed by the off-rails guard.
     git -C "$BSYNC_TREE" -c core.hooksPath=/dev/null commit -q -m "chore(backlog): coherence sync — $closed gaps closed, state.sql regenerated
@@ -147,7 +210,7 @@ Single-writer hub reconcile: merged PRs -> gap done, regenerate the shared truth
 published from an isolated clone that never races the fleet tree's git index." 2>/dev/null \
       || { log "commit failed"; return 1; }
     if git -C "$BSYNC_TREE" push --quiet origin HEAD:main 2>/dev/null; then
-      log "published state.sql to origin/main ($closed gaps closed this cycle)"; return 0
+      log "published state.sql to $(git -C "$BSYNC_TREE" remote get-url origin 2>/dev/null | sed -E 's#^.*[:/]([^/:]+/[^/]+)$#\1#') ($closed gaps closed this cycle)"; return 0
     fi
     log "push rejected (origin/main advanced) — re-basing, attempt $tries/3"
   done

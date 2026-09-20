@@ -2272,14 +2272,33 @@ impl GapStore {
         if !self.repo_root.join(".git").exists() {
             return None;
         }
+        // Registry privacy: the canonical registry is published to the
+        // private `registry` git remote, not to the public code repo. When
+        // that remote is configured it is the ONLY source consulted: a
+        // configured-but-unreadable registry returns `None` (unverifiable,
+        // fail-closed gate) rather than quietly falling back to a frozen
+        // legacy copy on origin/main, which would under-report the max ID
+        // and hand out colliding IDs. `origin/main` is consulted only when
+        // no registry remote exists (the legacy, pre-cutover layout).
+        let has_registry_remote = std::process::Command::new("git")
+            .args(["remote", "get-url", "registry"])
+            .current_dir(&self.repo_root)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        let (remote, spec) = if has_registry_remote {
+            ("registry", "registry/main:.chump/state.sql")
+        } else {
+            ("origin", "origin/main:.chump/state.sql")
+        };
         // Best-effort refresh; non-fatal if offline (mirrors the INFRA-2423
         // auto-fetch already used by ship()'s proof-of-merge check).
         let _ = std::process::Command::new("git")
-            .args(["fetch", "origin", "main", "--quiet"])
+            .args(["fetch", remote, "main", "--quiet"])
             .current_dir(&self.repo_root)
             .output();
         let output = std::process::Command::new("git")
-            .args(["show", "origin/main:.chump/state.sql"])
+            .args(["show", spec])
             .current_dir(&self.repo_root)
             .output()
             .ok()?;
@@ -6396,6 +6415,101 @@ mod auto_fetch_tests {
             picked_num > 3866,
             "reserve must allocate above canonical max 3866 despite a \
              stale local checkout; got {id}"
+        );
+    }
+
+    /// Registry privacy: when a `registry` git remote is configured, the
+    /// canonical max ID comes from `registry/main:.chump/state.sql` and the
+    /// code repo (`origin`) is never consulted, even if a frozen legacy copy
+    /// still sits there with a LOWER max. A configured registry that carries
+    /// no state.sql is "unverifiable" (`None`), not a fallback to origin.
+    #[test]
+    fn canonical_max_id_prefers_registry_remote_over_origin() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path();
+        init_repo(repo);
+
+        // origin = the code repo, carrying a frozen legacy state.sql (max 100).
+        let origin_dir = tempdir().unwrap();
+        bare_clone(repo, origin_dir.path());
+        git(
+            repo,
+            &[
+                "remote",
+                "add",
+                "origin",
+                origin_dir.path().to_str().unwrap(),
+            ],
+        );
+        git(repo, &["push", "--quiet", "origin", "main"]);
+        let scratch = tempdir().unwrap();
+        non_bare_clone(origin_dir.path().to_str().unwrap(), scratch.path());
+        std::fs::create_dir_all(scratch.path().join(".chump")).ok();
+        std::fs::write(
+            scratch.path().join(".chump/state.sql"),
+            b"gaps:\n- id: INFRA-100\n  domain: INFRA\n  title: frozen legacy\n  status: done\n  priority: P2\n  effort: s\n",
+        )
+        .ok();
+        git(scratch.path(), &["add", ".chump/state.sql"]);
+        git(scratch.path(), &["commit", "--quiet", "-m", "legacy copy"]);
+        git(scratch.path(), &["push", "--quiet", "origin", "main"]);
+
+        // registry = a separate, unrelated-history repo with the live max 4200.
+        let reg_src = tempdir().unwrap();
+        init_repo(reg_src.path());
+        std::fs::create_dir_all(reg_src.path().join(".chump")).ok();
+        std::fs::write(
+            reg_src.path().join(".chump/state.sql"),
+            b"gaps:\n- id: INFRA-4200\n  domain: INFRA\n  title: live registry\n  status: open\n  priority: P2\n  effort: s\n",
+        )
+        .ok();
+        git(reg_src.path(), &["add", ".chump/state.sql"]);
+        git(reg_src.path(), &["commit", "--quiet", "-m", "registry"]);
+        let reg_bare = tempdir().unwrap();
+        bare_clone(reg_src.path(), reg_bare.path());
+
+        let store = open_store(repo);
+        // No registry remote yet: legacy path reads origin/main.
+        assert_eq!(store.canonical_max_id("INFRA"), Some(100));
+
+        git(
+            repo,
+            &[
+                "remote",
+                "add",
+                "registry",
+                reg_bare.path().to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            store.canonical_max_id("INFRA"),
+            Some(4200),
+            "with a registry remote configured the registry is canonical"
+        );
+
+        // A configured registry with NO state.sql is unverifiable: must not
+        // fall back to the frozen origin copy (which would under-report).
+        let empty_src = tempdir().unwrap();
+        init_repo(empty_src.path());
+        let empty_bare = tempdir().unwrap();
+        bare_clone(empty_src.path(), empty_bare.path());
+        git(
+            repo,
+            &[
+                "remote",
+                "set-url",
+                "registry",
+                empty_bare.path().to_str().unwrap(),
+            ],
+        );
+        // Drop the previously fetched tracking ref so the stale registry/main
+        // from the first remote cannot satisfy the read.
+        git(repo, &["update-ref", "-d", "refs/remotes/registry/main"]);
+        let got = store.canonical_max_id("INFRA");
+        assert_eq!(
+            got, None,
+            "configured-but-empty registry is unverifiable; must never fall \
+             back to origin's frozen legacy copy (100); got {got:?}"
         );
     }
 

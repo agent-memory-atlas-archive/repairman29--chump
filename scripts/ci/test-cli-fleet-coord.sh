@@ -235,21 +235,30 @@ else
 fi
 
 # ── Test 10: chump --briefing <ID> outputs briefing ──────────────────────
-# Pick a known gap ID from the gap YAML directory (doesn't need state.db).
-KNOWN_GAP=$(ls "$REPO_ROOT/docs/gaps/"*.yaml 2>/dev/null | head -1 | \
-    xargs -I{} basename {} .yaml 2>/dev/null || true)
-if [[ -n "$KNOWN_GAP" ]]; then
-    set +e
-    BRIEFING_OUT=$("$CHUMP" --briefing "$KNOWN_GAP" 2>&1)
-    BRIEFING_EXIT=$?
-    set -e
-    if [[ "$BRIEFING_EXIT" -eq 0 ]] && [[ -n "$BRIEFING_OUT" ]]; then
-        ok "Test 10: chump --briefing $KNOWN_GAP outputs briefing"
-    else
-        fail "Test 10: chump --briefing $KNOWN_GAP exited $BRIEFING_EXIT (${BRIEFING_OUT:0:80})"
-    fi
+# Registry privacy: the real gap registry is not in this repo's checkout, so
+# this test owns its fixture instead of borrowing the first docs/gaps/*.yaml.
+# It never SKIPs: a missing fixture is a FAIL, so the lane cannot go green by
+# losing its data. The title assertion proves the fixture was actually read.
+KNOWN_GAP="FIXTURE-9001"
+mkdir -p "$TMP/docs/gaps"
+cat > "$TMP/docs/gaps/${KNOWN_GAP}.yaml" <<'YAML'
+- id: FIXTURE-9001
+  domain: FIXTURE
+  title: briefing fixture sentinel 7f3a
+  status: open
+  priority: P2
+  effort: xs
+  description: |
+    Fixture gap for test-cli-fleet-coord Test 10.
+YAML
+set +e
+BRIEFING_OUT=$("$CHUMP" --briefing "$KNOWN_GAP" 2>&1)
+BRIEFING_EXIT=$?
+set -e
+if [[ "$BRIEFING_EXIT" -eq 0 ]] && grep -q "briefing fixture sentinel 7f3a" <<<"$BRIEFING_OUT"; then
+    ok "Test 10: chump --briefing $KNOWN_GAP rendered the fixture gap"
 else
-    printf '  [SKIP] Test 10: no gap YAML files found in docs/gaps/\n'
+    fail "Test 10: chump --briefing $KNOWN_GAP exited $BRIEFING_EXIT without the fixture title (${BRIEFING_OUT:0:120})"
 fi
 
 # ── Test 11: chump --briefing UNKNOWN-9999 reports "not found" ───────────

@@ -827,7 +827,11 @@ fi
 # grep -c prints "0" AND exits 1 on zero-match; the old `|| true` then wrote a
 # SECOND "0", yielding "0\n0" and a `((` syntax error (VOA-004). Capture the count
 # as-is and default only if the whole expansion is empty.
-_sql_open=$(git show "origin/main:.chump/state.sql" 2>/dev/null | grep -c "^INSERT.*'open'" 2>/dev/null)
+# Registry privacy: the mirror is published to the private `registry` remote;
+# origin/main only carries it in the legacy (pre-cutover) layout.
+_reg_ref="origin/main"
+git -C "$REPO_ROOT" remote get-url registry >/dev/null 2>&1 && _reg_ref="registry/main"
+_sql_open=$(git -C "$REPO_ROOT" show "${_reg_ref}:.chump/state.sql" 2>/dev/null | grep -c "^INSERT.*'open'" 2>/dev/null)
 _sql_open=${_sql_open:-0}
 if (( _db_open < _sql_open )); then
     echo "[run-fleet] INFRA-465: state.db has $_db_open open gaps, origin/main has $_sql_open — running 'chump gap import'"

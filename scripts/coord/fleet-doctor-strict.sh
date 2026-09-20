@@ -676,22 +676,35 @@ check_almanac_freshness() {
 #                         21 days — this makes it RED within hours instead.
 check_backlog_sync_freshness() {
     local max_h="${CHUMP_BACKLOG_SYNC_STALE_HOURS:-24}"
-    local last_epoch
-    last_epoch="$(git -C "$REPO_ROOT" log -1 --format='%ct' origin/main -- .chump/state.sql 2>/dev/null)"
+    local last_epoch reg_ref="origin/main"
+    # Registry privacy: the writer publishes to the private `registry` remote.
+    # Measure freshness THERE when it is configured; origin/main only carries
+    # the legacy (pre-cutover) file. A configured-but-unfetchable registry is a
+    # FAIL, never a quiet fallback to the frozen legacy copy.
+    if git -C "$REPO_ROOT" remote get-url registry >/dev/null 2>&1; then
+        reg_ref="registry/main"
+        if ! git -C "$REPO_ROOT" fetch --quiet registry main 2>/dev/null; then
+            register_check "backlog-sync-freshness" "fail" \
+                "registry remote is configured but could not be fetched — cannot prove the registry is fresh" \
+                "check the node's registry deploy key / network: git -C $REPO_ROOT fetch registry main"
+            return
+        fi
+    fi
+    last_epoch="$(git -C "$REPO_ROOT" log -1 --format='%ct' "$reg_ref" -- .chump/state.sql 2>/dev/null)"
     if [[ -z "$last_epoch" ]]; then
         register_check "backlog-sync-freshness" "fail" \
-            "no commit history for .chump/state.sql on origin/main — backlog-sync writer has never published" \
+            "no commit history for .chump/state.sql on $reg_ref — backlog-sync writer has never published there" \
             "install the writer organ: sudo bash scripts/setup/install-helsinki-atc.sh (see chump-backlog-sync-writer.timer)"
         return
     fi
     local age_h=$(( ( $(date +%s) - last_epoch ) / 3600 ))
     if (( age_h >= max_h )); then
         register_check "backlog-sync-freshness" "fail" \
-            "origin/main .chump/state.sql is ${age_h}h stale (threshold ${max_h}h) — backlog-sync --writer is dead or not installed, registry split-brain risk" \
+            "$reg_ref .chump/state.sql is ${age_h}h stale (threshold ${max_h}h) — backlog-sync --writer is dead or not installed, registry split-brain risk" \
             "check: systemctl status chump-backlog-sync-writer.timer; re-arm: sudo bash scripts/setup/install-helsinki-atc.sh"
         return
     fi
-    register_check "backlog-sync-freshness" "pass" "origin/main .chump/state.sql ${age_h}h fresh (threshold ${max_h}h)" ""
+    register_check "backlog-sync-freshness" "pass" "$reg_ref .chump/state.sql ${age_h}h fresh (threshold ${max_h}h)" ""
 }
 
 #  14. organ-roll-call-live — INFRA-3646 (TREK-20): the static Roll-Call
