@@ -206,9 +206,17 @@ installers:
   - id: almanac-code-intel
     why: "Almanac grounded code-intelligence — indexes this repo (+ fleet + public deps) and wires the almanac_* MCP tools (almanac_search / almanac_api / almanac_search_fleet / almanac_neighbors / almanac_status) so agents ground code questions on path:line receipts and exact API signatures instead of grepping/guessing. Keyword-ready in seconds; fusion embeds in the background; hourly refresh keeps it fresh. Non-blocking: the hook exits 0 if Almanac isn't built."
     priority: P2
-    install: bash scripts/setup/install-almanac-organ.sh && bash "$HOME/Projects/almanac/scripts/chump-ftue-hook.sh" "$PWD"
+    install: bash scripts/setup/install-almanac-organ.sh
     check: grep -q '"almanac"' chump-mcp.json 2>/dev/null
     adds: almanac MCP server in chump-mcp.json + indexed working repo + hourly refresh cron (install-almanac-organ.sh runs first — INFRA-4660 — so a clean host clones+builds almanac before the FTUE hook needs a binary)
+
+  - id: almanac-ftue-hook
+    why: "Run Almanac FTUE hook to configure MCP integration"
+    priority: P2
+    install: bash "$HOME/Projects/almanac/scripts/chump-ftue-hook.sh" "$PWD"
+    check: grep -q '"almanac"' chump-mcp.json 2>/dev/null
+    depends_on: [almanac-code-intel]
+    adds: almanac MCP server in chump-mcp.json
 
   - id: chump-coord-assign-launchd
     why: "RESILIENT-271 shipped the com.chump.coord-assign installer (FLEET-034 push-routing daemon — publishes WorkEnvelopes so preferred_machine can route work) and mapped it in optional-installers-allowlist.txt (audit-only), but never registered it in bootstrap-manifest.yaml — the manifest chump-fleet-bootstrap.sh actually reads to auto-install. Without this entry the daemon stays uninstalled on every fresh operator machine despite being 'known and intentional'."
