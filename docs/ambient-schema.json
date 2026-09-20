@@ -53,7 +53,8 @@
         "ALERT",
         "fleet_queue_depth",
         "gen_smoke_results",
-        "next_best_action"
+        "next_best_action",
+        "subagent_spawned"
       ],
       "description": "One of the well-known event kinds. Adding a new kind requires a new entry here AND a new branch in the oneOf below."
     },
@@ -283,6 +284,38 @@
       "required": [
         "action",
         "who"
+      ]
+    },
+    {
+      "title": "subagent_spawned",
+      "description": "META-978: emitted by scripts/coord/emit-subagent-spawn.sh when an orchestrator launches a sub-agent via the Agent tool (Part A of docs/design/SUBAGENT_ATTRIBUTION.md / META-130).",
+      "properties": {
+        "event": {
+          "const": "subagent_spawned"
+        },
+        "sub_session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent_session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "worktree_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agent_description": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sub_session_id",
+        "parent_session_id",
+        "worktree_path"
       ]
     }
   ]

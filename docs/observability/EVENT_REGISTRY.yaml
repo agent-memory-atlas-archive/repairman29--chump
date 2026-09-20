@@ -8680,6 +8680,19 @@ events:
       Indicates a stale citation that should be removed or the gap filed.
     consumers: [audit-log]
     fields_required: [ts, kind, doc, gap_id]
+  # META-978: Part A slice of META-130 / docs/design/SUBAGENT_ATTRIBUTION.md.
+  - kind: subagent_spawned
+    effect_metric: self
+    emitter: scripts/coord/emit-subagent-spawn.sh (META-978)
+    trigger: >
+      An orchestrator session launches a sub-agent via the Agent tool.
+      Carries a synthetic sub_session_id (chump-sub-<parent>-<agent_id>),
+      parent_session_id, worktree_path, agent_description, and model — the
+      hierarchy input the fleet-recorder needs (SUBAGENT_ATTRIBUTION.md
+      Part B, not yet implemented) to attribute sub-agent activity to its
+      own lane instead of collapsing it into the parent session.
+    consumers: [fleet-recorder (planned), fleet-scrubber (planned)]
+    fields_required: [ts, kind, session, sub_session_id, parent_session_id, worktree_path]
   # INFRA-1922: curator-opus-handoff productization. The handoff curator role
   # ships as .claude/agents/handoff.md + .claude/skills/handoff/SKILL.md +
   # scripts/coord/handoff-loop.sh (harness-neutral CLI). The CLI emits the
