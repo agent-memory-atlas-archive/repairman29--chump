@@ -2940,3 +2940,10 @@ CHUMP_ORGAN_MANIFEST_PLATFORM
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_PROCESS_ORGAN_REGISTRY_FILE
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_ORGAN_RECONCILE_FARMER_HEARTBEAT
+# detected in: (standard input)
+CHUMP_ORGAN_RECONCILE_FARMER_HEARTBEAT_DURABLE

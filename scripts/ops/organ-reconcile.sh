@@ -47,6 +47,11 @@ SYSTEMCTL_BIN="${CHUMP_ORGAN_RECONCILE_SYSTEMCTL_BIN:-systemctl}"
 BACKOFF_DIR="${CHUMP_ORGAN_RECONCILE_BACKOFF_DIR:-$REPO_ROOT/.chump-locks/organ-backoff}"
 BACKOFF_COOLDOWN_S="${CHUMP_ORGAN_RECONCILE_BACKOFF_COOLDOWN_S:-3600}"
 VERIFY_DELAY_S="${CHUMP_ORGAN_RECONCILE_VERIFY_DELAY_S:-2}"
+# RESILIENT-1082: stubbable farmer-heartbeat paths (test hook), same pattern
+# as BACKOFF_DIR/SYSTEMCTL_BIN above — mirrors farmer.sh's write_heartbeat()
+# dual-write (repo-local + $HOME-durable copy).
+FARMER_HEARTBEAT_FILE="${CHUMP_ORGAN_RECONCILE_FARMER_HEARTBEAT:-$REPO_ROOT/.chump/farmer-heartbeat}"
+FARMER_HEARTBEAT_DURABLE="${CHUMP_ORGAN_RECONCILE_FARMER_HEARTBEAT_DURABLE:-${HOME:-/root}/.chump/farmer-heartbeat}"
 
 AMBIENT_LOG="${NODE_AMBIENT:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 LIB_AMBIENT="$REPO_ROOT/scripts/coord/lib/ambient-write.sh"
@@ -208,6 +213,20 @@ reap_unit_and_sibling() {
     "$SYSTEMCTL_BIN" stop "$s" 2>/dev/null || true
     "$SYSTEMCTL_BIN" reset-failed "$s" 2>/dev/null || true
   done
+  # RESILIENT-1082: reaping the farmer organ off a brain->muscle switch stops
+  # the timer but leaves its LAST heartbeat file behind. src/farmer_status.rs
+  # check_heartbeat_fresh is vacuous-PASS only while the file is ABSENT
+  # ("farmer never installed here") and RED once it exists but ages past
+  # HEARTBEAT_MAX_AGE_S — so a stale leftover pins `farmer status` RED
+  # forever and the worker readiness gate (RESILIENT-069) never claims again,
+  # even with a full queue. Clear the heartbeat wherever farmer.sh writes it
+  # (repo-local + the $HOME durable copy) the moment the organ is reaped, so
+  # the vacuous-pass path is restored immediately instead of needing a manual
+  # `rm` (VERIFIED on mugman 2026-09-08: 4 days dark until hand-removed).
+  if [[ "$base" == "chump-farmer" ]]; then
+    rm -f "$FARMER_HEARTBEAT_FILE" 2>/dev/null || true
+    rm -f "$FARMER_HEARTBEAT_DURABLE" 2>/dev/null || true
+  fi
 }
 
 # Repo-declared drop-in body that neuters an auto-pager's ExecStart.
