@@ -1001,6 +1001,10 @@ jobs:
           cargo build --bin chump 2>&1 | tail -3
           bash scripts/ci/test-waste-tally-domain.sh
 
+      - name: organ-manifest unified-BOM integration — parser+renderer+housekeeping-lib agree (INFRA-7768)
+        if: matrix.shard == 4
+        run: bash scripts/ci/test-organ-manifest-bom-integration.sh
+
       - name: "audit-step isolation guard — one test script per step (RESILIENT-044)"
         if: matrix.shard == 4
         run: bash scripts/ci/test-audit-step-isolation.sh

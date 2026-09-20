@@ -441,3 +441,12 @@ test-corrective-keyword-exception.sh  # reason: META-937 — exercises scripts/d
 # also unmirrored). Allowlisted here rather than adding a preflight.rs mirror
 # so the fixture-vs-live-manifest comparison stays exactly what CI runs.
 test-bom-old-manifest-regression.sh  # reason: INFRA-7769 — regression guard proving a real pre-unification organ-manifest.txt still parses, cannot render a launchd roster alone, and trips the documented INFRA-7766 fallback WARN; same shape/rationale as test-organ-manifest-bom-integration.sh above
+# ── INFRA-7768: organ-manifest unified-BOM cross-consumer integration ────────
+# Proves the shared parser (organ-manifest-lib.sh), the renderer
+# (render-organ-roster.sh) and the housekeeping-organ deriver
+# (node-housekeeping-roster-lib.sh) all agree against the SAME synthetic
+# manifest, plus real-manifest cross-check — three independent shell call
+# sites, no chump binary involved; Tier-D in spirit (bash-library integration,
+# not preflight-shaped Rust). Mirroring would mean re-implementing the same
+# three-script sourcing dance inside preflight.rs for no additional coverage.
+test-organ-manifest-bom-integration.sh   # reason: INFRA-7768 — cross-consumer bash-library integration proof (parser+renderer+housekeeping-lib agree); no chump binary; Tier-D in spirit
