@@ -730,6 +730,8 @@ jobs:
       # `git reset --hard` over the same dirty tree while preserving ignored DBs.
       - name: Mirror-converge dirty-tree gate (RESILIENT-001)
         run: bash scripts/ci/test-backlog-sync-reader-dirty-tree.sh
+      - name: backlog-sync registry-remote contract (same script, fixture only)
+        run: bash scripts/ci/test-backlog-sync-registry-remote.sh
 
       # RESILIENT-1055 / RESILIENT-1102: the shared organ-unit host-rewriter +
       # role-roster placement. Locks the byte-for-byte rewrite contract both

@@ -2474,6 +2474,14 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-backlog-sync-reader-dirty-tree.sh"],
             GateKind::Scripts,
         ));
+        // INFRA-7887: registry-remote contract for the same script. Hermetic:
+        // bare-repo fixtures in a tmpdir with HOME pinned and a stubbed
+        // `chump`. Mirrors the ci.yml step of the same name.
+        steps.push(step(
+            "backlog-sync-registry-remote",
+            &["bash", "scripts/ci/test-backlog-sync-registry-remote.sh"],
+            GateKind::Scripts,
+        ));
 
         // EFFECTIVE-1666 (EFFECTIVE-414 slice): bin-bloat-guard mirror.
         // Pure `git diff` + `wc -c` over new top-level src/*.rs files —
