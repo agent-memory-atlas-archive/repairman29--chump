@@ -188,6 +188,10 @@ pub fn sync_pull(store: &GapStore, gaps_dir: &Path, dry_run: bool) -> Result<Syn
                 // reverts `chump gap ship`/`gap close` back to open on the next
                 // `--pull`, which is exactly the split-brain this gap fixes.
                 if is_terminal_status(&db_row.status) && !allow_recycle {
+                    eprintln!(
+                        "WARN: sync_pull: {id} is in terminal status '{}' — skipping YAML pull, row left unchanged (INFRA-7824)",
+                        db_row.status
+                    );
                     report.skipped += 1;
                     continue;
                 }
@@ -939,6 +943,74 @@ mod tests {
             after.status, "done",
             "gap sync --pull reverted a shipped gap"
         );
+    }
+
+    #[test]
+    fn pull_leaves_terminal_rows_fully_untouched() {
+        // INFRA-7824: sync_pull must skip any row whose status is a member
+        // of `is_terminal_status`, not just `done` — and it must leave the
+        // *entire* row (title, priority, acceptance_criteria, status) as-is,
+        // not just refuse to flip status back to open.
+        let root = tempdir().unwrap();
+        let store = fresh_store(root.path());
+        let gaps_dir = root.path().join("docs/gaps");
+
+        for (gap_id, terminal_status) in [
+            ("INFRA-7824-A", "superseded"),
+            ("INFRA-7824-B", "wontfix"),
+            ("INFRA-7824-C", "duplicate"),
+        ] {
+            insert_minimal(&store, gap_id, "Original title", "[\"original ac\"]");
+            store
+                .conn_for_sync()
+                .execute(
+                    &format!(
+                        "UPDATE gaps SET status='{terminal_status}', priority='P3' WHERE id='{gap_id}'"
+                    ),
+                    [],
+                )
+                .unwrap();
+            write_yaml(
+                &gaps_dir,
+                gap_id,
+                &format!(
+                    "- id: {gap_id}\n  domain: INFRA\n  title: Divergent YAML title\n  status: open\n  priority: P0\n  effort: s\n  acceptance_criteria:\n    - divergent ac\n"
+                ),
+            );
+        }
+
+        let report = sync_pull(&store, &gaps_dir, false).unwrap();
+        assert_eq!(
+            report.updated, 0,
+            "no terminal-status row should be updated"
+        );
+        assert_eq!(
+            report.skipped, 3,
+            "all three terminal rows should be skipped"
+        );
+
+        for (gap_id, terminal_status) in [
+            ("INFRA-7824-A", "superseded"),
+            ("INFRA-7824-B", "wontfix"),
+            ("INFRA-7824-C", "duplicate"),
+        ] {
+            let after = store.get(gap_id).unwrap().unwrap();
+            assert_eq!(
+                after.status, terminal_status,
+                "{gap_id} status must not change"
+            );
+            assert_eq!(
+                after.title, "Original title",
+                "{gap_id} title must not change"
+            );
+            assert_eq!(after.priority, "P3", "{gap_id} priority must not change");
+            let acs = parse_json_ac_list(&after.acceptance_criteria);
+            assert_eq!(
+                acs,
+                vec!["original ac".to_string()],
+                "{gap_id} acceptance_criteria must not change"
+            );
+        }
     }
 
     #[test]
