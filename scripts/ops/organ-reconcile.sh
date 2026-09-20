@@ -225,6 +225,84 @@ ExecStart=/bin/true
 EOF
 }
 
+# INFRA-7838 (INFRA-3648 slice): scripts/ops/organ-registry.txt (INFRA-7586)
+# declares CJ's process-level node-housekeeping organs (cargo-sweep-gc,
+# disk-monitor, main-health-watchdog, node-orchestrator, pr-lander,
+# pr-stuck-live-scan, reviver, rot-reaper, worktree-reaper, ...) in the same
+# `enabled  <name>  launcher=...  pgrep=...  heartbeat=...` grammar this
+# manifest uses for systemd units — but until now nothing PARSED it: the
+# generator (generate-organ-registry.sh) writes the file and a CI test checks
+# its shape, but no live loop ever pgreps the organs it declares. That's the
+# "designed but never wired into the revivable gate" hole this closes.
+# organ_registry_parse populates 4 caller-provided arrays (nameref, mirrors
+# organ_manifest_parse's calling convention) from a registry file in that
+# format; blank lines and lines not starting with `enabled` are ignored.
+PROCESS_ORGAN_REGISTRY="${CHUMP_PROCESS_ORGAN_REGISTRY_FILE:-$REPO_ROOT/scripts/ops/organ-registry.txt}"
+organ_registry_parse() {  # registry-file, names-array-name, launcher-assoc-name, pgrep-assoc-name, heartbeat-assoc-name
+  local registry="$1"
+  local -n _orp_names="$2"
+  local -n _orp_launcher="$3"
+  local -n _orp_pgrep="$4"
+  local -n _orp_heartbeat="$5"
+  _orp_names=()
+
+  if [[ ! -f "$registry" ]]; then
+    echo "ERROR: process-organ registry not found: $registry" >&2
+    return 1
+  fi
+
+  local state name rest tok launcher pgrep heartbeat
+  while read -r state name rest; do
+    [[ -z "${state:-}" ]] && continue
+    [[ "$state" == \#* ]] && continue
+    [[ "$state" != "enabled" ]] && continue
+    [[ -z "${name:-}" ]] && continue
+    launcher="" pgrep="" heartbeat=""
+    for tok in $rest; do
+      case "$tok" in
+        launcher=*)  launcher="${tok#launcher=}" ;;
+        pgrep=*)     pgrep="${tok#pgrep=}" ;;
+        heartbeat=*) heartbeat="${tok#heartbeat=}" ;;
+      esac
+    done
+    [[ -z "$pgrep" ]] && continue
+    _orp_names+=("$name")
+    _orp_launcher["$name"]="$launcher"
+    _orp_pgrep["$name"]="$pgrep"
+    _orp_heartbeat["$name"]="$heartbeat"
+  done < "$registry"
+  return 0
+}
+
+# organ_registry_check <registry-file>: read-only pgrep audit of every organ
+# declared in a registry (organ_registry_parse's format). Prints one
+# DETECTED-ALIVE/DETECTED-DEAD/UNKNOWN line per organ (mirrors
+# process-organ-heal.sh's --check output shape for the sibling almanac
+# registry) and returns 1 if any organ is DETECTED-DEAD. Never spawns
+# anything — audit only.
+organ_registry_check() {
+  local registry="$1"
+  local names=() launcher pgrep_pat heartbeat
+  declare -A launchers pgreps heartbeats
+  organ_registry_parse "$registry" names launchers pgreps heartbeats || return 2
+
+  local any_dead=0 name status
+  for name in "${names[@]}"; do
+    pgrep_pat="${pgreps[$name]}"
+    status="UNKNOWN"
+    if command -v pgrep >/dev/null 2>&1; then
+      if pgrep -f "$pgrep_pat" >/dev/null 2>&1; then
+        status="DETECTED-ALIVE"
+      else
+        status="DETECTED-DEAD"
+        any_dead=1
+      fi
+    fi
+    printf '[organ-reconcile] %s: %s (%s)\n' "$status" "$name" "$pgrep_pat"
+  done
+  return "$any_dead"
+}
+
 # ── read manifest into arrays (+ per-unit role/requires, RESILIENT-347) ─────
 # TREK-18: parsed by the shared organ_manifest_parse() helper (organ-manifest-lib.sh)
 PAGING_OFF=()
@@ -301,6 +379,15 @@ if [[ -n "$ROLE_FILTER" ]]; then
 fi
 
 MODE="${1:---apply}"
+
+# ── --check-process-organs mode: read-only pgrep audit of organ-registry.txt
+# (INFRA-7838). Independent of --check/--apply below (those drive systemd
+# units only); exits 1 if any registered process-organ is DETECTED-DEAD, 2 if
+# the registry itself is missing/unreadable.
+if [[ "$MODE" == "--check-process-organs" ]]; then
+  organ_registry_check "$PROCESS_ORGAN_REGISTRY"
+  exit $?
+fi
 
 # ── --check mode: verify live state matches the manifest, change nothing ─────
 if [[ "$MODE" == "--check" ]]; then
