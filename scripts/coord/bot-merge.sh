@@ -525,6 +525,8 @@ if [[ "${CHUMP_DISPATCH_DEPTH:-0}" == "1" ]]; then
     export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-chump-dispatch@chump.bot}"
     export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Chump Dispatched}"
     export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-chump-dispatch@chump.bot}"
+    # RESILIENT-1406: dispatched agents should not run local build; rely on CI
+    FAST=1
 fi
 
 # ── INFRA-209: ensure pre-commit hooks are installed in this worktree ────────
