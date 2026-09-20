@@ -104,6 +104,44 @@
 #                            a unit name that only ever existed as a launchd
 #                            plist.
 #
+# INFRA-7766 (docs/strategy/ONE_COMMAND_INSTALL.md section 1, same slice):
+# `enabled` lines may also carry
+#
+#   housekeeping=<script>|<cadence>|<args>
+#                            Pipe-separated triple identifying this organ as
+#                            one of install-node-housekeeping.sh's supervised
+#                            loop-services: <script> is the repo-relative
+#                            path it runs, <cadence> is the sleep interval in
+#                            seconds (0 = the script self-loops, e.g. the
+#                            orchestrator), <args> (may be empty) are extra
+#                            CLI args appended to the script invocation.
+#                            scripts/ops/lib/node-housekeeping-roster-lib.sh's
+#                            housekeeping_organs_from_manifest() reads this
+#                            token from every `enabled` line to derive
+#                            install-node-housekeeping.sh's install roster —
+#                            so THIS file, not a hardcoded heredoc in that
+#                            script, is the one declared source for which
+#                            organs it installs. Omitted means the line is
+#                            not a housekeeping organ (most `enabled` lines
+#                            aren't — housekeeping= only tags the janitor/
+#                            brain subset install-node-housekeeping.sh
+#                            supervises). If the manifest is missing OR
+#                            carries zero housekeeping= lines, the roster lib
+#                            WARNs on stderr and falls back to its built-in
+#                            10-organ roster rather than silently installing
+#                            nothing — deliberately fail-open where the
+#                            parser/renderer (platforms= above) fail closed.
+#                            Two organs (pr-lander, rot-reaper) are a
+#                            documented carve-out NOT given housekeeping=
+#                            tokens here — see node-housekeeping-roster-lib.sh
+#                            and INFRA-7772 for the unit-name collision this
+#                            avoids.
+#
+# See docs/ops/ORGAN_MANIFEST_BOM.md for the full unified-BOM usage guide:
+# how the three consumers (this reconcile, render-organ-roster.sh,
+# install-node-housekeeping.sh) read this ONE file, and how to add a new
+# organ / new platform / new housekeeping organ to it.
+
 # Applicability is the FIRST gate (blast-all -> per-node-applicable, was
 # RESILIENT-347's core ask). If an organ IS applicable but `enable --now`
 # either fails outright or the unit is not verified active a few seconds
