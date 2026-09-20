@@ -53,13 +53,18 @@ chmod +x "$STUB"
 BACKOFF_DIR="$TMP/organ-backoff"
 mkdir -p "$BACKOFF_DIR"
 
+FILE_ASSET="$TMP/cj-worker-run.sh"
+echo "#!/usr/bin/env bash" > "$FILE_ASSET"
+
 MANIFEST="$TMP/manifest.txt"
-cat > "$MANIFEST" <<'EOF'
+cat > "$MANIFEST" <<EOF
 enabled     chump-not-applicable.timer  role=muscle requires=bin:this-binary-does-not-exist-anywhere
 enabled     chump-happy.timer  role=brain
 enabled     chump-unowned-dead.timer  role=muscle
 enabled     chump-backoff-cooling.timer  role=data
 enabled     chump-backoff-expired.timer  role=data
+enabled     chump-cj-worker.service  role=muscle requires=bin:bash,file:$FILE_ASSET
+enabled     chump-cj-file-missing.service  role=muscle requires=file:$TMP/no-such-asset
 EOF
 
 # Source the doctor script for direct function access (matches the
@@ -83,6 +88,7 @@ run_check() {
 }
 
 echo "chump-happy.timer" >> "$ACTIVE_FILE"
+echo "chump-cj-worker.service" >> "$ACTIVE_FILE"
 rm -f "$BACKOFF_DIR"/*.json 2>/dev/null || true
 printf '{"unit":"chump-backoff-cooling.timer","since":%d,"reason":"enable_failed"}\n' \
     "$(date +%s)" > "$BACKOFF_DIR/chump-backoff-cooling.timer.json"
@@ -91,8 +97,9 @@ printf '{"unit":"chump-backoff-expired.timer","since":%d,"reason":"verify_failed
 
 run_check
 
-# Manifest order: not-applicable, happy, unowned-dead, backoff-cooling, backoff-expired
-[[ "${#CHECKS[@]}" -eq 5 ]] || fail "expected 5 organ checks registered, got ${#CHECKS[@]} (${CHECKS[*]})"
+# Manifest order: not-applicable, happy, unowned-dead, backoff-cooling,
+# backoff-expired, cj-worker (file: present), cj-file-missing (file: absent)
+[[ "${#CHECKS[@]}" -eq 7 ]] || fail "expected 7 organ checks registered, got ${#CHECKS[@]} (${CHECKS[*]})"
 
 # ── 1. not-applicable (unmet requires=) → skip ──────────────────────────────
 if [[ "${STATUSES[0]}" == "skip" && "${DETAILS[0]}" == *"not applicable"* ]]; then
@@ -127,6 +134,20 @@ if [[ "${STATUSES[4]}" == "fail" && "${DETAILS[4]}" == *"dead and unowned"* ]]; 
     pass "inactive + expired backoff → fail, 'dead and unowned' (cooldown elapsed, no longer distinguished)"
 else
     fail "expected fail/'dead and unowned' for chump-backoff-expired.timer, got status=${STATUSES[4]} detail=${DETAILS[4]}"
+fi
+
+# ── 6. file: requires= met (asset exists) + active → pass (RESILIENT-1436) ──
+if [[ "${STATUSES[5]}" == "pass" ]]; then
+    pass "requires=file:<existing-asset> → applicable and checked, active → pass"
+else
+    fail "expected pass for chump-cj-worker.service (file: asset exists), got status=${STATUSES[5]} detail=${DETAILS[5]}"
+fi
+
+# ── 7. file: requires= unmet (asset absent) → skip, not unknown-spec fail ──
+if [[ "${STATUSES[6]}" == "skip" && "${DETAILS[6]}" == *"missing_file"* ]]; then
+    pass "requires=file:<absent-asset> → skip/'missing_file', not RED and not 'unknown_requires_spec'"
+else
+    fail "expected skip/'missing_file' for chump-cj-file-missing.service, got status=${STATUSES[6]} detail=${DETAILS[6]}"
 fi
 
 echo "ALL PASS"

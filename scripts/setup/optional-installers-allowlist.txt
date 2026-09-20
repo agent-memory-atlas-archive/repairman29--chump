@@ -180,3 +180,10 @@ install-fleet-health-sentinel.sh
 # broader postgres+postgrest provisioning flow, not a universal
 # fresh-bootstrap requirement.
 install-postgrest.sh
+
+# RESILIENT-1436 — systemd --user supervision for CJ's hand-placed
+# ~/cj-worker-run.sh / cj-disk-monitor-run.sh / cj-sync-run.sh, a
+# host-specific asset per organ-manifest.txt's file: requires= idiom. Skips
+# cleanly (no-op) on any node where those run-scripts don't exist, so it is
+# situational/opt-in, not a universal fresh-bootstrap requirement.
+install-cj-core-organs.sh

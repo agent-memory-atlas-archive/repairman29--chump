@@ -730,6 +730,23 @@ _organ_roll_call_is_applicable() {
                 "$systemctl_bin" is-active --quiet "${rtok#dep:}" 2>/dev/null \
                     || { printf -v "$reason_var" 'missing_dep:%s' "${rtok#dep:}"; return 1; }
                 ;;
+            file:*)
+                # RESILIENT-1436: mirrors organ_is_applicable() in
+                # scripts/ops/lib/organ-manifest-lib.sh — the CJ-legacy
+                # chump-cj-worker/disk-monitor/sync organs declare
+                # requires=...,file:~/cj-*-run.sh (a host-specific asset with
+                # no tracked unit file). Before this case existed, `file:`
+                # fell through to the `*)` unknown-spec branch below, which
+                # marked these organs not-applicable and SKIPped them —
+                # invisible to the live roll-call even when systemd-supervised.
+                local fpath="${rtok#file:}"
+                case "$fpath" in
+                    '~/'*)     fpath="${HOME:-/root}/${fpath#\~/}" ;;
+                    '$HOME/'*) fpath="${HOME:-/root}/${fpath#\$HOME/}" ;;
+                esac
+                [[ -e "$fpath" ]] \
+                    || { printf -v "$reason_var" 'missing_file:%s' "$fpath"; return 1; }
+                ;;
             *)
                 printf -v "$reason_var" 'unknown_requires_spec:%s' "$rtok"; return 1 ;;
         esac
