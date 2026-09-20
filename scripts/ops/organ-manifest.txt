@@ -397,7 +397,7 @@ enabled     chump-node-converge.timer  role=muscle requires=bin:git
 # data (github_cache.db, ambient.jsonl, claim leases). ~48 gauges stayed
 # dark until this served them. Unit + SYSTEM_UNITS roster entry land together
 # (RESILIENT-376: manifest-only never installs the file).
-enabled     chump-fleet-server.service  role=data requires=bin:git
+enabled     chump-fleet-server.service  role=data requires=bin:git platforms=systemd,launchd  # INFRA-7765: widened -- fleet-server-launchd (bootstrap-manifest.yaml) is a confirmed exact match (same HTTP+WS query server on 127.0.0.1:7070), not a separate organ; see docs/ops/ORGAN_ROSTER_AUDIT.md
 
 # chump-almanac-liveness.timer: systemd complement to the macOS-only
 # almanac-summarize-watchdog (RESILIENT-354/launchd) — covers almanac binary
@@ -537,3 +537,45 @@ enabled     chump-effect-verifier.timer  role=brain
 # (scripts/setup/provision-chumpd-host.sh's chumpd.env) reference the same
 # manifest rather than hand-copying the ladder values, so there is exactly
 # ONE place to edit to change the fleet's floor model or ladder.
+
+# --- macOS-only capabilities folded in from bootstrap-manifest.yaml (INFRA-7765,
+# docs/strategy/ONE_COMMAND_INSTALL.md section 1, one-command-install BOM
+# unification INFRA-7756). Every id below either MATCHES an existing line
+# above (platforms= widened in place, no new line) or gets exactly ONE new
+# platforms=launchd line here — even where NO Linux port exists yet — so the
+# Linux gap is visible in this single declared roster instead of silently
+# absent from a second file nobody diffs against the first. Full audit with
+# ExecStart/script citations: docs/ops/ORGAN_ROSTER_AUDIT.md. These lines are
+# inert on a systemd host: organ-reconcile.sh's platform filter (INFRA-7764)
+# excludes any line whose platforms= does not include "systemd" from ENABLED
+# before anything else runs, so none of the confirmed-absent entries below is
+# ever `systemctl enable`'d here — zero runtime behavior change, pure
+# visibility. requires=bin:chump is the common floor (every one of these
+# needs the CLI); a few also declare bin:gh where the underlying script is
+# gh-dependent, matching bootstrap-manifest.yaml's own installer.
+enabled     chump-opus-curator.timer  role=brain requires=bin:chump platforms=launchd  # curator-launchd: P0 demotion/vague-AC-fill/pillar rebalance. ExecStart trace (ONE_COMMAND_INSTALL.md finding 4): confirmed absent on Linux — chump-rca-reflex.service runs a different script (recurring-gap-pattern-detector.sh). Linux port: TODO.
+enabled     chump-self-doctor.timer  role=brain requires=bin:chump platforms=launchd  # self-doctor-launchd: `fleet doctor --heal` every 5min. Confirmed absent — chump-process-organ-heal.service heals organ PROCESSES, not gap-dispatch via fleet doctor. Linux port: TODO.
+enabled     chump-paramedic.timer  role=brain requires=bin:chump platforms=launchd  # paramedic-launchd: stuck-PR rescue every 10min. Confirmed absent — no PR-rescue timer in this manifest (shepherd is an agent role, not a systemd unit). Linux port: TODO.
+enabled     chump-conductor.timer  role=brain requires=bin:chump platforms=launchd  # conductor-launchd: self-rescue consensus proposal every 30min. Confirmed absent — closest is chump-organ-success-verifier/chump-effect-verifier, which verify effects, not propose self-rescue. Linux port: TODO.
+enabled     chump-github-liaison.timer  role=data requires=bin:chump,bin:gh platforms=launchd  # github-liaison-launchd: refreshes .chump/github_cache.db every 60s. Not traced to a Linux unit by name or script match; treat as absent per ONE_COMMAND_INSTALL.md finding 4 until proven otherwise. Linux port: TODO.
+enabled     chump-quartermaster-audit.timer  role=data requires=bin:chump,bin:git platforms=launchd  # quartermaster-audit-launchd: 5-min shelfware-audit scanning merged artifacts against curator docs. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-ghost-pr-closer.timer  role=janitor requires=bin:chump,bin:gh platforms=launchd  # ghost-pr-closer-launchd: closes DIRTY/CONFLICTING PRs whose gap is already done. Not traced to a Linux unit (distinct from chump-gap-closure-reconcile.timer, which closes gaps from GitHub truth, not PRs from gap truth). Linux port: TODO.
+enabled     chump-trunk-sentinel.timer  role=brain requires=bin:chump,bin:gh platforms=launchd  # trunk-sentinel-launchd: 60s trunk-red watcher escalating fix-class actions. Distinct from chump-trunk-recovery-reviver.timer (that one reopens rot-reaped PRs after a red->green recovery; this one watches + escalates DURING red). Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-pr-shepherd.timer  role=brain requires=bin:chump,bin:gh platforms=launchd  # pr-shepherd-daemon-launchd: 60s PR classifier/auto-rebaser/auto-armer. Not traced to a Linux unit (distinct from chump-pr-lander.timer, which only arms already-green PRs). Linux port: TODO.
+enabled     chump-daemon-activator.timer  role=janitor requires=bin:chump,bin:git platforms=launchd  # daemon-activator-launchd: 5-min auto-loader for new install-*.sh/*.plist since last checkpoint. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-main-worktree-drift-detector.timer  role=data requires=bin:chump,bin:git platforms=launchd  # main-worktree-drift-detector-launchd: 30-min untracked-yaml/behind-origin drift alarm. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-fleet-recorder.service  role=data requires=bin:chump platforms=launchd  # fleet-recorder-launchd: captures NATS+ambient events to .chump/fleet_events.db, feeds fleet-server's query API. Not traced to a Linux unit distinct from chump-fleet-server.service itself (which serves, but does not capture, the events). Linux port: TODO.
+enabled     chump-planner.timer  role=data requires=bin:chump-plan platforms=launchd  # chump-planner-launchd: hourly gap-priority.json writer (INFRA-1257), consumed by the fleet picker. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-queue-health-monitor.timer  role=data requires=bin:chump platforms=launchd  # queue-health-monitor-launchd: hourly .chump/health.jsonl + ambient ALERT writer. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-stale-branch-reaper.timer  role=janitor requires=bin:chump,bin:git platforms=launchd  # stale-branch-reaper-launchd: daily reaper for remote branches 14+ days stale with no open PR. Distinct from chump-stale-worktree-reaper.timer (worktrees, not branches). Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-pr-watch-shepherd.timer  role=brain requires=bin:chump,bin:gh platforms=launchd  # pr-watch-shepherd-launchd: 10-min sweep auto-recovering DIRTY-after-arm PRs from a clean ephemeral worktree. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-distill-pr-skills.timer  role=data requires=bin:chump platforms=launchd  # distill-pr-skills-launchd: hourly distiller of shipped PRs into chump_improvement_targets rows. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-ci-health-gate.timer  role=brain requires=bin:chump platforms=launchd  # ci-health-gate-launchd: 5-min auto-pause when CI is jammed (>=50% BLOCKED) or an SLO breaches. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-auto-deploy.timer  role=janitor requires=bin:chump,bin:git platforms=launchd  # auto-deploy-launchd: 20-min binary-tracks-main deploy daemon via refresh-runner-binary.sh. ONE_COMMAND_INSTALL.md finding 4 explicitly rules OUT chump-organ-deploy.timer as a match (that one places unit files as root; this one rebuilds/redeploys the binary). Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-almanac-code-intel.timer  role=data requires=bin:chump platforms=launchd  # almanac-code-intel: wires almanac_* MCP tools into chump-mcp.json + indexes the working repo. RENAMED-ORGAN, PARTIAL/UNCONFIRMED: install-almanac-organ.sh already self-installs as systemd --user on Linux TODAY (ONE_COMMAND_INSTALL.md section 2d groups it with install-oauth-refresh-systemd.sh/install-fleet-health-sentinel.sh as already-rootless-systemd installers) -- but that --user unit is NOT organ-manifest.txt-tracked, and is a DIFFERENT capability from chump-almanac-liveness.timer below (which is itself the systemd complement to a THIRD, not-in-bootstrap-manifest launchd organ, almanac-summarize-watchdog/RESILIENT-354 -- freshness-checking, not indexing/MCP-wiring). Left platforms=launchd-only (not widened to systemd) rather than force a 1:1 merge with either existing organ pending a dedicated reconciliation follow-up; zero behavior change preserved either way since this line was never reconcile-visible before.
+enabled     chump-coord-assign.service  role=brain requires=bin:chump platforms=launchd  # coord-assign-launchd: FLEET-034 push-routing daemon publishing WorkEnvelopes. RESILIENT-271 shipped the installer + mapped it in optional-installers-allowlist.txt (audit-only) but it was never registered in bootstrap-manifest.yaml OR this manifest until now. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-a2a-dead-letter-reaper.timer  role=janitor requires=bin:chump platforms=launchd  # a2a-dead-letter-reaper-launchd: 30-min dead-letter reaper for unread dormant-inbox A2A messages. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-decomposition-hint-tracker.timer  role=data requires=bin:chump platforms=launchd  # decomposition-hint-tracker-launchd: daily analytics on PR-decomposition-hint heeded-rate. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-refresh-model-prices.timer  role=data requires=bin:chump platforms=launchd  # refresh-model-prices-launchd: weekly diff of model_rates.yaml/model_registry.yaml against LiteLLM upstream. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-fleet-version-skew-detect.timer  role=data requires=bin:chump,bin:git platforms=launchd  # fleet-version-skew-detect-launchd: 6h ALERT when working-tree worker.sh drifts from origin/main unrelaunched. Not traced to a Linux unit. Linux port: TODO.
+enabled     chump-mission-grade.timer  role=data requires=bin:chump platforms=launchd  # mission-grade-cron: emits kind=mission_grade via `chump mission-grade` on a 30-min cadence. Genuinely cross-platform BY DESIGN (delegates to `chump cron install`, which renders launchd on macOS and a systemd --user timer of this EXACT name on Linux, INFRA-2057) -- but the Linux side is --user scope, outside this system-scope organ-reconcile's reach until slice B's rootless --user rendering lands, so platforms= stays launchd-only here to avoid this reconcile attempting a system-scope `systemctl enable` against a unit that only ever exists at --user scope. Not a Linux GAP like the lines above (the Linux mechanism already exists); a scoping mismatch slice B resolves.

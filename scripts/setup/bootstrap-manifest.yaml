@@ -40,6 +40,7 @@ installers:
   - id: chump-planner-launchd
     why: INFRA-1257 — hourly planner that writes .chump-locks/gap-priority.json (consumed by the fleet picker per INFRA-1258).
     priority: P1
+    organ: chump-planner.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-chump-planner-launchd.sh
     check: launchctl list 2>/dev/null | grep -q dev.chump.planner
     depends_on: [chump-plan-binary]
@@ -48,6 +49,7 @@ installers:
   - id: curator-launchd
     why: META-065 — opus-curator runs every 10 min, mutates gap registry (P0 demotion, vague-AC fill, pillar rebalance). Without this, registry rots.
     priority: P1
+    organ: chump-opus-curator.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-curator-launchd.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.opus-curator
     depends_on: [chump-binary]
@@ -56,6 +58,7 @@ installers:
   - id: conductor-launchd
     why: EFFECTIVE-264 (EFFECTIVE-088 activation) — fleet self-rescue conductor. Every 30 min detects a wedged fleet by ground truth (recent merges + pickable P0/P1 + fleet-paused sentinel) and emits a self-rescue consensus proposal (dry-run by default; arm with CHUMP_CONDUCTOR_ACT=1). The autonomous proposer that fills the empty consensus chair so "chump drives the loop" is a live daemon, not code-on-disk.
     priority: P1
+    organ: chump-conductor.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-conductor-launchd.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.conductor
     depends_on: [chump-binary]
@@ -64,6 +67,7 @@ installers:
   - id: paramedic-launchd
     why: INFRA-1397 — chump paramedic daemon runs every 10min rescuing stuck PRs (REBASE_DIRTY, RERUN_FLAKE, etc.). Without this, PR rescue is manual-only.
     priority: P1
+    organ: chump-paramedic.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-paramedic.sh
     check: bash scripts/setup/install-paramedic.sh --check
     depends_on: [chump-binary]
@@ -72,6 +76,7 @@ installers:
   - id: self-doctor-launchd
     why: INFRA-1595 — Wave 0b outer autonomy loop. Runs `chump fleet doctor --heal` every 5min; catches missing daemons + stuck PRs and dispatches via `chump --execute-gap`. Default OFF (diagnose-only); set CHUMP_FLEET_SELF_DOCTOR_HEAL=true to enable auto-fix.
     priority: P1
+    organ: chump-self-doctor.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-self-doctor.sh
     check: bash scripts/setup/install-self-doctor.sh --check
     depends_on: [chump-binary]
@@ -80,6 +85,7 @@ installers:
   - id: queue-health-monitor-launchd
     why: INFRA-052 — hourly queue-health-monitor.sh writes .chump/health.jsonl + alerts.log + ambient ALERTs. Plist exists at launchd/com.chump.queue-health-monitor.plist but was never wired into the bootstrap manifest — fleet self-healing has no signal until this is loaded (INFRA-1546 narrow-split 1/3).
     priority: P1
+    organ: chump-queue-health-monitor.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-queue-health-monitor-launchd.sh
     # INFRA-1808: the plist's actual Label is dev.chump.queue-health-monitor
     # (see install-queue-health-monitor-launchd.sh) — the prior check grepped
@@ -99,6 +105,7 @@ installers:
   - id: github-liaison-launchd
     why: INFRA-1317 — Phase 1 of GITHUB_LIAISON.md. One process refreshes .chump/github_cache.db every 60s instead of N workers each polling GitHub independently. Plist sets CHUMP_LIAISON_ENABLED=1; the script itself defaults OFF for safety in manual contexts. Cuts the secondary-rate-limit pressure that hit 44k self-throttle events / 23h on 2026-05-14.
     priority: P1
+    organ: chump-github-liaison.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-github-liaison.sh
     # INFRA-1808: calling the installer's own `--check` mode ran
     # resolve_main_worktree() under `set -euo pipefail` as a side effect —
@@ -112,6 +119,7 @@ installers:
   - id: stale-branch-reaper-launchd
     why: INFRA-388 — daily reaper deletes remote branches 14+ days old with no open PR. Without this the reaper script exists but never runs; reaper-heartbeat-watchdog ALERTs daemon_silent for "branch". Installer existed since 2026-05 but was missing from manifest until INFRA-1926 today.
     priority: P1
+    organ: chump-stale-branch-reaper.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-stale-branch-reaper-launchd.sh
     check: launchctl list 2>/dev/null | grep -q dev.chump.stale-branch-reaper
     adds: ~/Library/LaunchAgents/dev.chump.stale-branch-reaper.plist + daily run
@@ -119,6 +127,7 @@ installers:
   - id: pr-watch-shepherd-launchd
     why: INFRA-354 — 10-min sweeper that scans all open ARMED PRs and auto-recovers DIRTY-after-arm ones from a clean ephemeral worktree. Without this, the per-PR detached pr-watch.sh children die when their host worktree is reaped, leaving PRs stuck DIRTY. Manifest gap surfaced by daemon_silent ALERT for "pr-watch" today.
     priority: P1
+    organ: chump-pr-watch-shepherd.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-pr-watch-shepherd-launchd.sh
     check: launchctl list 2>/dev/null | grep -q dev.chump.pr-watch-shepherd
     adds: ~/Library/LaunchAgents/dev.chump.pr-watch-shepherd.plist + 10-min run
@@ -126,6 +135,7 @@ installers:
   - id: distill-pr-skills-launchd
     why: INFRA-195 — hourly feedback loop that distills shipped PRs into chump_improvement_targets rows for cross-agent skill sharing. Without this the table only grows via manual sqlite3 INSERTs (i.e. never). reaper-heartbeat-watchdog ALERTs daemon_silent for "distill" because /tmp/chump-distill.heartbeat is never stamped. Installer NEWLY created by INFRA-1926 today (the script existed since 2026-05-01 but no launchd installer ever shipped).
     priority: P2
+    organ: chump-distill-pr-skills.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-distill-pr-skills-launchd.sh
     check: launchctl list 2>/dev/null | grep -q dev.chump.distill-pr-skills
     adds: ~/Library/LaunchAgents/dev.chump.distill-pr-skills.plist + hourly run
@@ -133,6 +143,7 @@ installers:
   - id: ci-health-gate-launchd
     why: INFRA-1607 — 5-min daemon that auto-pauses the fleet when CI is jammed (>= 50% BLOCKED PRs) or any SLO is breached. Without this, workers keep claiming new gaps during a pipeline jam and compound the pile-up. Plist at launchd/com.chump.ci-health-gate.plist; script at scripts/coord/ci-health-gate.sh.
     priority: P1
+    organ: chump-ci-health-gate.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: cp launchd/com.chump.ci-health-gate.plist ~/Library/LaunchAgents/ && sed -i '' "s|/path/to/Chump|$(pwd)|g; s|/path/to/HOME|$HOME|g" ~/Library/LaunchAgents/com.chump.ci-health-gate.plist && launchctl load ~/Library/LaunchAgents/com.chump.ci-health-gate.plist
     check: launchctl list 2>/dev/null | grep -q com.chump.ci-health-gate
     depends_on: [chump-binary, github-liaison-launchd]
@@ -141,6 +152,7 @@ installers:
   - id: fleet-recorder-launchd
     why: INFRA-2174 — capture daemon that writes NATS+ambient events to .chump/fleet_events.db. Required by the fleet visualization umbrella (INFRA-2164); without it the query API (INFRA-2175) and scrubber (INFRA-2176) have no data.
     priority: P1
+    organ: chump-fleet-recorder.service  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-fleet-recorder-launchd.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.fleet-recorder
     adds: ~/Library/LaunchAgents/com.chump.fleet-recorder.plist + KeepAlive daemon writing to .chump/fleet_events.db
@@ -148,6 +160,7 @@ installers:
   - id: fleet-server-launchd
     why: INFRA-2175 — HTTP + WebSocket query server for fleet visualization (INFRA-2164 sub-slice b). Reads from .chump/fleet_events.db and serves /api/events, /api/segments, /api/sessions/active, /api/trace/pr/:n, and WS /api/live on 127.0.0.1:7070. Without this daemon the scrubber frontend (INFRA-2176) has no data source.
     priority: P2
+    organ: chump-fleet-server.service  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-fleet-server.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.fleet-server
     adds: ~/Library/LaunchAgents/com.chump.fleet-server.plist + KeepAlive server on 127.0.0.1:7070
@@ -155,6 +168,7 @@ installers:
   - id: daemon-activator-launchd
     why: META-225 — 5-min Quartermaster auto-fixer that scans last 24h of main commits for new install-*.sh or *.plist files and loads them via launchctl if absent. Eliminates the manual "forgot to run the installer after merge" class of unwedging. Self-bootstrapping on first tick.
     priority: P1
+    organ: chump-daemon-activator.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-daemon-activator.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.daemon-activator
     adds: ~/Library/LaunchAgents/com.chump.daemon-activator.plist + 5-min run
@@ -162,6 +176,7 @@ installers:
   - id: ghost-pr-closer-launchd
     why: META-225 — 15-min Quartermaster auto-fixer that scans open PRs and closes those where the underlying gap is already status=done AND the PR is DIRTY/CONFLICTING. Eliminates the ghost-PR accumulation class of unwedging. Self-throttles to 5 closes per run; overflow deferred to .chump/ghost-pr-deferred.jsonl.
     priority: P1
+    organ: chump-ghost-pr-closer.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-ghost-pr-closer.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.ghost-pr-closer
     adds: ~/Library/LaunchAgents/com.chump.ghost-pr-closer.plist + 15-min run
@@ -169,6 +184,7 @@ installers:
   - id: main-worktree-drift-detector-launchd
     why: META-225 — 30-min Quartermaster auto-fixer that measures untracked yaml under docs/gaps/ and commits-behind-origin/main in the main worktree; alerts via ambient event and auto-reserves a cleanup gap when thresholds breach (untracked>50 OR behind>20). Debounced 6h. Eliminates the silent drift accumulation that blocks shepherd operations.
     priority: P1
+    organ: chump-main-worktree-drift-detector.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-main-worktree-drift-detector.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.main-worktree-drift-detector
     adds: ~/Library/LaunchAgents/com.chump.main-worktree-drift-detector.plist + 30-min run
@@ -176,6 +192,7 @@ installers:
   - id: trunk-sentinel-launchd
     why: Trunk Health Sentinel — 60s daemon that watches main's ci.yml conclusion and autonomously triggers fix-class actions when RED persists (>5m file gap, >15m dispatch Sonnet via CodeFixContract brief, >60m operator-recall T4). Closes the 'trunk red, nobody noticed, queue burned for an hour' class of waste. Pillars RESILIENT + ZERO-WASTE.
     priority: P1
+    organ: chump-trunk-sentinel.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-trunk-sentinel.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.trunk-sentinel
     adds: ~/Library/LaunchAgents/com.chump.trunk-sentinel.plist + 60s run
@@ -183,6 +200,7 @@ installers:
   - id: pr-shepherd-daemon-launchd
     why: META-192 — 60s relentless PR-shepherd that classifies all open PRs into 8 states, auto-rebases BEHIND PRs, arms auto-merge on BLOCKED_GREEN, and files follow-up gaps on BLOCKED_REAL_FAIL. Completes the autonomous PR-management activation path begun in META-180 through META-184.
     priority: P1
+    organ: chump-pr-shepherd.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-pr-shepherd-daemon.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.pr-shepherd
     depends_on: [chump-binary, github-liaison-launchd]
@@ -191,6 +209,7 @@ installers:
   - id: quartermaster-audit-launchd
     why: "META-205 — 5-min Quartermaster shelfware-audit daemon. Scans git log origin/main since last checkpoint; fires when (ships >= 5) OR (age >= 30min AND ships >= 1). Greps curator role docs (.claude/agents/*.md, CLAUDE.md, AGENTS.md, docs/process/*.md) for each merged artifact; zero-hit = shelfware → files EFFECTIVE wiring gap (max 5/run, deferred to .chump/quartermaster-deferred.jsonl). Without this, every new daemon/CLI/protocol ships as shelf-ware (present on disk, absent from every curator workflow). Emits kind=shelfware_detected + kind=shelfware_audit_run to ambient.jsonl."
     priority: P1
+    organ: chump-quartermaster-audit.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: "cp scripts/launchd/com.chump.quartermaster-audit.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.chump.quartermaster-audit.plist"
     check: launchctl list 2>/dev/null | grep -q com.chump.quartermaster-audit
     adds: ~/Library/LaunchAgents/com.chump.quartermaster-audit.plist + 5-min shelfware-audit tick
@@ -198,6 +217,7 @@ installers:
   - id: auto-deploy-launchd
     why: "MISSION-012 — 20-min auto-deploy daemon that ensures /opt/homebrew/bin/chump tracks origin/main. Without this, merged fixes are inert until a manual rebuild. Delegates to refresh-runner-binary.sh which builds in an isolated detached worktree (main checkout never touched). Emits kind=binary_auto_deployed on each successful deploy."
     priority: P0
+    organ: chump-auto-deploy.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-auto-deploy-launchd.sh
     check: launchctl list 2>/dev/null | grep -q com.chump.auto-deploy
     depends_on: [chump-binary]
@@ -206,6 +226,7 @@ installers:
   - id: almanac-code-intel
     why: "Almanac grounded code-intelligence — indexes this repo (+ fleet + public deps) and wires the almanac_* MCP tools (almanac_search / almanac_api / almanac_search_fleet / almanac_neighbors / almanac_status) so agents ground code questions on path:line receipts and exact API signatures instead of grepping/guessing. Keyword-ready in seconds; fusion embeds in the background; hourly refresh keeps it fresh. Non-blocking: the hook exits 0 if Almanac isn't built."
     priority: P2
+    organ: chump-almanac-code-intel.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-almanac-organ.sh
     check: grep -q '"almanac"' chump-mcp.json 2>/dev/null
     adds: almanac MCP server in chump-mcp.json + indexed working repo + hourly refresh cron (install-almanac-organ.sh runs first — INFRA-4660 — so a clean host clones+builds almanac before the FTUE hook needs a binary)
@@ -221,6 +242,7 @@ installers:
   - id: chump-coord-assign-launchd
     why: "RESILIENT-271 shipped the com.chump.coord-assign installer (FLEET-034 push-routing daemon — publishes WorkEnvelopes so preferred_machine can route work) and mapped it in optional-installers-allowlist.txt (audit-only), but never registered it in bootstrap-manifest.yaml — the manifest chump-fleet-bootstrap.sh actually reads to auto-install. Without this entry the daemon stays uninstalled on every fresh operator machine despite being 'known and intentional'."
     priority: P2
+    organ: chump-coord-assign.service  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-coord-assign-launchd.sh
     check: bash scripts/setup/install-coord-assign-launchd.sh --check
     adds: ~/Library/LaunchAgents/com.chump.coord-assign.plist + KeepAlive daemon publishing WorkEnvelopes
@@ -228,6 +250,7 @@ installers:
   - id: a2a-dead-letter-reaper-launchd
     why: "INFRA-1946 (INFRA-1862 slice C) — 30-min reaper that dead-letters messages sitting unread in a dormant recipient's inbox for CHUMP_A2A_DEAD_LETTER_MIN+ minutes into .chump-locks/inbox/dead-letter.jsonl and pages the operator via operator-recall.sh --condition A2A_DEAD_LETTER_FLOOD when too many pile up in one run. Without this, messages to a dormant inbox sit forever unread with no reaper, no pager, no closure (today's session: 4 curator inboxes accumulated 5K-19K bytes of unread dispatches)."
     priority: P1
+    organ: chump-a2a-dead-letter-reaper.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-a2a-dead-letter-reaper-launchd.sh
     check: bash scripts/setup/install-a2a-dead-letter-reaper-launchd.sh --check
     adds: ~/Library/LaunchAgents/com.chump.a2a-dead-letter-reaper.plist + 30-min run
@@ -235,6 +258,7 @@ installers:
   - id: decomposition-hint-tracker-launchd
     why: "INFRA-1564 — decomposition-hint-tracker.sh (FLEET-026) has been production-ready for days: idempotent analytics on PR decomposition hints, own outcomes file, own ambient event. Never wired into launchctl, so the heeded-rate/revealed-correct-rate signal never refreshes on a real machine."
     priority: P2
+    organ: chump-decomposition-hint-tracker.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: cp launchd/com.chump.decomposition-hint-tracker.plist ~/Library/LaunchAgents/ && sed -i '' "s|/path/to/Chump|$(pwd)|g; s|/path/to/HOME|$HOME|g" ~/Library/LaunchAgents/com.chump.decomposition-hint-tracker.plist && launchctl load ~/Library/LaunchAgents/com.chump.decomposition-hint-tracker.plist
     check: launchctl list 2>/dev/null | grep -q com.chump.decomposition-hint-tracker
     adds: ~/Library/LaunchAgents/com.chump.decomposition-hint-tracker.plist + daily run
@@ -242,6 +266,7 @@ installers:
   - id: refresh-model-prices-launchd
     why: "INFRA-1564 — refresh-model-prices.sh (INFRA-731/INFRA-739) diffs docs/pricing/model_rates.yaml + docs/dispatch/model_registry.yaml against LiteLLM upstream weekly, but had no launchd entry so pricing drift only surfaced when someone ran it by hand."
     priority: P2
+    organ: chump-refresh-model-prices.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: cp launchd/com.chump.refresh-model-prices.plist ~/Library/LaunchAgents/ && sed -i '' "s|/path/to/Chump|$(pwd)|g; s|/path/to/HOME|$HOME|g" ~/Library/LaunchAgents/com.chump.refresh-model-prices.plist && launchctl load ~/Library/LaunchAgents/com.chump.refresh-model-prices.plist
     check: launchctl list 2>/dev/null | grep -q com.chump.refresh-model-prices
     adds: ~/Library/LaunchAgents/com.chump.refresh-model-prices.plist + weekly run
@@ -249,6 +274,7 @@ installers:
   - id: fleet-version-skew-detect-launchd
     why: "INFRA-1564 — fleet-version-skew-detect.sh (INFRA-609/RESILIENT-155) compares the running fleet's working-tree worker.sh against origin/main and ALERTs when telemetry-affecting drift is unrelaunched, but had no launchd entry to run it automatically."
     priority: P2
+    organ: chump-fleet-version-skew-detect.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: cp launchd/com.chump.fleet-version-skew-detect.plist ~/Library/LaunchAgents/ && sed -i '' "s|/path/to/Chump|$(pwd)|g; s|/path/to/HOME|$HOME|g" ~/Library/LaunchAgents/com.chump.fleet-version-skew-detect.plist && launchctl load ~/Library/LaunchAgents/com.chump.fleet-version-skew-detect.plist
     check: launchctl list 2>/dev/null | grep -q com.chump.fleet-version-skew-detect
     adds: ~/Library/LaunchAgents/com.chump.fleet-version-skew-detect.plist + 6h run
@@ -256,6 +282,7 @@ installers:
   - id: mission-grade-cron
     why: "CREDIBLE-421 — `chump mission-grade` emits kind=mission_grade to ambient.jsonl (the input `chump kpi report`'s Mission Grade History trend reads), but nothing ran it on a cadence: the old installer hand-rolled a macOS-only launchd plist and was never added to this manifest, so the gauge stayed dark ('No mission-grade snapshots recorded yet') on every host. Now delegates to cross-platform `chump cron install` (launchd on macOS, systemd --user on Linux, INFRA-2057)."
     priority: P1
+    organ: chump-mission-grade.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-mission-grade-launchd.sh
     check: test -f "$HOME/Library/LaunchAgents/com.chump.mission-grade.plist" -o -f "$HOME/.config/systemd/user/chump-mission-grade.timer"
     depends_on: [chump-binary]
