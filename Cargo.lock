@@ -1644,9 +1644,11 @@ dependencies = [
  "async-trait",
  "axonerai",
  "chump-db-pool",
+ "hex",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tokio",
 ]
 
