@@ -1,0 +1,43 @@
+#! publish-guard-patterns v1
+#! version 1
+#! nonce REPLACE-WITH-32-RANDOM-HEX      (openssl rand -hex 16; makes this file's sha256 safe to log)
+#
+# EXAMPLE ONLY. This copy is safe to publish: every value is a placeholder.
+# The real file is PRIVATE. It lives in a private repo of the operator's choosing and at
+# ~/.config/chump/publish-guard.patterns (mode 0600) on each node. It never enters the public tree,
+# a gap, a chat channel, an issue tracker, or a PR. The list of what you consider secret is itself revealing.
+#
+# <class>     <kind>   <pattern>
+#   kind term  = case-insensitive substring, checked in every evasion view (split, base64, look-alikes...)
+#   kind word  = whole word only; use for short or ordinary words that are also a hostname
+#   kind regex = Python regex, case-insensitive
+#   class allow    = never a finding
+#   class severity = "severity <class> warn|block"
+
+# machines, tailnet, LAN
+hostname      term    examplenode01
+hostname      word    pixel
+network       term    example-tailnet.ts.net
+network       regex   \b192\.168\.77\.\d{1,3}\b
+
+# who you are outside this repo
+identity      term    firstname.lastname
+personal      term    someone@example.org
+personal      term    555 Example Street
+employer      term    Example Employer Inc
+
+# things that exist but are not public
+repo-name     term    example-private-repo
+repo-name     regex   \bexample-org/[a-z0-9._-]+
+vendor-acct   term    example-project-ref-abcdef
+
+# internal service tokens that no provider pattern knows
+internal-token regex  \bexint_[A-Za-z0-9]{24,}\b
+
+# known-fine values
+allow         term    noreply@anthropic.com
+allow         term    users.noreply.github.com
+allow         regex   ^127\.0\.0\.1$
+
+# classes that report without blocking while the base rate is measured
+severity      bypass-recipe   warn

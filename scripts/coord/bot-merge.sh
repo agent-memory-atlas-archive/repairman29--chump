@@ -3719,6 +3719,16 @@ EOF
 )"
     fi
 
+    # INFRA-7880: publish guard, REPORT-ONLY, over the text that is about to become
+    # a public PR title and body (commit subjects, gap line, spliced plan file).
+    # Runs in dry-run too. It logs findings (stderr + a publish_guard_report ambient
+    # event) and never blocks: the wrapper always exits 0 and we ignore it as well.
+    _pg_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    if [[ -f "$_pg_root/scripts/publish-guard/report_only.py" ]] && command -v python3 >/dev/null 2>&1; then
+        printf '%s\n\n%s\n' "$PR_TITLE" "$_pr_body" \
+            | python3 "$_pg_root/scripts/publish-guard/report_only.py" text pr-title-and-body || true
+    fi
+
     if [[ $DRY_RUN -eq 1 ]]; then
         info "[dry-run] gh pr create --base $BASE_BRANCH --title \"$PR_TITLE\" …"
     else

@@ -58,18 +58,33 @@ fake_anthropic_key() {
 }
 
 # ── case 1: stage a fake credential → guard FAILS ────────────────────────────
+FAKE_KEY="$(fake_anthropic_key)"
 {
     echo 'fn secret_test() {'
-    echo "    let _ = \"$(fake_anthropic_key)\";"
+    echo "    let _ = \"$FAKE_KEY\";"
     echo '}'
 } >> "$SANDBOX/src/lib.rs"
 git -C "$SANDBOX" add src/lib.rs
 if env $SANDBOX_ENV \
-    git -C "$SANDBOX" -c user.email=t@t -c user.name=t commit -q -m "leak" >/dev/null 2>&1; then
+    git -C "$SANDBOX" -c user.email=t@t -c user.name=t commit -q -m "leak" >"$SANDBOX/.case1.out" 2>&1; then
     fail "fake credential unexpectedly committed"
 else
     pass "fake-shaped credential blocked by guard"
 fi
+
+# ── case 1b (INFRA-7880): the guard must not echo the value it found ─────────
+# stderr lands in bot-merge and worker logs; printing the match republishes it.
+if grep -qF "$FAKE_KEY" "$SANDBOX/.case1.out"; then
+    fail "guard echoed the matched value to its output"
+else
+    pass "matched value is not echoed"
+fi
+if grep -q 'value withheld' "$SANDBOX/.case1.out" && grep -q 'in: src/lib.rs' "$SANDBOX/.case1.out"; then
+    pass "guard names the file and the key family instead"
+else
+    fail "guard output lacks the file name or the key-family line"
+fi
+rm -f "$SANDBOX/.case1.out"
 
 # ── case 2: bypass env CHUMP_CREDENTIAL_CHECK=0 → guard skips ────────────────
 if env $SANDBOX_ENV CHUMP_CREDENTIAL_CHECK=0 \
@@ -97,6 +112,20 @@ fi
 # in a separate gap (file as INFRA-* follow-up to INFRA-158).
 echo "[NOTE] docs-only-credential-leak path is a known blind spot (cargo-fmt early-exit at pre-commit:947)"
 echo "       Tracked as a follow-up gap; not exercised by this test to keep CI green."
+
+# ── sibling content guard (INFRA-7880): the report-only publish guard ────────
+# Runs here so it rides this test's existing CI step AND its `chump preflight`
+# mirror: one wiring, local and CI in sync. It gets its own step when the guard
+# goes blocking.
+if command -v python3 >/dev/null 2>&1; then
+    if bash "$REPO_ROOT/scripts/ci/test-publish-guard-report-only.sh"; then
+        pass "publish-guard report-only suite"
+    else
+        fail "publish-guard report-only suite (bash scripts/ci/test-publish-guard-report-only.sh)"
+    fi
+else
+    echo "[SKIP] publish-guard report-only suite: python3 not on PATH (this is a skip, not a pass)"
+fi
 
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"

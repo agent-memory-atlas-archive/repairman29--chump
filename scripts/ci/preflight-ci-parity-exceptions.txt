@@ -450,3 +450,12 @@ test-bom-old-manifest-regression.sh  # reason: INFRA-7769 — regression guard p
 # not preflight-shaped Rust). Mirroring would mean re-implementing the same
 # three-script sourcing dance inside preflight.rs for no additional coverage.
 test-organ-manifest-bom-integration.sh   # reason: INFRA-7768 — cross-consumer bash-library integration proof (parser+renderer+housekeeping-lib agree); no chump binary; Tier-D in spirit
+# INFRA-7880: publish-guard.yml (report-only, non-required, never fails). The scan itself is
+# not a preflight gate: locally it runs in pre-commit, commit-msg and bot-merge via
+# scripts/publish-guard/report_only.py, and its test suite IS mirrored (chained from
+# test-credential-pattern-guard.sh). These steps are Actions-secret plumbing.
+Is the pattern secret available to this run?                # reason: publish-guard.yml reads an Actions secret into GITHUB_OUTPUT; nothing to assert locally
+Materialise the pattern file (runner home, mode 0600)       # reason: publish-guard.yml decodes an Actions secret onto the runner; locally the operator's own file is already in place
+Scan diff, commit messages and identities (counts only)     # reason: publish-guard.yml report-only scan of the PR range; same engine runs locally in the git hooks, and it can never fail
+Scan PR title and body (counts only)                        # reason: publish-guard.yml report-only scan of PR text from the event payload; locally bot-merge makes the same call
+Remove the pattern file                                     # reason: publish-guard.yml runner cleanup; GitHub Actions only

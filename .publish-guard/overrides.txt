@@ -1,0 +1,13 @@
+# publish-guard overrides. PUBLIC file: it only ever describes something a human has decided
+# is fine to publish. One finding per line:
+#
+#   <fingerprint, 12 hex> <class> <path glob> <reason, 10+ characters>
+#
+# The fingerprint is the fp= value the guard printed. It is a truncated hash, not the value.
+# An override is narrow on purpose: that value, that class, those paths.
+#
+# Who writes here: the operator. Agents do not add lines to this file. Until an operator signing
+# key exists and CI verifies it, that is a rule and not a wall; say so rather than pretend.
+#
+# The guard is report-only today (INFRA-7880), so nothing needs an override yet. Candidates get
+# listed here once the first week of numbers is in.

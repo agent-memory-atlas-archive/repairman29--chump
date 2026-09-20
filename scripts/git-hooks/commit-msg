@@ -73,6 +73,16 @@ _stamp_provenance() {
 }
 _stamp_provenance || true
 
+# ── INFRA-7880: publish guard, REPORT-ONLY ────────────────────────────────────
+# pre-commit cannot see the message (git writes it afterwards); this stage can.
+# Placed before the docs-delta check because that check has early exits.
+# Logs findings, never blocks: the wrapper always exits 0 and we ignore it too.
+_PG_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$_PG_ROOT" ] && [ -f "$_PG_ROOT/scripts/publish-guard/report_only.py" ] && command -v python3 >/dev/null 2>&1; then
+    python3 "$_PG_ROOT/scripts/publish-guard/report_only.py" message "$MSG_FILE" || true
+fi
+unset _PG_ROOT
+
 # Legacy inline docs-delta check — fallback when the installed chump binary
 # predates `chump verify` (CREDIBLE-155). NOTE: preserves historical early
 # exits (inapplicable -> exit 0 skips the INFRA-2407 validator below, same

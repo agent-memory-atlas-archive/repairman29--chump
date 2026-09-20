@@ -1006,6 +1006,15 @@ events:
       the NEW-file-only gate (INFRA-1580) structurally cannot see.
     fields_required: [ts, kind, files, reasons]
     consumers: [fleet-brief, audit-log, META-064-effectiveness]
+  - kind: publish_guard_report
+    effect_metric: self
+    emitter: scripts/publish-guard/report_only.py (INFRA-7880)
+    trigger: report-only publish guard ran at a call site (pre-commit staged
+      diff, commit-msg message file, bot-merge PR title and body). Carries
+      counts per finding class only - never a path, a fingerprint or text.
+      Never blocks; exists to measure the base rate before any blocking.
+    fields_required: [ts, kind, site, status, patterns, blocking, warn, classes]
+    consumers: [audit-log, operator-daily-tally]
   - kind: redundancy_bypass_used
     effect_metric: self
     emitter: scripts/git-hooks/pre-commit-redundancy.sh (META-063)

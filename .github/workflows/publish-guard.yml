@@ -1,0 +1,110 @@
+# publish-guard, REPORT-ONLY (INFRA-7880).
+#
+# Runs the same engine the hooks and bot-merge call (scripts/publish-guard/) over
+#   (1) the diff of the PR or push (added lines + file paths), registry paths skipped,
+#   (2) every commit message and author/committer identity in the range,
+#   (3) the PR title and body,
+# and prints COUNTS PER CLASS. It never fails, it is not a required check, and it must not be
+# added to the `verified` aggregator. Green here means "the job ran", not "nothing was found".
+#
+# Why counts only: Actions logs on a public repo are public. The engine never prints a matched
+# value, but a list of path:line pointers is still a map to the findings. Read the detail
+# locally: python3 scripts/publish-guard/report_only.py range <base> <head>
+#
+# The private pattern file arrives as the Actions secret PUBLISH_GUARD_PATTERNS_B64 (gzip, then
+# base64). Trigger is `pull_request`, never `pull_request_target`: GitHub does not hand secrets
+# to `pull_request` runs from forks, so a fork PR gets an empty secret and the job skips its
+# scan steps and says so. Nothing in this job ever prints the file.
+#
+# Known limit, stated: with `pull_request` the engine comes from the PR itself, so a same-repo
+# branch can change the code it is judged by. That is acceptable for a job that only counts.
+# The blocking version needs the base-branch design (scripts/publish-guard/DEPTH.md, last
+# section) and is a separate, operator-approved change.
+
+name: publish-guard
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-guard-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish-guard-report:
+    name: publish-guard (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: Is the pattern secret available to this run?
+        id: p
+        env:
+          PATTERNS_B64: ${{ secrets.PUBLISH_GUARD_PATTERNS_B64 }}
+        run: |
+          if [ -n "${PATTERNS_B64:-}" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=false" >> "$GITHUB_OUTPUT"
+            echo "publish-guard: no pattern secret in this run (fork PR, dependabot, or not set). Skipping. This is not a pass." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Check out
+        if: steps.p.outputs.have == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Materialise the pattern file (runner home, mode 0600)
+        if: steps.p.outputs.have == 'true'
+        env:
+          PATTERNS_B64: ${{ secrets.PUBLISH_GUARD_PATTERNS_B64 }}
+        run: |
+          set -uo pipefail
+          umask 077
+          mkdir -p "$HOME/.config/chump"
+          printf '%s' "$PATTERNS_B64" | base64 -d 2>/dev/null | gunzip 2>/dev/null > "$HOME/.config/chump/publish-guard.patterns" \
+            || rm -f "$HOME/.config/chump/publish-guard.patterns"
+          [ -s "$HOME/.config/chump/publish-guard.patterns" ] || { rm -f "$HOME/.config/chump/publish-guard.patterns"; echo "pattern secret did not decode: the scan below falls back to generic rules and says so"; }
+
+      - name: Scan diff, commit messages and identities (counts only)
+        if: steps.p.outputs.have == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          if [ "$EVENT" = "pull_request" ]; then base="$PR_BASE"; head="$PR_HEAD"; else base="$PUSH_BEFORE"; head="$PUSH_AFTER"; fi
+          python3 scripts/publish-guard/report_only.py --summary-only range "$base" "$head" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Scan PR title and body (counts only)
+        if: steps.p.outputs.have == 'true' && github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -uo pipefail
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" \
+            | python3 scripts/publish-guard/report_only.py --summary-only text pr-title-and-body 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Remove the pattern file
+        if: always()
+        run: rm -f "$HOME/.config/chump/publish-guard.patterns"
+
+# Not covered by this workflow (named so nobody reads green as covered):
+#   - PR and issue comments, review comments, release notes, wiki, discussions.
+#   - Actions logs and artifacts of other workflows.
+#   - Branch and tag names.
+#   - Anything pushed to a branch with no PR: it is public the moment it is pushed.
+#   - Registry paths (.chump/state.sql, docs/gaps/): skipped on purpose in report-only mode.
+#   - Fork PRs: no secret, no scan.
