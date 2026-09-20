@@ -231,7 +231,32 @@ PAGING_OFF=()
 ENABLED=()
 declare -A ORGAN_ROLE
 declare -A ORGAN_REQUIRES
-organ_manifest_parse "$MANIFEST" PAGING_OFF ENABLED ORGAN_ROLE ORGAN_REQUIRES || exit 1
+declare -A ORGAN_PLATFORMS
+organ_manifest_parse "$MANIFEST" PAGING_OFF ENABLED ORGAN_ROLE ORGAN_REQUIRES ORGAN_PLATFORMS || exit 1
+
+# INFRA-7764 (docs/strategy/ONE_COMMAND_INSTALL.md section 1): platform
+# scoping. organ-manifest.txt is becoming the single unified roster —
+# bootstrap-manifest.yaml's macOS-only capabilities and
+# install-node-housekeeping.sh's roster fold in as ordinary `enabled` lines
+# tagged `platforms=launchd` / `platforms=systemd` respectively (slices
+# INFRA-7765/INFRA-7766). This reconcile only ever drives systemd, so any
+# line NOT applicable to systemd must never reach ENABLED below — otherwise
+# folding in a platforms=launchd-only line (e.g. the mac-only curator/
+# self-doctor/paramedic/conductor capabilities) would make this reconcile
+# attempt `systemctl enable --now` on a unit name that only ever existed as
+# a launchd plist, a pure regression the design doc requires "zero runtime
+# behavior change" to avoid. Every pre-existing line has no platforms= token
+# and defaults to systemd (organ_platform_matches' own default), so this
+# filter is a no-op today and only starts doing work once INFRA-7765/7766
+# add non-systemd lines.
+THIS_PLATFORM="$(organ_current_platform)"
+PLATFORM_FILTERED_ENABLED=()
+for unit in "${ENABLED[@]}"; do
+  if organ_platform_matches "${ORGAN_PLATFORMS[$unit]:-}" "$THIS_PLATFORM"; then
+    PLATFORM_FILTERED_ENABLED+=("$unit")
+  fi
+done
+ENABLED=("${PLATFORM_FILTERED_ENABLED[@]}")
 
 # RESILIENT-746: optional per-role scoping. chump-node-install.sh's ORGANS
 # phase (--role brain|muscle|all) sets this so a freshly-installed node only

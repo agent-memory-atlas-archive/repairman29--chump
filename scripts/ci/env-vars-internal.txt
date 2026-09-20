@@ -2928,3 +2928,8 @@ CHUMP_IGNORE_WASTE_PAUSE
 CHUMP_MERGE_LOCK_TTL_SECS
 # detected in: (standard input)
 CHUMP_NATS_MERGE_QUEUE_BUCKET
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_ORGAN_MANIFEST_PLATFORM

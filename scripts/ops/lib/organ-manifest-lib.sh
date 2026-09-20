@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/ops/lib/organ-manifest-lib.sh — TREK-18 (INFRA-3644)
+# scripts/ops/lib/organ-manifest-lib.sh — TREK-18 (INFRA-3644), platforms= INFRA-7764
 #
 # The ONE parser for scripts/ops/organ-manifest.txt, shared by
 # organ-reconcile.sh (which converges live systemd state to the manifest)
@@ -15,18 +15,40 @@
 # impossible instead of separately detected.
 #
 # Format is documented in scripts/ops/organ-manifest.txt's header comment.
-
-# organ_manifest_parse <manifest-file> <paging_off-array-name> <enabled-array-name> <role-assoc-array-name> <requires-assoc-array-name>
 #
-# Populates the four caller-provided array names (via nameref) from the
-# manifest file. Caller must declare them first (any prior contents are
-# cleared). Returns 1 (and prints an error) if the manifest file is missing.
+# INFRA-7764 (docs/strategy/ONE_COMMAND_INSTALL.md section 1, slice A of the
+# one-command-install BOM unification, INFRA-7756): `enabled` lines may also
+# carry a `platforms=SYSTEM,SYSTEM,...` token (comma-separated, values
+# systemd|launchd|runit). Omitted means `platforms=systemd` — today's
+# implicit assumption for every pre-existing line, so nothing regresses.
+# This lets organ-manifest.txt absorb bootstrap-manifest.yaml's macOS-only
+# capabilities and install-node-housekeeping.sh's roster as ordinary lines
+# (`platforms=launchd` / `platforms=systemd` respectively) without a second
+# format — the single declared roster every supervisor renders from. Callers
+# that don't care about platforms (the 5-arg organ_manifest_parse call) are
+# unaffected; a 6th nameref arg opts in to receiving the per-unit platforms
+# string so a caller can filter ENABLED to units applicable to the CURRENT
+# host (see organ_platform_matches / organ_current_platform below).
+
+# organ_manifest_parse <manifest-file> <paging_off-array-name> <enabled-array-name> <role-assoc-array-name> <requires-assoc-array-name> [<platforms-assoc-array-name>]
+#
+# Populates the caller-provided array names (via nameref) from the manifest
+# file. Caller must declare them first (any prior contents are cleared). The
+# 6th (platforms) array name is OPTIONAL — omitting it preserves the original
+# 5-arg call signature verbatim for existing callers. Returns 1 (and prints
+# an error) if the manifest file is missing.
 organ_manifest_parse() {
   local manifest="$1"
   local -n _omp_paging_off="$2"
   local -n _omp_enabled="$3"
   local -n _omp_role="$4"
   local -n _omp_requires="$5"
+  local _omp_have_platforms=0
+  if [[ $# -ge 6 && -n "${6:-}" ]]; then
+    local -n _omp_platforms="$6"
+    _omp_have_platforms=1
+    _omp_platforms=()
+  fi
 
   _omp_paging_off=()
   _omp_enabled=()
@@ -38,15 +60,16 @@ organ_manifest_parse() {
     return 1
   fi
 
-  local state unit rest role requires tok
+  local state unit rest role requires platforms tok
   while read -r state unit rest; do
     [[ -z "${state:-}" ]] && continue
     [[ "$state" == \#* ]] && continue
-    role="" requires=""
+    role="" requires="" platforms=""
     for tok in $rest; do
       case "$tok" in
-        role=*)     role="${tok#role=}" ;;
-        requires=*) requires="${tok#requires=}" ;;
+        role=*)      role="${tok#role=}" ;;
+        requires=*)  requires="${tok#requires=}" ;;
+        platforms=*) platforms="${tok#platforms=}" ;;
       esac
     done
     case "$state" in
@@ -55,11 +78,54 @@ organ_manifest_parse() {
         _omp_enabled+=("$unit")
         _omp_role["$unit"]="${role:-brain}"
         _omp_requires["$unit"]="$requires"
+        if [[ "$_omp_have_platforms" == 1 ]]; then
+          _omp_platforms["$unit"]="${platforms:-systemd}"
+        fi
         ;;
       *) echo "WARN: unknown state '$state' for '$unit' in manifest; ignoring" >&2 ;;
     esac
   done < "$manifest"
   return 0
+}
+
+# organ_current_platform -> echoes this host's supervisor: systemd|launchd|runit.
+# Shared detection so every caller (organ-reconcile.sh, a future launchd/runit
+# renderer) agrees on what "this platform" means. Termux (runit) is checked
+# first since it also reports uname=Linux; Darwin is launchd; everything else
+# with systemd unit tooling present is systemd — the pre-INFRA-7764 default
+# assumption, kept as the fallback so an environment with neither detector
+# (e.g. a minimal CI container) still resolves to the historical behavior.
+organ_current_platform() {
+  # CHUMP_ORGAN_MANIFEST_PLATFORM: explicit override, mainly for tests that
+  # need to exercise a launchd/runit filtering path without actually running
+  # on that OS. Real hosts never need to set this.
+  if [[ -n "${CHUMP_ORGAN_MANIFEST_PLATFORM:-}" ]]; then
+    echo "${CHUMP_ORGAN_MANIFEST_PLATFORM}"
+    return 0
+  fi
+  if [[ -n "${PREFIX:-}" ]] && printf '%s' "${PREFIX:-}" | grep -q com.termux; then
+    echo runit
+  elif [[ "$(uname -s 2>/dev/null)" == "Darwin" ]]; then
+    echo launchd
+  else
+    echo systemd
+  fi
+}
+
+# organ_platform_matches <platforms-csv> <current-platform>
+#
+# Is <current-platform> among the comma-separated <platforms-csv>? An empty
+# csv means "systemd only" (the implicit default every pre-INFRA-7764 line
+# carries), matching organ_manifest_parse's own `${platforms:-systemd}`
+# default so the two never disagree.
+organ_platform_matches() {
+  local csv="${1:-}" current="${2:-}"
+  [[ -z "$csv" ]] && csv="systemd"
+  local IFS=',' tok
+  for tok in $csv; do
+    [[ "$tok" == "$current" ]] && return 0
+  done
+  return 1
 }
 
 # organ_is_applicable <unit> <requires-string> <reason-var-name>

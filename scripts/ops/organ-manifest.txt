@@ -80,6 +80,30 @@
 #                                           (not `enable --now` a file-less unit
 #                                           into an eternal backoff).
 #
+# INFRA-7764 (docs/strategy/ONE_COMMAND_INSTALL.md section 1, one-command-
+# install BOM unification, INFRA-7756): `enabled` lines may also carry
+#
+#   platforms=SUPERVISOR,SUPERVISOR,...
+#                            Comma-separated list of supervisors this organ
+#                            applies to: systemd|launchd|runit. Omitted means
+#                            "platforms=systemd" — the implicit assumption
+#                            every line in this file carried before this
+#                            field existed, so no pre-existing line's
+#                            behavior changes. organ-reconcile.sh (systemd
+#                            only) filters ENABLED to lines whose platforms
+#                            include "systemd" before doing anything else,
+#                            via organ_platform_matches()/organ_current_
+#                            platform() in organ-manifest-lib.sh. This is
+#                            what lets bootstrap-manifest.yaml's macOS-only
+#                            capabilities (curator/self-doctor/paramedic/
+#                            conductor/etc, INFRA-7765) fold into THIS file
+#                            as platforms=launchd lines — visible in the one
+#                            declared roster instead of a second file nobody
+#                            diffs against the first — without this
+#                            reconcile ever attempting to `systemctl enable`
+#                            a unit name that only ever existed as a launchd
+#                            plist.
+#
 # Applicability is the FIRST gate (blast-all -> per-node-applicable, was
 # RESILIENT-347's core ask). If an organ IS applicable but `enable --now`
 # either fails outright or the unit is not verified active a few seconds
