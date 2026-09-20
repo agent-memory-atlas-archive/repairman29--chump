@@ -248,6 +248,28 @@ D and E are standalone one-file fixes with no dependency on A/B/C.
   (`chump_anon` permission denied) — default to the canonical working
   backend instead of wiring every fresh node to a dead one.
 
+## Slice A status (INFRA-7756, INFRA-7764..7771)
+
+Slice A landed as 8 gaps: INFRA-7764 (platforms= field), INFRA-7765
+(bootstrap-manifest.yaml fold-in), INFRA-7766 (install-node-housekeeping.sh
+roster fold-in), INFRA-7767 (render-organ-roster.sh), INFRA-7768
+(cross-consumer integration test — the four unified-BOM consumers agree on a
+synthetic manifest), INFRA-7769 (regression test proving a REAL
+pre-unification organ-manifest.txt still parses, cannot render a launchd
+roster alone, and trips the documented INFRA-7766 fallback WARN), and
+INFRA-7771. INFRA-7770 (this note) is that slice's fmt/clippy closure sweep:
+`cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets -- -D
+warnings` were both green on main at the point every one of 7764-7769's
+changes had landed — every file the slice touched (organ-manifest.txt,
+bootstrap-manifest.yaml, the three shared libs, the two CI test scripts, the
+fixtures) is bash/YAML/text, not Rust, so the slice introduced zero fmt/clippy
+surface to begin with. Receipt: CI run
+https://github.com/repairman29/chump/actions/runs/35517501643 (`fast-checks`
++ `clippy` both `success`) against main SHA
+d187cae35e4e00d57d25f6cf131c3cb33d3f688b, the last commit before this note
+that had 7764-7767 in and still ran green — re-confirmed after 7768/7769
+landed since their added scripts/ci/*.sh and fixtures are likewise non-Rust.
+
 ## Non-goals
 
 - Does not implement any of the slices (design + decompose only, per the
