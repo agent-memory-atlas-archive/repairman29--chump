@@ -4,6 +4,29 @@ All notable changes to Chump are documented here. Format follows [Keep a Changel
 
 ## [Unreleased]
 
+### Added — Fleet self-hosting: organ-manifest unification + almanac org-wide (2026-09)
+
+The fleet's coordination layer turned inward: the roster of "organs" (daemons,
+scripts, cron jobs that keep the fleet alive) and the code-memory index that
+answers "have we built X" both moved from scattered per-purpose files to a
+single source of truth, with the fleet's own PRs providing the proof.
+
+**Unified organ-manifest:**
+- `organ-manifest.txt` is now the single roster of record — `bootstrap-manifest.yaml` folded in, `install-node-housekeeping.sh` sources its roster from it, and a `platforms=` field lets `organ-reconcile` scope entries per platform.
+- CI integration + regression tests prove the unified BOM parses/renders/derives consistently, and that a real pre-unification `organ-manifest.txt` fails/routes correctly without the unified format.
+- Documented: schema, consumers, migration guide.
+- `node-organ-manifest.txt` extends the pattern to process-level organs on individual machines (e.g. CJ's 9 process-level organs).
+
+**Almanac goes org-wide:**
+- Almanac (the fleet's grounded code-memory index, `repo:path:line` receipts on every hit) now indexes the whole `repairman29` org, not just `chump` — the canonical fleet index referenced by `almanac-mastery`.
+- Wired into `chump-mcp.json`; dynamic git hooks installed via `almanac hook install`.
+- Coverage-owner logic gained a `summarized_pct` guard (strict >95%), CI-tested; the reindex wrapper aligned to the real index CLI; `refresh-runner-binary.sh --almanac` emits `almanac_health` and gained a CI test proving its SHA-idempotent build logic; an install-script unbound-var crash + silent exit-0-on-absent-checkout bug was fixed.
+
+**Duty officer resilience:**
+- The duty-officer daemon falls back to a UID-derived `XDG_RUNTIME_DIR`/`DBUS_SESSION_BUS_ADDRESS` when the environment doesn't set them, so it survives launch contexts (cron, non-interactive shells) where a login session hasn't populated them.
+
+**Scale:** ~280 PRs merged 2026-09-06 → 2026-09-20 across this theme plus the ongoing RESILIENT/CREDIBLE/INFRA backlog. See `git log origin/main --since=2026-09-06` for the full ledger; this section names the dominant shape, not every PR.
+
 ### Added — Agent Client Protocol (ACP) maturity
 
 Post-v0.1.0 work elevates the ACP adapter from a minimal-viable stdio server to a fully spec-complete editor integration. Chump is now usable as a first-class coding agent inside Zed, JetBrains IDEs, and any client in the [ACP Registry](https://blog.jetbrains.com/ai/2026/01/acp-agent-registry/).

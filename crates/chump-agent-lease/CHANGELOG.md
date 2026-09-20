@@ -3,6 +3,11 @@
 All notable changes to `chump-agent-lease` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Dormant (2026-09-20, DOC-155).** No functional change since 0.2.0 —
+> subsequent repo commits touching this crate are dependency bumps and the
+> AGPLv3/Apache-2.0 relicense, not new API. Live source of truth for the
+> parent monorepo is the root [`CHANGELOG.md`](../../CHANGELOG.md).
+
 ## [0.2.0] — 2026-04-18
 
 ### Added
