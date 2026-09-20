@@ -397,6 +397,35 @@ log "OK: $TARGET_BIN now at sha $NEW_SHA (origin/main = $MAIN_SHA, delta_commits
 emit runner_binary_refreshed "\"prev_sha\":\"$INSTALLED_SHA\",\"new_sha\":\"$NEW_SHA\",\"main_sha\":\"$MAIN_SHA\""
 emit runner_binary_advance "\"prev_sha\":\"$INSTALLED_SHA\",\"new_sha\":\"$NEW_SHA\",\"main_sha\":\"$MAIN_SHA\",\"delta_commits\":\"$DELTA_COMMITS\""
 
+# Emit almanac_health probe (INFRA-7831)
+ALMANAC_REPO="${ALMANAC_REPO:-$HOME/Projects/almanac}"
+ALMANAC_BIN="${ALMANAC_BIN:-$ALMANAC_REPO/target/release/almanac}"
+ALMANAC_MARKER="${ALMANAC_MARKER:-${ALMANAC_REPO}.last-indexed-commit}"
+ALMANAC_MCP_BIN="${ALMANAC_MCP_BIN:-$(dirname "$ALMANAC_BIN")/almanac-mcp}"
+ALMANAC_HEALTH_REPO="${ALMANAC_HEALTH_REPO:-chump}"
+
+_health_binary_present=0
+[[ -x "$ALMANAC_BIN" ]] && _health_binary_present=1
+
+_health_indexed_files=0
+if [[ "$_health_binary_present" == "1" ]] && command -v timeout >/dev/null 2>&1; then
+    _health_stats_out="$(timeout 10 "$ALMANAC_BIN" stats "$ALMANAC_HEALTH_REPO" 2>/dev/null || true)"
+    _health_files_line="$(printf '%s\n' "$_health_stats_out" | awk '/^files:/{print $2}')"
+    [[ "$_health_files_line" =~ ^[0-9]+$ ]] && _health_indexed_files="$_health_files_line"
+fi
+
+_health_last_index_age_s=0
+if [[ -f "$ALMANAC_MARKER" ]]; then
+    _health_marker_mtime="$(stat -c %Y "$ALMANAC_MARKER" 2>/dev/null || stat -f %m "$ALMANAC_MARKER" 2>/dev/null || echo 0)"
+    _health_now_epoch="$(date -u +%s)"
+    _health_last_index_age_s=$(( _health_now_epoch - _health_marker_mtime ))
+fi
+
+_health_mcp_reachable=0
+[[ -x "$ALMANAC_MCP_BIN" ]] && _health_mcp_reachable=1
+
+emit almanac_health "\"indexed_files\":$_health_indexed_files,\"last_index_age_s\":$_health_last_index_age_s,\"binary_present\":$([[ $_health_binary_present == 1 ]] && echo true || echo false),\"mcp_reachable\":$([[ $_health_mcp_reachable == 1 ]] && echo true || echo false)"
+
 # Prune old logs (keep last 24)
 ls -t "$LOG_DIR"/refresh-*.log 2>/dev/null | tail -n +25 | xargs -I{} rm -f {} 2>/dev/null || true
 
