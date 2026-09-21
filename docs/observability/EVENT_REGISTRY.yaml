@@ -584,6 +584,19 @@ events:
     consumers: [fleet-brief, watchdog, operator-recall]
     fields_required: [agent_id, fail_class, consecutive_failures, gap_id]
 
+  - kind: worker_sub_auth_dead
+    effect_metric: self
+    emitter: scripts/dispatch/worker.sh (RESILIENT-1443)
+    trigger: worker is configured with CHUMP_AUTH_MODE=oauth; the CHUMP_SUB_AUTH_PRECHECK
+      liveness probe (claude -p PONG, cadence CHUMP_SUB_AUTH_PRECHECK_EVERY_CYCLES) fails
+      before a gap is claimed — the claude CLI OAuth session is logged out (e.g. lapsed
+      across a reboot, not durable). Worker pauses this cycle instead of silently
+      demoting to the free-tier floor; feeds operator-recall.sh's AUTH_DEAD condition
+      at threshold=1 (2026-09-21 CJ incident: farmer heartbeat stayed green while 0
+      gaps shipped for hours post-reboot)
+    consumers: [fleet-brief, watchdog, operator-recall]
+    fields_required: [agent_id, cycle]
+
   - kind: model_ladder_capability_escalation
     effect_metric: self
     emitter: scripts/dispatch/worker.sh (RESILIENT-1007, RESILIENT-596 slice)

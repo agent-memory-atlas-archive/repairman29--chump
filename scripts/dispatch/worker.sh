@@ -630,6 +630,46 @@ while :; do
     fi
     # ── end RESILIENT-073 ────────────────────────────────────────────────────
 
+    # ── RESILIENT-1443: sub-auth precheck — page loudly, never demote silently ──
+    # 2026-09-21 CJ incident: after a reboot the claude CLI OAuth session
+    # lapsed (not durable across reboot) and the worker fell through to the
+    # dead free-tier floor with no signal at all — farmer_heartbeat stayed
+    # green while the fleet shipped 0 PRs for hours (false-healthy). When this
+    # worker is configured to run on the Anthropic sub (CHUMP_AUTH_MODE=oauth),
+    # verify the sub actually answers BEFORE claiming a gap. A dead sub pages
+    # the operator (kind=worker_sub_auth_dead, wired into operator-recall.sh's
+    # AUTH_DEAD condition) and pauses this cycle instead of silently
+    # proceeding to dispatch on a demoted backend.
+    # Cadence: probe once on cycle 1, then every
+    # CHUMP_SUB_AUTH_PRECHECK_EVERY_CYCLES (default 5) cycles thereafter —
+    # each probe is a real `claude -p` call, not free. Disable: set
+    # CHUMP_SUB_AUTH_PRECHECK=0.
+    if [[ "${CHUMP_SUB_AUTH_PRECHECK:-1}" != "0" ]] \
+       && [[ "${CHUMP_AUTH_MODE:-}" == "oauth" ]]; then
+        _sap_every="${CHUMP_SUB_AUTH_PRECHECK_EVERY_CYCLES:-5}"
+        if (( cycle == 1 || cycle % _sap_every == 0 )); then
+            if probe_sub_live; then
+                # AC3: sub recovered (e.g. operator re-ran claude /login) —
+                # clear the dead marker and fall through to normal dispatch,
+                # resuming on the sub without any manual restart.
+                rm -f "$REPO_ROOT/.chump-locks/backend-outage/agent-${AGENT_ID}.sub-auth-dead" 2>/dev/null || true
+            else
+                _sap_marker="$REPO_ROOT/.chump-locks/backend-outage/agent-${AGENT_ID}.sub-auth-dead"
+                mkdir -p "$(dirname "$_sap_marker")" 2>/dev/null || true
+                _amb_sap="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+                mkdir -p "$(dirname "$_amb_sap")" 2>/dev/null || true
+                printf '{"ts":"%s","session":"%s","event":"ALERT","kind":"worker_sub_auth_dead","agent_id":"%s","cycle":%s,"note":"claude CLI OAuth session dead/logged-out — CHUMP_AUTH_MODE=oauth configured but sub does not answer. NOT demoting to free-tier silently; run: claude then /login on this host, verify with: claude -p OK"}\n' \
+                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${CHUMP_SESSION_ID:-fleet-worker-$AGENT_ID}" \
+                    "$AGENT_ID" "$cycle" >> "$_amb_sap" 2>/dev/null || true
+                log "ALERT RESILIENT-1443: kind=worker_sub_auth_dead — sub (claude CLI OAuth) is logged out; pausing ${IDLE_SLEEP_S:-60}s instead of silently demoting to free-tier. Fix: claude then /login."
+                : > "$_sap_marker" 2>/dev/null || true
+                sleep "${IDLE_SLEEP_S:-60}"
+                continue
+            fi
+        fi
+    fi
+    # ── end RESILIENT-1443 ───────────────────────────────────────────────────
+
     # ── RESILIENT-1086: auto-repromote off the free-tier floor when the sub
     # recovers ────────────────────────────────────────────────────────────────
     # RESILIENT-575 demotes this worker to chump-local after a sub outage. That

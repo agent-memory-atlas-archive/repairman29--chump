@@ -16,7 +16,11 @@
 #                             infra-watcher-loop.sh check-oauth-freshness), all
 #                             within the same CHUMP_AUTH_STORM_WINDOW_SECS window —
 #                             widened past the single fleet_auth_storm+worker_exit
-#                             signal so a wedged refresher pages too
+#                             signal so a wedged refresher pages too, OR
+#                             ≥ CHUMP_SUB_AUTH_DEAD_RECALL_THRESHOLD (default 1)
+#                             worker_sub_auth_dead events (RESILIENT-1443:
+#                             worker.sh's CHUMP_AUTH_MODE=oauth precheck found
+#                             the claude CLI OAuth session logged out)
 #   (b) COST_CAP            — cost_cap_exceeded event in ambient.jsonl within 2 h,
 #                             OR `chump cost-watch --hard-cap` exits non-zero
 #   (c) CI_BROKEN           — ≥ CHUMP_CI_BROKEN_THRESHOLD pr_stuck events with
@@ -99,6 +103,7 @@
 #   CHUMP_AUTH_STORM_WINDOW_SECS           default 3600
 #   CHUMP_OAUTH_FAILURE_RECALL_THRESHOLD   default 3 (oauth_token_refresh_failed count)
 #   CHUMP_AUTH_STALE_RECALL_THRESHOLD      default 2 (auth_token_stale count)
+#   CHUMP_SUB_AUTH_DEAD_RECALL_THRESHOLD   default 1 (worker_sub_auth_dead count, RESILIENT-1443)
 #   CHUMP_CI_BROKEN_THRESHOLD              default 3
 #   CHUMP_CI_BROKEN_WINDOW_SECS            default 7200
 #   CHUMP_QUEUE_STARVE_SECS                default 86400
@@ -123,6 +128,7 @@ _auth_threshold="${CHUMP_AUTH_STORM_RECALL_THRESHOLD:-5}"
 _auth_window="${CHUMP_AUTH_STORM_WINDOW_SECS:-3600}"
 _oauth_fail_threshold="${CHUMP_OAUTH_FAILURE_RECALL_THRESHOLD:-3}"
 _auth_stale_threshold="${CHUMP_AUTH_STALE_RECALL_THRESHOLD:-2}"
+_sub_auth_dead_threshold="${CHUMP_SUB_AUTH_DEAD_RECALL_THRESHOLD:-1}"
 _ci_threshold="${CHUMP_CI_BROKEN_THRESHOLD:-3}"
 _ci_window="${CHUMP_CI_BROKEN_WINDOW_SECS:-7200}"
 _queue_starve="${CHUMP_QUEUE_STARVE_SECS:-86400}"
@@ -464,6 +470,16 @@ _oauth_fail_hits="${_oauth_fail_hits//[[:space:]]/}"
 _auth_stale_hits=$(_scan_ambient "$_auth_window" '"kind":"auth_token_stale"' | wc -l 2>/dev/null || echo 0)
 _auth_stale_hits="${_auth_stale_hits//[[:space:]]/}"
 
+# RESILIENT-1443: worker_sub_auth_dead — worker.sh's precheck (CHUMP_AUTH_MODE=
+# oauth) found the claude CLI OAuth session logged out (e.g. lapsed across a
+# reboot). This is an unambiguous "the sub is dead" signal, not a probabilistic
+# storm, so it pages at a low count by default (threshold=1) — the whole point
+# is that a logged-out sub pages within one worker cycle instead of the fleet
+# silently demoting to a dead free-tier floor for hours (2026-09-21 CJ
+# incident: farmer heartbeat stayed green while 0 gaps shipped post-reboot).
+_sub_auth_dead_hits=$(_scan_ambient "$_auth_window" '"kind":"worker_sub_auth_dead"' | wc -l 2>/dev/null || echo 0)
+_sub_auth_dead_hits="${_sub_auth_dead_hits//[[:space:]]/}"
+
 # CREDIBLE-130: fleet_credit_exhausted (billing exhausted, credentials fine)
 # is deliberately EXCLUDED from every AUTH_DEAD signal above — it must never
 # be added to the fleet_auth_storm/oauth_token_refresh_failed/auth_token_stale
@@ -485,6 +501,8 @@ elif (( _oauth_fail_hits >= _oauth_fail_threshold )); then
     _reason="oauth_token_refresh_failed seen ${_oauth_fail_hits}x in last ${_auth_window}s (threshold=${_oauth_fail_threshold}); OAuth refresher repeatedly failing"
 elif (( _auth_stale_hits >= _auth_stale_threshold )); then
     _reason="auth_token_stale seen ${_auth_stale_hits}x in last ${_auth_window}s (threshold=${_auth_stale_threshold}); token stale/expired and not recovering"
+elif (( _sub_auth_dead_hits >= _sub_auth_dead_threshold )); then
+    _reason="worker_sub_auth_dead seen ${_sub_auth_dead_hits}x in last ${_auth_window}s (threshold=${_sub_auth_dead_threshold}); claude CLI OAuth session is logged out on a worker configured for CHUMP_AUTH_MODE=oauth (RESILIENT-1443) — run: claude then /login, verify with: claude -p OK"
 fi
 
 if [[ -n "$_reason" ]]; then
