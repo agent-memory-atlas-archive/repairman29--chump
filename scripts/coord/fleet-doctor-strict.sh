@@ -59,6 +59,10 @@
 # Thresholds (override via env)
 #   LEASE_STALE_HOURS         default 2    — leases older than N hours are flagged
 #   DISK_MIN_GB               default 5    — fail if free disk below N GB
+#   DISK_PRESSURE_PCT         default 90   — fail if REPO_ROOT (or any path in
+#                              CHUMP_DISK_PRESSURE_PATHS) is at/above N percent used
+#   CHUMP_DISK_PRESSURE_PATHS default REPO_ROOT — space-separated extra mounts to check
+#                              (e.g. "/ /mnt/cjdata1" on a CJ coordinator node)
 #   DIRTY_PR_HOURS            default 24   — DIRTY PRs older than N hours are flagged
 #   P0_MAX                    default 5    — fail if more than N open P0 gaps
 #   PILLAR_MIN                default 2    — fail if any pillar has fewer than N pickable gaps
@@ -205,9 +209,32 @@ check_disk() {
         register_check "disk" "fail" \
             "only ${free_gb} GB free (threshold: >=${DISK_MIN_GB} GB)" \
             "bash $REPO_ROOT/scripts/coord/chump-target-reaper.sh --apply  # or manual cleanup"
+        return
+    fi
+
+    # RESILIENT-1444: percentage-based guard — a large filesystem can clear
+    # the absolute-GB floor above while still being critically full (e.g.
+    # 15 GB free on a 115 GB disk is 87% used). Checks REPO_ROOT plus any
+    # extra mounts in CHUMP_DISK_PRESSURE_PATHS (space-separated).
+    local pressure_pct="${DISK_PRESSURE_PCT:-90}"
+    local pressure_paths="${CHUMP_DISK_PRESSURE_PATHS:-$REPO_ROOT}"
+    local path pct worst_path="" worst_pct=0
+    for path in $pressure_paths; do
+        pct="$(df -k "$path" 2>/dev/null | awk 'NR==2 { gsub(/%/,"",$5); print $5 }')"
+        [[ -z "$pct" || ! "$pct" =~ ^[0-9]+$ ]] && continue
+        if [[ "$pct" -gt "$worst_pct" ]]; then
+            worst_pct="$pct"
+            worst_path="$path"
+        fi
+    done
+
+    if [[ -n "$worst_path" && "$worst_pct" -ge "$pressure_pct" ]]; then
+        register_check "disk" "fail" \
+            "$worst_path is ${worst_pct}% used (threshold: <${pressure_pct}%) — RESILIENT-1444 disk-pressure guard" \
+            "bash $REPO_ROOT/scripts/ops/stale-worktree-reaper.sh --execute  # reap abandoned worktrees, then chump-target-reaper.sh --apply"
     else
         register_check "disk" "pass" \
-            "${free_gb} GB free (threshold: >=${DISK_MIN_GB} GB)" \
+            "${free_gb} GB free (threshold: >=${DISK_MIN_GB} GB); ${worst_path:-$REPO_ROOT} at ${worst_pct}% used (threshold: <${pressure_pct}%)" \
             ""
     fi
 }

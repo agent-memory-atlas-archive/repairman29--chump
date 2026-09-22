@@ -86,6 +86,10 @@ install-stale-gap-lock-reaper-launchd.sh
 install-stale-pr-reaper-launchd.sh
 install-stale-pr-rebase-bot.sh
 install-stale-worktree-reaper-launchd.sh
+# RESILIENT-1444: Linux-node counterpart to install-stale-worktree-reaper-launchd.sh
+# (systemd user timer). Opt-in per Linux coordinator node (e.g. CJ) so abandoned
+# rc=1 worktrees actually get reaped — the launchd-only installer never runs there.
+install-stale-worktree-reaper-systemd.sh
 install-stuck-pr-filer-launchd.sh
 install-syspolicyd-doctor-launchd.sh
 install-system-invariants-launchd.sh

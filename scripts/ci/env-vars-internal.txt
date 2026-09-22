@@ -2956,3 +2956,16 @@ CHUMP_SUB_AUTH_DEAD_RECALL_THRESHOLD
 CHUMP_SUB_AUTH_PRECHECK
 # detected in: (standard input)
 CHUMP_SUB_AUTH_PRECHECK_EVERY_CYCLES
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_DISK_CHECK_DISABLE
+# detected in: (standard input)
+CHUMP_DISK_CHECK_PATH
+# detected in: (standard input)
+CHUMP_DISK_PRESSURE_PATHS
+# detected in: (standard input)
+CHUMP_DISK_PRESSURE_PCT
+# detected in: (standard input)
+CHUMP_WORKTREE_REAPER_INTERVAL
