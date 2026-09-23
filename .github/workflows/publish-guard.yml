@@ -57,7 +57,7 @@ jobs:
 
       - name: Check out
         if: steps.p.outputs.have == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           filter: blob:none
