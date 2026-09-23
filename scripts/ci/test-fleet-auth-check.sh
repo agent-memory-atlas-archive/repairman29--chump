@@ -43,7 +43,7 @@ test_auth_probe() {
     # Mock claude
     cat > "$sandbox/bin/claude" << 'CLAUDE_MOCK'
 #!/bin/bash
-[[ "$1" == "--once" ]] || exit 0
+[[ "$1" == "-p" ]] || exit 0
 [[ -n "${ANTHROPIC_API_KEY:-}" && "${ANTHROPIC_API_KEY}" != "invalid" ]] && { echo "ok"; exit 0; }
 [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" && "${CLAUDE_CODE_OAUTH_TOKEN}" != "invalid" ]] && { echo "ok"; exit 0; }
 echo "error: 401 Unauthorized" >&2
