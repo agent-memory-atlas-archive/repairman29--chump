@@ -9,9 +9,9 @@
 #
 # The fix is COMPOSITION, not new machinery — one source of truth (origin/main's
 # .chump/state.sql) and one loop with two roles, both built from existing chump
-# primitives (gap ship / gap dump / restore --from-sql) + the local github_cache:
+# primitives (gap ship / gap dump / gap restore --from-sql) + the local github_cache:
 #
-#   --reader  (every node, on a timer): git pull + `chump restore --from-sql`.
+#   --reader  (every node, on a timer): git pull + `chump gap restore --from-sql`.
 #             Rebuilds the local backlog from the shared truth. Idempotent/safe;
 #             live claims live in NATS-KV, not state.db, so a rebuild loses nothing.
 #
@@ -99,8 +99,17 @@ reader() {
     log "fix: git -C $REPO remote add $REGISTRY_REMOTE_NAME <private registry repo url>"
     return 1
   fi
-  log "chump restore --from-sql"
-  "$CHUMP" restore --from-sql >/dev/null 2>&1 || { log "restore failed"; return 1; }
+  # RESILIENT: the subcommand is `gap restore` (src/main.rs, INFRA-538). A bare
+  # `chump restore` is `chump fleet restore` (a lease-snapshot replay) and exits
+  # "unknown subcommand 'restore'", so every reader silently failed to rebuild its
+  # backlog -- the real cause of the diverging state.db copies this script's header
+  # warns about. The error is no longer swallowed: a failure now logs why.
+  log "chump gap restore --from-sql"
+  local _restore_err
+  if ! _restore_err="$("$CHUMP" gap restore --from-sql 2>&1)"; then
+    log "restore failed: $(printf '%s' "$_restore_err" | tail -3 | tr '\n' ' ')"
+    return 1
+  fi
   log "backlog refreshed: $(sqlite3 "$DB" "SELECT COUNT(*) FROM gaps WHERE status='open'" 2>/dev/null) open gaps"
 }
 

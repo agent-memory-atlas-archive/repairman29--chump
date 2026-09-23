@@ -31,7 +31,13 @@ git config --global user.name "fixture"
 git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 
-# stub chump: `gap dump` prints a registry, everything else succeeds quietly.
+# stub chump. FAITHFUL to the real CLI: it knows only the subcommands the real
+# binary knows, and REJECTS anything else non-zero the way the real one does
+# ("unknown subcommand"). The previous stub ended in a blanket `exit 0`, so a
+# call the real binary rejects still "succeeded" here -- that is exactly how
+# `chump restore --from-sql` (no such subcommand; the real one is
+# `chump gap restore`) survived in reader() with this test green. A stub that
+# accepts more than the real CLI cannot catch a wrong-subcommand bug.
 mkdir -p "$TMP/bin"
 cat > "$TMP/bin/chump" <<'STUB'
 #!/usr/bin/env bash
@@ -39,8 +45,14 @@ if [[ "${1:-}" == "gap" && "${2:-}" == "dump" ]]; then
   printf 'gaps:\n- id: FIX-1\n  status: open\n  stamp: %s\n' "${FIXTURE_STAMP:-0}"
   exit 0
 fi
-[[ "${1:-}" == "restore" ]] && { echo restored >> "${CHUMP_REPO:-.}/.chump/restore.calls"; exit 0; }
-exit 0
+if [[ "${1:-}" == "gap" && "${2:-}" == "restore" ]]; then
+  echo restored >> "${CHUMP_REPO:-.}/.chump/restore.calls"; exit 0
+fi
+if [[ "${1:-}" == "gap" && "${2:-}" == "set" ]]; then
+  exit 0
+fi
+echo "chump: unknown subcommand ${1:-} ${2:-}" >&2
+exit 2
 STUB
 printf '#!/usr/bin/env bash\necho 0\n' > "$TMP/bin/sqlite3"
 chmod +x "$TMP/bin/chump" "$TMP/bin/sqlite3"
