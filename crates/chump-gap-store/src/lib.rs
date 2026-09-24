@@ -2424,7 +2424,14 @@ impl GapStore {
             .optional()?;
         match row {
             None => return Ok(PreflightResult::NotFound),
-            Some(s) if s == "done" => return Ok(PreflightResult::Done),
+            // RESILIENT-1447: 'open' is the ONLY pickable status. Before this
+            // fix, only status=='done' was rejected here, so a worker re-pick
+            // could slip through on any other terminal/in-flight status
+            // (wontfix, already_satisfied, decomposed, superseded,
+            // ready_to_ship, bisect_quarantined, waiting_operator) — burning a
+            // full cycle producing a hollow ship with no branch/PR (e.g.
+            // RESILIENT-700). Treat every non-'open' status as not pickable.
+            Some(s) if s != "open" => return Ok(PreflightResult::Done),
             _ => {}
         }
         let live_claim: Option<String> = self
@@ -9926,6 +9933,38 @@ meta:
             matches!(result, PreflightResult::Done),
             "expected Done, got {result:?}"
         );
+    }
+
+    #[test]
+    fn preflight_rejects_non_open_terminal_and_intermediate_statuses() {
+        // RESILIENT-1447: preflight must reject re-picking ANY non-'open'
+        // status, not just 'done' — a status like 'ready_to_ship' or
+        // 'wontfix' previously fell through to Available and let a worker
+        // burn a full cycle on already-finished work (e.g. RESILIENT-700:
+        // status=done-equivalent, re-picked, 769s cycle, no branch/PR).
+        let (store, _dir) = test_store();
+        for status in [
+            "wontfix",
+            "already_satisfied",
+            "decomposed",
+            "superseded",
+            "ready_to_ship",
+            "bisect_quarantined",
+            "waiting_operator",
+        ] {
+            let id = store
+                .reserve("RESILIENT", &format!("gap in status {status}"), "P2", "s")
+                .unwrap();
+            store
+                .conn
+                .execute("UPDATE gaps SET status=?1 WHERE id=?2", params![status, id])
+                .unwrap();
+            let result = store.preflight(&id).unwrap();
+            assert!(
+                matches!(result, PreflightResult::Done),
+                "status={status} expected preflight to reject re-pick (Done), got {result:?}"
+            );
+        }
     }
 
     #[test]
