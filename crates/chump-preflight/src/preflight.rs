@@ -762,6 +762,10 @@ struct Args {
     /// the cargo-shaped pipeline entirely. Unset or "code" runs the normal
     /// pipeline below unchanged.
     artifact_type: Option<String>,
+    /// EFFECTIVE-1547: common scaffolding stub for future chump subcommands.
+    /// `newcmd` is a placeholder that does nothing but exit 0 — a template
+    /// other subcommands can copy the wiring from.
+    newcmd: bool,
 }
 
 fn parse_args(argv: &[String]) -> Args {
@@ -776,6 +780,7 @@ fn parse_args(argv: &[String]) -> Args {
         vs_ref: None,
         full: false,
         artifact_type: None,
+        newcmd: false,
     };
     let mut i = 0;
     while i < argv.len() {
@@ -787,6 +792,7 @@ fn parse_args(argv: &[String]) -> Args {
             "--json" => a.json = true,
             "--pre-commit" => a.pre_commit = true,
             "-h" | "--help" => a.help = true,
+            "newcmd" => a.newcmd = true,
             "--scope" => {
                 if i + 1 >= argv.len() {
                     a.bad_scope = Some("(missing value)".to_string());
@@ -877,6 +883,9 @@ OPTIONS:
                     entirely. Unregistered T (including the default \"code\")
                     falls through to the normal pipeline below.
     -h, --help      This message
+
+SUBCOMMANDS:
+    newcmd          New chump subcommand placeholder (EFFECTIVE-1547)
 
 BYPASS:
     Main-RED auto-skip (INFRA-2422): when origin/main itself is failing a
@@ -1402,6 +1411,12 @@ pub fn run(argv: &[String]) -> i32 {
     let mut args = parse_args(argv);
     if args.help {
         print_help();
+        return 0;
+    }
+    // EFFECTIVE-1547: `newcmd` is a placeholder subcommand — scaffolding
+    // future chump subcommands can copy this wiring from. It does nothing
+    // but exit 0.
+    if args.newcmd {
         return 0;
     }
     // EFFECTIVE-318: --full reproduces CI's audit shards locally — force the
@@ -3664,6 +3679,17 @@ mod tests {
         assert!(!s.rust, "docs-only must skip rust");
         assert!(!s.scripts, "docs-only must skip scripts");
         assert!(s.docs, "docs-only must record docs");
+    }
+
+    #[test]
+    fn parse_args_newcmd_flag() {
+        let a = parse_args(&["newcmd".to_string()]);
+        assert!(a.newcmd);
+    }
+
+    #[test]
+    fn run_newcmd_exits_zero() {
+        assert_eq!(run(&["newcmd".to_string()]), 0);
     }
 
     #[test]
