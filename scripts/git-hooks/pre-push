@@ -205,17 +205,30 @@ _pp_check_total_budget() {
 _pp_run_timed() {
     local _phase="$1"; shift
     _pp_check_total_budget "$_phase"
-    local _t0 _rc _elapsed
+    local _t0 _rc _elapsed _phase_timeout
+    # RESILIENT-1448: per-phase budget. fmt --check is a genuine fast guard
+    # (30s is plenty). clippy is a COMPILE-bearing gate: even a WARM,
+    # incremental `cargo clippy --all-targets` re-lints the whole workspace
+    # and runs well over 30s on a small box, so the fast-guard budget
+    # false-killed a legitimate clippy and blocked the push. Give clippy its
+    # own generous-but-bounded budget (mirrors the cargo-test gate INFRA-1744
+    # timeout); a genuinely hung cargo still aborts. clippy is the LAST
+    # budget-checked phase in this hook, so a longer clippy never trips a
+    # later phase total-budget check.
+    _phase_timeout="$_PP_PHASE_TIMEOUT_S"
+    if [[ "$_phase" == "clippy" ]]; then
+        _phase_timeout="${CHUMP_PREPUSH_CLIPPY_TIMEOUT_S:-600}"
+    fi
     _t0="$(date +%s)"
-    timeout "${_PP_PHASE_TIMEOUT_S}s" "$@"
+    timeout "${_phase_timeout}s" "$@"
     _rc=$?
     if [[ "$_rc" -eq 124 ]]; then
         _elapsed=$(( $(date +%s) - _t0 ))
         echo "" >&2
-        echo "[pre-push] BLOCKED (INFRA-5126): phase '${_phase}' exceeded ${_PP_PHASE_TIMEOUT_S}s." >&2
-        echo "[pre-push] Raise the per-phase budget: CHUMP_PREPUSH_PHASE_TIMEOUT_S=<secs> git push" >&2
+        echo "[pre-push] BLOCKED (INFRA-5126): phase '${_phase}' exceeded ${_phase_timeout}s." >&2
+        echo "[pre-push] Raise the per-phase budget: CHUMP_PREPUSH_PHASE_TIMEOUT_S=<secs> git push (clippy: CHUMP_PREPUSH_CLIPPY_TIMEOUT_S)" >&2
         echo "" >&2
-        _pp_emit_timeout_event "$_phase" "$_PP_PHASE_TIMEOUT_S" "$_elapsed" "phase_timeout"
+        _pp_emit_timeout_event "$_phase" "$_phase_timeout" "$_elapsed" "phase_timeout"
     fi
     return "$_rc"
 }
@@ -737,7 +750,34 @@ elif command -v cargo &>/dev/null; then
         echo "[pre-push] INFRA-1390: running cargo clippy (diff has .rs changes)..." >&2
         echo "[pre-push] Bypass: CHUMP_CLIPPY_GATE=0 git push  (with Lint-Gate-Bypass: trailer)" >&2
 
-        _WT_CLIPPY_TARGET="$REPO_ROOT_CL/.cargo-test-target"
+        # RESILIENT-1448: reuse a persistent, WARM target dir for the clippy
+        # gate instead of a COLD per-worktree .cargo-test-target rebuilt from
+        # scratch on every push. A cold full `cargo clippy --all-targets` runs
+        # 10min+ on a small box (measured 920s cold vs 130s warm) -> push/phase
+        # timeout -> the branch never reaches origin and no PR is created
+        # (INFRA-2183 cold-per-worktree-target class). Precedence:
+        #   1. CHUMP_PREPUSH_CLIPPY_TARGET_DIR - explicit override.
+        #   2. inherited CARGO_TARGET_DIR - the persistent shared build cache
+        #      the dispatch worker already exports (scripts/dispatch/worker.sh,
+        #      INFRA-1933) and has just built `cargo check/clippy --workspace`
+        #      into, so clippy here is INCREMENTAL. That dir sits outside every
+        #      cargo-target-reaper scan path, so reuse is reap-safe.
+        #   3. a persistent per-worker fallback under ~/.cache, keyed by worker
+        #      id so parallel workers never share one dir; survives across
+        #      worktrees/cycles - NOT the old cold in-worktree path.
+        # Correctness is preserved: cargo recompiles on any real source change
+        # regardless of which target dir it reuses, so clippy still lints the
+        # true working tree and `-D warnings` still gates (warmth only, never a
+        # skipped check). CI re-runs `clippy --workspace --all-targets` at merge.
+        if [[ -n "${CHUMP_PREPUSH_CLIPPY_TARGET_DIR:-}" ]]; then
+            _WT_CLIPPY_TARGET="$CHUMP_PREPUSH_CLIPPY_TARGET_DIR"
+        elif [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+            _WT_CLIPPY_TARGET="$CARGO_TARGET_DIR"
+        else
+            _clippy_worker_id="${CHUMP_CLIPPY_WORKER_ID:-${WORKER_MACHINE:-host}-${AGENT_ID:-0}}"
+            _WT_CLIPPY_TARGET="${XDG_CACHE_HOME:-$HOME/.cache}/chump-fleet-target/clippy-${_clippy_worker_id}"
+        fi
+        mkdir -p "$_WT_CLIPPY_TARGET" 2>/dev/null || true
 
         # Run clippy; capture exit code.
         # INFRA-5126: per-phase timeout via _pp_run_timed — wrapped in
