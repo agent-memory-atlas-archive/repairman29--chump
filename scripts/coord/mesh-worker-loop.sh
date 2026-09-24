@@ -40,6 +40,84 @@ AMB="${CHUMP_AMBIENT_PATH:-$ROOT/.chump-locks/ambient.jsonl}"
 SESS="${CHUMP_SESSION_ID:-mesh-worker-$(hostname -s 2>/dev/null || echo host)-$$}"
 _ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# schedule_ephemeral — EFFECTIVE-1015 (EFFECTIVE-178 slice)
+#
+# Runs `cmd` on a fixed `interval` in a detached background subshell.
+# Stops after `max_iter` executions if max_iter > 0 (0/empty = unbounded),
+# and stops as soon as `ctx_pid` (if non-empty) is no longer alive — the
+# cancellable context. Prints "[EPHEMERAL]" before each execution so the
+# loop is observable in logs. Echoes the background subshell's PID so a
+# caller can track/wait on it.
+schedule_ephemeral() {
+    local cmd="$1" interval="$2" max_iter="${3:-0}" ctx_pid="${4:-}"
+    (
+        local n=0
+        while :; do
+            if [ -n "$ctx_pid" ] && ! kill -0 "$ctx_pid" 2>/dev/null; then
+                break
+            fi
+            n=$((n + 1))
+            echo "[EPHEMERAL] $(_ts) iter=${n} cmd: ${cmd}"
+            eval "$cmd"
+            if [ "$max_iter" -gt 0 ] && [ "$n" -ge "$max_iter" ]; then
+                break
+            fi
+            if [ -n "$ctx_pid" ] && ! kill -0 "$ctx_pid" 2>/dev/null; then
+                break
+            fi
+            sleep "$interval"
+        done
+    ) &
+    echo $!
+}
+
+# --- unit tests (run via: scripts/coord/mesh-worker-loop.sh --self-test) ---
+
+test_schedule_ephemeral_max_iter() {
+    local tmpfile sched_pid count
+    tmpfile="$(mktemp)"
+    sched_pid=$(schedule_ephemeral "echo tick >> '${tmpfile}'" 0.2 3 "")
+    wait "$sched_pid" 2>/dev/null
+    count=$(wc -l < "$tmpfile" | tr -d ' ')
+    rm -f "$tmpfile"
+    if [ "$count" -eq 3 ]; then
+        echo "PASS test_schedule_ephemeral_max_iter"
+        return 0
+    fi
+    echo "FAIL test_schedule_ephemeral_max_iter (expected 3 executions, got ${count})"
+    return 1
+}
+
+test_schedule_ephemeral_cancel() {
+    local tmpfile ctx_pid sched_pid count_at_cancel count_after
+    tmpfile="$(mktemp)"
+    sleep 100 &
+    ctx_pid=$!
+    sched_pid=$(schedule_ephemeral "echo tick >> '${tmpfile}'" 0.2 1000 "$ctx_pid")
+    sleep 0.7
+    kill "$ctx_pid" 2>/dev/null
+    wait "$ctx_pid" 2>/dev/null
+    sleep 0.3
+    count_at_cancel=$(wc -l < "$tmpfile" | tr -d ' ')
+    sleep 1
+    count_after=$(wc -l < "$tmpfile" | tr -d ' ')
+    kill "$sched_pid" 2>/dev/null
+    rm -f "$tmpfile"
+    if [ "$count_after" -eq "$count_at_cancel" ]; then
+        echo "PASS test_schedule_ephemeral_cancel"
+        return 0
+    fi
+    echo "FAIL test_schedule_ephemeral_cancel (count grew from ${count_at_cancel} to ${count_after} after cancel)"
+    return 1
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+    _fail=0
+    test_schedule_ephemeral_max_iter || _fail=1
+    test_schedule_ephemeral_cancel || _fail=1
+    exit "$_fail"
+fi
+
 [ -x "$BIN" ] || { echo "[mesh-worker] chump-coord not found at $BIN — exit." >&2; exit 0; }
 
 # MISSION-018: log external-repo pick state at every tick so "is the flag
