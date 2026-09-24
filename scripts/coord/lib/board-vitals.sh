@@ -67,6 +67,9 @@
 #   CHUMP_BOARD_VITALS_DROUGHT_MIN     merge-stall threshold minutes (default 180 = 3h)
 #   CHUMP_BOARD_VITALS_WORKER_SILENT_MIN worker not-producing threshold min (default 40)
 #   CHUMP_BOARD_VITALS_MAIN_RED_MIN    sustained main-red threshold minutes (default 30)
+#   CHUMP_BOARD_VITALS_SUSTAINED_MAIN_RED_MIN main-red threshold minutes for the
+#                                      distinct "sustained_main_red" ambient
+#                                      signal (default 2880 = 48h, RESILIENT-1128)
 #   CHUMP_BOARD_VITALS_MAIN_RED_LIVE   0 disables the live per-beat invocation of
 #                                      main-health-watchdog.sh (RESILIENT-414);
 #                                      default 1. Without this, main_red_detected
@@ -506,6 +509,25 @@ board_vitals_check() {
         incidents=$((incidents+1))
         _bv_maybe_page "main_red" \
 "🔴 **main CI red ${main_red_span}m.** main has been failing for ${main_red_span}m (threshold ${main_red_min}m) — the whole fleet builds on red. A human should look. (board-vitals.sh)"
+    fi
+
+    # ── 4b · MAIN red SUSTAINED past 48h (RESILIENT-1128, RESILIENT-417 slice) ─
+    # The 30m page above (section 4) is the "look now" signal. This is a
+    # distinct, longer-horizon signal: main has been red for a genuinely
+    # extreme span (default 2880m = 48h). It rides the same _bv_main_red_span_min
+    # computed in 3b — which already resets to 0 the moment a non-benign-red
+    # streak is broken by a green/clean/passing/no_runs line — so a transient
+    # red that clears within the window never trips this (AC3: no false
+    # positives for transient red). Emits its own ambient kind so downstream
+    # consumers (fresh-eyes, operator-recall, dashboards) can distinguish
+    # "red, someone's on it" from "red for two days, something is structurally
+    # broken" without re-deriving the span themselves.
+    local sustained_main_red_min
+    sustained_main_red_min="${CHUMP_BOARD_VITALS_SUSTAINED_MAIN_RED_MIN:-2880}"
+    if (( main_red_span >= sustained_main_red_min )); then
+        # scanner-anchor: "kind":"sustained_main_red"
+        _bv_emit "sustained_main_red" \
+            "\"main_red_span_min\":${main_red_span},\"threshold_min\":${sustained_main_red_min}"
     fi
 
     # ── 5 · FLOOR: credential / credit needs — genuinely Jeff's to fix ───────

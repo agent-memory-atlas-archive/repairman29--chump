@@ -340,6 +340,59 @@ BG="$TMP/blocked-green.jsonl"
 _notemitted "5 in-flight PRs + main GREEN → merge_stall still suppressed (unchanged behavior)" \
     "$BG" '"board_vitals_page_(dryrun|sent)".*"merge_stall"'
 
+# ── RESILIENT-1128 (RESILIENT-417 slice): sustained_main_red past 48h ────────
+echo "[test-board-vitals] RESILIENT-1128: sustained_main_red fires past the 48h threshold"
+SR="$TMP/sustained-red.jsonl"
+{
+  echo '{"ts":"2026-08-25T00:00:00Z","kind":"main_red_detected","status":"red"}'
+  echo '{"ts":"2026-08-27T10:00:00Z","kind":"main_red_detected","status":"red"}'
+} > "$SR"
+( set -a
+  CHUMP_AMBIENT_LOG="$SR"; CHUMP_BOARD_VITALS_STATE_DIR="$TMP/state-sr"
+  CHUMP_BOARD_VITALS_DRY_RUN=1; CHUMP_BOARD_VITALS_ESCALATE=0
+  CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+  CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+  CHUMP_BOARD_VITALS_MAIN_RED_MIN=999999          # isolate: the 30m page is not what's under test
+  CHUMP_BOARD_VITALS_SUSTAINED_MAIN_RED_MIN=2880  # default (48h), spelled out for clarity
+  set +a
+  source "$LIB"; board_vitals_check ) >/dev/null 2>&1
+_emitted "58h consecutive real-red span → sustained_main_red emitted" \
+    "$SR" '"kind":"sustained_main_red".*"main_red_span_min":3480'
+
+echo "[test-board-vitals] RESILIENT-1128: no false positive — span under the 48h threshold"
+SR2="$TMP/sustained-red-short.jsonl"
+{
+  echo '{"ts":"2026-08-27T10:00:00Z","kind":"main_red_detected","status":"red"}'
+  echo '{"ts":"2026-08-27T10:40:00Z","kind":"main_red_detected","status":"red"}'
+} > "$SR2"
+( set -a
+  CHUMP_AMBIENT_LOG="$SR2"; CHUMP_BOARD_VITALS_STATE_DIR="$TMP/state-sr2"
+  CHUMP_BOARD_VITALS_DRY_RUN=1; CHUMP_BOARD_VITALS_ESCALATE=0
+  CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+  CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+  CHUMP_BOARD_VITALS_MAIN_RED_MIN=999999
+  set +a
+  source "$LIB"; board_vitals_check ) >/dev/null 2>&1
+_notemitted "40m red span (well under 48h) → sustained_main_red NOT emitted" \
+    "$SR2" '"kind":"sustained_main_red"'
+
+echo "[test-board-vitals] RESILIENT-1128: no false positive — transient red cleared by a later benign line"
+SR3="$TMP/sustained-red-transient.jsonl"
+{
+  echo '{"ts":"2026-08-20T00:00:00Z","kind":"main_red_detected","status":"red"}'
+  echo '{"ts":"2026-08-27T10:00:00Z","kind":"main_red_detected","status":"green"}'
+} > "$SR3"
+( set -a
+  CHUMP_AMBIENT_LOG="$SR3"; CHUMP_BOARD_VITALS_STATE_DIR="$TMP/state-sr3"
+  CHUMP_BOARD_VITALS_DRY_RUN=1; CHUMP_BOARD_VITALS_ESCALATE=0
+  CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+  CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+  CHUMP_BOARD_VITALS_MAIN_RED_MIN=999999
+  set +a
+  source "$LIB"; board_vitals_check ) >/dev/null 2>&1
+_notemitted "long-past red span since recovered to green → sustained_main_red NOT emitted" \
+    "$SR3" '"kind":"sustained_main_red"'
+
 echo
 echo "[test-board-vitals] PASS=$PASS FAIL=$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1
