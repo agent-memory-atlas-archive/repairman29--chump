@@ -650,9 +650,36 @@ _check_binary_freshness() {
 }
 _check_binary_freshness
 
+# RESILIENT-1450: re-exec self when the tracked worker.sh HEAD changes.
+# node-converge (RESILIENT-1189) hard-resets $REPO_ROOT to origin/main on a
+# ~10min cadence but NEVER restarts the already-running worker process, so a
+# merged worker.sh fix sits on disk while this loop keeps executing the SHA it
+# was exec'd with (observed: #4815/RESILIENT-1449 sat inert for a day). Record
+# the HEAD this process started at; at every cycle boundary (never mid-gap),
+# compare against the live HEAD and `exec` this same script fresh when it
+# moved — cheap (one `git rev-parse`), safe (only runs between gaps, after
+# lease/worktree cleanup for the prior cycle), and picks up the new code
+# without waiting on a systemd Restart=always bounce.
+_WORKER_START_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+_check_worker_head_reexec() {
+    [[ "${CHUMP_WORKER_HEAD_REEXEC:-1}" == "0" ]] && return 0
+    [[ "$_WORKER_START_SHA" == "unknown" ]] && return 0
+    local _now_sha
+    _now_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+    [[ "$_now_sha" == "unknown" || "$_now_sha" == "$_WORKER_START_SHA" ]] && return 0
+    local _amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+    printf '{"ts":"%s","kind":"worker_reexec_on_head_change","source":"worker.sh","agent_id":"%s","prev_sha":"%s","new_sha":"%s"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${AGENT_ID:-}" "$_WORKER_START_SHA" "$_now_sha" \
+        >> "$_amb" 2>/dev/null || true
+    log "RESILIENT-1450: worker.sh HEAD moved $_WORKER_START_SHA -> $_now_sha; re-exec'ing self at cycle boundary"
+    exec bash "$REPO_ROOT/scripts/dispatch/worker.sh" "$@"
+}
+
 cycle=0
 while :; do
     cycle=$((cycle + 1))
+
+    _check_worker_head_reexec
 
     # ── RESILIENT-073: fleet kill switch — AUTONOMY_LEVEL check ─────────────
     # Pure file read: ~/.chump/AUTONOMY_LEVEL must be >= 1 to proceed.

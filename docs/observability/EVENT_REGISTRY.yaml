@@ -5427,6 +5427,14 @@ events:
     consumers: [fleet-brief, watchdog]
     fields_required: [ts, kind, source, age_secs, max_age_secs, note]
 
+  # ── RESILIENT-1450: worker self re-exec on tracked HEAD change ───────────
+  - kind: worker_reexec_on_head_change
+    effect_metric: self
+    emitter: scripts/dispatch/worker.sh (RESILIENT-1450)
+    trigger: at a cycle boundary, live REPO_ROOT HEAD differs from the SHA this worker process started at (node-converge hard-reset the tree under it) — worker execs itself fresh instead of running stale code
+    consumers: [fleet-brief, watchdog]
+    fields_required: [ts, kind, source, agent_id, prev_sha, new_sha]
+
   - kind: stale_binary_destructive_override
     effect_metric: self
     emitter: src/version.rs (chump fleet version-check)
