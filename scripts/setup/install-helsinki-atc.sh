@@ -321,6 +321,23 @@ echo "== installing system units (pr-lander, armed-rebaser, sla-scorecard, board
 # /root/.chump and run as the wrong user (no git/ssh/cargo). Rewrite per-host on
 # copy so the SAME manifest wires correctly everywhere — this is what lets
 # organ-watchdog end the shipped-but-dark disease on any node, not just helsinki.
+#
+# RESILIENT-1446: a hub whose privileged placer/deploy runs as ROOT from a
+# ROOT-OWNED checkout (e.g. an Oracle hub brought up by a root install:
+# /root/.chumpnode/repo) must still emit units shaped for the node's real
+# worker/store identity, NOT root — otherwise the farmer + organs run as root
+# and read /root/.chump while the worker + canonical gap store + oauth token
+# live under the worker user, splitting the node's identity (the farmer writes
+# its heartbeat to /root/.chump, the worker reads /home/<user>/.chump -> gated
+# off RED -> fleet dark, RESILIENT-069). The node declares that identity in
+# ~/.chump/node.env's CHUMP_RUN_USER (chump-node-install.sh's write_node_env);
+# honor it here so a root-run deploy emits run-user-shaped units. An explicit
+# CHUMP_RUN_USER already in the environment still wins (test hook / override).
+if [[ -z "${CHUMP_RUN_USER:-}" ]]; then
+  _node_env="${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/node.env"
+  [[ -f "$_node_env" ]] && CHUMP_RUN_USER="$(grep -E '^(export )?CHUMP_RUN_USER=' "$_node_env" 2>/dev/null | tail -1 | sed -E 's/^(export )?CHUMP_RUN_USER=//; s/^"(.*)"$/\1/')"
+  [[ -z "${CHUMP_RUN_USER:-}" ]] && unset CHUMP_RUN_USER
+fi
 RUN_USER="${CHUMP_RUN_USER:-$(stat -c %U "$REPO_ROOT" 2>/dev/null || echo root)}"
 RUN_HOME="$(getent passwd "$RUN_USER" 2>/dev/null | cut -d: -f6 || true)"; [[ -z "$RUN_HOME" ]] && RUN_HOME="/home/$RUN_USER"
 
@@ -341,6 +358,25 @@ if [[ "$REPO_ROOT" == *"/.claude/worktrees/"* ]]; then
     if [[ -e "$_cand/.git" ]]; then UNIT_REPO_ROOT="$_cand"; break; fi
   done
   echo "  NOTE: ephemeral worktree ($REPO_ROOT) — baking stable repo path $UNIT_REPO_ROOT into organ units"
+fi
+# RESILIENT-1446: if the checkout this installer runs from is owned by a
+# DIFFERENT user than the run-user (the split-identity hub: a root deploy from
+# /root/.chumpnode/repo but CHUMP_RUN_USER=<worker>), the run-user cannot cd
+# into that root-owned tree (WorkingDirectory -> 200/CHDIR) and $HOME-based
+# tools would read the wrong ~/.chump. Re-target the baked repo path to the
+# run-user's OWN checkout so every placed unit points at a tree the run-user
+# actually owns. Only re-target to a run-user-owned checkout that exists on
+# disk; a same-user fresh node (owner == run-user) is already correct and is
+# left untouched.
+_checkout_owner="$(stat -c %U "$UNIT_REPO_ROOT" 2>/dev/null || echo "")"
+if [[ -n "$_checkout_owner" && "$_checkout_owner" != "$RUN_USER" ]]; then
+  for _cand in "${RUN_HOME%/}/chump" "${RUN_HOME%/}/Projects/chump" "${RUN_HOME%/}/chump-host"; do
+    if [[ -e "$_cand/.git" && "$(stat -c %U "$_cand" 2>/dev/null)" == "$RUN_USER" ]]; then
+      UNIT_REPO_ROOT="$_cand"
+      echo "  NOTE: checkout $REPO_ROOT owned by $_checkout_owner != run-user $RUN_USER — baking run-user checkout $UNIT_REPO_ROOT into organ units (RESILIENT-1446)"
+      break
+    fi
+  done
 fi
 echo "  host-rewrite target: User=$RUN_USER HOME=$RUN_HOME repo=$UNIT_REPO_ROOT"
 mkdir -p "$SYSTEMD_DEST_DIR"

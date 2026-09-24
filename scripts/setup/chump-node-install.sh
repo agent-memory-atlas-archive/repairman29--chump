@@ -459,6 +459,16 @@ write_node_env() {
   # it as "set to nothing", which is worse than an obviously-fake value.
   team_api_key="${team_api_key:-placeholder-team-api-key}"
   local store_backend="${CHUMP_STORE_BACKEND:-postgrest}"
+  # RESILIENT-1446: the node's real worker/store identity — the user the organs
+  # must run as (git/ssh/cargo/oauth) and whose ~/.chump holds the canonical gap
+  # store + oauth token + farmer heartbeat. Persist it so a LATER root-privileged
+  # placer/deploy (chump-organ-deploy runs install-helsinki-atc.sh AS ROOT) emits
+  # RUN-USER-shaped units even when it runs from a root-owned checkout, instead of
+  # root-shaped units that split the node (farmer heartbeat in /root/.chump vs the
+  # worker reading the run-user's ~/.chump -> RESILIENT-069 RED -> fleet dark).
+  # Derivation: an explicit override wins; else the owner of this node's repo;
+  # else the installing user.
+  local run_user="${CHUMP_RUN_USER:-$(stat -c %U "$NODE_DIR/repo" 2>/dev/null || id -un 2>/dev/null || echo root)}"
   local work_enabled=0 node_mode="control-plane"
   if [ "$CONTROL_PLANE_ONLY" != 1 ] && provider_creds_ready; then
     work_enabled=1
@@ -474,6 +484,9 @@ write_node_env() {
       # RESILIENT-1083: persist this node's role OUTSIDE the repo so the recurring
       # organ-reconcile can self-scope to it (and survive `git reset --hard`).
       printf 'export CHUMP_NODE_ROLE=%s\n' "$ROLE"
+      # RESILIENT-1446: persist the node's run-user so a root-run placer/deploy
+      # emits run-user-shaped units (see the local run_user derivation above).
+      printf 'export CHUMP_RUN_USER=%s\n' "$run_user"
       # OOTB contract: safe control-plane operation is valid without a provider;
       # workers start only after a credentialed re-install enables work mode.
       printf 'export CHUMP_NODE_WORK_ENABLED=%s\n' "$work_enabled"
@@ -483,8 +496,8 @@ write_node_env() {
   # Source now so subsequent phases inherit the canonical settings.
   # shellcheck disable=SC1090
   . "$node_env"
-  export CHUMP_STATE_DIR CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE CHUMP_NODE_WORK_ENABLED CHUMP_NODE_MODE
-  ok "node.env written + sourced: $node_env (mode=$CHUMP_NODE_MODE)"
+  export CHUMP_STATE_DIR CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE CHUMP_NODE_WORK_ENABLED CHUMP_NODE_MODE CHUMP_RUN_USER
+  ok "node.env written + sourced: $node_env (mode=$CHUMP_NODE_MODE, run-user=$CHUMP_RUN_USER)"
 }
 
 # ---------- 4. BINARY ----------
@@ -1092,6 +1105,20 @@ place_role_unit_files() {
 Environment=CHUMP_ORGAN_RECONCILE_ROLE=$rf
 EOF
     systemctl daemon-reload 2>/dev/null || true
+  elif [ "$ROLE" = all ]; then
+    # RESILIENT-1446: a sole hub (--role all) runs the WHOLE manifest — an empty
+    # role-filter makes organ-reconcile enable every organ and reap NOTHING. A
+    # stale zz-node-role.conf left from a prior brain/muscle bring-up would pin
+    # CHUMP_ORGAN_RECONCILE_ROLE and make the recurring reconcile's RESILIENT-1016
+    # drift-removal reap the out-of-role layer (a muscle scope reaps the entire
+    # brain incl. the farmer -> RESILIENT-069 RED -> fleet dark). Remove it so
+    # node.env's CHUMP_NODE_ROLE=all governs and a node transitioned TO all sheds
+    # the old scope with no hand-edit.
+    if [ -f "$dest_dir/chump-organ-reconcile.service.d/zz-node-role.conf" ]; then
+      rm -f "$dest_dir/chump-organ-reconcile.service.d/zz-node-role.conf"
+      systemctl daemon-reload 2>/dev/null || true
+      info ORGANS "role=all: removed stale zz-node-role.conf so the recurring reconcile runs the whole manifest and reaps nothing (RESILIENT-1446)"
+    fi
   fi
 
   # Arm the reconcile beat itself (not a manifest 'enabled' line, so

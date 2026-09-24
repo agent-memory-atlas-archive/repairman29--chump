@@ -305,4 +305,54 @@ for jeff_native in chump-nba-dispatch.service chump-gap-drain.service chump-dige
 done
 ok "jeff-shaped source units (nba-dispatch, gap-drain, digest) host-rewrite cleanly for run-user ubuntu — repo path -> the real (existing) checkout, no /home/jeff leak, no Projects/chump ghost (RESILIENT-1051 + 1102)"
 
+# ── RESILIENT-1446: a root-run deploy honors CHUMP_RUN_USER from node.env ──
+# The split-identity hub bug: chump-organ-deploy runs install-helsinki-atc.sh AS
+# ROOT from a root-owned checkout, so RUN_USER derived only via `stat %U` was
+# root -> root-shaped units, while the worker/store/oauth live under the worker
+# user -> farmer heartbeat split -> RESILIENT-069 RED -> fleet dark. The node's
+# real identity is persisted in ~/.chump/node.env's CHUMP_RUN_USER; the installer
+# must honor it even when CHUMP_RUN_USER is NOT already exported. Assert that a
+# node.env-provided CHUMP_RUN_USER (with the env var UNSET) still shapes units.
+mkdir -p "$TMP/ne-dest" "$TMP/ne-bins" "$TMP/ne-cargo-bin" "$TMP/ne-locks" "$TMP/ne-state"
+cat > "$TMP/ne-bins/systemctl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/ne-bins/systemctl"
+cat > "$TMP/ne-cargo-bin/chump-integrator" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/ne-cargo-bin/chump-integrator"
+cat > "$TMP/ne-state/node.env" <<'EOF'
+export CHUMP_NODE_ROLE=all
+export CHUMP_RUN_USER=ubuntu
+EOF
+# CHUMP_RUN_USER deliberately NOT in the environment — it must come from node.env.
+env -u CHUMP_RUN_USER \
+    CHUMP_INSTALL_ATC_ALLOW_NONROOT=1 \
+    CHUMP_INSTALL_ATC_SYSTEMD_DIR="$TMP/ne-dest" \
+    CHUMP_INSTALL_ATC_SYSTEMCTL_BIN="$TMP/ne-bins/systemctl" \
+    CHUMP_STATE_DIR="$TMP/ne-state" \
+    CARGO_BIN_DIR="$TMP/ne-cargo-bin" \
+    NODE_AMBIENT="$TMP/ne-locks/ambient.jsonl" \
+    bash "$SCRIPT" --auto >"$TMP/ne-out.log" 2>&1
+ne_rc=$?
+[ "$ne_rc" -eq 0 ] || fail "--auto with node.env CHUMP_RUN_USER=ubuntu must exit 0; got $ne_rc: $(cat "$TMP/ne-out.log")"
+NE_INSTALLED="$TMP/ne-dest/chump-organ-watchdog.service"
+[ -f "$NE_INSTALLED" ] || fail "chump-organ-watchdog.service not installed (node.env run-user path): $(cat "$TMP/ne-out.log")"
+grep -q '^User=ubuntu' "$NE_INSTALLED" \
+    || fail "node.env CHUMP_RUN_USER=ubuntu was not honored — unit not shaped for ubuntu: $(grep -n '^User=' "$NE_INSTALLED")"
+ok "install-helsinki-atc.sh honors CHUMP_RUN_USER from node.env when the env var is unset (root-run deploy emits run-user-shaped units — RESILIENT-1446)"
+
+# ── RESILIENT-1446: repo-retarget source guard ────────────────────────────
+# When the checkout the (root) installer runs from is owned by a DIFFERENT user
+# than the run-user, the baked WorkingDirectory must be re-targeted to the
+# run-user's OWN checkout (else the run-user cannot cd into a root-owned tree ->
+# 200/CHDIR). A full functional test needs a second-user-owned checkout (not
+# creatable without root in CI), so assert the source-level guard exists.
+grep -q '_checkout_owner' "$SCRIPT" \
+    || fail "install-helsinki-atc.sh missing the RESILIENT-1446 repo-retarget guard for a checkout owned by a non-run-user"
+ok "install-helsinki-atc.sh re-targets the baked repo path to the run-user's checkout when the checkout owner differs (RESILIENT-1446 source guard)"
+
 echo "ALL PASS"

@@ -210,6 +210,21 @@ _node_refresh_halt_class() {
 # CHUMP_NODE_ROLE selects which organ set to converge (default: muscle, the
 # class of node — mugman, cuphead — this gap was filed against). Best-effort:
 # a failure here must never fail the binary refresh that already succeeded.
+#
+# RESILIENT-1446: source the node's PERSISTED role from ~/.chump/node.env before
+# falling back to the muscle default. node.env is written by chump-node-install.sh's
+# write_node_env and survives `git reset --hard`, so it is the node's source of
+# truth for role. Without this, a node-refresh run whose environment didn't export
+# CHUMP_NODE_ROLE silently defaulted to `muscle` and re-ran `chump-node-install.sh
+# --role muscle --reconcile-organs-only`, which rewrote the muscle role drop-in and
+# made the recurring reconcile's drift-removal reap a SOLE HUB's entire brain layer
+# (incl. the farmer -> RESILIENT-069 heartbeat-RED -> fleet dark). A sole hub
+# declares CHUMP_NODE_ROLE=all; honoring the persisted value keeps the whole manifest.
+if [[ -z "${CHUMP_NODE_ROLE:-}" ]]; then
+    _nr_node_env="${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/node.env"
+    [[ -f "$_nr_node_env" ]] && CHUMP_NODE_ROLE="$(grep -E '^(export )?CHUMP_NODE_ROLE=' "$_nr_node_env" 2>/dev/null | tail -1 | sed -E 's/^(export )?CHUMP_NODE_ROLE=//; s/^"(.*)"$/\1/')"
+    [[ -z "${CHUMP_NODE_ROLE:-}" ]] && unset CHUMP_NODE_ROLE
+fi
 NODE_ROLE="${CHUMP_NODE_ROLE:-muscle}"
 _reconcile_role_organs() {
     local installer="$REPO_ROOT/scripts/setup/chump-node-install.sh"
