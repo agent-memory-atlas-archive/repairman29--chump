@@ -151,8 +151,21 @@ _publish_url() {
     printf '%s' "$url"; return 0
   fi
   if registry_legacy_tracked "$REPO"; then
-    log "WARNING: no '$REGISTRY_REMOTE_NAME' remote — LEGACY publish to origin/main (pre-cutover only)" >&2
-    git -C "$REPO" remote get-url origin 2>/dev/null; return 0
+    # FAIL CLOSED (contract conformance). This branch used to return origin's URL
+    # -- the CODE repo -- which is exactly what this function's contract above
+    # forbids: "refuses to publish rather than ever pushing registry data to the
+    # public code repo". It is also the same destination the registry_same_repo
+    # branch a few lines up already hard-refuses. Same repo, opposite handling;
+    # this reconciles the two.
+    #
+    # Why the refusal must live HERE and not in unit state: the writer organ is
+    # role=data, and a brain node's role filter is brain,data,janitor,trust, so
+    # every reconcile / node-install re-enables its timer. Disabling the unit is
+    # not a state that holds. The publish path is the only place a refusal sticks.
+    log "ERROR: no '$REGISTRY_REMOTE_NAME' remote — the legacy leg targets the code repo; refusing to publish" >&2
+    log "  the registry carries operator-identifying content; the code repo is public" >&2
+    log "  fix: git -C $REPO remote add $REGISTRY_REMOTE_NAME <private registry url>" >&2
+    return 1
   fi
   log "ERROR: no '$REGISTRY_REMOTE_NAME' remote and origin/main no longer tracks state.sql — refusing to publish" >&2
   return 1

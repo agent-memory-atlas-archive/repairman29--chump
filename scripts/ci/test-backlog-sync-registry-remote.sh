@@ -134,14 +134,23 @@ run_sync "$B/node" --reader; rc=$?
 [[ $rc -ne 0 ]] && ok "5a: reader fails loudly (rc=$rc)" || bad "5a: reader exited 0 with no registry source"
 [[ ! -e "$B/node/.chump/restore.calls" ]] && ok "5b: restore NOT invoked on a missing source" || bad "5b: restore ran with no source"
 
-# ── 6. legacy (pre-cutover) still works: tracked file, no registry remote ───
+# ── 6. legacy (pre-cutover) tracked layout ALSO fails closed ────────────────
+# Previously asserted "legacy tracked layout still publishes". That encoded the
+# pre-cutover contract, and it is the hole: the legacy leg's publish target IS
+# the public code repo, which _publish_url()'s own contract forbids. Tracked and
+# untracked now behave identically (cf. test 2) because they resolve to the same
+# repo. Re-enabling publication is the registry-remote cutover's job, not this
+# leg's.
 D="$TMP/d"; mkdir -p "$D"; make_code_repo "$D" tracked
+code_before="$(git -C "$D/code.git" rev-parse main)"
 FIXTURE_STAMP=222 run_sync "$D/node" --writer; rc=$?
-{ [[ $rc -eq 0 ]] && git -C "$D/code.git" show main:.chump/state.sql | grep -q "stamp: 222"; } \
-  && ok "6: legacy tracked layout still publishes (safe to land before cutover)" || bad "6: legacy publish broke (rc=$rc): $(cat "$D/--writer.log")"
+[[ $rc -ne 0 ]] && ok "6a: legacy tracked layout fails closed (rc=$rc)" || bad "6a: legacy leg published to the code repo"
+[[ "$(git -C "$D/code.git" rev-parse main)" == "$code_before" ]] \
+  && ok "6b: code repo main untouched" || bad "6b: code repo main MOVED — registry reached the code repo"
+grep -q "refusing to publish" "$D/--writer.log" && ok "6c: refusal is logged" || bad "6c: no refusal line in log"
 
 # Guard against a vacuous green: every assertion above must have executed.
-EXPECTED=15
+EXPECTED=17
 echo "ran $((PASS+FAILS)) assertions, expected $EXPECTED; pass=$PASS fail=$FAILS"
 [[ $((PASS+FAILS)) -eq $EXPECTED ]] || { echo "[FAIL] assertion count drifted (vacuous-pass guard)" >&2; exit 1; }
 [[ $FAILS -eq 0 ]] || exit 1
