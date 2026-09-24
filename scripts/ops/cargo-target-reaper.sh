@@ -183,8 +183,13 @@ fi
 # does not reference) keep aggressive-mode reaping build-safe.
 if [[ $AGGRESSIVE_MODE -eq 0 ]] \
    && { pgrep -x "cargo" > /dev/null 2>&1 || pgrep -f "rustc " > /dev/null 2>&1; }; then
-    echo "[cargo-target-reaper] ABORT: active cargo/rustc processes detected — run after build completes." >&2
-    exit 1
+    # Skip cleanly this cycle: an active build is a NORMAL condition on a worker
+    # node (it is nearly always building), not a failure. Exiting non-zero here
+    # marked the systemd oneshot unit `failed` every tick on a build host — the
+    # exact spurious-failure this reaper's own guard should not cause. The timer
+    # re-runs it once the build settles; nothing to reap now.
+    echo "[cargo-target-reaper] SKIP: active cargo/rustc processes detected — nothing to reap this cycle; will retry next tick." >&2
+    exit 0
 fi
 
 # 2. Refuse if free disk < MIN_FREE_GB — NORMAL MODE ONLY (ZERO-WASTE-012).
@@ -194,8 +199,12 @@ if [[ $AGGRESSIVE_MODE -eq 0 ]]; then
     _free_kb=$(df -k "$REPO_ROOT" 2>/dev/null | awk 'NR==2{print $4}' || echo "9999999")
     _free_gb=$(( _free_kb / 1024 / 1024 ))
     if [[ $_free_gb -lt $MIN_FREE_GB ]]; then
-        echo "[cargo-target-reaper] ABORT: only ${_free_gb}GB free — less than minimum ${MIN_FREE_GB}GB." >&2
-        exit 1
+        # Skip cleanly (exit 0, not a failure): in normal mode below the safety
+        # floor there is nothing this reaper will safely touch; disk-critical
+        # reaping is handled by AGGRESSIVE_MODE above. A non-zero exit here only
+        # marked the systemd oneshot unit `failed` without doing any work.
+        echo "[cargo-target-reaper] SKIP: only ${_free_gb}GB free — below the ${MIN_FREE_GB}GB normal-mode floor; nothing to reap this cycle." >&2
+        exit 0
     fi
 fi
 

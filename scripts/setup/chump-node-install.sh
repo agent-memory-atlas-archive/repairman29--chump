@@ -1166,7 +1166,12 @@ WK"
 install_organs() {
   # write the heartbeat organ (brain's proof-of-life: refresh heartbeat + node profile)
   run "cat > '$ORGAN_DIR/node-heartbeat.sh' <<'HB'
-#!/data/data/com.termux/files/usr/bin/env bash
+#!/usr/bin/env bash
+# Portable shebang: the earlier /data/data/com.termux/.../env path exists ONLY on
+# Termux, so on any other host (systemd Linux, macOS) exec of this script failed
+# with 126 ("bad interpreter") and the organ crash-looped. /usr/bin/env resolves
+# bash on every supported host, matching the process-organ-heal/fleet-health
+# sentinel wrappers written alongside it below.
 STATE=\"\${CHUMP_STATE_DIR:-\$HOME/.chump}\"
 while true; do
   date -u +%Y-%m-%dT%H:%M:%SZ > \"\$STATE/node-heartbeat\"

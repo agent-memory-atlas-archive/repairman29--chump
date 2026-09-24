@@ -1,0 +1,11 @@
+# Run the Chump paramedic rescue pass every 10 minutes (paramedic port)
+[Unit]
+Description=Run the Chump paramedic rescue pass every 10 minutes (paramedic port)
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

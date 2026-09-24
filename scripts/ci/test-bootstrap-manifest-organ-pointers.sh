@@ -104,10 +104,12 @@ out="$(
   bash "$RECONCILE" --check 2>&1
 )"
 
-# A handful of the confirmed-absent macOS-only units this slice added — none
-# may appear in --check output nor be passed to systemctl on this (systemd)
-# host.
-for launchd_only in chump-opus-curator.timer chump-paramedic.timer chump-conductor.timer chump-self-doctor.timer; do
+# A handful of the STILL-launchd-only macOS units — none may appear in --check
+# output nor be passed to systemctl on this (systemd) host. (curator/paramedic/
+# conductor/self-doctor were ported to platforms=systemd,launchd tracked units and
+# now DO reconcile on Linux, so they are no longer valid launchd-only probes; these
+# four remain platforms=launchd-only and exercise the INFRA-7764 filter unchanged.)
+for launchd_only in chump-github-liaison.timer chump-quartermaster-audit.timer chump-planner.timer chump-queue-health-monitor.timer; do
   echo "$out" | grep -q "$launchd_only" \
     && fail "$launchd_only (platforms=launchd-only) leaked into a systemd --check run — INFRA-7764's filter regressed; output: $out"
   grep -q "$launchd_only" "$CALL_LOG" \

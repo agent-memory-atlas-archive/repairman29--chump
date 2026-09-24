@@ -59,7 +59,7 @@ pass "--role filters further within a platform"
 REAL_MANIFEST="$REPO_ROOT/scripts/ops/organ-manifest.txt"
 real_out="$("$RENDERER" --platform systemd --manifest "$REAL_MANIFEST" | awk '{print $1}')"
 [[ -n "$real_out" ]] || fail "renderer produced zero lines against the real organ-manifest.txt"
-echo "$real_out" | grep -q "chump-opus-curator.timer" && fail "renderer must exclude platforms=launchd-only lines from the real manifest under --platform systemd; chump-opus-curator.timer leaked"
+echo "$real_out" | grep -q "chump-github-liaison.timer" && fail "renderer must exclude platforms=launchd-only lines from the real manifest under --platform systemd; chump-github-liaison.timer leaked"
 echo "$real_out" | grep -q "chump-board-cycle.timer" || fail "renderer must include a known real systemd-default organ (chump-board-cycle.timer) under --platform systemd"
 pass "against the real organ-manifest.txt, the renderer excludes launchd-only lines and includes known systemd organs"
 

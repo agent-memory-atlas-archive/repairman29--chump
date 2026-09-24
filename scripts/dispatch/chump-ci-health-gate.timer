@@ -1,0 +1,11 @@
+# Run the Chump ci-health-gate check every 5 minutes (ci-health-gate port)
+[Unit]
+Description=Run the Chump ci-health-gate check every 5 minutes (ci-health-gate port)
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

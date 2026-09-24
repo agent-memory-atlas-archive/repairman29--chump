@@ -1,0 +1,11 @@
+# Run the Chump pr-watch-shepherd sweep every 10 minutes (pr-watch-shepherd port)
+[Unit]
+Description=Run the Chump pr-watch-shepherd sweep every 10 minutes (pr-watch-shepherd port)
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

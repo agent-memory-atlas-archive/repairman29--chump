@@ -206,12 +206,20 @@ else
     # even when the reaper's real output was correct. Pure bash substring
     # matching sidesteps the footgun entirely (no subprocess, no pipe).
     #
-    # Normal mode (disk healthy) + active build → MUST still abort.
-    out_normal="$(CHUMP_DISK_CRITICAL_GB=0 bash "$REAPER" 2>&1 || true)"
-    if [[ "$out_normal" == *"ABORT: active cargo"* ]]; then
-        pass "normal mode still aborts on an active cargo/rustc process"
+    # Normal mode (disk healthy) + active build → MUST NOT reap. It skips
+    # cleanly and exits 0: an active build is a normal condition on a worker
+    # node, not a failure, and a non-zero exit marked the systemd oneshot
+    # `failed` every tick — the exact spurious-failure the guard should not
+    # cause. The conservative guard is still intact: normal mode never touches
+    # target/ while a build runs; it just returns 0 instead of aborting.
+    set +e
+    out_normal="$(CHUMP_DISK_CRITICAL_GB=0 bash "$REAPER" 2>&1)"
+    rc_normal=$?
+    set -e
+    if [[ "$out_normal" == *"SKIP: active cargo"* && $rc_normal -eq 0 ]]; then
+        pass "normal mode skips cleanly (exit 0, no reap) on an active cargo/rustc process — conservative guard intact"
     else
-        fail "normal mode did NOT abort on active rustc — the conservative guard was lost"
+        fail "normal mode did NOT skip cleanly on active rustc (rc=$rc_normal) — the conservative guard was lost"
     fi
     # Disk-critical aggressive mode + active build → must NOT abort; must escalate.
     out_agg="$(CHUMP_DISK_CRITICAL_GB=999999 bash "$REAPER" 2>&1 || true)"

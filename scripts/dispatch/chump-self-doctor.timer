@@ -1,0 +1,11 @@
+# Run the Chump self-doctor cycle every 5 minutes (self-doctor port)
+[Unit]
+Description=Run the Chump self-doctor cycle every 5 minutes (self-doctor port)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

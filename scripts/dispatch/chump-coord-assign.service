@@ -1,0 +1,24 @@
+# Chump coord-assign — FLEET-034 push-routing daemon: publishes WorkEnvelopes so
+# preferred_machine can steer a gap to a chosen runner (coord-assign port).
+# Ported from the macOS launchd agent (com.chump.coord-assign / install-coord-
+# assign-launchd.sh) to a host-agnostic systemd unit. Fail-open: if NATS is
+# unreachable, chump-coord assign logs and exits 0 and the pull fleet handles
+# everything (Restart=on-failure so a clean fail-open exit does not churn-loop).
+# Paths are primary-node(root)-shaped and host-rewritten per node by
+# scripts/ops/lib/organ-unit-install-lib.sh when place_role_unit_files installs it.
+[Unit]
+Description=Chump coord-assign push-routing daemon — publish WorkEnvelopes for host-targeted dispatch (coord-assign port)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/root
+# chump-coord is a distinct binary (not the chump symlink on PATH), so reference
+# it by its in-repo release path — host-rewritten to this node's real checkout.
+ExecStart=/bin/bash -c 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/target/release/chump-coord assign'
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

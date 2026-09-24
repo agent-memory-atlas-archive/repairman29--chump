@@ -1,0 +1,11 @@
+# Run the Chump conductor self-rescue detection every 30 minutes (conductor port)
+[Unit]
+Description=Run the Chump conductor self-rescue detection every 30 minutes (conductor port)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

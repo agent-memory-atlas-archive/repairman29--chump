@@ -15,8 +15,22 @@ After=network-online.target
 [Service]
 Type=oneshot
 Environment=HOME=/root
-# Wrapper sets env, sources providers.env, sweeps stale leases, refreshes oauth
-# mtime, then execs one farmer tick. Kept short so it always completes well
-# inside the 30s timer cadence.
-ExecStart=/bin/bash -lc 'exec /root/Projects/chump/scripts/dispatch/chump-farmer-run.sh'
+# Source ALL ~/.chump/*.env (export-format creds + config) in the unit's ExecStart
+# — the same pattern chump-pr-lander.service uses — BEFORE handing off to the
+# wrapper, so the organ's env is loaded even if the wrapper's own source path ever
+# regresses. Sourcing the WHOLE *.env glob (not just providers.env) is load-bearing:
+# the free-tier provider config (openrouter/deepseek) lives in node.env, and with
+# only providers.env sourced, auth-status.sh finds no Anthropic token, falls through
+# to a failing Anthropic probe, and returns a FALSE AUTH_DEAD — so the farmer
+# withholds the heartbeat and the worker gates itself off, even though a valid
+# free-tier provider is configured. VERIFIED: auth-status.sh with all *.env sourced
+# returns "AUTH ✓ OK — free-tier provider live (openrouter)". The wrapper then sets
+# HOME/PATH, sweeps stale leases, refreshes oauth mtime, and execs one farmer tick
+# (which writes ~/.chump/farmer-heartbeat unconditionally at tick start — the file
+# the worker gate reads). Non-login shell (-c) so the host-rewriter's injected
+# Environment=PATH (run-user's ~/.cargo/bin) is authoritative on every host, not
+# reset by a login profile. The host-rewriter turns /root into the run-user's home,
+# so the glob resolves to the run-user's ~/.chump on every host. Kept short so it
+# always completes well inside the 30s timer cadence.
+ExecStart=/bin/bash -c 'set -a; for e in /root/.chump/*.env; do source "$e" 2>/dev/null; done; set +a; exec /root/Projects/chump/scripts/dispatch/chump-farmer-run.sh'
 TimeoutStartSec=120

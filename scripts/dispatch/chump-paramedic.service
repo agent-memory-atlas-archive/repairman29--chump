@@ -1,0 +1,20 @@
+# Chump paramedic tick — triage+execute one stuck-PR rescue pass (paramedic port)
+# Ported from the macOS launchd agent (com.chump.paramedic / install-paramedic.sh) to a host-agnostic systemd
+# unit so the Linux fleet hub runs the complete organ roster (launchd->systemd
+# port). Paths below are primary-node(root)-shaped and are host-rewritten per
+# node by scripts/ops/lib/organ-unit-install-lib.sh (WorkingDirectory/ExecStart/
+# HOME/User -> the repo-owning user + real HOME + real checkout path) when
+# place_role_unit_files installs them — no hardcoded per-host path survives.
+[Unit]
+Description=Chump paramedic tick — triage+execute one stuck-PR rescue pass (paramedic port)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+# Source providers.env (export-format creds) then exec the organ — same pattern
+# as chump-pr-lander.service. Non-login shell so the host-rewriter's injected
+# Environment=PATH (with the run-user's ~/.cargo/bin) stays authoritative.
+ExecStart=/bin/bash -c 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec chump paramedic execute'
+TimeoutStartSec=300

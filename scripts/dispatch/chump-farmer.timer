@@ -5,12 +5,23 @@
 # let the heartbeat cross stale. AccuracySec=1s is REQUIRED — systemd's default 1min
 # accuracy would smear a 30s cadence into ~1min and blow the 120s budget on a
 # reset-then-miss. Enable: systemctl enable --now chump-farmer.timer
+#
+# OnUnitInactiveSec=30s is REQUIRED for a oneshot service (paired with, not a
+# replacement for, OnUnitActiveSec): OnUnitActiveSec re-arms relative to when the
+# service last ACTIVATED, but a Type=oneshot service is only briefly active and
+# then goes inactive, so once the run completes the timer has no live "active"
+# anchor to count from and NextElapse goes empty — the timer fires once and never
+# again (VERIFIED live: list-timers showed NEXT=n/a after the first tick, the
+# heartbeat then aged past stale and the worker gated itself off). OnUnitInactiveSec
+# re-arms 30s after the service goes INACTIVE (i.e. after each tick completes), which
+# is the anchor a oneshot actually has, so the cadence self-perpetuates.
 [Unit]
 Description=Run the Chump farmer tick every 30s (RESILIENT-313)
 
 [Timer]
 OnBootSec=20s
 OnUnitActiveSec=30s
+OnUnitInactiveSec=30s
 AccuracySec=1s
 Persistent=true
 
