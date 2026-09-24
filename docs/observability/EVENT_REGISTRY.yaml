@@ -2182,6 +2182,17 @@ events:
       since main_red_span resets to 0 the moment a benign status line lands.
     consumers: [ambient]
     fields_required: [ts, kind, main_red_span_min, threshold_min]
+  - kind: main_sat_sustained_red
+    effect_metric: self
+    emitter: scripts/coord/lib/board-vitals.sh (RESILIENT-1123, RESILIENT-416 slice)
+    trigger: the live main_red_span (section 3b, RESILIENT-414) has held at a
+      real-red streak for at least CHUMP_BOARD_VITALS_MAIN_SAT_RED_MIN minutes
+      (default 2880 = 48h) — the main-sat gate's own independently-configurable
+      sustained-red signal, sibling of sustained_main_red (RESILIENT-1128).
+      Never fires on a transient red that clears before the window, since
+      main_red_span resets to 0 the moment a benign status line lands.
+    consumers: [ambient]
+    fields_required: [ts, kind, main_red_span_min, threshold_min]
   # NOTE: board_vitals_alert (the notify/page kind set via CHUMP_NOTIFY_KIND) is
   # deliberately NOT registered here — like its sibling board_cycle_alert, it is
   # a notify/page kind whose home is scripts/coord/operator-escalation-registry.txt,

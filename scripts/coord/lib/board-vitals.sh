@@ -70,6 +70,9 @@
 #   CHUMP_BOARD_VITALS_SUSTAINED_MAIN_RED_MIN main-red threshold minutes for the
 #                                      distinct "sustained_main_red" ambient
 #                                      signal (default 2880 = 48h, RESILIENT-1128)
+#   CHUMP_BOARD_VITALS_MAIN_SAT_RED_MIN main-red threshold minutes for the
+#                                      distinct "main_sat_sustained_red" ambient
+#                                      signal (default 2880 = 48h, RESILIENT-1123)
 #   CHUMP_BOARD_VITALS_MAIN_RED_LIVE   0 disables the live per-beat invocation of
 #                                      main-health-watchdog.sh (RESILIENT-414);
 #                                      default 1. Without this, main_red_detected
@@ -528,6 +531,26 @@ board_vitals_check() {
         # scanner-anchor: "kind":"sustained_main_red"
         _bv_emit "sustained_main_red" \
             "\"main_red_span_min\":${main_red_span},\"threshold_min\":${sustained_main_red_min}"
+    fi
+
+    # ── 4c · main-sat gate SUSTAINED red (RESILIENT-1123, RESILIENT-416 slice) ─
+    # Same underlying span as 4/4b (_bv_main_red_span_min, section 3b) — no new
+    # log-scanning, this is purely an independently-configurable threshold +
+    # its own ambient kind so a consumer that only cares about the "main-sat"
+    # gate (as opposed to the 30m look-now page or the 48h structural-outage
+    # signal) can watch one kind without re-deriving the span itself. Default
+    # threshold matches the 48h precedent from RESILIENT-1128; distinct env
+    # var so the two thresholds can be tuned independently. Read-only: this
+    # section only ever emits a diagnostic event, never mutates state (AC2),
+    # and — because main_red_span resets to 0 the instant a benign status line
+    # lands — a transient red that clears before the window never trips it
+    # (AC3, mirrors the false-positive guarantee proven for RESILIENT-1128).
+    local main_sat_red_min
+    main_sat_red_min="${CHUMP_BOARD_VITALS_MAIN_SAT_RED_MIN:-2880}"
+    if (( main_red_span >= main_sat_red_min )); then
+        # scanner-anchor: "kind":"main_sat_sustained_red"
+        _bv_emit "main_sat_sustained_red" \
+            "\"main_red_span_min\":${main_red_span},\"threshold_min\":${main_sat_red_min}"
     fi
 
     # ── 5 · FLOOR: credential / credit needs — genuinely Jeff's to fix ───────
