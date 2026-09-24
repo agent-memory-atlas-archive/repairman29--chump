@@ -506,6 +506,15 @@ events:
     consumers: [fleet-brief, waste_tally]
     fields_required: [gap_id, agent_id, idle_s]
 
+  - kind: cycle_reclassified_shipped
+    effect_metric: self
+    emitter: scripts/dispatch/worker.sh (RESILIENT-1449)
+    trigger: a cycle about to be classified failed (non-zero rc, e.g. rc=143 from a
+      post-ship merge-poll stall kill) is reclassified shipped because ground truth
+      (webhook cache / gap status / gh) shows a PR exists for the cycle's branch
+    consumers: [fleet-brief, waste_tally]
+    fields_required: [gap_id, agent, rc, evidence]
+
   - kind: worker_cooldown
     effect_metric: self
     emitter: scripts/dispatch/worker.sh (FLEET-051)

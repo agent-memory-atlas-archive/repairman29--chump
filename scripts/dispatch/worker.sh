@@ -398,6 +398,53 @@ classify_rc() {
     esac
 }
 
+# RESILIENT-1449: ground-truth ship detection. Does a PR actually exist for
+# this cycle's branch? Checks cheapest-first: webhook cache (github_cache.db)
+# → canonical gap status → gh fallback. Prints the evidence token (a PR number,
+# or "status:<state>") and returns 0 when found; prints nothing + returns 1
+# otherwise. Shared by BOTH the CREDIBLE-154 rc==0 path AND the non-zero-rc
+# reclassification below: a session that shipped correctly (branch pushed, PR
+# created, auto-merge armed) then sat quietly polling `gh pr view` for its own
+# merge produces no stdout for 120s, so the INFRA-705 stall-detector kills it
+# (rc=143) — yet the PR was created and may already have MERGED (e.g.
+# RESILIENT-1123 logged rc=1 but PR #4812 merged). rc alone therefore cannot
+# decide "failed"; ground truth (a PR for the branch) is the authoritative
+# signal, so it must be consulted before ANY failed/unverified verdict.
+_detect_ship_evidence() {
+    local _gap_id="$1" _branch="$2" _ev="" _cache_db="${REPO_ROOT}/.chump/github_cache.db"
+    if [ -f "$_cache_db" ]; then
+        _ev="$(sqlite3 "$_cache_db" \
+            "SELECT number FROM pr_state WHERE head_ref='${_branch}' LIMIT 1" 2>/dev/null || true)"
+    fi
+    if [ -z "$_ev" ]; then
+        local _gap_now
+        _gap_now="$(CHUMP_REPO="$REPO_ROOT" chump gap show "$_gap_id" 2>/dev/null \
+            | grep -m1 -oE 'status: *[a-z_]+' | awk '{print $2}' || true)"
+        case "$_gap_now" in ready_to_ship|done|shipped) _ev="status:$_gap_now" ;; esac
+    fi
+    if [ -z "$_ev" ]; then
+        _ev="$(gh pr list --head "$_branch" --state all --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)"
+    fi
+    [ -n "$_ev" ] && { printf '%s\n' "$_ev"; return 0; }
+    return 1
+}
+
+# RESILIENT-1449: has this cycle already SHIPPED (per its own log)? Once
+# bot-merge has created the PR and armed auto-merge, its success output is
+# flushed to the cycle log; the session then commonly sits QUIET polling
+# `gh pr view` for the merge to land. That quiet is a post-ship merge-wait,
+# NOT a hang — so the INFRA-705 stall-detector must recognize it and extend
+# its timeout (analogous to the RESILIENT-157 build-descendant carve-out)
+# instead of killing at the normal 120s no-output threshold. Matches the
+# stable PR-created / auto-merge-armed markers bot-merge.sh prints on success.
+_cycle_log_shows_ship() {
+    local _log="${1:-$cycle_log}"
+    [ -f "$_log" ] || return 1
+    grep -qE 'github\.com/[^ ]+/pull/[0-9]+|armed for auto-merge|auto-merge armed|created and verified|PR #[0-9]+ (created|armed)' \
+        "$_log" 2>/dev/null
+}
+
 # RESILIENT-575: classify a `claude -p` (sub) cycle-log failure as an
 # account-level outage (cap exhausted / rate-limited / creds dead), not a
 # per-gap failure. Mirrors classify_probe_error() in run-fleet.sh so the two
@@ -1651,6 +1698,15 @@ Operator or sibling worker can rescue this branch via:
                 # Complements the first-output watchdog: that one fires on zero
                 # initial output; this one fires on mid-cycle output stalls.
                 _stall_threshold="${CHUMP_STALL_THRESHOLD_S:-120}"
+                # RESILIENT-1449: once the cycle has SHIPPED (PR created +
+                # auto-merge armed, visible in the cycle log) the session
+                # commonly sits QUIET polling `gh pr view` for its own PR's
+                # merge. That is a post-ship merge-wait, NOT a hang — so use a
+                # much larger no-output threshold during that phase instead of
+                # the 120s one, so a real ship is not stall-killed (which would
+                # mis-count it as failed). Still bounded so a session genuinely
+                # wedged AFTER shipping is eventually reaped.
+                _postship_threshold="${CHUMP_POSTSHIP_STALL_THRESHOLD_S:-900}"
                 # RESILIENT-157: true (0) if a cargo/rustc/clippy-driver/sccache
                 # build is an ACTIVE DESCENDANT of $1 (the claude -p pid) — i.e.
                 # the cycle is silently COMPILING (a workspace clippy/build can run
@@ -1686,7 +1742,16 @@ Operator or sibling worker can rescue this branch via:
                             _sd_last_active=$SECONDS
                         fi
                         _sd_idle=$(( SECONDS - _sd_last_active ))
-                        if [[ $_sd_idle -ge $_stall_threshold ]]; then
+                        # RESILIENT-1449: extend the threshold once the cycle
+                        # has shipped — a quiet post-ship merge-poll is not a
+                        # stall. Non-shipped cycles keep the strict 120s bound,
+                        # so protection against genuinely-hung sessions is
+                        # unchanged.
+                        _eff_threshold=$_stall_threshold
+                        if _cycle_log_shows_ship "$cycle_log"; then
+                            _eff_threshold=$_postship_threshold
+                        fi
+                        if [[ $_sd_idle -ge $_eff_threshold ]]; then
                             # RESILIENT-157: a clippy/cargo build streams no output
                             # for minutes — that's compiling, not stalled. Defer the
                             # kill while a build descendant is live; reset the idle
@@ -1707,7 +1772,7 @@ Operator or sibling worker can rescue this branch via:
                                 "${AGENT_ID:-unknown}" \
                                 "$_sd_idle" \
                                 >> "${CHUMP_LOCKS_DIR:-.chump-locks}/ambient.jsonl" 2>/dev/null || true
-                            log "INFRA-705: stall-detector firing (no output for ${_sd_idle}s ≥ threshold ${_stall_threshold}s) — killing cycle"
+                            log "INFRA-705: stall-detector firing (no output for ${_sd_idle}s ≥ threshold ${_eff_threshold}s) — killing cycle"
                             # INFRA-3832: reap the whole tree (see _kill_cycle_tree)
                             # so the hung claude grandchild dies now, not at
                             # FLEET_TIMEOUT_S.
@@ -2557,22 +2622,10 @@ Operator or sibling worker can rescue this branch via:
         # ready_to_ship in the worktree-local db and no PR was ever created).
         # Evidence, cheapest first: webhook cache by head_ref → canonical-db
         # gap status → gh fallback. No evidence → kind=unverified_ship.
+        # RESILIENT-1449: this ground-truth check is now _detect_ship_evidence,
+        # shared verbatim with the non-zero-rc reclassification below.
         _ship_branch="chump/$(printf '%s' "$GAP_ID" | tr '[:upper:]' '[:lower:]')-claim"
-        _ship_evidence=""
-        _cache_db="${REPO_ROOT}/.chump/github_cache.db"
-        if [ -f "$_cache_db" ]; then
-            _ship_evidence="$(sqlite3 "$_cache_db" \
-                "SELECT number FROM pr_state WHERE head_ref='${_ship_branch}' LIMIT 1" 2>/dev/null || true)"
-        fi
-        if [ -z "$_ship_evidence" ]; then
-            _gap_now="$(CHUMP_REPO="$REPO_ROOT" chump gap show "$GAP_ID" 2>/dev/null \
-                | grep -m1 -oE 'status: *[a-z_]+' | awk '{print $2}' || true)"
-            case "$_gap_now" in ready_to_ship|done|shipped) _ship_evidence="status:$_gap_now" ;; esac
-        fi
-        if [ -z "$_ship_evidence" ]; then
-            _ship_evidence="$(gh pr list --head "$_ship_branch" --state all --json number \
-                --jq '.[0].number // empty' 2>/dev/null || true)"
-        fi
+        _ship_evidence="$(_detect_ship_evidence "$GAP_ID" "$_ship_branch" || true)"
         if [ -n "$_ship_evidence" ]; then
             _cycle_kind="shipped"
             # EFFECTIVE-441: a verified ship clears any accumulated unverified_ship
@@ -2703,6 +2756,32 @@ Operator or sibling worker can rescue this branch via:
     elif [ "$rc" -eq 124 ]; then
         _cycle_kind="timeout"
     fi
+
+    # ── RESILIENT-1449: ground-truth before declaring "failed" ────────────
+    # A non-zero exit is NOT proof the cycle failed. The dominant false
+    # failure: the session shipped correctly (branch pushed, PR created,
+    # auto-merge armed), then sat quietly polling `gh pr view` for its own
+    # PR's merge. That produced no stdout for 120s, so the INFRA-705
+    # stall-detector killed it → rc=143 → classified "failed" — even though
+    # the PR was created and may already have merged (RESILIENT-1123 logged
+    # rc=1 yet PR #4812 MERGED; EFFECTIVE-1015 was stall-killed mid-poll but
+    # PR #4813 was created). Before trusting a "failed" verdict, consult the
+    # authoritative signal: if a PR exists for this cycle's branch, the cycle
+    # SHIPPED. Only reclassify AWAY from failed — never override a
+    # shipped/unverified_ship/wedge/timeout verdict already established above.
+    if [ "$_cycle_kind" = "failed" ] && [ "${CHUMP_SHIP_GROUNDTRUTH_RECHECK:-1}" != "0" ]; then
+        _gt_branch="chump/$(printf '%s' "$GAP_ID" | tr '[:upper:]' '[:lower:]')-claim"
+        _gt_ev="$(_detect_ship_evidence "$GAP_ID" "$_gt_branch" || true)"
+        if [ -n "$_gt_ev" ]; then
+            _cycle_kind="shipped"
+            # scanner-anchor: "kind":"cycle_reclassified_shipped"
+            printf '{"ts":"%s","event":"cycle_reclassified_shipped","kind":"cycle_reclassified_shipped","agent":"%s","gap_id":"%s","rc":%d,"evidence":"%s","reason":"post_ship_stall_kill_false_failure"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$AGENT_ID" "$GAP_ID" "$rc" "$_gt_ev" \
+                >> "${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}" 2>/dev/null || true
+            log "RESILIENT-1449: rc=$rc looked failed, but ground truth shows a PR for branch $_gt_branch (evidence=$_gt_ev) — reclassifying shipped (post-ship stall-kill false failure)"
+        fi
+    fi
+
     _amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
     printf '{"event":"cycle_end","ts":"%s","agent":"%s","gap_id":"%s","elapsed_s":%d,"rc":%d,"kind":"%s","model":"%s","cycle_log_bytes":%d}\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
