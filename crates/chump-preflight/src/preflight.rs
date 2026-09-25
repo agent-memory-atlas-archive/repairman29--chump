@@ -25,7 +25,7 @@
 //!   `--scope rust`    <60s   (cargo fmt/clippy/check warm; no scripts)
 //!   `--scope all`     same as INFRA-1670 (every gate)
 
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
 /// One gate the preflight runs.
@@ -366,6 +366,22 @@ fn run_step(s: &Step) -> Outcome {
             elapsed_ms,
             captured: Some(format!("failed to spawn {:?}: {}", s.argv, e)),
         },
+    }
+}
+
+/// INFRA-4116 (INFRA-3381 slice): generic single-script spawn helper. Runs
+/// `bash <name>`, waits for it, and fails closed on a non-zero exit or a
+/// spawn error. A thin, reusable entry point for call sites that just need
+/// "run this script and turn non-zero into an error" without the full
+/// `Step`/`Outcome` status-line machinery `run_step` provides.
+// Not yet called from `run()` — reserved for a follow-up call site; unit
+// tests below exercise it directly.
+#[allow(dead_code)]
+fn run_preflight_script(name: &str) -> Result<(), ExitCode> {
+    let status = Command::new("bash").arg(name).stdin(Stdio::null()).status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        _ => Err(ExitCode::FAILURE),
     }
 }
 
@@ -3346,6 +3362,24 @@ mod tests {
                 .any(|p| p.ends_with("scripts/ci/test-pr-stuck-cluster-detection.sh")),
             "test-pr-stuck-cluster-detection.sh must be wired into preflight's \
              always-run allowlist so detector regressions surface locally"
+        );
+    }
+
+    // INFRA-4116: run_preflight_script must return Ok(()) for a successful
+    // script and Err(ExitCode::FAILURE) for a failing one.
+    #[test]
+    fn infra4116_run_preflight_script_ok_and_err() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let ok_script = dir.path().join("ok.sh");
+        std::fs::write(&ok_script, "#!/bin/sh\nexit 0\n").expect("write ok script");
+        assert!(run_preflight_script(ok_script.to_str().unwrap()).is_ok());
+
+        let fail_script = dir.path().join("fail.sh");
+        std::fs::write(&fail_script, "#!/bin/sh\nexit 1\n").expect("write fail script");
+        assert_eq!(
+            run_preflight_script(fail_script.to_str().unwrap()),
+            Err(ExitCode::FAILURE)
         );
     }
 
