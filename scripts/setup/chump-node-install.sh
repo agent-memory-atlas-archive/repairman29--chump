@@ -1255,8 +1255,76 @@ FHS"
     render_worker_launcher
   fi
   local list; case "$ROLE" in brain) list="$(brain_organs; common_organs)";; muscle) list="$(muscle_organs; common_organs)";; all) list="$(brain_organs; muscle_organs; common_organs)";; esac
+
+  # INFRA-4351 (INFRA-3641 slice): gate the local svc_install/svc_up organs
+  # above against scripts/ops/organ-manifest.txt itself, not just the
+  # hardcoded brain/muscle/common_organs() role split above. Each local
+  # organ's systemd unit name (svc_install writes "chump-$name.service")
+  # doubles as its organ-manifest.txt lookup key — an organ explicitly
+  # declared paging_off there, or scoped away from this node's role/platform,
+  # or missing a requires= precondition, is skipped here too instead of
+  # svc_install/svc_up running for it unconditionally. An organ that has no
+  # line in the manifest at all keeps today's behavior (installed whenever
+  # role-selected above) — the manifest is additive coverage, not a second
+  # required declaration, so undeclared local organs don't regress to
+  # "never installs".
+  local manifest_lib="$NODE_DIR/repo/scripts/ops/lib/organ-manifest-lib.sh"
+  [ -f "$manifest_lib" ] || manifest_lib="$(dirname "$0")/../ops/lib/organ-manifest-lib.sh"
+  # CHUMP_ORGAN_MANIFEST: same override organ-reconcile.sh honors (RESILIENT-746
+  # tests drive it this way) — lets tests point install_organs at a synthetic
+  # manifest without touching the real fleet-wide organ-manifest.txt.
+  local manifest="${CHUMP_ORGAN_MANIFEST:-}"
+  if [ -z "$manifest" ]; then
+    manifest="$NODE_DIR/repo/scripts/ops/organ-manifest.txt"
+    [ -f "$manifest" ] || manifest="$(dirname "$0")/../ops/organ-manifest.txt"
+  fi
+  local have_manifest=0
+  local M_PAGING_OFF=() M_ENABLED=()
+  declare -A M_ROLE M_REQUIRES M_PLATFORMS
+  if [ -f "$manifest_lib" ] && [ -f "$manifest" ]; then
+    # shellcheck source=/dev/null
+    . "$manifest_lib"
+    organ_manifest_parse "$manifest" M_PAGING_OFF M_ENABLED M_ROLE M_REQUIRES M_PLATFORMS && have_manifest=1
+  fi
+  local rf; rf="$(organ_role_filter)"
+  local current_platform; current_platform="systemd"
+  [ "$have_manifest" = 1 ] && current_platform="$(organ_current_platform 2>/dev/null || echo systemd)"
+
   echo "$list" | while IFS='|' read -r name exec; do
     [ -z "$name" ] && continue
+    unit="chump-$name.service"
+    if [ "$have_manifest" = 1 ]; then
+      declared=0
+      for entry in "${M_ENABLED[@]:-}"; do [ "$entry" = "$unit" ] && { declared=1; break; }; done
+      paging=0
+      for entry in "${M_PAGING_OFF[@]:-}"; do [ "$entry" = "$unit" ] && { paging=1; break; }; done
+      if [ "$paging" = 1 ]; then
+        info ORGANS "$name skipped: organ-manifest.txt declares $unit paging_off"
+        continue
+      fi
+      if [ "$declared" = 1 ]; then
+        m_role="${M_ROLE[$unit]:-brain}"
+        in_role=0
+        if [ -z "$rf" ]; then in_role=1
+        else
+          IFS=',' read -ra _rf_toks <<< "$rf"
+          for entry in "${_rf_toks[@]}"; do [ "$entry" = "$m_role" ] && { in_role=1; break; }; done
+        fi
+        if [ "$in_role" = 0 ]; then
+          info ORGANS "$name skipped: organ-manifest.txt scopes $unit to role=$m_role, this install is role=$ROLE"
+          continue
+        fi
+        if ! organ_platform_matches "${M_PLATFORMS[$unit]:-}" "$current_platform"; then
+          info ORGANS "$name skipped: organ-manifest.txt scopes $unit to platforms=${M_PLATFORMS[$unit]:-systemd}, this host is $current_platform"
+          continue
+        fi
+        reason=""
+        if ! organ_is_applicable "$unit" "${M_REQUIRES[$unit]:-}" reason; then
+          info ORGANS "$name skipped: organ-manifest.txt requires unmet ($reason)"
+          continue
+        fi
+      fi
+    fi
     svc_install "$name" "$exec"
     if [ "$name" = worker ] && ! worker_execution_enabled; then
       svc_down "$name"
