@@ -1590,6 +1590,15 @@ timing race above, and these Playwright specs being intentionally skipped —
 neither a rename nor a headless-mount failure. No code change needed; this
 gap re-confirms INFRA-6338's diagnosis still holds.
 
+**INFRA-7412 shipped the fix (2026-09-18):** `e2e-tauri/run.mjs` now clicks
+`[data-view="chat"]` before waiting on `chump-chat` (`e2e-tauri/run.mjs:114-115`),
+mirroring the Playwright specs. **INFRA-5525 re-verification (2026-09-25):**
+re-checked all three AC branches (stale selector / app-init failure / missing
+X11-D-Bus dep) — no drift, all still ruled out per the analysis above, and
+confirmed the fix holds: live `ci-nightly.yml` run `36104297256`
+(2026-09-25T06:45Z) shows `tauri-cowork-e2e` job-level `conclusion: success`.
+Full writeup: `docs/audits/INFRA-5525-chump-chat-selector-investigation.md`.
+
 **Ongoing enforcement:** `scripts/ci/test-rollup-not-blocked-by-flaky-job.sh` parses
 `ci.yml` and asserts every non-required job has either `continue-on-error: true` or
 a PR-trigger exclusion. Run it after any ci.yml change.
