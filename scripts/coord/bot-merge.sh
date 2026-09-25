@@ -2406,8 +2406,10 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
     # Write gap claim to lease file (replaces YAML in_progress edit — no merge conflicts).
     # INFRA-193: under `set -u`, an empty bash array can't be safely expanded with
     # "${arr[@]}". Build the optional flag as a string, then word-split via $arr.
-    _claim_extra=""
-    [[ "$SPECULATIVE" == "1" ]] && _claim_extra="--speculative"
+    # INFRA-5486 made --role mandatory on `chump claim`; bot-merge's
+    # re-claim is a ship-pipeline operation, not a role-specific one.
+    _claim_extra="--role bot-merge"
+    [[ "$SPECULATIVE" == "1" ]] && _claim_extra="$_claim_extra --speculative"
     for gid in "${GAP_IDS[@]}"; do
         if [[ $DRY_RUN -eq 0 ]]; then
             # INFRA-1901: if we are already sitting inside the worktree that
