@@ -355,4 +355,58 @@ grep -q '_checkout_owner' "$SCRIPT" \
     || fail "install-helsinki-atc.sh missing the RESILIENT-1446 repo-retarget guard for a checkout owned by a non-run-user"
 ok "install-helsinki-atc.sh re-targets the baked repo path to the run-user's checkout when the checkout owner differs (RESILIENT-1446 source guard)"
 
+# ── RESILIENT-1452: same-owner node-clone retarget (de-split the hand dropins) ──
+# A box that is BOTH a chump-node-install.sh node (self-deploy organ runs from
+# $NODE_DIR/repo, default ~/.chumpnode/repo) AND the sole hub (a real checkout
+# at $RUN_HOME/chump) has the SAME owner on both trees, so RESILIENT-1446's
+# owner-mismatch guard is a no-op and every organ — including the farmer — gets
+# placed shaped for the shadow node clone. That's exactly what forced the hand
+# drop-ins chump-farmer.service.d/zz-ubuntu-home.conf +
+# chump-farmer.timer.d/zz-refire.conf. Reproduce that box shape hermetically:
+# copy the installer + its dispatch unit sources into a path that ends in
+# ".chumpnode/repo" (so $REPO_ROOT resolves there), point
+# CHUMP_INSTALL_ATC_RUN_HOME_OVERRIDE at a fake $HOME containing a real hub
+# checkout at $HOME/chump owned by the SAME user, and assert the installed
+# chump-farmer.service ends up pointed at the hub, not the node clone.
+NC_RUNHOME="$TMP/nc-runhome"
+NC_NODE_REPO="$TMP/nc-noderoot/.chumpnode/repo"
+mkdir -p "$NC_RUNHOME/chump/.git" "$NC_NODE_REPO/scripts" "$NC_NODE_REPO/scripts/coord" \
+    "$TMP/nc-dest" "$TMP/nc-bins" "$TMP/nc-cargo-bin" "$TMP/nc-locks"
+# The --auto flow shells out to several sibling scripts by $REPO_ROOT-relative
+# path (organ-reconcile.sh, install-node-refresh-systemd.sh, ...) after the
+# unit-install loop, so the node-clone checkout needs the full scripts/{dispatch,
+# setup,ops} + scripts/coord/lib trees present, not just the installer + units.
+cp -r "$REPO_ROOT/scripts/dispatch" "$REPO_ROOT/scripts/setup" "$REPO_ROOT/scripts/ops" "$NC_NODE_REPO/scripts/"
+cp -r "$REPO_ROOT/scripts/coord/lib" "$NC_NODE_REPO/scripts/coord/"
+cp "$SCRIPT" "$NC_NODE_REPO/scripts/setup/install-helsinki-atc.sh"
+cat > "$TMP/nc-bins/systemctl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/nc-bins/systemctl"
+cat > "$TMP/nc-cargo-bin/chump-integrator" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/nc-cargo-bin/chump-integrator"
+
+_nc_run_user="$(id -un)"
+CHUMP_INSTALL_ATC_ALLOW_NONROOT=1 \
+    CHUMP_INSTALL_ATC_SYSTEMD_DIR="$TMP/nc-dest" \
+    CHUMP_INSTALL_ATC_SYSTEMCTL_BIN="$TMP/nc-bins/systemctl" \
+    CHUMP_INSTALL_ATC_RUN_HOME_OVERRIDE="$NC_RUNHOME" \
+    CHUMP_RUN_USER="$_nc_run_user" \
+    CARGO_BIN_DIR="$TMP/nc-cargo-bin" \
+    NODE_AMBIENT="$TMP/nc-locks/ambient.jsonl" \
+    bash "$NC_NODE_REPO/scripts/setup/install-helsinki-atc.sh" --auto >"$TMP/nc-out.log" 2>&1
+nc_rc=$?
+[ "$nc_rc" -eq 0 ] || fail "--auto from a node-clone-shaped checkout must exit 0; got $nc_rc: $(cat "$TMP/nc-out.log")"
+NC_FARMER="$TMP/nc-dest/chump-farmer.service"
+[ -f "$NC_FARMER" ] || fail "chump-farmer.service not installed from node-clone-shaped checkout: $(cat "$TMP/nc-out.log")"
+grep -q "^WorkingDirectory=${NC_RUNHOME}/chump\$" "$NC_FARMER" \
+    || fail "chump-farmer.service WorkingDirectory not re-targeted to the hub checkout ($NC_RUNHOME/chump) — still shaped for the node clone (RESILIENT-1452): $(grep -n '^WorkingDirectory=' "$NC_FARMER")"
+grep -q "${NC_NODE_REPO}" "$NC_FARMER" \
+    && fail "chump-farmer.service still references the node-clone path $NC_NODE_REPO — RESILIENT-1452 retarget did not fire: $(cat "$NC_FARMER")"
+ok "chump-farmer.service host-rewrite retargets a same-owner node-clone checkout (\$HOME/.chumpnode/repo) to the real hub checkout (\$HOME/chump) with no hand-applied drop-in (RESILIENT-1452)"
+
 echo "ALL PASS"

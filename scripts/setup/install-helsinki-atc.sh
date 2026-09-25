@@ -346,7 +346,11 @@ if [[ -z "${CHUMP_RUN_USER:-}" ]]; then
   [[ -z "${CHUMP_RUN_USER:-}" ]] && unset CHUMP_RUN_USER
 fi
 RUN_USER="${CHUMP_RUN_USER:-$(stat -c %U "$REPO_ROOT" 2>/dev/null || echo root)}"
-RUN_HOME="$(getent passwd "$RUN_USER" 2>/dev/null | cut -d: -f6 || true)"; [[ -z "$RUN_HOME" ]] && RUN_HOME="/home/$RUN_USER"
+# CHUMP_INSTALL_ATC_RUN_HOME_OVERRIDE: test hook (mirrors the SYSTEMD_DIR /
+# SYSTEMCTL_BIN overrides above) so RESILIENT-1452's same-owner node-clone
+# retarget can be exercised hermetically in CI without depending on the real
+# invoking user's actual $HOME layout.
+RUN_HOME="${CHUMP_INSTALL_ATC_RUN_HOME_OVERRIDE:-$(getent passwd "$RUN_USER" 2>/dev/null | cut -d: -f6 || true)}"; [[ -z "$RUN_HOME" ]] && RUN_HOME="/home/$RUN_USER"
 
 # RESILIENT-1102: the repo path baked into every organ's WorkingDirectory/
 # ExecStart. It MUST be this box's REAL checkout — owned nodes live at
@@ -375,12 +379,27 @@ fi
 # actually owns. Only re-target to a run-user-owned checkout that exists on
 # disk; a same-user fresh node (owner == run-user) is already correct and is
 # left untouched.
+#
+# RESILIENT-1452: the owner-mismatch guard above misses a SAME-owner variant —
+# a box that is both a chump-node-install.sh node (self-deploy organ runs from
+# $NODE_DIR/repo, default ~/.chumpnode/repo, owned by the run-user) AND the
+# sole hub (a real checkout at $RUN_HOME/chump the operator actually works in,
+# also owned by the run-user). Owner equality made the guard above a no-op, so
+# every organ — including the farmer — got placed shaped for the shadow node
+# clone instead of the hub, and only hand-applied host drop-ins
+# (chump-farmer.service.d/zz-ubuntu-home.conf, chump-farmer.timer.d/zz-refire.conf)
+# pointed it back at the real repo. Detect the node-clone shape by path
+# (".../.chumpnode/repo", chump-node-install.sh's NODE_DIR/repo default) and
+# retarget to the hub checkout even when the owner already matches, so a fresh
+# reconcile reproduces the hand-fixed state with no drop-ins.
 _checkout_owner="$(stat -c %U "$UNIT_REPO_ROOT" 2>/dev/null || echo "")"
-if [[ -n "$_checkout_owner" && "$_checkout_owner" != "$RUN_USER" ]]; then
+_is_node_clone=0
+[[ "$UNIT_REPO_ROOT" == */.chumpnode/repo ]] && _is_node_clone=1
+if [[ -n "$_checkout_owner" ]] && { [[ "$_checkout_owner" != "$RUN_USER" ]] || [[ "$_is_node_clone" == 1 ]]; }; then
   for _cand in "${RUN_HOME%/}/chump" "${RUN_HOME%/}/Projects/chump" "${RUN_HOME%/}/chump-host"; do
-    if [[ -e "$_cand/.git" && "$(stat -c %U "$_cand" 2>/dev/null)" == "$RUN_USER" ]]; then
+    if [[ -e "$_cand/.git" && "$(stat -c %U "$_cand" 2>/dev/null)" == "$RUN_USER" && "$_cand" != "$UNIT_REPO_ROOT" ]]; then
+      echo "  NOTE: checkout $REPO_ROOT owned by $_checkout_owner (node-clone=$_is_node_clone) — baking run-user checkout $_cand into organ units (RESILIENT-1446/RESILIENT-1452)"
       UNIT_REPO_ROOT="$_cand"
-      echo "  NOTE: checkout $REPO_ROOT owned by $_checkout_owner != run-user $RUN_USER — baking run-user checkout $UNIT_REPO_ROOT into organ units (RESILIENT-1446)"
       break
     fi
   done
