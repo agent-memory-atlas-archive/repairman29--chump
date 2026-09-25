@@ -89,7 +89,7 @@ echo "[coord-surfaces-smoke] chump gap preflight $GAP_ID …" >&2
 "$BIN_DIR/chump" gap preflight "$GAP_ID"
 
 echo "[coord-surfaces-smoke] chump claim $GAP_ID …" >&2
-"$BIN_DIR/chump" claim "$GAP_ID" --paths docs/process/CURSOR_CLAUDE_COORDINATION.md
+"$BIN_DIR/chump" claim "$GAP_ID" --role fleet-test --paths docs/process/CURSOR_CLAUDE_COORDINATION.md
 
 echo "[coord-surfaces-smoke] musher --status (first lines) …" >&2
 bash scripts/coord/musher.sh --status 2>/dev/null | head -25 || true

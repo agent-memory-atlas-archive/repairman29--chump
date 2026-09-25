@@ -88,13 +88,13 @@ run_claim_check() {
     local label="$1"
     # Use a non-existent gap ID so claim fails fast; what matters is *why*.
     HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" \
-        "$CHUMP_BIN" claim RESILIENT-073-TEST-FAKE 2>&1 || true
+        "$CHUMP_BIN" claim RESILIENT-073-TEST-FAKE --role fleet-test 2>&1 || true
 }
 
 # ── Test 1: AUTONOMY_LEVEL=0 → claim refuses ─────────────────────────────────
 echo "0" > "$AL_FILE"
 _out="$(HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" \
-    "$CHUMP_BIN" claim RESILIENT-073-FAKE 2>&1 || true)"
+    "$CHUMP_BIN" claim RESILIENT-073-FAKE --role fleet-test 2>&1 || true)"
 if echo "$_out" | grep -q "fleet stopped"; then
     ok "Test 1: AUTONOMY_LEVEL=0 → claim refused with 'fleet stopped'"
 else
@@ -104,7 +104,7 @@ fi
 # ── Test 2: File missing → claim refuses (fail-closed) ───────────────────────
 rm -f "$AL_FILE"
 _out="$(HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" \
-    "$CHUMP_BIN" claim RESILIENT-073-FAKE 2>&1 || true)"
+    "$CHUMP_BIN" claim RESILIENT-073-FAKE --role fleet-test 2>&1 || true)"
 if echo "$_out" | grep -q "fleet stopped"; then
     ok "Test 2: AUTONOMY_LEVEL missing → claim refused (fail-closed)"
 else
@@ -114,7 +114,7 @@ fi
 # ── Test 3: File corrupt → claim refuses (fail-closed) ───────────────────────
 echo "banana" > "$AL_FILE"
 _out="$(HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" \
-    "$CHUMP_BIN" claim RESILIENT-073-FAKE 2>&1 || true)"
+    "$CHUMP_BIN" claim RESILIENT-073-FAKE --role fleet-test 2>&1 || true)"
 if echo "$_out" | grep -q "fleet stopped"; then
     ok "Test 3: AUTONOMY_LEVEL=corrupt → claim refused (fail-closed)"
 else
@@ -126,7 +126,7 @@ fi
 # fail with "fleet stopped".
 echo "5" > "$AL_FILE"
 _out="$(HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" \
-    "$CHUMP_BIN" claim RESILIENT-073-FAKE 2>&1 || true)"
+    "$CHUMP_BIN" claim RESILIENT-073-FAKE --role fleet-test 2>&1 || true)"
 if echo "$_out" | grep -q "fleet stopped"; then
     fail "Test 4: AUTONOMY_LEVEL=5 → kill-switch fired (should not have)"
 else

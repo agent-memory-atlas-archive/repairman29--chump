@@ -153,6 +153,7 @@ else
         CHUMP_REPO="$REPO_ROOT" \
         CHUMP_ALLOW_MAIN_WORKTREE=1 \
         "$CHUMP_BIN" claim TEST-99999 \
+        --role fleet-test \
         2>"$stderr9" && rc9=0 || rc9=$?
 
     if [[ $rc9 -ne 0 ]]; then

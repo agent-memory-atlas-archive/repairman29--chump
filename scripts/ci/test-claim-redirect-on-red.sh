@@ -102,7 +102,7 @@ setup_state "$RED_STATE"
 STDERR_OUT="$(mktemp)"
 EXIT_CODE=0
 AMBIENT_BEFORE="$(ambient_line_count)"
-"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --skip-doctor --skip-import 2>"$STDERR_OUT" || EXIT_CODE=$?
+"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --role fleet-test --skip-doctor --skip-import 2>"$STDERR_OUT" || EXIT_CODE=$?
 
 if [[ "$EXIT_CODE" -eq 3 ]]; then
     ok "exit code is 3 for red state"
@@ -149,7 +149,7 @@ setup_state "$RED_STATE"
 STDERR_OUT="$(mktemp)"
 EXIT_CODE=0
 CHUMP_CLAIM_IGNORE_MAIN_HEALTH=1 \
-    "$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --skip-doctor --skip-import 2>"$STDERR_OUT" \
+    "$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --role fleet-test --skip-doctor --skip-import 2>"$STDERR_OUT" \
     || EXIT_CODE=$?
 
 if [[ "$EXIT_CODE" -eq 3 ]]; then
@@ -174,7 +174,7 @@ GREEN_STATE="{\"last_tick_at\":${NOW_SECS},\"last_status\":\"green\",\"head_sha\
 setup_state "$GREEN_STATE"
 
 EXIT_CODE=0
-"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --skip-doctor --skip-import 2>/dev/null || EXIT_CODE=$?
+"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --role fleet-test --skip-doctor --skip-import 2>/dev/null || EXIT_CODE=$?
 
 if [[ "$EXIT_CODE" -ne 3 ]]; then
     ok "exit code is not 3 for green state (got $EXIT_CODE — claim proceeded past health gate)"
@@ -191,7 +191,7 @@ setup_state "$RED_NO_GAPS"
 
 STDERR_OUT="$(mktemp)"
 EXIT_CODE=0
-"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --skip-doctor --skip-import 2>"$STDERR_OUT" || EXIT_CODE=$?
+"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --role fleet-test --skip-doctor --skip-import 2>"$STDERR_OUT" || EXIT_CODE=$?
 
 if [[ "$EXIT_CODE" -eq 3 ]]; then
     ok "exit code is 3 for red state with no filed_gaps"

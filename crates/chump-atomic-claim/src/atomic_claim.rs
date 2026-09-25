@@ -100,9 +100,11 @@ impl ClaimArgs {
         for a in args.iter().skip(1) {
             if a == "--help" || a == "-h" {
                 println!(
-                    "Usage: chump claim <GAP-ID> [--paths CSV] [--session ID] [--no-doctor] [--no-import] [--force-recover]\n\n\
+                    "Usage: chump claim <GAP-ID> --role ROLE [--scope SCOPE] [--paths CSV] [--session ID] [--no-doctor] [--no-import] [--force-recover]\n\n\
                      Atomic claim: fetch + verify + (doctor) + worktree + lease for <GAP-ID>.\n\n\
                      Options:\n  \
+                       --role ROLE      (mandatory) Role hint for the claiming session (e.g. shepherd, target)\n  \
+                       --scope SCOPE    (optional) Scope hint for the claiming session (e.g. a module or concern)\n  \
                        --paths CSV      Record path scope (comma-separated globs); enables overlap detection\n  \
                        --session ID     Explicit session ID (default derived from env / pid)\n  \
                        --no-doctor      Skip gap-doctor reconciliation (faster, but skips drift repair)\n  \
@@ -115,9 +117,7 @@ impl ClaimArgs {
                        --allow-duplicate-pr  Bypass open-PR-in-flight abort (INFRA-1503; rescue scenarios)\n  \
                        -h, --help       Show this help
                        --check-only  Run all preflight gates without creating worktree or lease\n  \
-                       --json        Output JSON format (use with --check-only)\n  \
-                       --role ROLE   Role hint for the claiming session (e.g. shepherd, target)\n  \
-                       --scope SCOPE Scope hint for the claiming session (e.g. a module or concern)"
+                       --json        Output JSON format (use with --check-only)"
                 );
                 std::process::exit(0);
             }
@@ -246,6 +246,21 @@ impl ClaimArgs {
                 }
                 other => bail!("unknown flag: {other}"),
             }
+        }
+
+        // INFRA-5486 (INFRA-1863 slice): --role is mandatory (AC1/AC2).
+        // Returned as an Err (not a direct process::exit) so unit tests can
+        // assert on it without aborting the test binary; main.rs's caller
+        // inspects the message to pick exit code 1 (AC2) vs the generic
+        // argument-error exit code 2.
+        if role.is_none() {
+            bail!(
+                "missing required flag --role <role>\n\n\
+                 Usage: chump claim <GAP-ID> --role <role> [--scope <module-or-concern>] [--paths CSV]\n\n\
+                 --role is mandatory: a role hint for the claiming session (e.g. shepherd, target).\n  \
+                 --scope is optional: a module or concern name.\n  \
+                 --paths remains optional and advisory (no path validation if omitted)."
+            );
         }
 
         let worktree_base = std::env::var("CHUMP_WORKTREE_BASE")
@@ -6361,7 +6376,12 @@ mod tests {
 
     #[test]
     fn from_argv_minimal() {
-        let argv: Vec<String> = vec!["claim".into(), "INFRA-123".into()];
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-123".into(),
+            "--role".into(),
+            "shepherd".into(),
+        ];
         let args = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap();
         assert_eq!(args.gap_id, "INFRA-123");
         assert!(args.paths.is_none());
@@ -6379,6 +6399,8 @@ mod tests {
             "--session".into(),
             "test-session".into(),
             "--skip-doctor".into(),
+            "--role".into(),
+            "shepherd".into(),
         ];
         let args = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap();
         assert_eq!(args.gap_id, "INFRA-200");
@@ -6386,6 +6408,15 @@ mod tests {
         assert_eq!(args.session_id.as_deref(), Some("test-session"));
         assert!(args.skip_doctor);
         assert!(!args.resume);
+    }
+
+    // INFRA-5486 (INFRA-1863 slice): --role is mandatory (AC1/AC2) — omitting
+    // it is an error, regardless of what other flags are present.
+    #[test]
+    fn from_argv_missing_role_errors() {
+        let argv: Vec<String> = vec!["claim".into(), "INFRA-123".into()];
+        let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
+        assert!(format!("{err:#}").contains("missing required flag --role"));
     }
 
     #[test]
@@ -6429,7 +6460,13 @@ mod tests {
 
     #[test]
     fn from_argv_resume_flag() {
-        let argv: Vec<String> = vec!["claim".into(), "INFRA-300".into(), "--resume".into()];
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-300".into(),
+            "--resume".into(),
+            "--role".into(),
+            "shepherd".into(),
+        ];
         let args = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap();
         assert_eq!(args.gap_id, "INFRA-300");
         assert!(args.resume);
@@ -6467,7 +6504,12 @@ mod tests {
     #[test]
     fn from_argv_accepts_canonical_gap_ids() {
         for good in ["INFRA-1234", "ZERO-WASTE-015", "SMOKE-001", "CREDIBLE-166"] {
-            let argv: Vec<String> = vec!["claim".into(), good.into()];
+            let argv: Vec<String> = vec![
+                "claim".into(),
+                good.into(),
+                "--role".into(),
+                "shepherd".into(),
+            ];
             assert!(
                 ClaimArgs::from_argv(&argv, PathBuf::from(".")).is_ok(),
                 "{good} should parse"

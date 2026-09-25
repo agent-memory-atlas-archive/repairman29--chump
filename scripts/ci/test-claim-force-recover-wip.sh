@@ -153,6 +153,7 @@ OUT="$(PATH="$SHIMDIR:$PATH" \
        CHUMP_WORKTREE_BASE="$WTS" \
        CHUMP_REPO="$REPO" \
        "$CHUMP_BIN" claim "$GAP_ID" \
+           --role fleet-test \
            --force-recover \
            --skip-doctor --skip-import 2>&1)"
 RC=$?
@@ -212,6 +213,7 @@ OUT2="$(PATH="$SHIMDIR:$PATH" \
         CHUMP_WORKTREE_BASE="$WTS" \
         CHUMP_REPO="$REPO" \
         "$CHUMP_BIN" claim "$GAP_ID" \
+            --role fleet-test \
             --force-recover --discard-wip \
             --skip-doctor --skip-import 2>&1)"
 RC2=$?

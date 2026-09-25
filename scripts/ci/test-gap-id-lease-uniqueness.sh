@@ -120,7 +120,7 @@ PAST_EXPIRES="$(python3 -c "import datetime; print((datetime.datetime.utcnow() -
 # 6a. Live competing lease → claim of same gap rejected.
 write_lease "INFRA-XXXX" "claim-infra-xxxx-session-A" "$FUTURE_EXPIRES"
 
-ERROR_OUT=$("$BIN" claim INFRA-XXXX --check-only 2>&1 || true)
+ERROR_OUT=$("$BIN" claim INFRA-XXXX --role fleet-test --check-only 2>&1 || true)
 
 if echo "$ERROR_OUT" | grep -qi "gap-id-unique\|claim_duplicate_gap_blocked\|already claimed\|session-A"; then
     ok "check-only: live duplicate lease triggers gap-id-unique failure"
@@ -132,7 +132,7 @@ rm -f "$LOCKS_DIR/claim-infra-xxxx-session-A.json"
 # 6b. Expired competing lease → NOT a blocker.
 write_lease "INFRA-YYYY" "claim-infra-yyyy-session-B" "$PAST_EXPIRES"
 
-EXPIRED_OUT=$("$BIN" claim INFRA-YYYY --check-only 2>&1 || true)
+EXPIRED_OUT=$("$BIN" claim INFRA-YYYY --role fleet-test --check-only 2>&1 || true)
 
 # The gap-id-unique gate should pass (expired lease is not live).
 # We look for the gate to be 'pass', or absence of 'already claimed' error referencing session-B.
@@ -144,7 +144,7 @@ fi
 rm -f "$LOCKS_DIR/claim-infra-yyyy-session-B.json"
 
 # 6c. No competing lease → claim-only check passes gap-id-unique gate.
-NO_LEASE_OUT=$("$BIN" claim INFRA-ZZZZ --check-only 2>&1 || true)
+NO_LEASE_OUT=$("$BIN" claim INFRA-ZZZZ --role fleet-test --check-only 2>&1 || true)
 if echo "$NO_LEASE_OUT" | grep -qi "gap-id-unique.*fail\|already claimed"; then
     fail "no competing lease should not trigger gap-id-unique failure; got: $NO_LEASE_OUT"
 else

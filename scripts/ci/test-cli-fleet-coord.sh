@@ -188,7 +188,7 @@ fi
 if [[ -n "$CLAIM_GAP" ]]; then
     # Claim with a fake worktree path override to avoid git worktree add in tmpdir.
     set +e
-    CLAIM_OUT=$("$CHUMP" claim "$CLAIM_GAP" 2>&1)
+    CLAIM_OUT=$("$CHUMP" claim "$CLAIM_GAP" --role fleet-test 2>&1)
     CLAIM_EXIT=$?
     set -e
 
@@ -199,7 +199,7 @@ if [[ -n "$CLAIM_GAP" ]]; then
 
             # ── Test 8: double-claim should fail ──────────────────────────────
             set +e
-            CLAIM2_OUT=$("$CHUMP" claim "$CLAIM_GAP" 2>&1)
+            CLAIM2_OUT=$("$CHUMP" claim "$CLAIM_GAP" --role fleet-test 2>&1)
             CLAIM2_EXIT=$?
             set -e
             if [[ "$CLAIM2_EXIT" -ne 0 ]]; then

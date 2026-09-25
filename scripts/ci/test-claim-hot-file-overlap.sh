@@ -161,6 +161,7 @@ run_claim() {
     CHUMP_REMOTE="origin" \
     CHUMP_BASE_BRANCH="main" \
     "$CHUMP_BIN" claim "$gap_id" \
+        --role fleet-test \
         --skip-doctor --skip-import \
         "$@" 2>&1
 }

@@ -75,6 +75,7 @@ run_claim_breadth() {
     # fires first (pre-worktree, pre-lease). We capture stderr + exit code.
     CHUMP_WORKTREE_BASE="$TMP_ROOT/wt" \
         "$CHUMP_BIN" claim INFRA-X \
+        --role fleet-test \
         --paths "$paths_val" \
         --skip-doctor \
         --skip-import \

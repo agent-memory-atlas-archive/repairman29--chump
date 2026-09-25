@@ -98,7 +98,7 @@ STDERR_OUT="$(mktemp)"
 EXIT_CODE=0
 # Use a non-existent gap so claim fails at gap-lookup, not at our gate.
 # But the main-health-gate runs BEFORE gap verification, so exit 3 fires first.
-"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --skip-doctor --skip-import 2>"$STDERR_OUT" || EXIT_CODE=$?
+"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --role fleet-test --skip-doctor --skip-import 2>"$STDERR_OUT" || EXIT_CODE=$?
 
 if [[ "$EXIT_CODE" -eq 3 ]]; then
     ok "exit code is 3 for red state"
@@ -134,7 +134,7 @@ GREEN_STATE="{\"last_tick_at\":${NOW_SECS},\"last_status\":\"green\",\"head_sha\
 setup_state "$GREEN_STATE"
 
 EXIT_CODE=0
-"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --skip-doctor --skip-import 2>/dev/null || EXIT_CODE=$?
+"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --role fleet-test --skip-doctor --skip-import 2>/dev/null || EXIT_CODE=$?
 
 # Exit 3 means health-gate blocked; any other exit is OK (gap not found = 1).
 if [[ "$EXIT_CODE" -ne 3 ]]; then
@@ -154,7 +154,7 @@ setup_state "$STALE_STATE"
 STDERR_OUT="$(mktemp)"
 EXIT_CODE=0
 AMBIENT_BEFORE="$(ambient_line_count)"
-"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --skip-doctor --skip-import 2>"$STDERR_OUT" || EXIT_CODE=$?
+"$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --role fleet-test --skip-doctor --skip-import 2>"$STDERR_OUT" || EXIT_CODE=$?
 
 STDERR_CONTENT="$(cat "$STDERR_OUT")"
 
@@ -190,7 +190,7 @@ setup_state "$RED_STATE"
 AMBIENT_BEFORE="$(ambient_line_count)"
 EXIT_CODE=0
 CHUMP_CLAIM_IGNORE_MAIN_HEALTH=1 \
-    "$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --skip-doctor --skip-import 2>/dev/null \
+    "$CHUMP_BIN" claim INFRA-NONEXISTENT-SMOKE-TEST --role fleet-test --skip-doctor --skip-import 2>/dev/null \
     || EXIT_CODE=$?
 
 # INFRA-2428: bypass env var deleted — setting it has no effect, gate still blocks.

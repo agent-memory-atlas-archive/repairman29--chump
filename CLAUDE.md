@@ -213,7 +213,7 @@ chump bootstrap "A CLI tool that syncs files across machines" \
 ## Claim before writing any code
 
 ```bash
-chump claim <GAP-ID> [--paths CSV]   # atomic: fetch + verify + doctor + worktree + lease
+chump claim <GAP-ID> --role <role> [--scope <module-or-concern>] [--paths CSV]   # atomic: fetch + verify + doctor + worktree + lease; --role is mandatory (INFRA-5486)
 chump gap reserve --domain INFRA --title "short title"    # new gap
 ```
 

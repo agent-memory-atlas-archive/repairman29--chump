@@ -2218,10 +2218,16 @@ async fn main() -> Result<()> {
             Ok(a) => a,
             Err(e) => {
                 eprintln!("chump claim: {e:#}");
+                // INFRA-5486 (INFRA-1863 slice): AC2 requires exit code 1
+                // specifically for the missing-mandatory-`--role` case;
+                // other argument errors keep the existing exit code 2.
+                if format!("{e:#}").contains("missing required flag --role") {
+                    std::process::exit(1);
+                }
                 eprintln!();
-                eprintln!("Usage: chump claim <GAP-ID> [--paths CSV] [--session ID]");
+                eprintln!("Usage: chump claim <GAP-ID> --role ROLE [--paths CSV] [--session ID]");
                 eprintln!("                          [--skip-doctor] [--skip-import]");
-                eprintln!("                          [--role ROLE] [--scope SCOPE]");
+                eprintln!("                          [--scope SCOPE]");
                 eprintln!();
                 eprintln!("Atomically: fetch origin/main, verify the gap, run chump-doctor,");
                 eprintln!("create a linked worktree, write the lease. Replaces the 6-step");
