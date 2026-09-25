@@ -4866,15 +4866,20 @@ class ChumpHintComposer extends HTMLElement {
 }
 customElements.define('chump-hint-composer', ChumpHintComposer);
 
-// ── <chump-ambient-viewer> (INFRA-1198) ──────────────────────────────────────
+// ── <chump-ambient-viewer> (INFRA-1198, filter pills + presets INFRA-1559) ──
 //
 // Live-tails .chump-locks/ambient.jsonl in the PWA's Events view via the
 // existing SSE endpoint (PRODUCT-091, /api/ambient/stream?kind=<X>?).
 // Renders a filtered, drillable list:
 //   - kind dropdown (top-N curated + "All") — server-side filter via ?kind=
+//   - gap + severity filter pills (INFRA-1559) — applied client-side; today's
+//     fleet is < 100 active gaps so client-side filtering is fine (server-side
+//     is out of scope until ~1000+, per INFRA-1559 AC7)
+//   - saved-preset dropdown (workspace-local localStorage, INFRA-1559)
 //   - connection indicator (● live / ○ reconnecting / ✕ error)
 //   - scrollable list, auto-pinned to bottom unless the user scrolls up
-//   - "↓ N new" pill appears while scrolled up; click jumps to bottom
+//   - "↓ N new since last viewed" pill appears while scrolled up; click jumps
+//     to bottom
 //   - click a row → expand to pretty-printed JSON drill-in
 //
 // Buffer is capped at #maxBuffer to keep DOM bounded under storm conditions.
@@ -4883,12 +4888,15 @@ customElements.define('chump-hint-composer', ChumpHintComposer);
 class ChumpAmbientViewer extends HTMLElement {
   #es = null;
   #kindFilter = '';
+  #gapFilter = '';
+  #severityFilter = '';
   #pinnedToBottom = true;
   #buffer = [];
   #pendingNew = 0;
   #connState = 'connecting'; // 'live' | 'reconnecting' | 'error' | 'connecting'
 
   static #MAX_BUFFER = 500;
+  static #PRESET_KEY = 'chump-ambient-filter-presets';
 
   // Curated kinds for the dropdown — the most operator-meaningful ones.
   // "All" sentinel uses empty string. The list is enrichment, not authoritative;
@@ -4924,24 +4932,63 @@ class ChumpAmbientViewer extends HTMLElement {
     const options = ChumpAmbientViewer.#FILTER_OPTIONS.map(o =>
       `<option value="${this.#esc(o.value)}">${this.#esc(o.label)}</option>`
     ).join('');
+    const presetOptions = this.#presetOptionsHtml();
     this.innerHTML = `
       <div class="amb-toolbar">
         <label class="amb-filter-label">
           Filter by kind:
           <select class="amb-filter">${options}</select>
         </label>
+        <label class="amb-filter-label">
+          gap:
+          <input type="text" class="amb-gap-filter" placeholder="gap id" />
+        </label>
+        <label class="amb-filter-label">
+          severity:
+          <select class="amb-severity-filter">
+            <option value="">All</option>
+            <option value="info">info</option>
+            <option value="warn">warn</option>
+            <option value="error">error</option>
+          </select>
+        </label>
         <span class="amb-state amb-state-connecting" title="connecting…">●</span>
       </div>
-      <div class="amb-pill" style="display:none">↓ <span class="amb-pill-n">0</span> new</div>
+      <div class="amb-pillbar">
+        <div class="amb-active-pills"></div>
+        <div class="amb-preset-bar">
+          <select class="amb-preset-select">${presetOptions}</select>
+          <input type="text" class="amb-preset-name" placeholder="preset name" />
+          <button type="button" class="amb-preset-save">Save preset</button>
+        </div>
+      </div>
+      <div class="amb-pill" style="display:none">↓ <span class="amb-pill-n">0</span> new since last viewed</div>
       <ol class="amb-list" tabindex="0" aria-label="Ambient event stream"></ol>
     `;
     const sel = this.querySelector('.amb-filter');
     if (this.#kindFilter) sel.value = this.#kindFilter;
-    sel.addEventListener('change', (e) => this.#changeFilter(e.target.value));
+    sel.addEventListener('change', (e) => this.#applyFilterChange({ kind: e.target.value }));
+
+    const gapInput = this.querySelector('.amb-gap-filter');
+    gapInput.value = this.#gapFilter;
+    gapInput.addEventListener('change', (e) => this.#applyFilterChange({ gap: e.target.value }));
+
+    const sevSel = this.querySelector('.amb-severity-filter');
+    sevSel.value = this.#severityFilter;
+    sevSel.addEventListener('change', (e) => this.#applyFilterChange({ severity: e.target.value }));
+
+    const presetSel = this.querySelector('.amb-preset-select');
+    presetSel.addEventListener('change', (e) => this.#applyPreset(e.target.value));
+
+    const saveBtn = this.querySelector('.amb-preset-save');
+    saveBtn.addEventListener('click', () => this.#saveCurrentPreset());
+
     const list = this.querySelector('.amb-list');
     list.addEventListener('scroll', () => this.#onScroll());
     const pill = this.querySelector('.amb-pill');
     pill.addEventListener('click', () => this.#jumpToBottom());
+
+    this.#renderActivePills();
   }
 
   #subscribe() {
@@ -4968,9 +5015,10 @@ class ChumpAmbientViewer extends HTMLElement {
   }
 
   #onEvent(payload) {
-    // Re-validate against the active filter — server should already filter,
-    // but defence-in-depth for race during filter swap.
-    if (this.#kindFilter && payload.kind !== this.#kindFilter) return;
+    // Re-validate against the active filter — server should already filter
+    // by kind, but gap/severity are client-side only (INFRA-1559 AC7) and
+    // this is also defence-in-depth for a race during filter swap.
+    if (!this.#matchesFilter(payload)) return;
 
     this.#buffer.push(payload);
     if (this.#buffer.length > ChumpAmbientViewer.#MAX_BUFFER) {
@@ -5032,16 +5080,143 @@ class ChumpAmbientViewer extends HTMLElement {
     }
   }
 
-  #changeFilter(kind) {
-    this.#kindFilter = kind || '';
-    // CREDIBLE-135: persist so the choice survives reloads (PRODUCT-098 chumpPrefs).
+  // INFRA-1559: true when `payload` passes ALL active filter pills
+  // (kind — server-filtered too; gap/severity — client-side only per AC7).
+  #matchesFilter(payload) {
+    if (this.#kindFilter && payload.kind !== this.#kindFilter) return false;
+    if (this.#gapFilter) {
+      const gapVal = String(payload.gap_id ?? payload.gap ?? '');
+      if (!gapVal.toLowerCase().includes(this.#gapFilter.toLowerCase())) return false;
+    }
+    if (this.#severityFilter && payload.severity !== this.#severityFilter) return false;
+    return true;
+  }
+
+  // Merges `partial` (any of {kind, gap, severity}) into filter state,
+  // emits kind=sse_filter_applied telemetry (AC6), resets the buffer, and
+  // re-subscribes (kind is server-side; gap/severity re-filter client-side).
+  #applyFilterChange(partial) {
+    const prevBuffer = this.#buffer;
+    if (typeof partial.kind === 'string') this.#kindFilter = partial.kind;
+    if (typeof partial.gap === 'string') this.#gapFilter = partial.gap.trim();
+    if (typeof partial.severity === 'string') this.#severityFilter = partial.severity;
+
+    // CREDIBLE-135: persist kind filter so the choice survives reloads (PRODUCT-098 chumpPrefs).
     window.chumpPrefs?.set('ambient-kind-filter', this.#kindFilter);
+
+    const resultsCount = prevBuffer.filter((p) => this.#matchesFilter(p)).length;
+    this.#emitFilterTelemetry(resultsCount);
+
     this.#buffer = [];
     this.#pendingNew = 0;
     const list = this.querySelector('.amb-list');
     if (list) list.innerHTML = '';
     this.#refreshPill();
+    this.#renderActivePills();
     this.#subscribe();
+  }
+
+  #emitFilterTelemetry(resultsCount) {
+    const filterSpec = { kind: this.#kindFilter, gap: this.#gapFilter, severity: this.#severityFilter };
+    if (typeof navigator !== 'undefined') {
+      navigator.sendBeacon?.('/api/ambient/emit', JSON.stringify({
+        kind: 'sse_filter_applied',
+        filter_spec: filterSpec,
+        results_count: resultsCount,
+      }));
+    }
+  }
+
+  // ── Filter pills row (INFRA-1559) ─────────────────────────────────────────
+  #renderActivePills() {
+    const bar = this.querySelector('.amb-active-pills');
+    if (!bar) return;
+    const active = [];
+    if (this.#kindFilter) active.push({ key: 'kind', label: `kind=${this.#kindFilter}` });
+    if (this.#gapFilter) active.push({ key: 'gap', label: `gap=${this.#gapFilter}` });
+    if (this.#severityFilter) active.push({ key: 'severity', label: `severity=${this.#severityFilter}` });
+    if (active.length === 0) {
+      bar.innerHTML = '<span class="amb-pill-chip-empty">No active filters</span>';
+      return;
+    }
+    bar.innerHTML = active.map(a =>
+      `<span class="amb-pill-chip" data-key="${this.#esc(a.key)}">${this.#esc(a.label)} <button type="button" class="amb-pill-chip-x" data-key="${this.#esc(a.key)}" aria-label="Remove ${this.#esc(a.label)} filter">×</button></span>`
+    ).join('');
+    bar.querySelectorAll('.amb-pill-chip-x').forEach((btn) => {
+      btn.addEventListener('click', (e) => this.#removePill(e.target.getAttribute('data-key')));
+    });
+  }
+
+  #removePill(key) {
+    if (key === 'kind') {
+      const sel = this.querySelector('.amb-filter');
+      if (sel) sel.value = '';
+      this.#applyFilterChange({ kind: '' });
+    } else if (key === 'gap') {
+      const input = this.querySelector('.amb-gap-filter');
+      if (input) input.value = '';
+      this.#applyFilterChange({ gap: '' });
+    } else if (key === 'severity') {
+      const sel = this.querySelector('.amb-severity-filter');
+      if (sel) sel.value = '';
+      this.#applyFilterChange({ severity: '' });
+    }
+  }
+
+  // ── Saved presets (INFRA-1559, workspace-local localStorage) ──────────────
+  #loadPresets() {
+    try {
+      const raw = window.localStorage?.getItem(ChumpAmbientViewer.#PRESET_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  #savePresets(presets) {
+    try {
+      window.localStorage?.setItem(ChumpAmbientViewer.#PRESET_KEY, JSON.stringify(presets));
+    } catch {
+      // best-effort — quota exceeded or localStorage unavailable
+    }
+  }
+
+  #presetOptionsHtml() {
+    const presets = this.#loadPresets();
+    const names = Object.keys(presets);
+    const opts = ['<option value="">Presets…</option>']
+      .concat(names.map(n => `<option value="${this.#esc(n)}">${this.#esc(n)}</option>`));
+    return opts.join('');
+  }
+
+  #saveCurrentPreset() {
+    const nameInput = this.querySelector('.amb-preset-name');
+    const name = (nameInput?.value || '').trim();
+    if (!name) return;
+    const presets = this.#loadPresets();
+    presets[name] = { kind: this.#kindFilter, gap: this.#gapFilter, severity: this.#severityFilter };
+    this.#savePresets(presets);
+    const sel = this.querySelector('.amb-preset-select');
+    if (sel) sel.innerHTML = this.#presetOptionsHtml();
+    if (nameInput) nameInput.value = '';
+  }
+
+  #applyPreset(name) {
+    if (!name) return;
+    const presets = this.#loadPresets();
+    const preset = presets[name];
+    if (!preset) return;
+    const kindSel = this.querySelector('.amb-filter');
+    if (kindSel) kindSel.value = preset.kind || '';
+    const gapInput = this.querySelector('.amb-gap-filter');
+    if (gapInput) gapInput.value = preset.gap || '';
+    const sevSel = this.querySelector('.amb-severity-filter');
+    if (sevSel) sevSel.value = preset.severity || '';
+    this.#applyFilterChange({
+      kind: preset.kind || '',
+      gap: preset.gap || '',
+      severity: preset.severity || '',
+    });
   }
 
   #onScroll() {
@@ -5101,6 +5276,164 @@ class ChumpAmbientViewer extends HTMLElement {
   }
 }
 customElements.define('chump-ambient-viewer', ChumpAmbientViewer);
+
+// ── <chump-bandit-regret-panel> (INFRA-1559) ─────────────────────────────────
+//
+// Pairs with the routing brain (TBD gap, placeholder INFRA-1545): once that
+// gap ships bandit-arm choices, it will emit `kind=routing_decision` (a
+// decision was made) and `kind=routing_outcome` (arm, reward, optimal_reward)
+// on the same ambient stream this component subscribes to. Renders a
+// cumulative-regret-per-arm time series so an operator can see at a glance
+// whether the routing brain is working (regret flat/slowly-growing = good)
+// or degrading (regret growing steeply = investigate).
+//
+// Until the routing brain ships, this renders an empty-state placeholder —
+// filed-and-parked per AC4. No server changes needed: reuses the existing
+// INFRA-1010 `?kinds=a,b` multi-kind SSE filter.
+class ChumpBanditRegretPanel extends HTMLElement {
+  #es = null;
+  #arms = {}; // arm -> { cumRegret: number, points: number[] (cumulative regret per outcome) }
+  #connState = 'connecting'; // 'live' | 'reconnecting' | 'error' | 'connecting'
+
+  // Cycle through canonical design tokens (CSS_TOKEN_DISCIPLINE, INFRA-1590) —
+  // no raw hex literals in JS.
+  static #COLORS = ['var(--accent)', 'var(--warn)', 'var(--success)', 'var(--error)', 'var(--text-secondary)'];
+
+  connectedCallback() {
+    this.#renderShell();
+    this.#subscribe();
+  }
+
+  disconnectedCallback() {
+    if (this.#es) { this.#es.close(); this.#es = null; }
+  }
+
+  #renderShell() {
+    this.innerHTML = `
+      <div class="regret-toolbar">
+        <span class="regret-title">Bandit regret (routing brain)</span>
+        <span class="regret-state regret-state-connecting" title="connecting…">●</span>
+      </div>
+      <div class="regret-empty">Waiting for routing_decision / routing_outcome events (routing brain not yet shipped — TBD-INFRA-1545)…</div>
+      <svg class="regret-chart" viewBox="0 0 600 200" preserveAspectRatio="none" hidden></svg>
+      <div class="regret-legend"></div>
+    `;
+  }
+
+  #subscribe() {
+    if (this.#es) { this.#es.close(); this.#es = null; }
+    this.#setConn('connecting');
+    const url = '/api/ambient/stream?kinds=routing_decision,routing_outcome';
+    try {
+      this.#es = new EventSource(url);
+    } catch (err) {
+      this.#setConn('error');
+      return;
+    }
+    this.#es.addEventListener('open', () => this.#setConn('live'));
+    this.#es.addEventListener('ambient', (e) => {
+      let payload;
+      try { payload = JSON.parse(e.data); } catch { return; }
+      this.#onEvent(payload);
+    });
+    this.#es.addEventListener('error', () => this.#setConn('reconnecting'));
+  }
+
+  #onEvent(payload) {
+    const kind = payload.kind || payload.event;
+    if (kind !== 'routing_outcome') return; // routing_decision is context only, not chart data
+    this.#recordOutcome(payload);
+  }
+
+  // Cumulative regret per arm: regret_inc = max(0, optimal_reward - reward),
+  // clamped non-negative so the running cumulative sum is monotonic
+  // non-decreasing by construction (INFRA-1559 AC5 smoke-test invariant).
+  // `optimal_reward` falls back to `reward` (0 regret) until the routing
+  // brain starts emitting it.
+  #recordOutcome(payload) {
+    const arm = String(payload.arm || payload.model_tier || payload.agent_backend || payload.machine || 'unknown');
+    const reward = Number(payload.reward ?? 0);
+    const optimal = Number(payload.optimal_reward ?? payload.best_reward ?? reward);
+    const regretInc = Math.max(0, optimal - reward);
+
+    if (!this.#arms[arm]) this.#arms[arm] = { cumRegret: 0, points: [] };
+    const state = this.#arms[arm];
+    state.cumRegret += regretInc;
+    state.points.push(state.cumRegret);
+
+    this.#render();
+  }
+
+  #render() {
+    const armNames = Object.keys(this.#arms);
+    const empty = this.querySelector('.regret-empty');
+    const svg = this.querySelector('.regret-chart');
+    const legend = this.querySelector('.regret-legend');
+    if (!svg || !legend) return;
+
+    if (armNames.length === 0) {
+      if (empty) empty.hidden = false;
+      svg.hidden = true;
+      return;
+    }
+    if (empty) empty.hidden = true;
+    svg.hidden = false;
+
+    const maxLen = Math.max(...armNames.map(a => this.#arms[a].points.length));
+    const maxRegret = Math.max(1, ...armNames.map(a => this.#arms[a].cumRegret));
+    const w = 600, h = 200, pad = 6;
+
+    const lines = armNames.map((arm, i) => {
+      const color = ChumpBanditRegretPanel.#COLORS[i % ChumpBanditRegretPanel.#COLORS.length];
+      const pts = this.#arms[arm].points;
+      const coords = pts.map((v, idx) => {
+        const x = maxLen > 1 ? (idx / (maxLen - 1)) * (w - 2 * pad) + pad : pad;
+        const y = h - pad - (v / maxRegret) * (h - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      return `<polyline class="regret-line" data-arm="${this.#esc(arm)}" points="${coords}" fill="none" stroke="${color}" stroke-width="2" />`;
+    }).join('');
+
+    // Overlay: "if we had picked the optimal arm always" (computed
+    // retrospectively, AC3) — by definition regret against the retrospective
+    // optimum is 0, so this is the flat zero baseline every arm's
+    // cumulative-regret line is measured against.
+    const optimalLine = `<line class="regret-optimal-line" x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}" stroke="var(--text-secondary)" stroke-width="1" stroke-dasharray="4,3" />`;
+
+    svg.innerHTML = optimalLine + lines;
+
+    legend.innerHTML = armNames.map((arm, i) => {
+      const color = ChumpBanditRegretPanel.#COLORS[i % ChumpBanditRegretPanel.#COLORS.length];
+      const cum = this.#arms[arm].cumRegret.toFixed(2);
+      return `<span class="regret-legend-item"><span class="regret-swatch" style="background:${color}"></span>${this.#esc(arm)} (cum. regret ${cum})</span>`;
+    }).join('') + `<span class="regret-legend-item regret-legend-optimal"><span class="regret-swatch regret-swatch-optimal"></span>optimal-always (retrospective)</span>`;
+  }
+
+  #setConn(state) {
+    this.#connState = state;
+    const el = this.querySelector('.regret-state');
+    if (!el) return;
+    el.className = `regret-state regret-state-${state}`;
+    const map = {
+      live:         { glyph: '●', title: 'live' },
+      reconnecting: { glyph: '○', title: 'reconnecting…' },
+      error:        { glyph: '✕', title: 'error' },
+      connecting:   { glyph: '●', title: 'connecting…' },
+    };
+    const m = map[state] || map.connecting;
+    el.textContent = m.glyph;
+    el.title = m.title;
+  }
+
+  #esc(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+}
+customElements.define('chump-bandit-regret-panel', ChumpBanditRegretPanel);
 
 // ── <chump-view-orchestrator-sessions> (INFRA-1365) ───────────────────────────
 // CREDIBLE — surfaces orchestrate_session_summary ambient events so operators
@@ -5372,7 +5705,9 @@ function makeAmbientView() {
   el.innerHTML = `
     <h2 class="view-title">Ambient Events</h2>
     <p class="view-subtitle">Real-time tail of .chump-locks/ambient.jsonl — fleet activity stream</p>
-    <chump-ambient-viewer></chump-ambient-viewer>`;
+    <chump-ambient-viewer></chump-ambient-viewer>
+    <h3 class="view-title regret-panel-title">Bandit Regret</h3>
+    <chump-bandit-regret-panel></chump-bandit-regret-panel>`;
   return el;
 }
 

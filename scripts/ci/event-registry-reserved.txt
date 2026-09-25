@@ -243,6 +243,7 @@ prepush_timeout  # reason: INFRA-5126 emitted from scripts/git-hooks/pre-push _p
 pwa_brief_loaded  # reason: emitted from web/v2/daily-brief.js via sendBeacon (JS not in PROD_PATHS); emit added in PRODUCT-078
 pwa_gap_list_filtered  # reason: emitted from web/v2/gap-list.js via sendBeacon (JS not in PROD_PATHS); emit added in PRODUCT-102
 pwa_impact_viewed  # reason: emitted from web/v2/impact.js via sendBeacon (JS, not in PROD_PATHS)
+sse_filter_applied  # reason: INFRA-1559 emitted from web/v2/app.js ChumpAmbientViewer via sendBeacon (JS not in PROD_PATHS)
 queue_health_check_failed # reason: CREDIBLE-068 #2359 same emit pattern as merge_queue_health (printf in monitor-merge-queue.sh, not grep-scannable)
 reaper_run                 # reason: planned for reaper start/stop lifecycle emit
 reaper_safety_gate_triggered  # reason: INFRA-1786 — emitted by reap-orphan-claude-procs.sh when fg_pid=none on non-headless macOS; safety gate refuses reap-all

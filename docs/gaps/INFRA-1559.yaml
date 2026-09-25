@@ -1,7 +1,7 @@
 - id: INFRA-1559
   domain: INFRA
   title: "EFFECTIVE: SSE filter UI + bandit regret rendering — pair with routing brain (TBD-INFRA-1545)"
-  status: open
+  status: done
   priority: P2
   effort: s
   acceptance_criteria:
@@ -12,5 +12,7 @@
     - "Smoke test scripts/ci/test-sse-filter-and-regret.sh: dev server, inject synthetic routing_decision + routing_outcome events, assert filter pills appear + regret line renders monotonically non-decreasing."
     - "Telemetry: emit kind=sse_filter_applied {filter_spec, results_count} so we can see which filters operators actually use."
     - "Out of scope: server-side filtering (today client-side is fine for fleet < 100 active gaps; revisit at 1000+). Regret-prediction (forecasting) is separate gap if ever wanted."
+  closed_date: '2026-09-25'
+  closed_pr: 4853
   outcome_id: MISSION-010
 

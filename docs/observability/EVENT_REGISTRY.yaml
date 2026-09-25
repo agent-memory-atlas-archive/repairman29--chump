@@ -13101,3 +13101,13 @@ events:
     consumers: [ops-audit, operator-recall]
     fields_required: [ts, kind, organs_total, organs_active, timers_total,
       timers_active, drifted_total, cockpit_total, cockpit_present, out]
+
+  # ── INFRA-1559: SSE filter UI + bandit regret rendering ─────────────────────
+  - kind: sse_filter_applied
+    effect_metric: self
+    emitter: web/v2/app.js ChumpAmbientViewer (INFRA-1559)
+    trigger: operator changes the ambient-stream filter pills (kind/gap/severity)
+      or applies a saved preset in the Events view — lets us see which filters
+      operators actually use.
+    consumers: [fleet-brief, observability]
+    fields_required: [ts, kind, filter_spec, results_count]

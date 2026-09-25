@@ -134,7 +134,7 @@ globalThis.EventSource = FakeEventSource;
 
 // ── Load the component class from app.js ──
 const appJs = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
-const startMarker = '// ── <chump-ambient-viewer> (INFRA-1198)';
+const startMarker = '// ── <chump-ambient-viewer> (INFRA-1198, filter pills + presets INFRA-1559)';
 const endMarker = "customElements.define('chump-ambient-viewer', ChumpAmbientViewer);";
 const startIdx = appJs.indexOf(startMarker);
 const endIdx = appJs.indexOf(endMarker);
