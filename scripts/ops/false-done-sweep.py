@@ -110,7 +110,10 @@ Usage:
   python3 scripts/ops/false-done-sweep.py --all --limit 400       # broader
   python3 scripts/ops/false-done-sweep.py --gap CREDIBLE-175      # check one
   python3 scripts/ops/false-done-sweep.py --multi-close-only --json
+  python3 scripts/ops/false-done-sweep.py --grep-target-sweep     # CREDIBLE-1087 slice
 Exit 0 always unless --strict, which exits 1 when any suspect is found.
+--grep-target-sweep always exits 0 regardless of findings (see
+grep_target_sweep() below).
 """
 import argparse
 import json
@@ -134,6 +137,66 @@ NOISE = {
     "docs/gaps", "state.db", "ambient.jsonl", "Cargo.toml", "README.md",
     "CLAUDE.md", "AGENTS.md", ".chump/state.sql",
 }
+
+# CREDIBLE-1087 (CREDIBLE-274 slice) — grep-target-sweep. Mirrors the walk +
+# regex approach above (PATH_RE / paths_in): only the unambiguous single-shot
+# form counts — grep <bool flags> <quoted pattern> <target> <clause end>.
+# Requiring a quoted pattern before the target keeps a grep's own search text
+# (which often itself contains path-shaped substrings) from being mistaken
+# for the target argument.
+GREP_TARGET_RE = re.compile(
+    r"""\bgrep\s+
+        (?:-[qniEFvwrlxcoPs]+\s+)*
+        (?:"[^"]*"|'[^']*')\s+
+        (?P<target>"[^"$]*"|'[^'$]*'|[A-Za-z0-9_./-]+)
+        (?=\s*(?:;|\)|&&|\|\||\#|$|2>))
+    """,
+    re.VERBOSE,
+)
+
+
+def _strip_quotes(tok):
+    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+        return tok[1:-1]
+    return tok
+
+
+def _is_grep_target_path(tok):
+    if not tok or tok.startswith(("$", "-")):
+        return False
+    return "/" in tok or re.search(r"\.[A-Za-z0-9]+$", tok)
+
+
+def grep_target_sweep(repo_root):
+    """Walk scripts/ci, find `grep` invocations whose target path doesn't
+    exist, and return a list of (rel_path, lineno, target) findings."""
+    scan_dir = os.path.join(repo_root, "scripts", "ci")
+    findings = []
+    for dirpath, _dirs, files in os.walk(scan_dir):
+        for name in sorted(files):
+            if not (name.endswith(".sh") or name.endswith(".py")):
+                continue
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, repo_root)
+            try:
+                with open(path, errors="ignore") as fh:
+                    lines = fh.readlines()
+            except OSError:
+                continue
+            for lineno, line in enumerate(lines, start=1):
+                stripped = line.strip()
+                if stripped.startswith("#") or "|" in line:
+                    continue
+                m = GREP_TARGET_RE.search(line)
+                if not m:
+                    continue
+                target = _strip_quotes(m.group("target"))
+                if not _is_grep_target_path(target):
+                    continue
+                if os.path.exists(os.path.join(repo_root, target)):
+                    continue
+                findings.append((rel, lineno, target))
+    return sorted(findings)
 
 
 def sh(cmd, timeout=90):
@@ -241,7 +304,26 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="cap gaps examined (0 = no cap)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--strict", action="store_true", help="exit 1 if any suspect found")
+    ap.add_argument("--grep-target-sweep", action="store_true",
+                     help="CREDIBLE-1087: sweep scripts/ci for grep calls whose "
+                          "target path doesn't exist; always exits 0")
     a = ap.parse_args()
+
+    if a.grep_target_sweep:
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        findings = grep_target_sweep(repo_root)
+        if a.json:
+            print(json.dumps({
+                "vacuous_grep_count": len(findings),
+                "findings": [
+                    {"file": f, "line": ln, "target": t} for f, ln, t in findings
+                ],
+            }, indent=2))
+        else:
+            print(f"Vacuous grep count: {len(findings)}")
+            for f, ln, t in findings:
+                print(f"{f}:{ln} – {t}")
+        sys.exit(0)
 
     gaps = load_gaps()
     done = [g for g in gaps if g.get("status") == "done" and g.get("closed_pr")]

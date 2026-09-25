@@ -21,6 +21,45 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TARGET="$REPO_ROOT/scripts/ops/false-done-sweep.py"
 
+# CREDIBLE-1087 — grep-target-sweep mode: walks scripts/ci, finds `grep`
+# invocations whose path argument names a file that doesn't exist (a
+# "vacuous grep" — it can never match anything), and reports them. This is
+# a slice of CREDIBLE-274 (false-done detection generalized to CI scripts
+# that silently no-op because their target never existed).
+case "${1:-}" in
+  grep-target-sweep)
+    cd "$REPO_ROOT"
+    count=0
+    findings=""
+    while IFS= read -r -d '' f; do
+      rel="${f#"$REPO_ROOT"/}"
+      lineno=0
+      while IFS= read -r line; do
+        lineno=$((lineno + 1))
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" == *"|"* ]] && continue
+        [[ "$line" == *grep* ]] || continue
+        # Only the unambiguous single-shot form counts: grep <bool-flags>
+        # <quoted pattern> <target> <clause end>. Requiring a quoted pattern
+        # before the target keeps a grep's own search text (which often
+        # contains path-shaped substrings) from being mistaken for its
+        # target argument.
+        target="$(grep -oP '\bgrep\s+(?:-[qniEFvwrlxcoPs]+\s+)*(?:"[^"]*"|'"'"'[^'"'"']*'"'"')\s+\K(?:"[^"$]*"|'"'"'[^'"'"'$]*'"'"'|[A-Za-z0-9_./-]+)(?=\s*(?:;|\)|&&|\|\||#|$|2>))' <<<"$line" | tail -1)"
+        target="${target%\"}"; target="${target#\"}"
+        target="${target%\'}"; target="${target#\'}"
+        [[ "$target" == */*.* || "$target" =~ \.[A-Za-z0-9]+$ ]] || continue
+        [[ "$target" == \$* || "$target" == -* ]] && continue
+        [[ -e "$REPO_ROOT/$target" ]] && continue
+        count=$((count + 1))
+        findings+="${rel}:${lineno} – ${target}"$'\n'
+      done < "$f"
+    done < <(find "$REPO_ROOT/scripts/ci" -type f \( -name '*.sh' -o -name '*.py' \) -print0 | sort -z)
+    echo "Vacuous grep count: $count"
+    [[ -n "$findings" ]] && printf '%s' "$findings"
+    exit 0
+    ;;
+esac
+
 echo "=== CREDIBLE-336 false-done-sweep.py tests ==="
 
 [[ -f "$TARGET" ]] && ok "script exists" || { fail "missing $TARGET"; exit 1; }
