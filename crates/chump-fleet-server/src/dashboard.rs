@@ -63,8 +63,39 @@ pub struct CiQaScore {
     pub ci_clean_landing_pct: f64,
     /// Number of CI runs included in the score.
     pub sample_size: u64,
-    /// Human-readable status label (e.g. "healthy", "degraded").
-    pub status: String,
+    /// Canonical status — always one of `green`/`amber`/`red`/`unknown`
+    /// (INFRA-3854). Emitters historically used ad-hoc labels
+    /// (`OK`/`WARN`/`ALERT`/`no_data`, `healthy`/`degraded`); the dashboard
+    /// normalizes whatever arrives via [`CiQaStatus::normalize`] so every
+    /// consumer of this field sees the same 4-value vocabulary already used
+    /// by `scripts/ops/vital-signs.sh`.
+    pub status: CiQaStatus,
+}
+
+/// The single status vocabulary shared across every emitter + the dashboard
+/// (INFRA-3854, parent INFRA-3841 slice). Mirrors the `green|amber|red|unknown`
+/// vocabulary `scripts/ops/vital-signs.sh` already uses.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CiQaStatus {
+    Green,
+    Amber,
+    Red,
+    Unknown,
+}
+
+impl CiQaStatus {
+    /// Normalize any raw status label (canonical or legacy) into the
+    /// 4-value vocabulary. Unrecognized labels map to `Unknown` rather than
+    /// erroring, so a stale/foreign emitter never breaks the dashboard.
+    pub fn normalize(raw: &str) -> Self {
+        match raw.to_ascii_lowercase().as_str() {
+            "green" | "ok" | "healthy" | "pass" => CiQaStatus::Green,
+            "amber" | "warn" | "warning" | "degraded" => CiQaStatus::Amber,
+            "red" | "alert" | "critical" | "fail" => CiQaStatus::Red,
+            _ => CiQaStatus::Unknown,
+        }
+    }
 }
 
 /// One active claim lease entry.
@@ -348,7 +379,7 @@ fn extract_ci_qa_score(v: &serde_json::Value) -> Option<CiQaScore> {
                 pct,
                 ci_clean_landing_pct: pct,
                 sample_size,
-                status,
+                status: CiQaStatus::normalize(&status),
             });
         }
     }
@@ -536,6 +567,57 @@ pub fn build_summary(repo_root: &Path) -> DashboardSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// INFRA-3854 (INFRA-3841 slice 6/9): every `ci_qa_score` emitter, plus
+    /// the dashboard's own normalization, must resolve onto the same 4-value
+    /// vocabulary already used by `scripts/ops/vital-signs.sh`
+    /// (`green|amber|red|unknown`). `scripts/ops/ci-qa-score.sh` previously
+    /// emitted `OK|WARN|ALERT|no_data` — this test proves both that vocabulary
+    /// and the canonical one normalize onto exactly `{green, amber, red,
+    /// unknown}`, and that garbage input degrades to `unknown` rather than
+    /// erroring.
+    #[test]
+    fn ci_qa_status_normalizes_every_emitter_onto_canonical_vocabulary() {
+        let legacy_ci_qa_score_sh = [("OK", "green"), ("WARN", "amber"), ("ALERT", "red")];
+        for (raw, want) in legacy_ci_qa_score_sh {
+            let got = serde_json::to_value(CiQaStatus::normalize(raw)).unwrap();
+            assert_eq!(
+                got, want,
+                "legacy ci-qa-score.sh status {raw:?} must normalize to {want:?}"
+            );
+        }
+
+        let canonical = [
+            ("green", CiQaStatus::Green),
+            ("amber", CiQaStatus::Amber),
+            ("red", CiQaStatus::Red),
+            ("unknown", CiQaStatus::Unknown),
+        ];
+        for (raw, want) in canonical {
+            assert_eq!(CiQaStatus::normalize(raw), want);
+        }
+
+        // Unrecognized input (e.g. a foreign emitter's own label) must
+        // degrade to `unknown`, never panic or propagate an unbounded string.
+        assert_eq!(CiQaStatus::normalize("no_data"), CiQaStatus::Unknown);
+        assert_eq!(CiQaStatus::normalize("garbage"), CiQaStatus::Unknown);
+
+        // Every possible normalized value serializes to one of exactly the
+        // 4 canonical lowercase strings — the single status vocabulary.
+        for status in [
+            CiQaStatus::Green,
+            CiQaStatus::Amber,
+            CiQaStatus::Red,
+            CiQaStatus::Unknown,
+        ] {
+            let s = serde_json::to_value(status).unwrap();
+            let s = s.as_str().unwrap();
+            assert!(
+                ["green", "amber", "red", "unknown"].contains(&s),
+                "status {s:?} is outside the canonical 4-value vocabulary"
+            );
+        }
+    }
 
     /// INFRA-7142 (INFRA-3841 slice): the JSON emitted by dashboard.rs must
     /// carry the canonical `merges_24h` column name — the same name used by

@@ -280,7 +280,10 @@ async fn test_dashboard_summary_with_fixtures() {
         "ci_clean_landing_pct and pct must always agree"
     );
     assert_eq!(score["sample_size"].as_u64().unwrap(), 40);
-    assert_eq!(score["status"].as_str().unwrap(), "healthy");
+    // INFRA-3854: the fixture writes the legacy label "healthy" (still
+    // emitted by some readers); the dashboard normalizes it onto the
+    // canonical green|amber|red|unknown vocabulary before serializing.
+    assert_eq!(score["status"].as_str().unwrap(), "green");
 
     // active_leases from claim files.
     let leases = v["active_leases"].as_array().unwrap();

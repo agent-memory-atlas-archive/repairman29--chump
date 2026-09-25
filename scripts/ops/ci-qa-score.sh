@@ -14,6 +14,10 @@
 #   {"ts":"<iso>","kind":"ci_qa_score","pct":<int>,
 #    "sample_size":<n>,"bypassed":<int>,"window":"<N>"}
 #
+# status is one of the canonical green|amber|red|unknown vocabulary
+# (INFRA-3854, parent INFRA-3841 slice 6/9) — the same vocabulary
+# scripts/ops/vital-signs.sh already uses. "unknown" covers the no-data case.
+#
 # Exit code:
 #   0 — pct >= WARN_THRESHOLD (default 95)
 #   1 — pct < WARN_THRESHOLD but >= ALERT_THRESHOLD (default 80) [WARN]
@@ -121,7 +125,7 @@ SAMPLE_SIZE=$(echo -n "$PRS" | grep -c '^' || true)
 
 if [[ "$SAMPLE_SIZE" -eq 0 ]]; then
     # No merged PRs in window — emit 0/0 honest signal, exit clean.
-    payload="$(printf '{"ts":"%s","kind":"ci_qa_score","pct":null,"sample_size":0,"bypassed":0,"window":"%s","status":"no_data"}' "$(now_ts)" "$WINDOW")"
+    payload="$(printf '{"ts":"%s","kind":"ci_qa_score","pct":null,"sample_size":0,"bypassed":0,"window":"%s","status":"unknown"}' "$(now_ts)" "$WINDOW")"
     [[ "$DRY_RUN" -eq 0 ]] && emit_ambient "$payload"
     if [[ "$JSON" -eq 1 ]]; then echo "$payload"; else echo "[ci-qa-score] no merged PRs in window (size $WINDOW); nothing to score"; fi
     exit 0
@@ -131,13 +135,13 @@ BYPASSED=$(count_bypassed_prs "$AMBIENT_LOG" "$PRS")
 CLEAN=$(( SAMPLE_SIZE - BYPASSED ))
 PCT=$(( CLEAN * 100 / SAMPLE_SIZE ))
 
-STATUS="OK"
+STATUS="green"
 RC=0
 if (( PCT < ALERT_THRESHOLD )); then
-    STATUS="ALERT"
+    STATUS="red"
     RC=2
 elif (( PCT < WARN_THRESHOLD )); then
-    STATUS="WARN"
+    STATUS="amber"
     RC=1
 fi
 
