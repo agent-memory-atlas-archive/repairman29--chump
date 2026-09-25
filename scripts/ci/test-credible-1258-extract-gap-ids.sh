@@ -2,12 +2,18 @@
 # scripts/ci/test-credible-1258-extract-gap-ids.sh — CREDIBLE-1258
 #
 # Validates the current gap-ID extraction mechanism used by
-# scripts/ops/github-webhook-receiver.py:_extract_gap_ids (CREDIBLE-268
-# slice: the sibling-lease-release path, NOT the narrower closure path
-# already covered by scripts/ci/test-webhook-gap-flip.sh).
+# scripts/ops/github-webhook-receiver.py:_extract_gap_ids (sibling-lease-
+# release path, NOT the narrower closure path already covered by
+# scripts/ci/test-webhook-gap-flip.sh).
 #
-# AC1: unit test confirms _extract_gap_ids extracts IDs from both PR title
-#      and body (via the `Closes:` trailer) using \b([A-Z][A-Z-]+-\d+)\b.
+# CREDIBLE-1072 restricted _extract_gap_ids to the PR TITLE only — the body
+# (including any `Closes:` trailer written there) is no longer scanned.
+# This suite's expectations were updated accordingly; see
+# scripts/ci/test-webhook-gap-flip.sh section (e) for the dedicated
+# CREDIBLE-1072 regression coverage.
+#
+# AC1: unit test confirms _extract_gap_ids extracts IDs from the PR title
+#      only, using \b([A-Z][A-Z-]+-\d+)\b, and ignores the body entirely.
 # AC2: integration test runs the receiver on a sample merged PR and
 #      verifies the extracted IDs match the expected list.
 # AC3: this suite must pass in CI without failures.
@@ -43,12 +49,12 @@ cases = [
     ),
     (
         {"title": "no gap id here", "body": "Closes: CREDIBLE-268"},
-        ["CREDIBLE-268"],
+        [],
     ),
     (
         {"title": "feat(MISSION-9001): x",
          "body": "Some unrelated prose about MISSION-9003.\n\nCloses: MISSION-9004, MISSION-9005"},
-        ["MISSION-9001", "MISSION-9004", "MISSION-9005"],
+        ["MISSION-9001"],
     ),
     (
         {"title": "mixed CREDIBLE-001 and PRODUCT-049 and INFRA-1500", "body": None},
@@ -72,7 +78,7 @@ PY
 )"
 echo "$out"
 if [[ "$out" == *"FAILS=0"* ]]; then
-    ok "_extract_gap_ids extracts from title and body Closes: trailer via \\b([A-Z][A-Z-]+-\\d+)\\b"
+    ok "_extract_gap_ids extracts from title only via \\b([A-Z][A-Z-]+-\\d+)\\b (body ignored)"
 else
     fail "_extract_gap_ids unit cases failed"
 fi
@@ -101,8 +107,9 @@ sample_merged_pr = {
     "head": {"ref": "chump/credible-1258-claim"},
 }
 
-# CREDIBLE-268 is only cited in body prose (no Closes: trailer), so the
-# narrower extraction contract means it must NOT appear in the result.
+# CREDIBLE-268 is only cited in body prose, and the body's `Closes:
+# CREDIBLE-1258` trailer is title-only-discipline-ignored too (CREDIBLE-1072)
+# — CREDIBLE-1258 is only extracted because it also appears in the title.
 expected = ["CREDIBLE-1258"]
 got = mod._extract_gap_ids(sample_merged_pr)
 if got != expected:

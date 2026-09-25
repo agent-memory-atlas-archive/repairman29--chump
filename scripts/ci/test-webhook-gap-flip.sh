@@ -121,6 +121,36 @@ grep -q 'MISSION-9002' "$CHUMP_STUB_CALLS" \
   && fail "closed-UNMERGED PR wrongly flipped MISSION-9002" \
   || ok "closed-unmerged PR did NOT flip (no regression)"
 
+# (e) CREDIBLE-1072: _extract_gap_ids (used by lease-release) is title-only —
+# a gap ID that appears ONLY in the body (even behind a Closes: trailer) must
+# NOT be extracted; a gap ID in the title still is.
+extract_out="$(python3 - "$RECV" <<'PY'
+import sys, importlib.util
+recv_path = sys.argv[1]
+spec = importlib.util.spec_from_file_location("ghwr_test_extract", recv_path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+pr_body_only = {"title": "docs: unrelated title", "body": "See CREDIBLE-9999 for context."}
+print("body_only=%r" % mod._extract_gap_ids(pr_body_only))
+
+pr_body_closes = {"title": "docs: unrelated title", "body": "Closes: CREDIBLE-9999"}
+print("body_closes=%r" % mod._extract_gap_ids(pr_body_closes))
+
+pr_title = {"title": "fix(CREDIBLE-1234): something", "body": "no gap ids here"}
+print("title=%r" % mod._extract_gap_ids(pr_title))
+PY
+)"
+echo "$extract_out" | grep -q "body_only=\[\]" \
+  && ok "_extract_gap_ids: body-only mention extracts nothing" \
+  || fail "_extract_gap_ids: body-only mention wrongly extracted an id ($extract_out)"
+echo "$extract_out" | grep -q "body_closes=\[\]" \
+  && ok "_extract_gap_ids: body-only Closes: trailer extracts nothing (title-only discipline)" \
+  || fail "_extract_gap_ids: body Closes: trailer wrongly extracted an id ($extract_out)"
+echo "$extract_out" | grep -q "title=\['CREDIBLE-1234'\]" \
+  && ok "_extract_gap_ids: title-named gap id still extracted" \
+  || fail "_extract_gap_ids: title-named gap id extraction broken ($extract_out)"
+
 echo ""
 if [[ "$fails" -eq 0 ]]; then
   echo "PASS: test-webhook-gap-flip.sh (title/Closes: only extraction; routes through gap ship; suppressed by default)"

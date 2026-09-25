@@ -191,11 +191,17 @@ def _notify_operator_escalation(kind: str, message: str) -> None:
 
 
 def _extract_gap_ids(pr: dict) -> list[str]:
-    """Extract gap IDs from PR title and explicit Closes: trailer in the body.
+    """Extract gap IDs from the PR title only.
 
-    Looks for patterns like 'INFRA-1234' or 'CREDIBLE-001' in the PR title.
-    In the PR body, only lines that start with (case-insensitive) 'Closes:'
-    are considered as trailers and gap IDs are extracted from them.
+    Looks for patterns like 'INFRA-1234' or 'CREDIBLE-001' in the PR title
+    (an explicit 'Closes: ID' trailer written INTO the title is caught by
+    the same pattern — no separate body scan is needed or performed).
+
+    CREDIBLE-1072: the PR body is never scanned. A gap ID that appears only
+    in the body (prose, an AC cross-reference, a `Closes:` trailer) must NOT
+    be extracted here — that class of over-match previously affected the
+    closure path too (see _extract_gap_ids_for_closure/CREDIBLE-268) and this
+    function is now held to the same title-only discipline.
 
     Returns a deduped list preserving first-seen order.
 
@@ -207,7 +213,6 @@ def _extract_gap_ids(pr: dict) -> list[str]:
     import re
 
     pattern = re.compile(r"\b([A-Z][A-Z-]+-\d+)\b")
-    trailer_pattern = re.compile(r"(?im)^Closes:\s*(.+)$")
 
     seen: set[str] = set()
     ordered: list[str] = []
@@ -217,13 +222,6 @@ def _extract_gap_ids(pr: dict) -> list[str]:
         if match not in seen:
             seen.add(match)
             ordered.append(match)
-
-    body = pr.get("body") or ""
-    for trailer_line in trailer_pattern.findall(body):
-        for match in pattern.findall(trailer_line):
-            if match not in seen:
-                seen.add(match)
-                ordered.append(match)
 
     return ordered
 
