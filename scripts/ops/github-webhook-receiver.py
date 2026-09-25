@@ -384,6 +384,9 @@ def _auto_flip_gaps_done(pr: dict, payload: dict) -> int:
     chump_bin = os.environ.get("CHUMP_BIN", "chump")
     flipped = 0
     for gid in gap_ids:
+        log.info("CREDIBLE-1073: invoking 'chump gap ship %s --closed-pr %s' "
+                  "(PROOF-OF-MERGE guard INFRA-1392 applies) for merged PR #%s",
+                  gid, pr_number, pr_number)
         try:
             result = subprocess.run(
                 [chump_bin, "gap", "ship", gid,

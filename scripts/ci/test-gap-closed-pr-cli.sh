@@ -48,10 +48,15 @@ GAPS_DIR="$REPO_ROOT/docs/gaps"
 # ── Test 1: src/main.rs `gap set` usage advertises --closed-pr ──────────────
 echo "--- Test 1: 'chump gap set' usage advertises --closed-pr ---"
 # Look in the help/usage block printed when args fail validation.
-if grep -q -- "--closed-pr" "$MAIN_RS" \
-   && grep -A 20 "fn .*gap_cmd\|\"gap\".*=>\|\"set\" => {" "$MAIN_RS" 2>/dev/null \
-        | grep -q -- "--closed-pr" 2>/dev/null \
-   || grep -B 2 -A 30 'chump gap set:' "$MAIN_RS" | grep -q -- "--closed-pr"; then
+# NOTE: capture blocks into variables (not `grep A | grep -q B`) — under
+# `set -o pipefail`, a `grep -q` consumer that finds its match on an early
+# line exits before the producer finishes writing, so the producer dies of
+# SIGPIPE (rc=141) and pipefail turns that into a false failure regardless
+# of whether the match was found.
+GAP_CMD_BLOCK=$(grep -A 20 "fn .*gap_cmd\|\"gap\".*=>\|\"set\" => {" "$MAIN_RS" 2>/dev/null || true)
+GAP_SET_USAGE_BLOCK=$(grep -B 2 -A 30 'chump gap set:' "$MAIN_RS" 2>/dev/null || true)
+if echo "$GAP_CMD_BLOCK" | grep -q -- "--closed-pr" \
+   || echo "$GAP_SET_USAGE_BLOCK" | grep -q -- "--closed-pr"; then
     ok "src/main.rs documents --closed-pr in 'gap set' usage"
 else
     fail "src/main.rs does not document --closed-pr in 'gap set' usage"
@@ -109,6 +114,36 @@ if grep -q "fn test_set_closed_pr_persists_and_emits_to_yaml" "$GAP_STORE_RS" \
     ok "both round-trip tests (set + ship) present"
 else
     fail "gap_store.rs missing one or both closed_pr round-trip tests"
+fi
+
+# ── Test 8: webhook receiver routes auto-flip through 'gap ship --closed-pr' ─
+# CREDIBLE-1073: _auto_flip_gaps_done must invoke the CLI 'chump gap ship'
+# with '--closed-pr' for every gap ID extracted from a merged PR — not
+# 'gap set' (which bypasses the INFRA-1392 PROOF-OF-MERGE guard and never
+# stamps closed_date).
+echo "--- Test 8: webhook _auto_flip_gaps_done routes through 'gap ship' + '--closed-pr' (CREDIBLE-1073) ---"
+WEBHOOK_PY="$REPO_ROOT/scripts/ops/github-webhook-receiver.py"
+if [ ! -f "$WEBHOOK_PY" ]; then
+    fail "scripts/ops/github-webhook-receiver.py not found"
+else
+    FLIP_FN=$(awk '/^def _auto_flip_gaps_done/,/^def _auto_prune_worktree_on_merge/' "$WEBHOOK_PY")
+    if echo "$FLIP_FN" | grep -q '"gap", "ship"' \
+       && echo "$FLIP_FN" | grep -q -- '"--closed-pr"'; then
+        echo "  found: subprocess call uses 'gap ship' with '--closed-pr' argument"
+        ok "_auto_flip_gaps_done invokes 'chump gap ship' with the '--closed-pr' argument"
+    else
+        fail "_auto_flip_gaps_done does not invoke 'chump gap ship' with '--closed-pr'"
+    fi
+    if echo "$FLIP_FN" | grep -q "gap ship"; then
+        ok "_auto_flip_gaps_done logs a line containing 'gap ship' (INFRA-1392 guard visibility)"
+    else
+        fail "_auto_flip_gaps_done has no log line mentioning 'gap ship'"
+    fi
+    if echo "$FLIP_FN" | grep -q '"gap", "set"'; then
+        fail "_auto_flip_gaps_done still invokes 'gap set' — must route through 'gap ship' only"
+    else
+        ok "_auto_flip_gaps_done does not invoke 'gap set' for closure"
+    fi
 fi
 
 # ── Summary ─────────────────────────────────────────────────────────────────
