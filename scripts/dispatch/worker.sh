@@ -410,11 +410,30 @@ classify_rc() {
 # RESILIENT-1123 logged rc=1 but PR #4812 merged). rc alone therefore cannot
 # decide "failed"; ground truth (a PR for the branch) is the authoritative
 # signal, so it must be consulted before ANY failed/unverified verdict.
+#
+# RESILIENT-1451 (RESILIENT-1449 follow-up): the branch-head-keyed lookups
+# (cache `head_ref=`, `gh pr list --head`) both go BLIND once the PR has
+# merged — a fast auto-merge DELETES the head branch, and GitHub's `--head`
+# filter no longer resolves a deleted ref, so a cycle that shipped AND merged
+# (RESILIENT-1447 -> PR #4816, RESILIENT-1450 -> PR #4817, both MERGED) found
+# no evidence and was logged kind=unverified_ship. The async bot-merge
+# pipeline can also create the PR AFTER this cycle's rc is observed, so the
+# branch may briefly have no PR at all yet. Fix: when the branch-keyed lookup
+# comes up empty, fall back to a GAP-ID-keyed lookup — PR titles are always
+# "<GAP_ID>: <summary>" (chump-commit.sh convention), so a title match finds
+# the PR by identity regardless of whether the head branch still exists or
+# which order the branch-push vs. PR-create race landed in.
 _detect_ship_evidence() {
     local _gap_id="$1" _branch="$2" _ev="" _cache_db="${REPO_ROOT}/.chump/github_cache.db"
     if [ -f "$_cache_db" ]; then
         _ev="$(sqlite3 "$_cache_db" \
             "SELECT number FROM pr_state WHERE head_ref='${_branch}' LIMIT 1" 2>/dev/null || true)"
+        if [ -z "$_ev" ]; then
+            # RESILIENT-1451: branch may be gone (merged + deleted) — fall
+            # back to a title match keyed on GAP ID, not the live head ref.
+            _ev="$(sqlite3 "$_cache_db" \
+                "SELECT number FROM pr_state WHERE title LIKE '${_gap_id}:%' ORDER BY number DESC LIMIT 1" 2>/dev/null || true)"
+        fi
     fi
     if [ -z "$_ev" ]; then
         local _gap_now
@@ -424,6 +443,13 @@ _detect_ship_evidence() {
     fi
     if [ -z "$_ev" ]; then
         _ev="$(gh pr list --head "$_branch" --state all --json number \
+            --jq '.[0].number // empty' 2>/dev/null || true)"
+    fi
+    if [ -z "$_ev" ]; then
+        # RESILIENT-1451: same branch-deleted-after-merge gap as the cache
+        # lookup above, for the live-gh fallback path — search by GAP ID in
+        # the PR title instead of the (possibly deleted) head branch.
+        _ev="$(gh pr list --search "${_gap_id} in:title" --state all --json number \
             --jq '.[0].number // empty' 2>/dev/null || true)"
     fi
     [ -n "$_ev" ] && { printf '%s\n' "$_ev"; return 0; }
