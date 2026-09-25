@@ -24,7 +24,27 @@ ok()   { printf '\033[0;32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[0;31mFAIL\033[0m %s\n' "$*"; exit 1; }
 hdr()  { printf '\n--- %s ---\n' "$*"; }
 
-[[ -f "$SRC" ]] || fail "atomic_claim.rs missing: $SRC"
+# CREDIBLE-1079 (CREDIBLE-237 slice): guard helper for negative-assertion
+# checks below. A negative assertion (grep -v, ! test -e, "pattern absent")
+# against a target that silently doesn't exist passes vacuously — the check
+# never actually ran. Call this BEFORE any negative assertion so a missing
+# target aborts the script instead of masquerading as a pass.
+ensure_target_exists() {
+    local target="$1"
+    if [[ ! -e "$target" ]]; then
+        printf 'ERROR : target %s not found\n' "$target"
+        return 1
+    fi
+    return 0
+}
+
+hdr "Round 0: ensure_target_exists guard self-test"
+if ensure_target_exists "/nonexistent-target-$$-ensure-target-exists-selftest"; then
+    fail "ensure_target_exists incorrectly succeeded for a missing target"
+fi
+ok "ensure_target_exists correctly fails (and prints ERROR) for a missing target"
+
+ensure_target_exists "$SRC" || fail "atomic_claim.rs missing: $SRC"
 
 hdr "Round 1: source-level shape"
 

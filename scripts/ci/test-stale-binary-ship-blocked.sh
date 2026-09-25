@@ -35,6 +35,25 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 pass() { printf '[PASS] %s\n' "$*"; }
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 
+# CREDIBLE-1079 (CREDIBLE-237 slice): guard helper for negative-assertion
+# checks below. A negative assertion (grep -v, ! test -e, "pattern absent")
+# against a target that silently doesn't exist passes vacuously — the check
+# never actually ran. Call this BEFORE any negative assertion so a missing
+# target aborts the script instead of masquerading as a pass.
+ensure_target_exists() {
+    local target="$1"
+    if [[ ! -e "$target" ]]; then
+        printf 'ERROR : target %s not found\n' "$target"
+        return 1
+    fi
+    return 0
+}
+
+if ensure_target_exists "/nonexistent-target-$$-ensure-target-exists-selftest"; then
+    fail "ensure_target_exists incorrectly succeeded for a missing target"
+fi
+pass "ensure_target_exists correctly fails (and prints ERROR) for a missing target"
+
 cd "$REPO_ROOT"
 
 # ── Test 1: src/version.rs unit tests cover #1444's failure mode ────────────
@@ -88,6 +107,9 @@ pass "$gap_site wires the hard-fail into the remaining destructive path (gap dum
 #
 # CREDIBLE-274: scan both main.rs and commands/gap.rs so the negative
 # assertion doesn't vacuous-pass when the target file is absent.
+ensure_target_exists "$gap_site" \
+    || fail "$gap_site: target for Test 3's negative-assertion check is missing — cannot verify gap ship --update-yaml is correctly unguarded"
+
 found_ship_guard=false
 for f in "${GAP_GUARD_FILES[@]}"; do
     if [[ -f "$f" ]] \
