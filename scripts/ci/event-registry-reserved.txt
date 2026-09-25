@@ -870,6 +870,7 @@ systemic_red_scan_started    # reason: RESILIENT-337 emitted by scripts/coord/sy
 systemic_red_scan_completed  # reason: RESILIENT-337 emitted by scripts/coord/systemic-red-detector.sh on scan end; carries result=clean|detected, elapsed_ms, gh_calls; printf-direct JSON not grep-scannable as kind=X literal
 chump_cron_installed    # reason: INFRA-2045 chump cron lifecycle, emitted by crates/chump-cron/src/lib.rs. Hold off EVENT_REGISTRY.yaml entry until first runtime fire reveals actual emit shape (per Wizard 2026-05-27 13:27Z, INFRA-2003/2020 lease pattern).
 chump_cron_uninstalled  # reason: INFRA-2045 chump cron lifecycle, emitted by crates/chump-cron/src/lib.rs. Hold off EVENT_REGISTRY.yaml entry until first runtime fire reveals actual emit shape (per Wizard 2026-05-27 13:27Z, INFRA-2003/2020 lease pattern).
+chump_cron_managed      # reason: META-600/INFRA-2046 chump cron health audit, one event per managed plist/unit, emitted by crates/chump-cron/src/lib.rs cmd_health(). Hold off EVENT_REGISTRY.yaml entry until first runtime fire reveals actual emit shape (same pattern as chump_cron_installed above).
 merge_driver_fallback   # reason: INFRA-1482 emitted by scripts/git/merge-driver-ci-yml-add-row.sh give_up() via the local _emit_ambient() helper (printf with variable kind, not grep-scannable as a "kind":"X" literal); EVENT_REGISTRY.yaml entry added.
 
 # ── RESILIENT-352: almanac-refresh-guard.py per-cycle outcome record ────────

@@ -5,6 +5,7 @@
 
 pub mod backend;
 pub mod cron_expr;
+pub mod health;
 pub mod health_sentinel;
 pub mod ops;
 pub mod spec;
@@ -24,6 +25,8 @@ const USAGE: &str = r#"Usage: chump cron <install|uninstall|status> [options]
 
   chump cron status --name NAME [--scope user|system]
 
+  chump cron health [--json]
+
 Backend is auto-detected from platform (macOS -> launchd, Linux -> systemd);
 override with CHUMP_CRON_BACKEND=launchd|systemd.
 
@@ -32,6 +35,7 @@ Examples:
       --exec "/usr/local/bin/chump gap-gardener --sweep"
   chump cron install --name heartbeat --interval 300s --exec "/bin/true"
   chump cron uninstall --name gap-gardener
+  chump cron health --json   # audit every chump-managed plist/unit (INFRA-2046)
 "#;
 
 pub fn run(args: &[String]) -> i32 {
@@ -55,6 +59,7 @@ fn run_inner(args: &[String]) -> Result<i32> {
         "install" => cmd_install(&args[1..]),
         "uninstall" => cmd_uninstall(&args[1..]),
         "status" => cmd_status(&args[1..]),
+        "health" => cmd_health(&args[1..]),
         other => {
             eprintln!("chump cron: unknown subcommand '{other}'\n\n{USAGE}");
             Ok(1)
@@ -273,6 +278,56 @@ fn cmd_status(args: &[String]) -> Result<i32> {
     let backend = Backend::detect();
     println!("{}", ops::status(&spec, backend));
     Ok(0)
+}
+
+// `chump cron health` (INFRA-2046/META-110): audit every chump-managed
+// plist/timer-unit for missing schedules (INFRA-1929 class), unloaded
+// units, and stale last-run timestamps. Emits one ambient
+// kind=chump_cron_managed event per managed entry (scanner-anchor:
+// "kind":"chump_cron_managed") and exits non-zero if any entry carries a
+// warning, so this composes as a CI/cron-daemon health gate.
+fn cmd_health(args: &[String]) -> Result<i32> {
+    let json = args.iter().any(|a| a == "--json");
+    let entries = health::scan();
+
+    for entry in &entries {
+        let _ = chump_ambient_cli::ambient_emit::emit(&chump_ambient_cli::ambient_emit::EmitArgs {
+            kind: entry.kind.to_string(),
+            source: Some("chump-cron".to_string()),
+            fields: vec![
+                ("name".to_string(), entry.name.clone()),
+                ("backend".to_string(), entry.backend.to_string()),
+                ("installed".to_string(), entry.installed.to_string()),
+                ("has_schedule".to_string(), entry.has_schedule.to_string()),
+                ("loaded".to_string(), entry.loaded.to_string()),
+                (
+                    "warning_count".to_string(),
+                    entry.warnings.len().to_string(),
+                ),
+            ],
+            ..Default::default()
+        });
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+    } else if entries.is_empty() {
+        println!("chump cron health: no chump-managed plists/units found");
+    } else {
+        for entry in &entries {
+            let status = if entry.is_healthy() { "OK" } else { "WARN" };
+            println!(
+                "[{status}] {} ({}) installed={} schedule={} loaded={}",
+                entry.name, entry.backend, entry.installed, entry.has_schedule, entry.loaded
+            );
+            for w in &entry.warnings {
+                println!("    - {w}");
+            }
+        }
+    }
+
+    let unhealthy = entries.iter().filter(|e| !e.is_healthy()).count();
+    Ok(if unhealthy > 0 { 1 } else { 0 })
 }
 
 #[cfg(test)]
