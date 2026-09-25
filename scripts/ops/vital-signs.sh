@@ -10,7 +10,14 @@
 # THE 9 SIGNS (group / lead_or_lag):
 #   1 merge_throughput    flow/lagging     merges/24h
 #   2 oldest_pr_age       flow/leading     oldest open PR age (minutes)
-#   3 ci_pass_rate        quality/leading  CI pass-rate % (success/decided)
+#   3 ci_run_pass_rate    quality/leading  CI RUN pass-rate % (success/decided
+#                                           runs, 24h) — distinct from
+#                                           dashboard/ci-qa-score's
+#                                           ci_clean_landing_pct (% of merged
+#                                           PRs landed without a bypass
+#                                           signal). Never call either metric
+#                                           by a generic, unqualified name
+#                                           (INFRA-3847).
 #   4 merged_not_running  quality/leading  organs active / manifest %
 #   5 conflict_churn      waste/leading    DIRTY open PR count
 #   6 calibration_brier   trust/meta       Brier from pr-book-calibration.log (else null)
@@ -121,7 +128,7 @@ NOW_EPOCH="$(date -u +%s)"
 CFG_MERGE_GREEN=30;   CFG_MERGE_AMBER=10
 # oldest_pr_age     minutes               lo   green<60  amber<=240 red>240
 CFG_OLDPR_GREEN=60;   CFG_OLDPR_AMBER=240
-# ci_pass_rate      percent               hi   green>90  amber>=75  red<75
+# ci_run_pass_rate  percent               hi   green>90  amber>=75  red<75
 CFG_CI_GREEN=90;      CFG_CI_AMBER=75
 # merged_not_running organs active %      hi   green>95  amber>=80  red<80
 CFG_ORGAN_GREEN=95;   CFG_ORGAN_AMBER=80
@@ -201,8 +208,13 @@ else
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
-# 3 · ci_pass_rate  (quality / leading)  — success / decided runs (24h).
+# 3 · ci_run_pass_rate  (quality / leading)  — success / decided RUNS (24h).
 #     decided = success + failure. skipped/cancelled/queued/in-progress excluded.
+#     INFRA-3847 (parent INFRA-3841 slice 4/9): named distinctly from
+#     dashboard/ci-qa-score.sh's `ci_clean_landing_pct` (% of merged PRs that
+#     landed WITHOUT a bypass signal — a PR-level metric, not a run-level
+#     one). The two measure different things; neither is a bare "CI pass
+#     rate".
 # ════════════════════════════════════════════════════════════════════════════
 ci_json="$(gh run list --repo "$GH_REPO" --limit 200 --json conclusion,createdAt \
            --jq "[.[]|select(.createdAt>\"$CUT_24H\")]|{s:([.[]|select(.conclusion==\"success\")]|length),f:([.[]|select(.conclusion==\"failure\")]|length)}" 2>/dev/null)"
@@ -212,13 +224,13 @@ ci_decided=$(( ${ci_s:-0} + ${ci_f:-0} ))
 if (( ci_decided > 0 )); then
   ci_rate="$(awk -v s="$ci_s" -v d="$ci_decided" 'BEGIN{printf "%.1f", 100*s/d}')"
   s="$(status_hi "$ci_rate" "$CFG_CI_GREEN" "$CFG_CI_AMBER")"
-  SIGNS+=("$(mksign ci_pass_rate "CI Pass Rate" quality leading \
+  SIGNS+=("$(mksign ci_run_pass_rate "CI Run Pass Rate" quality leading \
     "$(jnum "$ci_rate")" "percent" "$s" \
     "find the flaky/failing gate" \
     "$ci_s success / $ci_decided decided runs in 24h (skipped/cancelled/queued excluded) (gh run list)" \
     "{\"green\":\">$CFG_CI_GREEN\",\"amber\":\"$CFG_CI_AMBER-$CFG_CI_GREEN\",\"red_desc\":\"<$CFG_CI_AMBER%\"}")")
 else
-  SIGNS+=("$(mksign ci_pass_rate "CI Pass Rate" quality leading \
+  SIGNS+=("$(mksign ci_run_pass_rate "CI Run Pass Rate" quality leading \
     null "percent" "unknown" "find the flaky/failing gate" \
     "uninstrumented: 0 decided CI runs in the 24h window" \
     "{\"green\":\">$CFG_CI_GREEN\",\"amber\":\"$CFG_CI_AMBER-$CFG_CI_GREEN\",\"red_desc\":\"<$CFG_CI_AMBER%\"}")")

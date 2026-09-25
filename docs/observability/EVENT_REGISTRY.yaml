@@ -2644,6 +2644,14 @@ events:
     emitter: scripts/ops/ci-qa-score.sh (INFRA-1872 / parent INFRA-1861 slice g)
     trigger: daily aggregate — pct of last-N merged PRs landed clean (no --no-verify, no flake-rerun, no post-CI rebase)
     consumers: [audit-log, fleet-brief, dashboard]
+    fields_required: [ts, kind, pct, sample_size, bypassed, window]
+    # INFRA-3847 (parent INFRA-3841 slice 4/9): `pct` here is a PR-level
+    # metric (% of merged PRs landed without a bypass signal) — surfaced by
+    # dashboard.rs's /api/dashboard-summary under the distinctly-named
+    # `ci_clean_landing_pct` field (alongside `pct` for back-compat). It is
+    # a DIFFERENT metric from vital-signs.sh's `ci_run_pass_rate` sign
+    # (success/decided CI *runs* in 24h, a run-level metric). Never refer
+    # to either as a bare "CI pass rate".
 
   - kind: ci_qa_score_bypassed
     effect_metric: self

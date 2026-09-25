@@ -27,8 +27,8 @@
       "basis": "oldest open PR opened 88 min ago (gh)"
     },
     {
-      "key": "ci_pass_rate",
-      "name": "CI Pass Rate",
+      "key": "ci_run_pass_rate",
+      "name": "CI Run Pass Rate",
       "group": "quality",
       "lead_or_lag": "leading",
       "value": 75,

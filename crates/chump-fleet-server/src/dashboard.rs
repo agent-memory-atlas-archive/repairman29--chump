@@ -50,8 +50,17 @@ pub struct DashboardSummary {
 /// Payload surfaced from the most-recent `kind=ci_qa_score` ambient event.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CiQaScore {
-    /// Pass-rate as a percentage (0.0–100.0).
+    /// % of merged PRs that landed WITHOUT a bypass signal (0.0–100.0) —
+    /// see `scripts/ops/ci-qa-score.sh`. Kept for back-compat with existing
+    /// consumers; `ci_clean_landing_pct` below is the distinctly-named twin
+    /// (INFRA-3847, parent INFRA-3841 slice 4/9) so this value is never
+    /// confused with `vital-signs.sh`'s `ci_run_pass_rate` (success/decided
+    /// CI *runs* in 24h — a different metric measuring a different thing).
     pub pct: f64,
+    /// Same value as `pct`, under the canonical distinctly-named column —
+    /// % of merged PRs landed clean (no --no-verify / post-CI rebase /
+    /// flake-rerun bypass signal).
+    pub ci_clean_landing_pct: f64,
     /// Number of CI runs included in the score.
     pub sample_size: u64,
     /// Human-readable status label (e.g. "healthy", "degraded").
@@ -337,6 +346,7 @@ fn extract_ci_qa_score(v: &serde_json::Value) -> Option<CiQaScore> {
         if let (Some(pct), Some(sample_size), Some(status)) = (pct, sample_size, status) {
             return Some(CiQaScore {
                 pct,
+                ci_clean_landing_pct: pct,
                 sample_size,
                 status,
             });

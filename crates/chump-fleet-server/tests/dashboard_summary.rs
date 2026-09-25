@@ -271,6 +271,14 @@ async fn test_dashboard_summary_with_fixtures() {
         "pct mismatch: {:?}",
         score["pct"]
     );
+    // INFRA-3847 (parent INFRA-3841 slice 4/9): ci_clean_landing_pct is the
+    // distinctly-named twin of `pct` — must agree, and must NOT be confused
+    // with vital-signs.sh's separately-namespaced `ci_run_pass_rate` sign
+    // (a run-level metric, not this PR-level one).
+    assert_eq!(
+        score["ci_clean_landing_pct"], score["pct"],
+        "ci_clean_landing_pct and pct must always agree"
+    );
     assert_eq!(score["sample_size"].as_u64().unwrap(), 40);
     assert_eq!(score["status"].as_str().unwrap(), "healthy");
 
