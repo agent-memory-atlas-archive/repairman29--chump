@@ -5468,10 +5468,18 @@ events:
   # ── RESILIENT-1450: worker self re-exec on tracked HEAD change ───────────
   - kind: worker_reexec_on_head_change
     effect_metric: self
-    emitter: scripts/dispatch/worker.sh (RESILIENT-1450)
-    trigger: at a cycle boundary, live REPO_ROOT HEAD differs from the SHA this worker process started at (node-converge hard-reset the tree under it) — worker execs itself fresh instead of running stale code
+    emitter: scripts/dispatch/worker.sh (RESILIENT-1450, content-scoped in RESILIENT-1453)
+    trigger: at a cycle boundary, the sha256 of the tracked scripts/dispatch/worker.sh differs from what this worker process started with (node-converge hard-reset the tree under it) — worker execs itself fresh instead of running stale code. prev_sha/new_sha carry the worker.sh content hashes.
     consumers: [fleet-brief, watchdog]
     fields_required: [ts, kind, source, agent_id, prev_sha, new_sha]
+
+  # ── RESILIENT-1453: node-converge externally restarts a worker whose code changed ──
+  - kind: worker_restarted_on_code_change
+    effect_metric: self
+    emitter: scripts/ops/node-converge.sh (RESILIENT-1453)
+    trigger: node-converge detects the tracked scripts/dispatch/worker.sh changed under a running chump-node*-worker.service (its reset moved worker.sh, or the worker's stamp no longer matches disk) and restarts the service so the merged fix runs — closes "merged != running" during an in-flight gap that worker.sh's own between-gaps re-exec cannot
+    consumers: [fleet-brief, watchdog]
+    fields_required: [ts, kind, disk_hash, started_hash, trigger, units]
 
   - kind: stale_binary_destructive_override
     effect_metric: self

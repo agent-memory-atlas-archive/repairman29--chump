@@ -114,6 +114,68 @@ emit() {
 }
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG"; }
 
+# RESILIENT-1453: restart a running worker whose worker.sh changed under it.
+# This organ hard-resets the SOURCE tree to origin/main, but the long-running
+# chump-node*-worker.service was exec'd ONCE at service start and never reloads
+# code. worker.sh's own in-process re-exec (RESILIENT-1450) only fires between
+# gaps, so a merged worker.sh fix stays inert for the entire duration of an
+# in-flight gap (the "merged != running" disease). This organ already runs on a
+# ~10min timer with passwordless sudo, so it is the right place to bounce the
+# worker EXTERNALLY the instant the tracked worker.sh content changes. The worker
+# handles SIGTERM with a WIP checkpoint (INFRA-686), so an external restart is safe
+# at any point. Host-agnostic: discovers the active chump-node*-worker.service unit
+# rather than hard-coding node1.
+WORKER_SH="$REPO_ROOT/scripts/dispatch/worker.sh"
+WORKER_STAMP="$REPO_ROOT/.chump-locks/worker-code.stamp"
+WORKER_RESTART_MARKER="$REPO_ROOT/.chump-locks/worker-restart.marker"
+_worker_code_hash() { sha256sum "$WORKER_SH" 2>/dev/null | cut -d' ' -f1; }
+_maybe_restart_stale_workers() {
+    # $1: "reset_changed" when THIS converge's reset just changed worker.sh (a
+    #     definitive signal that needs no cooperation from the worker). Otherwise
+    #     fall back to the worker's own stamp (what it is executing) vs disk.
+    local definitive="${1:-}"
+    [[ -f "$WORKER_SH" ]] || return 0
+    local disk; disk="$(_worker_code_hash)"; [[ -z "$disk" ]] && return 0
+    local started=""; [[ -f "$WORKER_STAMP" ]] && started="$(tr -d '[:space:]' < "$WORKER_STAMP" 2>/dev/null)"
+    local stale=0
+    [[ "$definitive" == "reset_changed" ]] && stale=1
+    [[ -n "$started" && "$started" != "$disk" ]] && stale=1
+    [[ "$stale" -eq 0 ]] && return 0
+    # Loop guard: never re-request a restart for the SAME worker.sh hash within
+    # 25min. A healthy restart re-writes the stamp to == disk, clearing the stale
+    # condition next tick; this only bounds a crash-looping worker that never
+    # rewrites its stamp so we don't hammer it every 10min.
+    if [[ -f "$WORKER_RESTART_MARKER" ]]; then
+        local m_hash m_ts now age
+        m_hash="$(sed -n '1p' "$WORKER_RESTART_MARKER" 2>/dev/null)"
+        m_ts="$(sed -n '2p' "$WORKER_RESTART_MARKER" 2>/dev/null)"
+        case "$m_ts" in ''|*[!0-9]*) m_ts=0 ;; esac
+        now="$(date -u +%s)"; age=$(( now - m_ts ))
+        if [[ "$m_hash" == "$disk" && "$age" -lt 1500 ]]; then
+            log "worker.sh changed under a running worker (hash ${disk:0:12}) but a restart was already requested ${age}s ago — skipping to avoid a restart loop"
+            return 0
+        fi
+    fi
+    local units u restarted=0
+    units="$(systemctl list-units --type=service --state=running --no-legend 'chump-node*-worker.service' 2>/dev/null | awk '{print $1}')"
+    if [[ -z "$units" ]]; then
+        log "worker.sh changed (disk ${disk:0:12}) but no running chump-node*-worker.service found — nothing to restart"
+        return 0
+    fi
+    for u in $units; do
+        if sudo -n systemctl restart "$u" >>"$LOG" 2>&1; then
+            log "RESILIENT-1453: worker.sh changed under running $u (disk=${disk:0:12} started=${started:0:12} trigger=${definitive:-stamp_stale}) — restarted it (graceful SIGTERM/WIP checkpoint)"
+            restarted=1
+        else
+            log "WARN: sudo -n systemctl restart $u failed (converge user needs passwordless sudo)"
+        fi
+    done
+    if [[ "$restarted" -eq 1 ]]; then
+        printf '%s\n%s\n' "$disk" "$(date -u +%s)" > "$WORKER_RESTART_MARKER" 2>/dev/null || true
+        emit worker_restarted_on_code_change "\"disk_hash\":\"$disk\",\"started_hash\":\"${started:-none}\",\"trigger\":\"${definitive:-stamp_stale}\",\"units\":\"$(echo $units | tr '\n' ' ' | sed 's/ *$//')\""
+    fi
+}
+
 # --- preconditions -----------------------------------------------------------
 if [[ -z "$REPO_ROOT" || ! -d "$REPO_ROOT/.git" ]]; then
     log "SKIP: no chump source checkout found (set CHUMP_NODE_REPO)"
@@ -160,6 +222,10 @@ case "$BEHIND" in ''|*[!0-9]*) BEHIND=0 ;; esac
 if [[ "$HEAD_SHA" == "$TARGET_SHA" && "$BEHIND" -eq 0 && "$TARGET_SHA" != "unknown" ]]; then
     log "SKIP: already at $CONVERGE_REF ($HEAD_SHA)"
     emit node_converge_skipped "\"reason\":\"already_current\",\"sha\":\"$HEAD_SHA\""
+    # RESILIENT-1453: even when the tree did not move THIS tick, a worker started
+    # before an earlier converge (or a restart via another path) may still be
+    # executing older worker.sh — reconcile it against its stamp.
+    _maybe_restart_stale_workers ""
     # Prune old logs (keep last 24) even on the fast path.
     ls -t "$LOG_DIR"/converge-*.log 2>/dev/null | tail -n +25 | xargs -r rm -f 2>/dev/null || true
     exit 0
@@ -167,6 +233,7 @@ fi
 
 # --- converge ----------------------------------------------------------------
 log "converging $REPO_ROOT: HEAD $HEAD_SHA -> $CONVERGE_REF ($TARGET_SHA), behind by $BEHIND"
+PREV_WORKER_HASH="$(_worker_code_hash)"
 if ! converge_mirror_hard_reset "$CONVERGE_REF" >>"$LOG" 2>&1; then
     log "FATAL: converge (git reset --hard) to $CONVERGE_REF failed"
     emit node_converge_failed "\"reason\":\"reset_failed\",\"ref\":\"$CONVERGE_REF\",\"target_sha\":\"$TARGET_SHA\""
@@ -176,6 +243,13 @@ fi
 NEW_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 log "OK: $REPO_ROOT now at $NEW_SHA (was $HEAD_SHA, ref $CONVERGE_REF)"
 emit node_converged "\"prev_sha\":\"$HEAD_SHA\",\"new_sha\":\"$NEW_SHA\",\"ref\":\"$CONVERGE_REF\",\"behind\":$BEHIND"
+
+# RESILIENT-1453: if the reset just changed worker.sh out from under a running
+# worker, bounce the service onto the new code now (definitive signal — no stamp
+# needed). Also reconciles against the stamp for any change via another path.
+_reset_wc_flag=""
+[[ -n "${PREV_WORKER_HASH:-}" && "$PREV_WORKER_HASH" != "$(_worker_code_hash)" ]] && _reset_wc_flag="reset_changed"
+_maybe_restart_stale_workers "$_reset_wc_flag"
 
 # Prune old logs (keep last 24).
 ls -t "$LOG_DIR"/converge-*.log 2>/dev/null | tail -n +25 | xargs -r rm -f 2>/dev/null || true

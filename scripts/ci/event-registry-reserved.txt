@@ -904,3 +904,4 @@ publish_guard_report  # reason: INFRA-7880 — emitted by scripts/publish-guard/
 audit_orphan_landed  # reason: INFRA-5426 — emitted by scripts/coord/orphan-allowlist-daemon.sh via python3 heredoc (dynamic `kind` argument to the local `emit()` helper), not grep-scannable as a "kind":"X" literal in PROD_PATHS.
 orphan_allowlist_pr_opened  # reason: INFRA-5426 — same emit() helper as audit_orphan_landed above; fires once the daemon's rescue phase opens the batch-allowlist PR.
 orphan_allowlist_pr_failed  # reason: INFRA-5426 — same emit() helper as audit_orphan_landed above; fires when the rescue phase's git push or gh pr create fails.
+worker_restarted_on_code_change  # reason: RESILIENT-1453 — emitted by scripts/ops/node-converge.sh via the local emit() helper (dynamic `kind` argument), not a grep-scannable "kind":"X" literal in PROD_PATHS.

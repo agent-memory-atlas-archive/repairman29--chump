@@ -686,19 +686,39 @@ _check_binary_freshness
 # moved — cheap (one `git rev-parse`), safe (only runs between gaps, after
 # lease/worktree cleanup for the prior cycle), and picks up the new code
 # without waiting on a systemd Restart=always bounce.
-_WORKER_START_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+# RESILIENT-1453: content-scope the re-exec (was whole-repo HEAD in RESILIENT-1450,
+# which re-exec'd the worker on EVERY converge — even when worker.sh was byte-for-byte
+# identical — because origin/main moves on nearly every 10min tick for unrelated
+# reasons; #4817/#4844 both re-exec'd with a 0-line worker.sh diff). Compare the
+# sha256 of the tracked worker.sh instead, so this fires ONLY when the worker's own
+# code actually changed. Also stamp that hash so node-converge (RESILIENT-1453) can
+# see what the running worker is executing and bounce the SERVICE externally the
+# moment worker.sh changes — the external path is the real closer, because THIS
+# in-process check can only run between gaps and a merged fix would otherwise sit
+# inert for the whole duration of an in-flight gap (the "merged != running" disease).
+_worker_code_hash() { sha256sum "$REPO_ROOT/scripts/dispatch/worker.sh" 2>/dev/null | cut -d' ' -f1; }
+_WORKER_START_CODE_HASH="$(_worker_code_hash)"
+# Stamp = the worker.sh content THIS process is running. Lives under .chump-locks/
+# (gitignored, so it survives node-converge's `git reset --hard`).
+if [[ -n "$_WORKER_START_CODE_HASH" ]]; then
+    _wstamp="$REPO_ROOT/.chump-locks/worker-code.stamp"
+    mkdir -p "$REPO_ROOT/.chump-locks" 2>/dev/null || true
+    if printf '%s\n' "$_WORKER_START_CODE_HASH" > "$_wstamp.tmp.$$" 2>/dev/null; then
+        mv -f "$_wstamp.tmp.$$" "$_wstamp" 2>/dev/null || rm -f "$_wstamp.tmp.$$" 2>/dev/null || true
+    fi
+fi
 _check_worker_head_reexec() {
     [[ "${CHUMP_WORKER_HEAD_REEXEC:-1}" == "0" ]] && return 0
-    [[ "$_WORKER_START_SHA" == "unknown" ]] && return 0
-    local _now_sha
-    _now_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
-    [[ "$_now_sha" == "unknown" || "$_now_sha" == "$_WORKER_START_SHA" ]] && return 0
+    [[ -z "$_WORKER_START_CODE_HASH" ]] && return 0
+    local _now_hash
+    _now_hash="$(_worker_code_hash)"
+    [[ -z "$_now_hash" || "$_now_hash" == "$_WORKER_START_CODE_HASH" ]] && return 0
     local _amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
     printf '{"ts":"%s","kind":"worker_reexec_on_head_change","source":"worker.sh","agent_id":"%s","prev_sha":"%s","new_sha":"%s"}\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${AGENT_ID:-}" "$_WORKER_START_SHA" "$_now_sha" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${AGENT_ID:-}" "$_WORKER_START_CODE_HASH" "$_now_hash" \
         >> "$_amb" 2>/dev/null || true
-    log "RESILIENT-1450: worker.sh HEAD moved $_WORKER_START_SHA -> $_now_sha; re-exec'ing self at cycle boundary"
-    exec bash "$REPO_ROOT/scripts/dispatch/worker.sh" "$@"
+    log "RESILIENT-1453: worker.sh content changed ($_WORKER_START_CODE_HASH -> $_now_hash); re-exec'ing self at cycle boundary"
+    exec bash "$REPO_ROOT/scripts/dispatch/worker.sh"
 }
 
 cycle=0
