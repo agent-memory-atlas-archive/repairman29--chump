@@ -3006,3 +3006,22 @@ CHUMP_STUB_CALLS
 CHUMP_PROVIDER_2_ENABLED
 # detected in: (standard input)
 CHUMP_PROVIDER_3_ENABLED
+CHUMP_ORPHAN_ALLOWLIST_DAEMON
+# detected in: (standard input)
+CHUMP_ORPHAN_DAEMON_COVERAGE_SCRIPT
+# detected in: (standard input)
+CHUMP_ORPHAN_DAEMON_GH_BIN
+# detected in: (standard input)
+CHUMP_ORPHAN_DAEMON_GIT_BIN
+# detected in: (standard input)
+CHUMP_ORPHAN_DAEMON_HEAD_SHA
+# detected in: (standard input)
+CHUMP_ORPHAN_DAEMON_INTERVAL_S
+# detected in: (standard input)
+CHUMP_ORPHAN_DAEMON_REPO_ROOT
+# detected in: (standard input)
+CHUMP_ORPHAN_DAEMON_RESERVED
+# detected in: (standard input)
+CHUMP_ORPHAN_DAEMON_STATE
+# detected in: (standard input)
+CHUMP_REGISTRY_GATE_MODE

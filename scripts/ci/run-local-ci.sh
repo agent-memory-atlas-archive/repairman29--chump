@@ -147,6 +147,7 @@ run_test_script 1 "$SCRIPTS_CI/test-hardcoded-date-guard.sh"
 run_test_script 1 "$SCRIPTS_CI/test-plist-no-tmp-paths.sh"  # INFRA-2419: plist temp-path lint
 run_test_script 1 "$SCRIPTS_CI/test-fleet-clone-index.sh"   # RESILIENT-1351: org clone+index+untether sweep (hermetic, fake gh/almanac)
 run_test_script 1 "$SCRIPTS_CI/test-curator-liveness.sh"    # RESILIENT-246: curator exit-78 + silence regression
+run_test_script 1 "$SCRIPTS_CI/test-orphan-allowlist-daemon.sh"  # INFRA-5426: orphan auto-allowlist PR daemon (hermetic, fake git/gh)
 
 # Hook / commit hygiene gates
 run_test_script 1 "$SCRIPTS_CI/test-hook-silent-noop.sh"

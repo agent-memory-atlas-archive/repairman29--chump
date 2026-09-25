@@ -4022,6 +4022,36 @@ events:
     consumers: [fleet-brief, kpi-report]
     fields_required: [ts, pr, detail]
 
+  # ── INFRA-5426 (INFRA-1861 slice): orphan-allowlist auto-rescue daemon ────
+  - kind: audit_orphan_landed
+    effect_metric: self
+    emitter: scripts/coord/orphan-allowlist-daemon.sh (INFRA-5426)
+    trigger: a new EVENT_REGISTRY.yaml orphan (register-without-emit kind, per
+      the INFRA-1287 scan in scripts/ci/test-event-registry-coverage.sh) is
+      detected on main that the daemon hasn't seen before. Fires once per
+      orphan kind, keyed to the HEAD sha the daemon was running at.
+    consumers: [fleet-brief, kpi-report]
+    fields_required: [ts, kind, orphan_kind, sha]
+
+  - kind: orphan_allowlist_pr_opened
+    effect_metric: effective
+    emitter: scripts/coord/orphan-allowlist-daemon.sh (INFRA-5426)
+    trigger: the daemon successfully opened a batch-allowlist PR (title
+      `auto-allowlist: add orphan <SHA>`) that appends the orphan kind to
+      scripts/ci/event-registry-reserved.txt.
+    consumers: [fleet-brief, kpi-report]
+    fields_required: [ts, kind, orphan_kind, sha, pr]
+
+  - kind: orphan_allowlist_pr_failed
+    effect_metric: self
+    emitter: scripts/coord/orphan-allowlist-daemon.sh (INFRA-5426)
+    trigger: the daemon's rescue phase failed to push the fix branch or open
+      the PR (git push rejected, gh pr create failed). The orphan stays
+      status=landed in the state file and is retried on the next pass.
+    consumers: [fleet-brief, kpi-report]
+    fields_required: [ts, kind, orphan_kind, sha, error]
+    fields_required: [ts, pr, detail]
+
   # ── INFRA-2169: Mode D external-ship audit receipt ────────────────────────
   - kind: external_repo_ship
     effect_metric: effective

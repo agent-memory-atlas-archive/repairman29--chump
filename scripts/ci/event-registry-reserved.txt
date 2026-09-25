@@ -898,3 +898,8 @@ pixel_build_published  # reason: RESILIENT-1044 — emitted by scripts/ops/build
 
 # ── INFRA-7880: report-only publish guard ───────────────────────────────────
 publish_guard_report  # reason: INFRA-7880 — emitted by scripts/publish-guard/report_only.py (a scanner-anchor comment sits at the emit site). scripts/publish-guard/ is inside the CI coverage scanner's PROD_PATHS but outside the `chump verify` event-registry rule's compiled-in list (src/verify/rules/event_registry.rs), same structural gap as the scripts/lib/ entries above. Reserved so the register-without-emit check does not flag it; drop this line when the rule's list gains the directory.
+
+# ── INFRA-5426 (INFRA-1861 slice): orphan-allowlist auto-rescue daemon ───────
+audit_orphan_landed  # reason: INFRA-5426 — emitted by scripts/coord/orphan-allowlist-daemon.sh via python3 heredoc (dynamic `kind` argument to the local `emit()` helper), not grep-scannable as a "kind":"X" literal in PROD_PATHS.
+orphan_allowlist_pr_opened  # reason: INFRA-5426 — same emit() helper as audit_orphan_landed above; fires once the daemon's rescue phase opens the batch-allowlist PR.
+orphan_allowlist_pr_failed  # reason: INFRA-5426 — same emit() helper as audit_orphan_landed above; fires when the rescue phase's git push or gh pr create fails.
