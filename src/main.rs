@@ -1489,6 +1489,17 @@ async fn main() -> Result<()> {
     if args.get(1).map(String::as_str) == Some("git-guard") {
         std::process::exit(git_safety::run_cli(&args));
     }
+
+    // INFRA-5754 (INFRA-1748 pilot slice): self-registered subcommands take
+    // priority over the legacy if/else dispatch chain below. Nothing is
+    // registered via `inventory::submit! { CommandEntry::new(...) }` yet —
+    // this is a no-op until the first subcommand migrates per
+    // docs/refactor/MAIN_RS_DECOMPOSITION.md.
+    if let Some(name) = args.get(1) {
+        if let Some(result) = commands::registry::dispatch(name, &args) {
+            return result;
+        }
+    }
     // RESILIENT-256: the load-bearing half. Writes a dirty checkout into the
     // object store (refs/wip/…) without touching its working tree or index,
     // so `reset --hard` stops being unrecoverable even when it is correct.
