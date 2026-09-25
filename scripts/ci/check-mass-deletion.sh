@@ -114,12 +114,24 @@ if [[ -z "$PR_CONTEXT" ]]; then
     PR_CONTEXT="$(git log --pretty=format:"%s %b" "${MERGE_BASE}..HEAD" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
 fi
 
+# INFRA-5744: an explicit "Revert" commit subject already justifies the
+# deletion (mirrors check-pr-scope.sh Rule B) — without this, a legitimate
+# revert PR that doesn't happen to repeat the deleted file's name/dir in
+# the title/body still false-positived on this check.
+_revert_count_b="$(git log --pretty=format:%s "${MERGE_BASE}..HEAD" 2>/dev/null \
+    | grep -icE "^revert" || true)"
+has_revert_commit_b=0
+[[ "$_revert_count_b" -gt 0 ]] && has_revert_commit_b=1
+
 # Get all files with their net line-count change (deletions - insertions, per file)
 # We flag a file if: net deletions > THRESHOLD and file path not in PR context
 THRESHOLD=100
 flagged_files=()
 total_flagged_deletions=0
 
+if [[ "$has_revert_commit_b" -eq 1 ]]; then
+    pass "Explicit Revert commit detected — mass-deletion check N/A"
+else
 while IFS=$'\t' read -r insertions deletions filepath; do
     # Skip binary files and empty entries
     [[ -z "$filepath" || "$insertions" == "-" ]] && continue
@@ -149,6 +161,7 @@ while IFS=$'\t' read -r insertions deletions filepath; do
         total_flagged_deletions=$((total_flagged_deletions + net_del))
     fi
 done < <(git diff --numstat "${MERGE_BASE}..HEAD" 2>/dev/null || true)
+fi
 
 if [[ ${#flagged_files[@]} -gt 0 ]]; then
     report_violation "Mass deletion from files not mentioned in PR title/body (threshold: ${THRESHOLD} lines):"

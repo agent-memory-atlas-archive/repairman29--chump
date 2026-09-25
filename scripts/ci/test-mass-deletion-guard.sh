@@ -87,6 +87,24 @@ out="$(cd "$REPO4" && GITHUB_BASE_REF=main bash "$GUARD" --warn-only 2>&1 || tru
 echo "$out" | grep -q "No mass unrelated deletions" || fail "Test 4: mentioned-file deletion should pass"
 pass "Test 4: mentioned-file mass deletion passes"
 
+# ── Test 4b (INFRA-5744): explicit Revert commit exempts unrelated mass deletion ──
+REPO4B="$TMP/repo4b"
+make_repo "$REPO4B"
+python3 -c "print('\n'.join(f'line {i}' for i in range(200)))" > "$REPO4B/big_module.rs"
+git -C "$REPO4B" add big_module.rs
+git -C "$REPO4B" commit -q -m "chore: initial"
+git -C "$REPO4B" checkout -q -b feature
+rm "$REPO4B/big_module.rs"
+git -C "$REPO4B" add -A
+# Commit subject starts with 'Revert' but neither commit nor body names the file —
+# without the INFRA-5744 fix this false-positived as an "unrelated" mass deletion.
+git -C "$REPO4B" commit -q -m "Revert: undo accidental addition"
+
+out="$(cd "$REPO4B" && GITHUB_BASE_REF=main bash "$GUARD" --warn-only 2>&1 || true)"
+echo "$out" | grep -q "Explicit Revert commit detected" || fail "Test 4b: explicit Revert commit should exempt mass-deletion check"
+echo "$out" | grep -q "Mass deletion" && fail "Test 4b: Revert commit should not be flagged as mass deletion"
+pass "Test 4b: explicit Revert commit exempts unrelated mass deletion"
+
 # ── Test 5: --warn-only exits 0 even with violations ─────────────────────────
 REPO5="$TMP/repo5"
 make_repo "$REPO5"
