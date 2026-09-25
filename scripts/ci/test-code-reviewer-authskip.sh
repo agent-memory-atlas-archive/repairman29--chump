@@ -91,6 +91,39 @@ else
     fail "no 'SKIP: reviewer gateway unavailable' line in output. Output:\n$OUTPUT"
 fi
 
+# ── (2) Nothing configured at all (INFRA-5005) — fast SKIP, gateway never
+# invoked. Stub `chump` to sleep well past any reasonable test timeout so a
+# regression that falls through to the gateway (and its ~30s cascade
+# exhaustion retry, INFRA-363) fails this test instead of merely being slow.
+FAKEHOME="$TMPDIR/fakehome"
+mkdir -p "$FAKEHOME"
+cat > "$TMPDIR/chump-should-not-run" <<'CHUMPEOF'
+#!/usr/bin/env bash
+sleep 60
+CHUMPEOF
+chmod +x "$TMPDIR/chump-should-not-run"
+
+set +e
+OUTPUT2=$(env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN -u OPENAI_API_KEY -u OPENAI_API_BASE \
+    -u CHUMP_PROVIDER_1_ENABLED -u CHUMP_PROVIDER_2_ENABLED -u CHUMP_PROVIDER_3_ENABLED \
+    HOME="$FAKEHOME" PATH="$TMPDIR:$PATH" CHUMP_LLM_BIN="$TMPDIR/chump-should-not-run" \
+    CHUMP_TWO_TIER_REVIEW=0 timeout 10 \
+    bash "$REPO_ROOT/scripts/coord/code-reviewer-agent.sh" 999 2>&1)
+RC2=$?
+set -e
+
+if [[ $RC2 -eq 3 ]]; then
+    ok "no-auth-configured-at-all exits 3 (SKIP) without invoking the gateway"
+else
+    fail "expected exit 3 (SKIP) with no auth configured, got exit $RC2 (124 = timed out waiting on gateway). Output:\n$OUTPUT2"
+fi
+
+if echo "$OUTPUT2" | grep -q "^SKIP: reviewer gateway unavailable"; then
+    ok "SKIP: line surfaced for the no-auth-at-all case"
+else
+    fail "no 'SKIP: reviewer gateway unavailable' line in no-auth-at-all output. Output:\n$OUTPUT2"
+fi
+
 echo
 echo "=== Result ==="
 echo "  $PASS passed, $FAIL failed"

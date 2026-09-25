@@ -342,6 +342,41 @@ else
             fi
         done
     fi
+
+    # INFRA-5005: fast-fail when NO llm auth path is configured at all — an
+    # OAuth-only environment with no ANTHROPIC_API_KEY, no OAuth token on
+    # disk, and no other provider slot enabled. Without this check the
+    # gateway call below still runs and provider_cascade's exhaustion path
+    # sleeps up to CHUMP_CASCADE_EXHAUSTED_BACKOFF_S (default 30s) retrying
+    # once before giving up (INFRA-363) — wasted latency when there is
+    # nothing to retry. Detecting the fully-unconfigured case up front lets
+    # the reviewer SKIP immediately instead of stalling bot-merge for ~30s.
+    # Any other configured path (API key, OAuth token, local/cloud provider
+    # slot) still goes through the gateway unchanged — this only short-
+    # circuits the genuinely-nothing-configured case.
+    _has_llm_auth=0
+    [[ -n "${ANTHROPIC_API_KEY:-}" ]] && _has_llm_auth=1
+    [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && _has_llm_auth=1
+    [[ -n "${OPENAI_API_KEY:-}" ]] && _has_llm_auth=1
+    [[ -n "${OPENAI_API_BASE:-}" ]] && _has_llm_auth=1
+    if [[ $_has_llm_auth -eq 0 && -s "${CHUMP_OAUTH_TOKEN_PATH:-$HOME/.chump/oauth-token.json}" ]]; then
+        _has_llm_auth=1
+    fi
+    if [[ $_has_llm_auth -eq 0 ]]; then
+        for _n in 1 2 3 4 5 6 7 8 9; do
+            _var="CHUMP_PROVIDER_${_n}_ENABLED"
+            if [[ "${!_var:-}" == "1" ]]; then
+                _has_llm_auth=1
+                break
+            fi
+        done
+    fi
+    if [[ $_has_llm_auth -eq 0 ]]; then
+        yellow "No LLM auth path configured (no ANTHROPIC_API_KEY, no OAuth token, no provider slot) — SKIPPING (GitHub required checks still gate this merge)."
+        echo "SKIP: reviewer gateway unavailable (no provider configured for chump llm-complete)"
+        exit 3
+    fi
+
     # INFRA-3462: route the Tier-2 review through the SHARED LLM service via the
     # `chump llm-complete` gateway (ProviderCascade — full auth ladder incl OAuth,
     # 429 backoff, slot fallback) instead of a bespoke `curl` + `x-api-key` that

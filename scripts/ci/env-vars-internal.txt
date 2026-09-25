@@ -2999,3 +2999,10 @@ CHUMP_WORKER_HEAD_REEXEC
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_STUB_CALLS
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_PROVIDER_2_ENABLED
+# detected in: (standard input)
+CHUMP_PROVIDER_3_ENABLED
