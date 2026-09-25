@@ -41,6 +41,12 @@ if ! "$BROADCAST" STUCK INFRA-9001 >/dev/null 2>&1; then
 fi
 ok "non-strict STUCK with no reason succeeds (backward compat)"
 
+# (a2) INFRA-5763 AC #2: non-strict STUCK with no reason prints a clear
+# stderr warning about the silent default, instead of failing silently.
+WARN_OUT="$("$BROADCAST" STUCK INFRA-9001 2>&1 >/dev/null)"
+echo "$WARN_OUT" | grep -q "no reason" || fail "expected stderr warning about defaulted reason, got: $WARN_OUT"
+ok "non-strict STUCK with no reason emits a clear stderr warning"
+
 # (b) strict STUCK with no reason fails with a clear message
 OUT="$("$BROADCAST" --strict STUCK INFRA-9001 2>&1 || true)"
 if "$BROADCAST" --strict STUCK INFRA-9001 >/dev/null 2>/dev/null; then

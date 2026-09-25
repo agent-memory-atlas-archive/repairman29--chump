@@ -552,6 +552,12 @@ case "$EVENT" in
         [[ -n "$GAP" ]] || { echo "Usage: $0 STUCK <gap-id> \"<reason>\"" >&2; exit 1; }
         _strict_check_gap_id "$GAP" "$0 [--strict] STUCK <gap-id> \"<reason>\""
         _strict_check "reason" "${2:-}" "$0 [--strict] STUCK <gap-id> \"<reason>\"  (reason must not be omitted — got positional-arg confusion defaulting to 'unspecified')"
+        # INFRA-5763 (AC #2): in non-strict mode, warn on stderr when the
+        # reason was omitted and silently defaulted — the exact
+        # positional-arg-confusion failure mode --strict exists to catch.
+        if [[ "$STRICT" != "1" && -z "${2:-}" ]]; then
+            printf '[broadcast] WARN: STUCK %s called with no reason — defaulting reason=unspecified (use --strict to make this an error)\n' "$GAP" >&2
+        fi
         CORR_ID="$(_derive_corr "$GAP")"
         if [[ -n "$TO" ]]; then
             JSON="$(_maybe_add_parent_corr_id "$(build_json event STUCK session "$SESSION_ID" operator_id "$OPERATOR_ID" ts "$TS" corr_id "$CORR_ID" urgency "$URGENCY" gap "$GAP" reason "$REASON" to "$TO")")"
