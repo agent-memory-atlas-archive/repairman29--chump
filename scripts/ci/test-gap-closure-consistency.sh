@@ -382,6 +382,7 @@ if [[ "$overall_drift" -eq 0 ]]; then
     exit 0
 else
     echo "Closure consistency drift detected (--strict mode)."
+    printf '[FAIL] %s\n' "How to bypass cleanly: fix the drifted gap(s) via 'chump gap ship <ID>' (stale_post_merge_gap) or revert status to in_progress (premature_close); if the drift is a false positive set CHUMP_PREMATURE_CLOSURE_ALLOW_GH_FAIL=1 (gh-API flake) or re-run with --auto-fix" >&2
     gate_emit_result "CREDIBLE-028" "fail" "gap_drift_premature_close" "$overall_drift drift(s)"
     exit 1
 fi

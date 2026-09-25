@@ -157,6 +157,32 @@ _revert_count="$(git log --pretty=format:%s "${MERGE_BASE}..HEAD" 2>/dev/null \
 has_revert_commit=0
 [[ "$_revert_count" -gt 0 ]] && has_revert_commit=1
 
+# INFRA-1861 slice (AC #2, false-positive fix for PR #2418): the PR body
+# can also explicitly acknowledge a deleted file — either as a markdown
+# link "[label](path/to/file)" / "[path/to/file](path/to/file)" or as a
+# plain-text mention of the filename/basename. Previously ONLY an explicit
+# "Revert" commit subject satisfied this rule, so a PR that deleted a file
+# and called it out in prose still false-positived.
+PR_BODY_FOR_B=""
+if command -v gh &>/dev/null; then
+    PR_BODY_FOR_B="$(gh pr view --json body -q .body 2>/dev/null || true)"
+fi
+file_mentioned_in_pr_body() {
+    local f="$1"
+    [[ -z "$PR_BODY_FOR_B" ]] && return 1
+    local base; base="$(basename "$f")"
+    # Markdown link form: [...](path) or [...](.../path) — match on basename
+    # so a relative-vs-absolute path style difference still hits.
+    if echo "$PR_BODY_FOR_B" | grep -qE "\]\([^)]*${base//./\\.}\)"; then
+        return 0
+    fi
+    # Plain-text mention: the full path or just the basename appears in prose.
+    if echo "$PR_BODY_FOR_B" | grep -qF "$f" || echo "$PR_BODY_FOR_B" | grep -qF "$base"; then
+        return 0
+    fi
+    return 1
+}
+
 if [[ "$has_revert_commit" -eq 1 ]]; then
     pass "Rule B: explicit Revert commit detected — silent-revert check N/A"
 elif [[ -n "$deleted_files" ]] && command -v gh &>/dev/null; then
@@ -167,6 +193,10 @@ elif [[ -n "$deleted_files" ]] && command -v gh &>/dev/null; then
     now_secs="$(date +%s)"
     while IFS= read -r f; do
         [[ -z "$f" ]] && continue
+        # PR body already acknowledges this deletion — not silent.
+        if file_mentioned_in_pr_body "$f"; then
+            continue
+        fi
         # Get last commit on origin/main that touched this file
         last_sha="$(git log "origin/${BASE_BRANCH}" --pretty=format:%H --follow -- "$f" 2>/dev/null | head -1 || true)"
         [[ -z "$last_sha" ]] && continue
@@ -277,6 +307,7 @@ elif [[ "$WARN_ONLY" -eq 1 ]]; then
     exit 0
 else
     fail "CREDIBLE-026/CREDIBLE-041: $VIOLATIONS violation(s). Fix scope or update PR title."
+    fail "How to bypass cleanly: retitle to feat:/fix: (Rule A), add a commit titled 'Revert: <reason>' OR mention the affected filename in the PR body as a markdown link or plain text (Rule B), or add PR label 'intentional-bundle' with a comment explaining the bundle (Rule C)"
     gate_emit_result "CREDIBLE-026" "fail" "scope-violation" "$VIOLATIONS PR scope violation(s)"
     exit 1
 fi

@@ -636,6 +636,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/check-mass-deletion.sh
 
+      - name: Bypass-line-required audit (INFRA-5429)
+        # Every gate-manifest.yaml check that can exit FAIL must carry a
+        # "How to bypass cleanly: <instructions>" line so an agent hitting
+        # the gate never has to reverse-engineer the escape hatch. Also
+        # self-tests that a synthetic check WITHOUT the line is caught.
+        run: bash scripts/ci/test-bypass-line-required.sh
+
       - name: Broad canary coverage smoke (INFRA-1568)
         # Asserts every external CLI invoked by self-hosted-targeted workflow
         # steps is exercised by scripts/setup/test-runner-lane-broad-canary.sh.

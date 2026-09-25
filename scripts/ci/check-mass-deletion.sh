@@ -235,6 +235,7 @@ elif [[ "$WARN_ONLY" -eq 1 ]]; then
     exit 0
 else
     fail "CREDIBLE-027/CREDIBLE-038: $VIOLATIONS violation(s) found. Fix before pushing."
+    fail "How to bypass cleanly: mention the affected file paths in the PR title/body (Rule A/B), add label 'cross-cutting-acknowledged' (Rule C), or use --warn-only for local dry-runs; there is no blanket bypass — the gate demotes automatically once the mention/label is present"
     gate_emit_result "CREDIBLE-027" "fail" "mass-deletion" "$VIOLATIONS mass-deletion violation(s)"
     exit 1
 fi

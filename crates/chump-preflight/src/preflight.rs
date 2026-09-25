@@ -1981,6 +1981,19 @@ pub fn run(argv: &[String]) -> i32 {
             ));
         }
 
+        // INFRA-5429 (INFRA-1861 slice): bypass-line-required audit. Every
+        // gate-manifest.yaml check that can exit FAIL must carry a
+        // "How to bypass cleanly: <instructions>" line. No skip env var —
+        // per INFRA-2429 zero-bypass thesis, a gate whose entire purpose is
+        // "every FAIL needs a documented bypass" should not itself grow an
+        // undocumented one; it's cheap (grep-only, no network) so there is
+        // no legitimate reason to skip it locally.
+        steps.push(step(
+            "bypass-line-required",
+            &["bash", "scripts/ci/test-bypass-line-required.sh"],
+            GateKind::Scripts,
+        ));
+
         // INFRA-1810: install-script manifest gate. Verifies every
         // scripts/setup/install-*.sh is mapped to REQUIRED_DAEMONS,
         // optional-installers-allowlist.txt, or deprecated-installers-allowlist.txt.
