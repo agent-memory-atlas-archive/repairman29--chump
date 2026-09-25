@@ -447,6 +447,7 @@ enabled     chump-fleet-server.service  role=data requires=bin:git platforms=sys
 # call.sh) that would otherwise fire the moment this timer was added to
 # install-helsinki-atc.sh's SYSTEM_UNITS without a matching manifest line.
 enabled     chump-almanac-liveness.timer  role=data requires=bin:git
+enabled     chump-jeff-bus-ingest.timer  role=data requires=bin:python3  # META-900: conversation-bus inbound ingester (Claude Code transcripts -> chump_web_messages)
 enabled     chump-faculty-collector.timer  role=data requires=bin:gh,bin:jq
 enabled     chump-pr-book-settle.timer     role=trust requires=bin:gh,bin:jq
 # CREDIBLE-296: chump-race-control.timer — hourly merge-mix board (user-value%

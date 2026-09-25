@@ -229,6 +229,13 @@ SYSTEM_UNITS=(
   # freshness for the almanac fusion-search organ on the Linux factory.
   chump-almanac-liveness.service
   chump-almanac-liveness.timer
+  # META-900 (Mirror in the OS, Phase A): the conversation-bus inbound
+  # ingester — tails Claude Code transcripts into chump_web_messages so the
+  # operator<->fleet conversation is legible from one store on the hub.
+  # Runs as the run-user (reads its ~/.claude, writes the repo db); NOT in
+  # the keep-root set.
+  chump-jeff-bus-ingest.service
+  chump-jeff-bus-ingest.timer
   # RESILIENT-365: wires the INFRA-249 recurring-gap-pattern-detector as a
   # live organ instead of a script only ever run by hand — was DARK/0 units,
   # human-ALERT-only, while 44 symptom PRs shipped in one night with 0 root

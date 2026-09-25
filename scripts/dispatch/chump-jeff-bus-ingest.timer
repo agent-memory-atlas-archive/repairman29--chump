@@ -1,0 +1,18 @@
+# Drives chump-jeff-bus-ingest.service every 15 minutes so the conversation
+# bus stays fresh with no human step — the same cadence and self-healing shape
+# as every other organ in organ-manifest.txt. The ingester is idempotent (a
+# per-line uuid cursor) and cheap in steady state (a per-file size+mtime cursor
+# skips unchanged transcripts), so a 15m beat costs almost nothing when quiet.
+[Unit]
+Description=Chump conversation-bus inbound ingester beat — refresh every 15m
+
+# OnCalendar is wall-clock and self-anchoring, so the beat cannot silently die
+# on a daemon-reload the way an OnUnitActiveSec self-chaining timer can (see the
+# chump-faculty-collector.timer root-cause note). Persistent=true catches misses.
+[Timer]
+OnBootSec=4min
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

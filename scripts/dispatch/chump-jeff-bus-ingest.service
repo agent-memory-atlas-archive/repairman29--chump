@@ -1,0 +1,20 @@
+# Conversation-bus INBOUND ingester (Phase A of "Mirror in the OS"). Tails
+# Claude Code transcripts and appends each conversational turn into the
+# canonical chump_memory.db chump_web_messages table, so the operator<->fleet
+# conversation is legible from one authoritative store on the always-on hub
+# instead of only living in per-worktree transcript files. Passive, append-only
+# log — no decision/approval path. Paired with chump-jeff-bus-ingest.timer.
+# Deployed by scripts/setup/install-helsinki-atc.sh, which host-rewrites /root/
+# -> the run-user's HOME and User=root -> the run-user per node.
+[Unit]
+Description=Chump conversation-bus inbound ingester — Claude Code transcripts -> chump_web_messages
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=HOME=/root
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/bin/bash -lc 'exec /root/Projects/chump/scripts/ops/jeff-bus-ingest.sh'
