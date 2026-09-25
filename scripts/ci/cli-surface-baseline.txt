@@ -1,0 +1,49 @@
+# INFRA-5587: checked-in baseline of top-level chump subcommands that must
+# remain dispatched from src/main.rs (or its src/cmd/<name>.rs successor once
+# INFRA-1687/INFRA-1748 land). One token per line; # comments and blank lines
+# ignored. See docs/refactor/MAIN_RS_DECOMPOSITION.md for the full inventory
+# and per-command migration ownership — this file is the CI-checkable subset.
+#
+# Removing a line here is a deliberate CLI deprecation and must ship in the
+# same PR as the main.rs change that removes the dispatch. Adding a new
+# top-level subcommand does not require touching this file (only backward
+# compat is gated, not forward growth).
+gap
+claim
+ship
+init
+preflight
+pe-suite
+fleet
+dispatch
+brain
+orchestrate
+health
+health-digest
+session-summary
+fleet-status
+fleet-velocity
+waste-tally
+ship-quality
+roadmap-status
+roadmap-pillar-score
+mission-grade
+lesson-grade
+ci-summary
+verify
+classify-failure
+kpi
+claim-lint
+cost-watch
+cost
+pr-coupling-cost
+cascade
+funnel
+dashboard
+session-track
+session-export
+session-resume
+reflect-delta
+rebase-stuck
+pr
+gen
