@@ -15,6 +15,13 @@
       --color-blocked: #ef4444;
       --color-idle:    #9ca3af;
 
+      /* Idle palette v1 (META-129 AC) — idle promoted from one shade to five */
+      --color-idle-scheduled-quiet:   #6b7280;
+      --color-idle-working-but-quiet: #0ea5e9;
+      --color-idle-stalled:           #f59e0b;
+      --color-idle-dead:              #1f2937;
+      --color-idle-untracked:         #9ca3af;
+
       --bg:        #0f172a;
       --bg2:       #1e293b;
       --bg3:       #334155;
@@ -324,6 +331,19 @@
     .meta-key { color: var(--text-muted); min-width: 72px; }
     .meta-val { color: var(--text); word-break: break-all; }
 
+    /* Idle palette v1 badge — solid fill when confidence is rich-event-backed,
+       dashed outline when the state is inferred from sparse signal */
+    .idle-state-badge {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+      margin-right: 4px;
+    }
+    .idle-state-badge.confidence-solid  { background: currentColor; }
+    .idle-state-badge.confidence-dashed { border: 1px dashed currentColor; }
+    .idle-confidence { font-size: 9px; color: var(--text-muted); margin-left: 4px; }
+
     #panel-events {
       flex: 1;
       overflow-y: auto;
@@ -466,6 +486,25 @@ const ACTIVITY_COLOR = {
   blocked: 'var(--color-blocked)',
   idle:    'var(--color-idle)',
 };
+
+// Idle palette v1 (META-129 AC) — idle promoted from one shade to five named
+// states. `confidence` is 'solid' when the state comes from rich events,
+// 'dashed' when it's inferred from sparse signal (heartbeat-only, etc).
+const IDLE_PALETTE = {
+  'scheduled-quiet':   { label: 'scheduled-quiet',   color: 'var(--color-idle-scheduled-quiet)',   confidence: 'solid'  },
+  'working-but-quiet': { label: 'working-but-quiet', color: 'var(--color-idle-working-but-quiet)', confidence: 'solid'  },
+  stalled:             { label: 'stalled',           color: 'var(--color-idle-stalled)',           confidence: 'dashed' },
+  dead:                { label: 'dead',              color: 'var(--color-idle-dead)',              confidence: 'dashed' },
+  untracked:           { label: 'untracked',         color: 'var(--color-idle-untracked)',         confidence: 'dashed' },
+};
+
+// Idle-detection logic (heartbeat freshness, bash_call long-op matching,
+// lease expiry vs window size) is not implemented yet — tracked separately.
+// This stub always returns a safe default so the palette renders and state
+// transitions can be wired in later without touching the render path.
+function classifyIdleState(seg) {
+  return IDLE_PALETTE.untracked;
+}
 
 const LANE_H = 30;
 const LABEL_W = 160;
@@ -1111,9 +1150,19 @@ function startReplay() {
 function openPanel(seg) {
   sidePanel.classList.remove('collapsed');
 
+  const idleRow = (seg.activity === 'idle')
+    ? (() => {
+        const st = classifyIdleState(seg);
+        return `<div class="meta-row"><span class="meta-key">idle_state</span><span class="meta-val" style="color:${st.color}">` +
+               `<span class="idle-state-badge confidence-${st.confidence}"></span>${st.label}` +
+               `<span class="idle-confidence">(${st.confidence})</span></span></div>`;
+      })()
+    : '';
+
   panelMeta.innerHTML = `
     <div class="meta-row"><span class="meta-key">session</span><span class="meta-val">${seg.session_id}</span></div>
     <div class="meta-row"><span class="meta-key">activity</span><span class="meta-val" style="color:${ACTIVITY_COLOR[seg.activity]||'inherit'}">${seg.activity}</span></div>
+    ${idleRow}
     <div class="meta-row"><span class="meta-key">gap_id</span><span class="meta-val">${seg.gap_id || '—'}</span></div>
     <div class="meta-row"><span class="meta-key">start</span><span class="meta-val">${seg.start}</span></div>
     <div class="meta-row"><span class="meta-key">end</span><span class="meta-val">${seg.end}</span></div>
