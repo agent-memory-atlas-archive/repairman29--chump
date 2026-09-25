@@ -8,6 +8,12 @@ Description=Run the Chump PR-approval surfacer every 5 minutes (RESILIENT-265)
 [Timer]
 OnBootSec=3min
 OnUnitActiveSec=5min
+# RESILIENT-1455: OnUnitInactiveSec pairs with OnUnitActiveSec so this Type=oneshot
+# timer self-perpetuates. A oneshot goes inactive after each run, leaving OnUnitActiveSec
+# with no live "active" anchor -> NextElapse goes n/a and the timer fires once, never again.
+# OnUnitInactiveSec re-arms from the inactive edge (the anchor a oneshot has). Mirrors the
+# chump-farmer.timer fix (#4808 / RESILIENT-313).
+OnUnitInactiveSec=5min
 Persistent=true
 
 [Install]

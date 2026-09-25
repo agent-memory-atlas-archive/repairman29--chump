@@ -3,6 +3,12 @@ Description=Run unmerged-work triage every 20 min
 [Timer]
 OnBootSec=6min
 OnUnitActiveSec=20min
+# RESILIENT-1455: OnUnitInactiveSec pairs with OnUnitActiveSec so this Type=oneshot
+# timer self-perpetuates. A oneshot goes inactive after each run, leaving OnUnitActiveSec
+# with no live "active" anchor -> NextElapse goes n/a and the timer fires once, never again.
+# OnUnitInactiveSec re-arms from the inactive edge (the anchor a oneshot has). Mirrors the
+# chump-farmer.timer fix (#4808 / RESILIENT-313).
+OnUnitInactiveSec=20min
 Persistent=true
 [Install]
 WantedBy=timers.target

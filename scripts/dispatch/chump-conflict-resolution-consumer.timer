@@ -5,6 +5,12 @@ Description=Run the Chump conflict-resolution consumer every 15 minutes (RESILIE
 [Timer]
 OnBootSec=5min
 OnUnitActiveSec=15min
+# RESILIENT-1455: OnUnitInactiveSec pairs with OnUnitActiveSec so this Type=oneshot
+# timer self-perpetuates. A oneshot goes inactive after each run, leaving OnUnitActiveSec
+# with no live "active" anchor -> NextElapse goes n/a and the timer fires once, never again.
+# OnUnitInactiveSec re-arms from the inactive edge (the anchor a oneshot has). Mirrors the
+# chump-farmer.timer fix (#4808 / RESILIENT-313).
+OnUnitInactiveSec=15min
 Persistent=true
 [Install]
 WantedBy=timers.target

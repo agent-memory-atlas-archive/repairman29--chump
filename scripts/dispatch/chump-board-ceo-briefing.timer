@@ -10,6 +10,12 @@ Description=Run the Chump board CEO-briefing beat on boot + hourly (INFRA-3601)
 [Timer]
 OnBootSec=2min
 OnUnitActiveSec=60min
+# RESILIENT-1455: OnUnitInactiveSec pairs with OnUnitActiveSec so this Type=oneshot
+# timer self-perpetuates. A oneshot goes inactive after each run, leaving OnUnitActiveSec
+# with no live "active" anchor -> NextElapse goes n/a and the timer fires once, never again.
+# OnUnitInactiveSec re-arms from the inactive edge (the anchor a oneshot has). Mirrors the
+# chump-farmer.timer fix (#4808 / RESILIENT-313).
+OnUnitInactiveSec=60min
 Persistent=true
 
 [Install]
