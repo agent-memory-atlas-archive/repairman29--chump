@@ -18,6 +18,7 @@ services:
     image: supabase/postgres:15.1.1.51
     container_name: supabase_postgres
     cgroup_parent: supabase.slice  # MemoryMax=4G guard; systemd-run on compose does NOT reach containers
+    oom_score_adj: -800  # product DB is the last thing the kernel/earlyoom should pick
     restart: unless-stopped
     # max_connections is a SERVER runtime flag (-c), NOT an initdb flag.
     # Passing it via POSTGRES_INITDB_ARGS is the bug that produced
