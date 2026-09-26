@@ -1,0 +1,9 @@
+[Unit]
+Description=Supabase OSS stack (memory-capped, RESILIENT-314)
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=3584M
+MemoryMax=4G
+MemorySwapMax=1G

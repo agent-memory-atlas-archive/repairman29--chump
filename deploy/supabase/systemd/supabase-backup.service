@@ -1,0 +1,9 @@
+[Unit]
+Description=Supabase nightly backup (pg_dump + storage tar -> OCI bucket cuphead-backups + CJ)
+After=supabase-stack.service
+Requires=supabase-stack.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/opt/supabase/scripts/backup.sh

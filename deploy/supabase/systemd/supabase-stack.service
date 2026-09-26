@@ -1,0 +1,18 @@
+# Containers join supabase.slice via `cgroup_parent` in docker-compose.yml
+# (wrapping compose in systemd-run does NOT move containers: they are children of containerd).
+[Unit]
+Description=Supabase OSS stack (docker compose, /opt/supabase)
+Requires=docker.service
+After=docker.service network-online.target srv-supabase\x2ddata.mount
+RequiresMountsFor=/srv/supabase-data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/supabase
+ExecStart=/usr/bin/docker compose --env-file /srv/supabase-data/.env -f /opt/supabase/docker-compose.yml up -d --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /srv/supabase-data/.env -f /opt/supabase/docker-compose.yml down
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,197 @@
+# Self-hosted Supabase OSS stack for cuphead (Oracle A1, Ubuntu 22.04).
+#
+# Secrets are NEVER inlined here. They are read via ${VAR} substitution from an
+# --env-file that lives OUTSIDE this repo (default /srv/supabase-data/.env).
+# See .env.example + scripts/gen-secrets.sh. Run via scripts/start-supabase.sh.
+#
+# All host port bindings are 127.0.0.1-only. Nothing in this stack is exposed
+# publicly by Docker; public HTTPS is terminated by Caddy (see caddy/Caddyfile)
+# and Studio is reachable only over the tailnet.
+
+x-common-db-env: &common-db-env
+  POSTGRES_DB: "postgres"
+  POSTGRES_USER: "postgres"
+  POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+
+services:
+  postgres:
+    image: supabase/postgres:15.1.1.51
+    container_name: supabase_postgres
+    cgroup_parent: supabase.slice  # MemoryMax=4G guard; systemd-run on compose does NOT reach containers
+    restart: unless-stopped
+    # max_connections is a SERVER runtime flag (-c), NOT an initdb flag.
+    # Passing it via POSTGRES_INITDB_ARGS is the bug that produced
+    # "initdb: invalid option -- 'c'". Set it on the server command instead.
+    # NOTE: overriding `command` drops the image's default listen_addresses,
+    # so it must be set here or peer containers get "connection refused".
+    command: >-
+      postgres
+      -c listen_addresses=*
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c shared_preload_libraries=pg_stat_statements
+    volumes:
+      - /srv/supabase-data/postgres:/var/lib/postgresql/data
+      # Named zz-* so it runs AFTER the image's bundled init-scripts/ (which
+      # create the anon/authenticated/service_role roles + auth helpers).
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/zz-app-init.sql:ro
+    environment:
+      <<: *common-db-env
+    # Published on loopback only (default 54322 to avoid a host-native pg on
+    # 5432). Nothing here is public; inter-service traffic uses the docker net.
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-54322}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  auth:
+    image: supabase/gotrue:v2.119.0
+    container_name: supabase_auth
+    cgroup_parent: supabase.slice  # MemoryMax=4G guard; systemd-run on compose does NOT reach containers
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: "0.0.0.0"
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: "https://api.playsmuggler.com"
+      GOTRUE_DB_DRIVER: "postgres"
+      GOTRUE_DB_DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres?sslmode=disable&search_path=auth"
+      GOTRUE_SITE_URL: "https://api.playsmuggler.com"
+      GOTRUE_URI_ALLOW_LIST: "https://api.playsmuggler.com,https://api.postsub.io,https://api.mytrove.app,https://api.sendpov.xyz"
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_SECRET: "${JWT_SECRET}"
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_AUD: "authenticated"
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
+      GOTRUE_JWT_ADMIN_ROLES: "service_role"
+      GOTRUE_PASSWORD_MIN_LENGTH: "8"
+      # No SMTP on this box yet: auto-confirm email signups (dev data; revisit before real users).
+      GOTRUE_MAILER_AUTOCONFIRM: "${GOTRUE_MAILER_AUTOCONFIRM:-true}"
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: "true"
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID}"
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: "${GOOGLE_CLIENT_SECRET}"
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: "https://api.playsmuggler.com/auth/v1/callback"
+    ports:
+      - "127.0.0.1:9999:9999"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  rest:
+    image: postgrest/postgrest:v11.2.0
+    container_name: supabase_rest
+    cgroup_parent: supabase.slice  # MemoryMax=4G guard; systemd-run on compose does NOT reach containers
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: "postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres"
+      PGRST_DB_SCHEMAS: "public,smuggler,postsub,trove_web,pov_video"
+      PGRST_DB_ANON_ROLE: "anon"
+      PGRST_JWT_SECRET: "${JWT_SECRET}"
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_MAX_ROWS: "1000"
+    ports:
+      - "127.0.0.1:${REST_HOST_PORT:-54321}:3000"
+
+  storage:
+    image: supabase/storage-api:v0.46.4
+    container_name: supabase_storage
+    cgroup_parent: supabase.slice  # MemoryMax=4G guard; systemd-run on compose does NOT reach containers
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    volumes:
+      - /srv/supabase-data/storage:/var/lib/storage
+    environment:
+      ANON_KEY: "${SUPABASE_ANON_KEY}"
+      SERVICE_KEY: "${SUPABASE_SERVICE_ROLE_KEY}"
+      POSTGREST_URL: "http://rest:3000"
+      PGRST_JWT_SECRET: "${JWT_SECRET}"
+      DATABASE_URL: "postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres"
+      FILE_SIZE_LIMIT: "52428800"
+      STORAGE_BACKEND: "file"
+      FILE_STORAGE_BACKEND_PATH: "/var/lib/storage"
+      TENANT_ID: "default"
+      REGION: "default"
+      GLOBAL_S3_BUCKET: "default"
+    ports:
+      - "127.0.0.1:5000:5000"
+
+  studio:
+    image: supabase/studio:latest
+    container_name: supabase_studio
+    cgroup_parent: supabase.slice  # MemoryMax=4G guard; systemd-run on compose does NOT reach containers
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Tailnet-only: bind to the host's tailscale IP (STUDIO_BIND_ADDR in the
+    # env file), NOT 0.0.0.0. Falls back to loopback if unset.
+    ports:
+      - "${STUDIO_BIND_ADDR:-127.0.0.1}:${STUDIO_HOST_PORT:-8000}:3000"
+    environment:
+      STUDIO_PG_META_URL: "http://meta:8080"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      DEFAULT_ORGANIZATION_NAME: "cuphead"
+      SUPABASE_URL: "http://rest:3000"
+      SUPABASE_PUBLIC_URL: "https://api.playsmuggler.com"
+      SUPABASE_ANON_KEY: "${SUPABASE_ANON_KEY}"
+      SUPABASE_SERVICE_ROLE_KEY: "${SUPABASE_SERVICE_ROLE_KEY}"
+    # The image's built-in healthcheck targets /api/platform/profile, a route
+    # that studio:latest (Next.js 16) no longer serves with 200. A liveness
+    # check on the root (which 307-redirects) is the reliable signal here.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://'+require('os').hostname()+':3000/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  meta:
+    image: supabase/postgres-meta:v0.68.0
+    container_name: supabase_meta
+    cgroup_parent: supabase.slice  # MemoryMax=4G guard; systemd-run on compose does NOT reach containers
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: "8080"
+      PG_META_DB_HOST: "postgres"
+      PG_META_DB_PORT: "5432"
+      PG_META_DB_NAME: "postgres"
+      PG_META_DB_USER: "postgres"
+      PG_META_DB_PASSWORD: "${POSTGRES_PASSWORD}"
+
+  imgproxy:
+    image: darthsim/imgproxy:v3.8.0
+    container_name: supabase_imgproxy
+    cgroup_parent: supabase.slice  # MemoryMax=4G guard; systemd-run on compose does NOT reach containers
+    restart: unless-stopped
+    volumes:
+      - /srv/supabase-data/storage:/var/lib/storage:ro
+    environment:
+      IMGPROXY_BIND: ":8080"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: "/var/lib/storage"
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_ENABLE_WEBP_DETECTION: "true"
+    ports:
+      - "127.0.0.1:8080:8080"
+
+networks:
+  default:
+    name: supabase_default

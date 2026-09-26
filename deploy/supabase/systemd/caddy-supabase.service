@@ -1,0 +1,19 @@
+[Unit]
+Description=Caddy TLS front door for the Supabase API hosts
+After=network-online.target supabase-stack.service
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+Environment=XDG_DATA_HOME=/var/lib/caddy-supabase XDG_CONFIG_HOME=/var/lib/caddy-supabase
+StateDirectory=caddy-supabase
+ExecStart=/usr/bin/caddy run --config /opt/supabase/Caddyfile --adapter caddyfile
+ExecReload=/usr/bin/caddy reload --config /opt/supabase/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

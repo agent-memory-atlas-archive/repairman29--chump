@@ -176,6 +176,7 @@ jobs:
               - 'config/**'
               - 'content/**'
               - 'docker/**'
+              - 'deploy/**'
               - 'e2e/**'
               - 'e2e-tauri/**'
               - 'examples/**'
