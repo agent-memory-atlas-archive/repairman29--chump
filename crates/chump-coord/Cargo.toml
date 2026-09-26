@@ -37,6 +37,7 @@ anyhow      = "1.0"
 async-nats  = "0.50"
 async-trait = "0.1"
 bytes       = "1"
+chump-agent-lease = { path = "../chump-agent-lease", version = "0.3.0" }
 chrono      = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 futures     = "0.3"
 serde       = { version = "1", features = ["derive"] }

@@ -1443,7 +1443,9 @@ name = "chump-agent-lease"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "async-nats",
  "chrono",
+ "rusqlite",
  "serde",
  "serde_json",
  "serial_test",
@@ -1536,6 +1538,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "chump-agent-lease",
  "chump-ambient-cli",
  "chump-gap-store",
  "futures",
@@ -1677,6 +1680,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "chump-agent-lease",
  "glob",
  "rusqlite",
  "serde",

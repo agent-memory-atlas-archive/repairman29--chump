@@ -87,6 +87,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+pub mod store;
+pub use store::{LeaseRecord, LeaseStore};
+
 /// Default lease TTL: 30 minutes.
 pub const DEFAULT_TTL_SECS: u64 = 30 * 60;
 /// Hard cap on lease TTL: 4 hours. Longer leases become stale before they expire.

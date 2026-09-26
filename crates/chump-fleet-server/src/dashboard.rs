@@ -721,4 +721,45 @@ mod tests {
              the canonical fixture count"
         );
     }
+
+    /// EFFECTIVE-1134: exercises the unified `chump_agent_lease::LeaseStore`
+    /// abstraction end-to-end against its SQLite back-end, proving the
+    /// dashboard crate can depend on the shared lease CRUD surface rather
+    /// than rolling its own.
+    #[test]
+    fn lease_store_crud() {
+        use chump_agent_lease::store::sqlite::SqliteLeaseStore;
+        use chump_agent_lease::{LeaseRecord, LeaseStore};
+
+        let store = SqliteLeaseStore::open(":memory:").expect("open in-memory lease store");
+        let record = LeaseRecord {
+            id: "EFFECTIVE-1134".to_string(),
+            session_id: "dashboard-test-session".to_string(),
+            paths: vec!["crates/chump-fleet-server/src/dashboard.rs".to_string()],
+            expires_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        store.create(&record).expect("create");
+        assert_eq!(
+            store.read(&record.id).expect("read after create"),
+            Some(record.clone()),
+            "read must return exactly what was created"
+        );
+
+        let mut updated = record.clone();
+        updated.session_id = "dashboard-test-session-2".to_string();
+        store.update(&updated).expect("update");
+        assert_eq!(
+            store.read(&record.id).expect("read after update"),
+            Some(updated),
+            "read must reflect the updated session_id"
+        );
+
+        store.delete(&record.id).expect("delete");
+        assert_eq!(
+            store.read(&record.id).expect("read after delete"),
+            None,
+            "read must return None after delete"
+        );
+    }
 }

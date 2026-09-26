@@ -1398,6 +1398,71 @@ ENVIRONMENT
             }
         }
 
+        // ── lease-store (EFFECTIVE-1134) ────────────────────────────────────────
+        // CRUD over a lease record via the unified chump_agent_lease::LeaseStore
+        // abstraction, backed by SQLite. Exercises the Store trait from a real
+        // CLI entry point rather than only from tests.
+        "lease-store" => {
+            use chump_agent_lease::store::sqlite::SqliteLeaseStore;
+            use chump_agent_lease::{LeaseRecord, LeaseStore};
+
+            let db_path = args.get(2).map(|s| s.as_str()).unwrap_or_else(|| {
+                eprintln!(
+                    "Usage: chump-coord lease-store <db-path> <create|read|update|delete> <id> [session_id] [paths_csv] [expires_at]"
+                );
+                std::process::exit(2);
+            });
+            let sub = args.get(3).map(|s| s.as_str()).unwrap_or("");
+            let id = args.get(4).map(|s| s.as_str()).unwrap_or_else(|| {
+                eprintln!("Usage: chump-coord lease-store <db-path> {} <id> ...", sub);
+                std::process::exit(2);
+            });
+
+            let store = SqliteLeaseStore::open(db_path)?;
+            match sub {
+                "create" | "update" => {
+                    let sess = args.get(5).cloned().unwrap_or_else(session_id);
+                    let paths: Vec<String> = args
+                        .get(6)
+                        .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
+                        .unwrap_or_default();
+                    let expires_at = args
+                        .get(7)
+                        .cloned()
+                        .unwrap_or_else(|| chump_agent_lease::now_rfc3339());
+                    let record = LeaseRecord {
+                        id: id.to_string(),
+                        session_id: sess,
+                        paths,
+                        expires_at,
+                    };
+                    if sub == "create" {
+                        store.create(&record)?;
+                    } else {
+                        store.update(&record)?;
+                    }
+                    println!("{}", serde_json::to_string(&record)?);
+                }
+                "read" => match store.read(id)? {
+                    Some(record) => println!("{}", serde_json::to_string(&record)?),
+                    None => {
+                        eprintln!("[chump-coord] lease-store: no record for id={}", id);
+                        std::process::exit(1);
+                    }
+                },
+                "delete" => {
+                    store.delete(id)?;
+                }
+                other => {
+                    eprintln!(
+                        "Usage: chump-coord lease-store <db-path> <create|read|update|delete> <id> ... (got {:?})",
+                        other
+                    );
+                    std::process::exit(2);
+                }
+            }
+        }
+
         // ── help / default ────────────────────────────────────────────────────
         _ => {
             eprintln!(
