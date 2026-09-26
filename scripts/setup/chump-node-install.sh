@@ -959,58 +959,8 @@ reconcile_role_organs() {
 #     self-excludes it) and scopes ITS recurring reconcile to this node's role
 #     via a drop-in, so the timer-driven self-heal converges to the role roster
 #     instead of the whole manifest (which would re-add out-of-role organs).
-# Systemd hosts only; needs root to write /etc/systemd/system (warns + skips
-# non-root, non-fatal — reconcile_role_organs degrades the same way).
-# RESILIENT-1097: break the chicken-and-egg that left ~18 manifest organs
-# un-installable on cuphead. place_role_unit_files() below needs root to
-# write /etc/systemd/system and skips ENTIRELY when the install ran as a
-# non-root user; reconcile_role_organs() (organ-reconcile.sh) also runs as
-# that same non-root user and can only `enable --now` a unit that already
-# has a file on disk, so every role-matched organ backs off forever
-# ("WARN could not enable --now ... +7 more"). chump-organ-deploy.timer
-# (RESILIENT-374, User=root) is the ONE organ built to break exactly this:
-# once it is armed, its OWN root-run cycles call install-helsinki-atc.sh
-# --auto AS ROOT and place the REST of the role roster. So bootstrapping
-# just this one keystone unit via `sudo` (when available) unsticks the
-# whole roster on the very next timer tick — reproducible on any fresh box,
-# no hand-run installer, no full-root re-install required.
-bootstrap_organ_deploy_via_sudo() {
-  local repo="$1" lib_manifest="$2" lib_unit="$3" dispatch="$4"
-  # chump-organ-deploy.timer is role=janitor in the manifest — only brain/all
-  # role-filters include janitor (organ_role_filter), so a muscle-only node
-  # has no business installing it.
-  case "$ROLE" in brain|all) ;; *) return 0;; esac
-  command -v sudo >/dev/null 2>&1 || {
-    info ORGANS "no sudo on PATH — cannot bootstrap chump-organ-deploy.timer, role roster will stay dark until a root install"
-    return 0
-  }
-  if ! sudo -n true 2>/dev/null; then
-    info ORGANS "no passwordless sudo for $(whoami 2>/dev/null || id -un) — cannot bootstrap chump-organ-deploy.timer; grant NOPASSWD sudo for systemctl/install, or run install as root once"
-    return 0
-  fi
-  # shellcheck source=/dev/null
-  . "$lib_manifest"; . "$lib_unit"
-  local run_user run_home; run_user="$(organ_unit_run_user "$repo")"; run_home="$(organ_unit_run_home "$run_user")"
-  local dest_dir="${CHUMP_NODE_INSTALL_SYSTEMD_DIR:-/etc/systemd/system}"
-  local tmp; tmp="$(mktemp -d)"
-  local placed=0 f
-  for f in chump-organ-deploy.service chump-organ-deploy.timer; do
-    [ -f "$dispatch/$f" ] || continue
-    if organ_unit_host_rewrite "$dispatch/$f" "$tmp/$f" "$run_user" "$run_home" 1 "$repo" \
-        && sudo mkdir -p "$dest_dir" \
-        && sudo install -m 644 "$tmp/$f" "$dest_dir/$f"; then
-      placed=$((placed + 1))
-    fi
-  done
-  rm -rf "$tmp"
-  if [ "$placed" -gt 0 ]; then
-    sudo systemctl daemon-reload 2>/dev/null || true
-    sudo systemctl enable --now chump-organ-deploy.timer 2>/dev/null || true
-    ok "bootstrapped chump-organ-deploy.timer via sudo ($placed unit file(s) placed) — its own root cycle will place the rest of the role roster"
-  else
-    info ORGANS "chump-organ-deploy unit files not found under $dispatch — cannot bootstrap"
-  fi
-}
+# Systemd hosts only; writes into the invoking user's systemd --user unit dir
+# (INFRA-7895, INFRA-7757 slice) — no root required, no sudo bootstrap dance.
 place_role_unit_files() {
   [ "${HOST_KIND:-}" = "linux-systemd" ] || { info ORGANS "unit-file placement is systemd-only (host=${HOST_KIND:-unset}) — skipping"; return 0; }
   local repo="$NODE_DIR/repo"
@@ -1022,19 +972,16 @@ place_role_unit_files() {
     info ORGANS "manifest/libs not found under $repo — skipping unit-file placement"
     return 0
   fi
-  if [ "$(id -u)" != "0" ] && [ "${CHUMP_NODE_INSTALL_ALLOW_NONROOT_PLACE:-0}" != "1" ]; then
-    bootstrap_organ_deploy_via_sudo "$repo" "$lib_manifest" "$lib_unit" "$dispatch"
-    no "unit-file placement needs root to write /etc/systemd/system — skipping (re-run install as root/sudo)"
-    return 0
-  fi
-  if [ "$DRY" = 1 ]; then echo "  DRY: place role-matched manifest unit files (role=$ROLE) into /etc/systemd/system"; return 0; fi
+  if [ "$DRY" = 1 ]; then echo "  DRY: place role-matched manifest unit files (role=$ROLE) into \$HOME/.config/systemd/user"; return 0; fi
 
   # shellcheck source=/dev/null
   . "$lib_manifest"; . "$lib_unit"
   local run_user run_home; run_user="$(organ_unit_run_user "$repo")"; run_home="$(organ_unit_run_home "$run_user")"
-  local dest_dir="${CHUMP_NODE_INSTALL_SYSTEMD_DIR:-/etc/systemd/system}"
+  # INFRA-7895 (INFRA-7757 slice): unconditionally place into the invoking
+  # user's systemd --user unit dir — no root/UID check, no sudo bootstrap.
+  local dest_dir="${CHUMP_NODE_INSTALL_SYSTEMD_DIR:-$HOME/.config/systemd/user}"
   mkdir -p "$dest_dir"
-  info ORGANS "placing role-matched manifest unit files (role=$ROLE, user=$run_user, home=$run_home)"
+  info ORGANS "placing role-matched manifest unit files (role=$ROLE, user=$run_user, home=$run_home, dest=$dest_dir)"
 
   # Make `chump` resolvable on the organs' injected PATH ($RUN_HOME/.cargo/bin).
   if [ -x "$BIN" ]; then
@@ -1090,7 +1037,7 @@ place_role_unit_files() {
     fi
   done
 
-  systemctl daemon-reload 2>/dev/null || true
+  systemctl --user daemon-reload 2>/dev/null || true
 
   # Scope the recurring organ-reconcile timer to THIS node's role (unless --role
   # all) so the timer-driven self-heal converges to the role roster, not the
@@ -1104,7 +1051,7 @@ place_role_unit_files() {
 [Service]
 Environment=CHUMP_ORGAN_RECONCILE_ROLE=$rf
 EOF
-    systemctl daemon-reload 2>/dev/null || true
+    systemctl --user daemon-reload 2>/dev/null || true
   elif [ "$ROLE" = all ]; then
     # RESILIENT-1446: a sole hub (--role all) runs the WHOLE manifest — an empty
     # role-filter makes organ-reconcile enable every organ and reap NOTHING. A
@@ -1116,14 +1063,19 @@ EOF
     # the old scope with no hand-edit.
     if [ -f "$dest_dir/chump-organ-reconcile.service.d/zz-node-role.conf" ]; then
       rm -f "$dest_dir/chump-organ-reconcile.service.d/zz-node-role.conf"
-      systemctl daemon-reload 2>/dev/null || true
+      systemctl --user daemon-reload 2>/dev/null || true
       info ORGANS "role=all: removed stale zz-node-role.conf so the recurring reconcile runs the whole manifest and reaps nothing (RESILIENT-1446)"
     fi
   fi
 
-  # Arm the reconcile beat itself (not a manifest 'enabled' line, so
-  # reconcile_role_organs won't enable it).
-  [ -f "$dest_dir/chump-organ-reconcile.timer" ] && systemctl enable --now chump-organ-reconcile.timer 2>/dev/null || true
+  # INFRA-7895 (INFRA-7757 slice): arm every unit-file just placed, not only
+  # the reconcile beat — reconcile_role_organs (organ-reconcile.sh) still
+  # converges the full manifest afterward, but placement no longer leaves a
+  # freshly-copied unit dark until that separate pass runs.
+  local pf
+  for pf in "${placed[@]}"; do
+    systemctl --user enable --now "$pf" 2>/dev/null || true
+  done
 
   ok "placed ${#placed[@]} role-matched unit file(s): ${placed[*]:-none}"
   [ "${#skipped_nofile[@]}" -gt 0 ] && info ORGANS "role-matched but no tracked file (skipped, guarded by requires=file:): ${skipped_nofile[*]}"
