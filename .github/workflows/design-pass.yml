@@ -1,0 +1,39 @@
+name: Design pass
+
+# EFFECTIVE-1159 (EFFECTIVE-358 slice): a design-pass stage for user-facing
+# (web/**) changes. Today this is a stub — it does not yet have a design-spec
+# artifact contract to check against (no producer exists yet), so it always
+# reports success and logs that it is waiting on one. A later EFFECTIVE-358
+# slice wires in the real spec-diff check once a design-spec artifact format
+# is chosen.
+#
+# Triggered independently of ci.yml: runs on its own on push/pull_request for
+# web/** paths, and can be fired standalone via workflow_dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'ChumpMenu/**'
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'ChumpMenu/**'
+  workflow_dispatch: {}
+
+concurrency:
+  group: design-pass-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  design-pass:
+    name: design-pass
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Design-pass check
+        run: |
+          echo "design-pass: stage active for user-facing (web/**) changes"
+          echo "design-pass: awaiting design spec artifact — no producer wired up yet (EFFECTIVE-358)"
+          echo "design-pass: stub check — reporting success until a design-spec artifact contract exists"

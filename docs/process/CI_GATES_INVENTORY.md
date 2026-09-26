@@ -129,6 +129,7 @@ Documented for completeness; do **not** file follow-ups.
 | `test-review-handoff-smoke.sh` | INFRA-3383 — INFRA-774 end-to-end smoke (synthesizes a CI failure + simulates `review --serve` + telemetry assertions); needs the full CI fixture env |
 | `test-rollup-semantic.sh` | INFRA-3383 — unconditionally runs `cargo test --bin chump rollup_cmd` when `cargo` is available; too slow for the preflight fast loop |
 | `test-research-026-preflight.sh` | INFRA-3383 — eval harness preflight; requires `scripts/eval/` setup not present in a bare preflight run |
+| `Design-pass check` | EFFECTIVE-1159 (design-pass.yml) — stub gate for the new design-pass CI stage; its only step is two `echo` lines that always exit 0 (no design-spec artifact contract exists yet, per EFFECTIVE-358). Nothing to mirror locally until the real check lands; RESILIENT-586 auto-recognition doesn't fire because `get_added_jobs_from_diff` diffs `HEAD` (always empty in a clean CI checkout) instead of the merge-base — separate bug, filed rather than fixed here. |
 
 ## Required-vs-advisory disposition decisions
 
