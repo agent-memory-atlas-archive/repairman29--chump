@@ -2,7 +2,7 @@
   domain: PRODUCT
   title: "[gcp-exit] Complete Firestore document export + Storage bucket copy for PRODUCT-303 projects once billing reopens"
   status: open
-  priority: P2
+  priority: P3
   effort: s
   description: |
     Remainder of PRODUCT-303: with the Firebase/GCP billing account closed (ASK-021), the 2026-09-26
@@ -22,16 +22,16 @@
     workbench-tam-app — the only 4 projects with password-auth users — since that's not exposed by any
     API and today's auth:export JSON has passwordHash+salt but no algorithm params to verify them with.
   acceptance_criteria:
-    1. Firestore document export exists on owned storage for trove-web, echeo-vid, fulcrum-41e50 with per-collection document counts recorded in workspace-docs/GCP_EXIT.md
-    2. Storage bucket copy exists on owned storage for trove-web (305 objects) and echeo-vid (889 objects across 2 buckets), object counts on disk verified to match
-    3. Password hash parameters recorded (or the exact operator ask restated if still missing) for peakvinyl, echeo-vid, fulcrum-41e50, workbench-tam-app
-    4. Exports verified readable (one sample doc per collection re-parsed); no project deleted, no data mutated
-  depends_on: []
+    - Firestore document export exists on owned storage for trove-web, echeo-vid, fulcrum-41e50 with per-collection document counts recorded in workspace-docs/GCP_EXIT.md
+    - Storage bucket copy exists on owned storage for trove-web (305 objects) and echeo-vid (889 objects across 2 buckets), object counts on disk verified to match
+    - Password hash parameters recorded (or the exact operator ask restated if still missing) for peakvinyl, echeo-vid, fulcrum-41e50, workbench-tam-app
+    - Exports verified readable (one sample doc per collection re-parsed); no project deleted, no data mutated
   notes: |
-    FILED 2026-09-26 (PRODUCT-303 follow-up, cuphead session): everything in this gap is blocked on
+    PARKED 2026-09-26 (Jeff): mostly development data; Google billing stays closed. Do not pick until Jeff reopens billing (ASK-021) and un-parks. FILED 2026-09-26 (PRODUCT-303 follow-up, cuphead session): everything in this gap is blocked on
     Jeff reopening the Firebase/GCP billing account (ASK-021) — do not pick this up until that's
     confirmed. Password hash params are a separate, non-billing-gated Jeff-only browser step and can
     be done independently. See workspace-docs/GCP_EXIT.md "2026-09-26 — PRODUCT-303 export ledger" for
     full context (exact bucket names, object counts, what's already exported). Read-only gap: never
     delete or mutate a project. preferred_machine: cuphead (same auth/CLI setup as PRODUCT-303).
   preferred_machine: cuphead
+

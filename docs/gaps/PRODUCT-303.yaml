@@ -1,7 +1,7 @@
 - id: PRODUCT-303
   domain: PRODUCT
   title: "[gcp-exit] Export all live Firebase/GCP data (peakvinyl, trove-web, echeo-vid, fulcrum-41e50, smuggler) to owned storage before billing wind-down"
-  status: open
+  status: done
   priority: P1
   effort: s
   description: |
@@ -13,7 +13,7 @@
     - No project deleted and no data mutated by this gap
   notes: |
     DISPATCH (Jeff 2026-09-26): run ON cuphead (ubuntu@cuphead, tailnet; 116 GB free, always on). Exports land under /srv/gcp-export/<project>/ on cuphead, then a second copy is rsync'd to CJ (off Oracle). The Mac is not used. The pull picker does not enforce preferred_machine yet, so a worker on any other node that picks this must release it (chump claim --discard-wip). Operator-only prerequisites (a worker cannot do these; check first and page with the exact ask if missing): (1) reopen the Firebase/GCP billing account (ASK-021): Firestore managed export needs billing enabled; (2) authenticate the CLIs on cuphead as jeffadkins1: 'gcloud auth login --no-launch-browser' and 'firebase login --no-localhost' (browser step only Jeff can complete), or drop one service-account key per project into ~/.chump/gcp/ (chmod 600, never in git). Without billing, still do what works: firebase auth:export (no billing needed) and gsutil copies of Storage buckets, then record Firestore as blocked-on-billing in the ledger. Read-only gap: never delete or mutate a project.
-
+    
     DONE 2026-09-26 (cuphead, this session): CLIs already authenticated as jeffadkins1 (prereq 2 was
     complete). Prereq 1 (billing) was still NOT done, and turned out to gate more than expected —
     Storage bucket *downloads* need billing too (`gcloud storage cp` → 403 BILLING_DISABLED), not just
@@ -29,5 +29,8 @@
     fulcrum-41e50, and the Firebase-console-only password hash params for the 4 password-auth
     projects) is tracked in PRODUCT-310 and blocked on the same ASK-021 billing reopen. No project
     deleted or mutated.
+    [2026-09-26] CLOSED (Jeff: dev data). Shipped in #4880: Auth exports for all live projects (the only hard-to-recreate data) on cuphead /srv/gcp-export/, ledger in workspace-docs/GCP_EXIT.md. Firestore docs + Storage objects are billing-gated and PARKED as PRODUCT-310 (P3).
+  closed_date: '2026-09-26'
+  closed_pr: 4880
   preferred_machine: cuphead
 

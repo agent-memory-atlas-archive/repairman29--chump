@@ -2,7 +2,7 @@
   domain: PRODUCT
   title: "[gcp-exit] Wind down GCP: archive idle apps, delete emptied projects, keep auth-only OAuth project, close billing"
   status: open
-  priority: P2
+  priority: P3
   effort: m
   description: |
     Final step of workspace-docs/GCP_EXIT.md after PRODUCT-304..308 ship. Tier 2/3: export-then-archive workbench, kosmos (lifeos-dev, lifeos-family-os), mythseeker/mythseeker2 (mythseekers-rpg), smugglers, code-roach, oracle, project-forge, payment-platform-service; confirm echeo-workplatform Cloud Run services on echeodev are idle, then delete echeodev. Small swaps: roblox-game-manager Secret Manager to env vars; decide once whether Gemini stays in the fleet provider list (ai-gm-service, echeo-web, wear-sentinel-suite, jarvis-gateway, chump rate tables). DO NOT delete slidemate-1568: it holds Olive's and SlideMate's Google OAuth clients (ASK-049); move SlideMate hosting/functions to Vercel and keep that project auth-only. Project deletion and billing closure are operator actions (irreversible).
@@ -12,4 +12,6 @@
     - No repo in the fleet still depends on Firestore, Firebase Hosting, Cloud Functions, Cloud Run or Secret Manager (re-run the GCP_EXIT scan)
     - Billing account closed with a zero balance, recorded in GCP_EXIT.md and ASK-021 closed
   depends_on: [PRODUCT-304, PRODUCT-305, PRODUCT-306, PRODUCT-307, PRODUCT-308]
+  notes: |
+    PARKED 2026-09-26 (Jeff): mostly development data; Google billing stays closed. Do not pick until Jeff reopens billing (ASK-021) and un-parks. Wind-down needs billing closure + irreversible project deletions (Jeff-only). 
 

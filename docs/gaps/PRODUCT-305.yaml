@@ -11,8 +11,9 @@
     - Socket session handler verifies Supabase JWTs; firebase-admin removed from package.json
     - No GOOGLE_APPLICATION_CREDENTIALS / service-account JSON referenced anywhere in the repo
     - playsmuggler.com login + session flow verified on a preview deploy
-  depends_on: [PRODUCT-303, RESILIENT-314]
+  depends_on: [RESILIENT-314]
   notes: |
     DISPATCH (Jeff 2026-09-26): P1, queued behind its depends_on. Do not start until every dependency is done: the PRODUCT-303 export ledger must exist in workspace-docs/GCP_EXIT.md, because migration row counts are verified against it. Also needs RESILIENT-314 done (the cuphead Supabase stack is live, with its URL + keys in ~/.chump/providers.env on cuphead). Any node may do the code work; the app points at the cuphead stack by env vars (Vercel env), never with hard-coded hosts. The DNS cutover of the public domain happens only after a green preview deploy.
+    [2026-09-26] UNBLOCKED from PRODUCT-303 (Jeff: dev data). Build fresh schemas from the app code; import only the Auth users from /srv/gcp-export/<project>/auth/ on cuphead. Firestore/Storage content is NOT required (billing-gated, parked in PRODUCT-310); row-count parity ACs apply only to the Auth user count. Password-hash params are skipped: dev users reset passwords.
   skills_required: "external_repo:repairman29/smuggler"
 

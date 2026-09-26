@@ -12,8 +12,8 @@
     - RLS enforces the same member/admin access as firestore.rules (tests for member, admin, anon)
     - Keep-alive cron is live and the project has not paused over 8 days; a nightly backup exists off Supabase (OCI Object Storage + CJ) and one restore is proven
     - No firebase or firebase-admin import remains in website/ or functions/; production peakvinyl.club runs on Supabase
-  depends_on: [PRODUCT-303]
   notes: |
     DISPATCH (Jeff 2026-09-26): P1, queued behind its depends_on. Do not start until every dependency is done: the PRODUCT-303 export ledger must exist in workspace-docs/GCP_EXIT.md, because migration row counts are verified against it. Operator-only prerequisite: free the second Supabase free-tier slot. Jeff exports, then deletes, the paused 'Echeo' project (mgeydloygmoiypnwaqmn); that is irreversible and a worker must not do it. If the slot is not free, page with that exact ask and stop. Any node may do the code work (repo: repairman29/pvc).
+    [2026-09-26] UNBLOCKED from PRODUCT-303 (Jeff: dev data). Build fresh schemas from the app code; import only the Auth users from /srv/gcp-export/<project>/auth/ on cuphead. Firestore/Storage content is NOT required (billing-gated, parked in PRODUCT-310); row-count parity ACs apply only to the Auth user count. Password-hash params are skipped: dev users reset passwords.
   skills_required: "external_repo:repairman29/pvc"
 
