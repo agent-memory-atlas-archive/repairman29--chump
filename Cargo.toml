@@ -51,6 +51,7 @@ members = [
     "crates/chump-cron",
     "crates/chump-storage",
     "crates/chump-comprehension-organ",
+    "crates/chump-idea-drop",
 ]
 resolver = "2"
 

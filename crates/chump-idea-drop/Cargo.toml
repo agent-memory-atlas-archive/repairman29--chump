@@ -1,0 +1,22 @@
+[package]
+name = "chump-idea-drop"
+version = "0.1.0"
+edition = "2021"
+description = "Persisted model for dropped ideas — EFFECTIVE-392 slice (EFFECTIVE-1291)."
+repository = "https://github.com/repairman29/chump"
+homepage = "https://github.com/repairman29/chump/tree/main/crates/chump-idea-drop"
+license = "AGPL-3.0-only"
+
+[lib]
+name = "chump_idea_drop"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
