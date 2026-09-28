@@ -1999,6 +1999,13 @@ pub struct VisionIntakeInput {
 /// struggling, what the struggling moment looks like, and what signal tells
 /// them the struggle is over. Optional on [`VisionIntakeOutput`] (`#[serde(default)]`)
 /// so payloads produced before this slice still deserialize (AC3).
+///
+/// EFFECTIVE-1457 (EFFECTIVE-443 slice): this is the canonical `who` /
+/// `struggling_moment` / `done_signal` triple for the EFFECTIVE intake data
+/// model — [`VisionIntakeOutput::jtbd`] and
+/// `chump_gap_store::Outcome::jtbd_who` /
+/// `jtbd_struggling_moment` / `jtbd_done_signal` both round-trip these three
+/// fields verbatim, so there is exactly one shape to keep in sync.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct JtbdSummary {
     /// Plain-language description of who is struggling (the "who" in JTBD).
