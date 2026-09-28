@@ -5,4 +5,5 @@
 //! existing `preflight::run(..)` callers stay unchanged.
 
 pub mod artifact_gates;
+pub mod file_test_map;
 pub mod preflight;
