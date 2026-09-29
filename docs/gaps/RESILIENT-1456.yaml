@@ -1,0 +1,13 @@
+- id: RESILIENT-1456
+  domain: RESILIENT
+  title: "RESILIENT: opencode dispatch backend still passes the work prompt as argv (claude arm fixed by INFRA-3675)"
+  status: open
+  priority: P2
+  effort: s
+  description: |
+    src/dispatch.rs spawn_opencode (~line 464) builds 'opencode -p <prompt> --auto-approve', passing the whole work prompt as a positional argv. The same pattern killed the claude headless backend: a prompt whose first line is YAML frontmatter ('---') is parsed as a CLI option and the child exits instantly, and huge briefings can hit ARG_MAX. The claude arm was fixed by INFRA-3675 (#4169, prompt via stdin in spawn_headless). Fix direction: pipe the prompt to opencode via stdin (or a temp file flag if opencode lacks stdin support), mirroring spawn_headless; audit any other WorkBackend arm that still passes prompts as argv. Provenance: re-homed 2026-09-29 from a local-only state.db row that collided with the committed RESILIENT-314 (cuphead Supabase); that row's claude-arm half is already fixed.
+  acceptance_criteria:
+    - spawn_opencode no longer passes the prompt as argv (stdin or file), verified with a prompt that starts with '---' and one larger than 256 KB
+    - Every WorkBackend arm in src/dispatch.rs is audited; any other argv-prompt arm is fixed the same way
+    - A unit or CI test fails if a backend passes the prompt as a positional arg
+
