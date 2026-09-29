@@ -21,6 +21,10 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0.118", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
+# EFFECTIVE-1298: maintenance::enricher's OpenRouter model-metadata fetch
+# (GET https://openrouter.ai/api/v1/models). json + rustls-tls only, no
+# blocking client — the fetch runs on the crate's existing tokio runtime.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # INFRA-2092: optional Postgres backend slice — only compiled under the
 # `postgres-backend` feature. SQLite (rusqlite, above) stays the default.
 postgres = { version = "0.19", optional = true }

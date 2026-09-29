@@ -759,7 +759,137 @@ impl GapStore {
             ",
         );
 
+        // EFFECTIVE-1298 (EFFECTIVE-409 slice): OpenRouter model metadata index,
+        // enriched by maintenance::enricher::fetch_and_store_openrouter_models.
+        // Keyed by OpenRouter model id so a refresh UPSERTs existing rows
+        // in place rather than dropping/recreating the table.
+        let _ = self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS openrouter_model_metadata (
+                model_id                TEXT PRIMARY KEY,
+                context_length          INTEGER NOT NULL DEFAULT 0,
+                pricing_json            TEXT NOT NULL DEFAULT '{}',
+                per_request_limits_json TEXT NOT NULL DEFAULT '{}',
+                expiration_date         TEXT NOT NULL DEFAULT '',
+                knowledge_cutoff        TEXT NOT NULL DEFAULT '',
+                architecture_json       TEXT NOT NULL DEFAULT '{}',
+                reasoning_json          TEXT NOT NULL DEFAULT '{}',
+                supported_parameters_json TEXT NOT NULL DEFAULT '[]',
+                updated_at              INTEGER NOT NULL DEFAULT 0
+             );
+            ",
+        );
+
         Ok(())
+    }
+}
+
+/// One OpenRouter `/v1/models` entry, trimmed to the fields EFFECTIVE-409
+/// (inference tender) consumes: context/pricing/limits for routing, plus
+/// expiration/knowledge_cutoff/architecture/reasoning/supported_parameters
+/// for capability + deprecation checks. See
+/// `maintenance::enricher::fetch_and_store_openrouter_models`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct OpenRouterModel {
+    pub id: String,
+    #[serde(default)]
+    pub context_length: i64,
+    #[serde(default)]
+    pub pricing: serde_json::Value,
+    #[serde(default)]
+    pub per_request_limits: serde_json::Value,
+    #[serde(default)]
+    pub expiration_date: String,
+    #[serde(default)]
+    pub knowledge_cutoff: String,
+    #[serde(default)]
+    pub architecture: serde_json::Value,
+    #[serde(default)]
+    pub reasoning: serde_json::Value,
+    #[serde(default)]
+    pub supported_parameters: Vec<String>,
+}
+
+impl GapStore {
+    /// EFFECTIVE-1298: mutate the `openrouter_model_metadata` index in place —
+    /// one `INSERT ... ON CONFLICT DO UPDATE` per model, keyed by `model_id`.
+    /// Never drops or recreates the table, so a partial/incremental refresh
+    /// never loses rows for models absent from `models` (e.g. a filtered
+    /// re-fetch). Returns the number of rows upserted.
+    pub fn upsert_openrouter_model_metadata(&self, models: &[OpenRouterModel]) -> Result<usize> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let mut count = 0usize;
+        for m in models {
+            let pricing_json = serde_json::to_string(&m.pricing)?;
+            let limits_json = serde_json::to_string(&m.per_request_limits)?;
+            let architecture_json = serde_json::to_string(&m.architecture)?;
+            let reasoning_json = serde_json::to_string(&m.reasoning)?;
+            let supported_parameters_json = serde_json::to_string(&m.supported_parameters)?;
+            self.conn.execute(
+                "INSERT INTO openrouter_model_metadata
+                    (model_id, context_length, pricing_json, per_request_limits_json,
+                     expiration_date, knowledge_cutoff, architecture_json, reasoning_json,
+                     supported_parameters_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(model_id) DO UPDATE SET
+                    context_length = excluded.context_length,
+                    pricing_json = excluded.pricing_json,
+                    per_request_limits_json = excluded.per_request_limits_json,
+                    expiration_date = excluded.expiration_date,
+                    knowledge_cutoff = excluded.knowledge_cutoff,
+                    architecture_json = excluded.architecture_json,
+                    reasoning_json = excluded.reasoning_json,
+                    supported_parameters_json = excluded.supported_parameters_json,
+                    updated_at = excluded.updated_at",
+                params![
+                    m.id,
+                    m.context_length,
+                    pricing_json,
+                    limits_json,
+                    m.expiration_date,
+                    m.knowledge_cutoff,
+                    architecture_json,
+                    reasoning_json,
+                    supported_parameters_json,
+                    now,
+                ],
+            )?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// Read back one model's metadata row by OpenRouter model id, if present.
+    pub fn get_openrouter_model_metadata(&self, model_id: &str) -> Result<Option<OpenRouterModel>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT model_id, context_length, pricing_json, per_request_limits_json,
+                    expiration_date, knowledge_cutoff, architecture_json, reasoning_json,
+                    supported_parameters_json
+             FROM openrouter_model_metadata WHERE model_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![model_id])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let pricing_json: String = row.get(2)?;
+        let limits_json: String = row.get(3)?;
+        let architecture_json: String = row.get(6)?;
+        let reasoning_json: String = row.get(7)?;
+        let supported_parameters_json: String = row.get(8)?;
+        Ok(Some(OpenRouterModel {
+            id: row.get(0)?,
+            context_length: row.get(1)?,
+            pricing: serde_json::from_str(&pricing_json).unwrap_or_default(),
+            per_request_limits: serde_json::from_str(&limits_json).unwrap_or_default(),
+            expiration_date: row.get(4)?,
+            knowledge_cutoff: row.get(5)?,
+            architecture: serde_json::from_str(&architecture_json).unwrap_or_default(),
+            reasoning: serde_json::from_str(&reasoning_json).unwrap_or_default(),
+            supported_parameters: serde_json::from_str(&supported_parameters_json)
+                .unwrap_or_default(),
+        }))
     }
 }
 

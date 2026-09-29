@@ -657,6 +657,100 @@ impl LlmClient for CommandLlmClient {
     }
 }
 
+// ── OpenRouter model metadata (EFFECTIVE-1298, EFFECTIVE-409 slice) ─────────
+
+/// Raw `openrouter.ai/api/v1/models` GET boundary — a trait so tests never
+/// make a live network call, mirroring [`AlmanacClient`] and [`LlmClient`]
+/// above.
+#[async_trait::async_trait]
+pub trait OpenRouterClient {
+    /// Fetch the full model catalog. `Err` carries a human-readable reason
+    /// (HTTP status, transport error, or parse failure).
+    async fn fetch_models(&self) -> Result<Vec<crate::OpenRouterModel>, String>;
+}
+
+/// GETs `https://openrouter.ai/api/v1/models` with the configured slot-11 key
+/// (`CHUMP_PROVIDER_11_KEY`, the same env-var naming `provider_cascade.rs`
+/// uses for every numbered slot) as a Bearer token.
+pub struct HttpOpenRouterClient {
+    pub base_url: String,
+    pub api_key: String,
+}
+
+impl HttpOpenRouterClient {
+    /// Reads the key from `CHUMP_PROVIDER_11_KEY` (empty if unset — the
+    /// request is still attempted so the resulting 401 is logged like any
+    /// other API failure rather than silently skipped).
+    pub fn from_env() -> Self {
+        Self {
+            base_url: "https://openrouter.ai/api/v1/models".to_string(),
+            api_key: std::env::var("CHUMP_PROVIDER_11_KEY").unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterModelsResponse {
+    #[serde(default)]
+    data: Vec<crate::OpenRouterModel>,
+}
+
+#[async_trait::async_trait]
+impl OpenRouterClient for HttpOpenRouterClient {
+    async fn fetch_models(&self) -> Result<Vec<crate::OpenRouterModel>, String> {
+        let resp = reqwest::Client::new()
+            .get(&self.base_url)
+            .bearer_auth(&self.api_key)
+            .send()
+            .await
+            .map_err(|e| format!("openrouter GET {} failed: {e}", self.base_url))?;
+        if !resp.status().is_success() {
+            return Err(format!(
+                "openrouter GET {} returned HTTP {}",
+                self.base_url,
+                resp.status()
+            ));
+        }
+        let body: OpenRouterModelsResponse = resp
+            .json()
+            .await
+            .map_err(|e| format!("openrouter response parse failed: {e}"))?;
+        Ok(body.data)
+    }
+}
+
+/// Fetch the OpenRouter catalog via `client` and mutate the store's
+/// `openrouter_model_metadata` index in place (see
+/// [`GapStore::upsert_openrouter_model_metadata`] — a per-row UPSERT, never a
+/// full table rebuild). Logs a one-line success/failure receipt either way so
+/// a scheduled run leaves an audit trail without a dedicated event kind.
+pub async fn fetch_and_store_openrouter_models(
+    store: &GapStore,
+    client: &dyn OpenRouterClient,
+) -> Result<usize, String> {
+    match client.fetch_models().await {
+        Ok(models) => {
+            let n = models.len();
+            match store.upsert_openrouter_model_metadata(&models) {
+                Ok(count) => {
+                    eprintln!(
+                        "[openrouter-enrich] fetched {n} models, upserted {count} into openrouter_model_metadata"
+                    );
+                    Ok(count)
+                }
+                Err(e) => {
+                    eprintln!("[openrouter-enrich] store upsert failed: {e}");
+                    Err(format!("store upsert failed: {e}"))
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[openrouter-enrich] fetch failed: {e}");
+            Err(e)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -872,5 +966,84 @@ mod tests {
 
         // Silence unused-Arc lint parity with architect's test module.
         let _ = Arc::new(0u8);
+    }
+
+    struct MockOpenRouter(Result<Vec<crate::OpenRouterModel>, String>);
+
+    #[async_trait::async_trait]
+    impl OpenRouterClient for MockOpenRouter {
+        async fn fetch_models(&self) -> Result<Vec<crate::OpenRouterModel>, String> {
+            self.0.clone()
+        }
+    }
+
+    fn sample_model(id: &str) -> crate::OpenRouterModel {
+        crate::OpenRouterModel {
+            id: id.to_string(),
+            context_length: 128_000,
+            pricing: serde_json::json!({"prompt": "0", "completion": "0"}),
+            per_request_limits: serde_json::json!(null),
+            expiration_date: String::new(),
+            knowledge_cutoff: "2026-01".to_string(),
+            architecture: serde_json::json!({"modality": "text"}),
+            reasoning: serde_json::json!(false),
+            supported_parameters: vec!["tools".to_string()],
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_and_store_success_upserts_and_logs() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let store = GapStore::open(dir.path()).unwrap();
+        let client = MockOpenRouter(Ok(vec![
+            sample_model("nvidia/nemotron-3-ultra-550b:free"),
+            sample_model("deepseek/deepseek-v4-pro"),
+        ]));
+
+        let count = fetch_and_store_openrouter_models(&store, &client)
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+
+        let row = store
+            .get_openrouter_model_metadata("deepseek/deepseek-v4-pro")
+            .unwrap()
+            .expect("row persisted");
+        assert_eq!(row.context_length, 128_000);
+        assert_eq!(row.knowledge_cutoff, "2026-01");
+        assert_eq!(row.supported_parameters, vec!["tools".to_string()]);
+
+        // A second fetch of the same model id mutates the existing row
+        // in place rather than duplicating it.
+        let mut updated = sample_model("deepseek/deepseek-v4-pro");
+        updated.context_length = 256_000;
+        let client2 = MockOpenRouter(Ok(vec![updated]));
+        let count2 = fetch_and_store_openrouter_models(&store, &client2)
+            .await
+            .unwrap();
+        assert_eq!(count2, 1);
+        let row2 = store
+            .get_openrouter_model_metadata("deepseek/deepseek-v4-pro")
+            .unwrap()
+            .expect("row still present");
+        assert_eq!(row2.context_length, 256_000);
+    }
+
+    #[tokio::test]
+    async fn fetch_failure_is_reported_and_store_is_untouched() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let store = GapStore::open(dir.path()).unwrap();
+        let client = MockOpenRouter(Err("openrouter GET ... returned HTTP 401".to_string()));
+
+        let err = fetch_and_store_openrouter_models(&store, &client)
+            .await
+            .unwrap_err();
+        assert!(err.contains("401"));
+        assert!(store
+            .get_openrouter_model_metadata("anything")
+            .unwrap()
+            .is_none());
     }
 }
