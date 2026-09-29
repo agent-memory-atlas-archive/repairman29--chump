@@ -7482,6 +7482,16 @@ events:
     consumers: [fleet-brief, ops-audit]
     fields_required: [ts, kind, reason]
 
+  - kind: vision_acuity_below_floor
+    effect_metric: almanac_summary_coverage_pct
+    emitter: scripts/ops/almanac-vision-keeper.sh (CREDIBLE-1339, CREDIBLE-300 slice)
+    trigger: a vision-keeper pass's summary_pct landed below the >95% mission
+      floor (CREDIBLE-300). Fires alongside a non-zero return from
+      vision_pass so the guard is enforceable by the main loop, not just
+      visible in the ambient stream.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, summary_pct, floor]
+
   - kind: faculty_status
     effect_metric: self
     emitter: scripts/ops/faculty-collector.sh (OS self-portrait data source)

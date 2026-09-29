@@ -59,6 +59,12 @@
 #   CHUMP_VISION_ACUITY_STATE      — file holding last "symbol_pct summary_pct"
 #                                    for regression detection
 #                                    (default $HOME/.almanac/vision-acuity.state)
+#   CHUMP_VISION_KEEPER_MIN_SUMMARY_PCT — summary_pct floor (CREDIBLE-300/
+#                                    CREDIBLE-1339); a pass below this floor
+#                                    emits vision_acuity_below_floor and
+#                                    vision_pass returns non-zero instead of
+#                                    silently reporting success. Never allowed
+#                                    below 95 (clamped, mirrors CREDIBLE-1210).
 #   CHUMP_AMBIENT_LOG              — override ambient.jsonl path
 set -uo pipefail
 
@@ -73,6 +79,13 @@ INDEX_REPO="${CHUMP_ALMANAC_INDEX_REPO:-$HOME/Projects/chump}"
 MAX_SUMMARIZE_ROUNDS="${CHUMP_VISION_KEEPER_MAX_SUMMARIZE_ROUNDS:-40}"
 SUMMARIZE_ROUND_TIMEOUT_S="${CHUMP_VISION_KEEPER_SUMMARIZE_ROUND_TIMEOUT_S:-1800}"
 STATE_FILE="${CHUMP_VISION_ACUITY_STATE:-$HOME/.almanac/vision-acuity.state}"
+MIN_SUMMARY_PCT="${CHUMP_VISION_KEEPER_MIN_SUMMARY_PCT:-95}"
+# CREDIBLE-1210-style clamp: the floor must never drop below the 95% mission
+# floor (CREDIBLE-300) even via a careless/misconfigured env override.
+if awk -v v="$MIN_SUMMARY_PCT" 'BEGIN{exit !(v+0 < 95)}' 2>/dev/null; then
+    echo "[almanac-vision-keeper] CHUMP_VISION_KEEPER_MIN_SUMMARY_PCT=$MIN_SUMMARY_PCT is below the 95% mission floor — clamping to 95"
+    MIN_SUMMARY_PCT=95
+fi
 
 ONCE=0
 DRY_RUN="${CHUMP_VISION_KEEPER_DRY_RUN:-0}"
@@ -256,6 +269,22 @@ vision_pass() {
     # same way any organ-degradation signal does. Registered in
     # docs/observability/EVENT_REGISTRY.yaml.)
     emit vision_acuity "\"symbol_pct\":$SYMBOL_PCT,\"summary_pct\":$SUMMARY_PCT,\"symbol_count\":$SYMBOL_COUNT,\"symbol_total\":$SYMBOL_TOTAL,\"summary_count\":$SUMMARY_COUNT,\"summary_total\":$SUMMARY_TOTAL,\"summarize_rounds\":$SUMMARIZE_ROUNDS,\"reset\":\"$RESET_STATUS\",\"regressed\":\"$regressed\",\"dry_run\":$DRY_RUN"
+
+    # CREDIBLE-1339 (CREDIBLE-300 slice): the >95% summarized_pct floor must be
+    # enforceable by this code path itself, not just visible to a downstream
+    # watcher (board-vitals.sh / almanac-summarize-watchdog.sh already guard
+    # their own read of the acuity state; this guards the writer). A pass that
+    # lands below the floor emits vision_acuity_below_floor and returns
+    # non-zero so `vision_pass || ...` in the main loop surfaces the failure
+    # instead of it looking identical to a healthy pass.
+    if [[ "$SUMMARY_PCT" =~ ^[0-9]+$ ]] && (( SUMMARY_PCT < MIN_SUMMARY_PCT )); then
+        echo "[almanac-vision-keeper] WARN: summary coverage ${SUMMARY_PCT}% is below the ${MIN_SUMMARY_PCT}% mission floor (CREDIBLE-300)" >&2
+        # scanner-anchor: "kind":"vision_acuity_below_floor"  (CREDIBLE-1339;
+        # fires whenever a pass's summary_pct lands below the mission floor —
+        # the guard's "notify" half; the non-zero return is the "error" half.)
+        emit vision_acuity_below_floor "\"summary_pct\":$SUMMARY_PCT,\"floor\":$MIN_SUMMARY_PCT,\"dry_run\":$DRY_RUN"
+        return 1
+    fi
 }
 
 # ── main loop ───────────────────────────────────────────────────────────────

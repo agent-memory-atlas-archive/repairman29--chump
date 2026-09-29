@@ -3086,3 +3086,8 @@ CHUMP_IDEA_DROP_MIGRATION
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_GIT_COMMIT_RATE_LIMIT
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_VISION_KEEPER_MIN_SUMMARY_PCT
