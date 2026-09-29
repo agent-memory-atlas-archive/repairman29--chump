@@ -33,5 +33,6 @@
     be done independently. See workspace-docs/GCP_EXIT.md "2026-09-26 — PRODUCT-303 export ledger" for
     full context (exact bucket names, object counts, what's already exported). Read-only gap: never
     delete or mutate a project. preferred_machine: cuphead (same auth/CLI setup as PRODUCT-303).
+    [2026-09-27] Billing reopen attempted with Jeff: blocked. Billing account 017801-838BC8-3504BF ("Firebase Payment", linked to trove-web, echeo-vid, fulcrum-41e50, slidemate-1568, gen-lang-client-0312503272) is "not in good standing": $473.97 overdue, card declined, September cost $0.00 (old balance carried). Nothing spent, nothing exported. Decision (pay and export, or skip; Auth is already exported) is Jeff's: ASK-061, deferred to 2026-10-02. Export script staged at cuphead:/srv/gcp-export/billing-window.sh (Storage ~31 MB trove-web + 1.66 GB echeo-vid, 3 Firestore exports). Password-hash params: skipped (Jeff: dev users reset passwords).
   preferred_machine: cuphead
 

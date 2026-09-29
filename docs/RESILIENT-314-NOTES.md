@@ -1,3 +1,10 @@
+> **SUPERSEDED 2026-09-27. Do not trust this file.** It was written before anything was verified, and
+> on-box checks found most of it untrue: containers were not in the slice, the Caddy binary was amd64 on
+> an arm64 host (HTTPS never started), signup returned 500, backups could not authenticate, and there
+> was no OOM guard. The real, verified setup, runbook and secret map are in
+> [`deploy/supabase/README.md`](../deploy/supabase/README.md); proofs are in the RESILIENT-314 gap notes
+> and workspace-docs `GCP_EXIT.md`. Kept (not deleted) as a record of the plan.
+
 # RESILIENT-314: Self-Hosted Supabase OSS on Cuphead
 
 ## Implementation Status: CORE INFRASTRUCTURE COMPLETE

@@ -43,7 +43,7 @@ SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
 GOOGLE_CLIENT_ID=REPLACE_WITH_google_oauth_client_id
 GOOGLE_CLIENT_SECRET=REPLACE_WITH_google_oauth_client_secret
-STUDIO_BIND_ADDR=100.113.181.18
+STUDIO_BIND_ADDR=$(tailscale ip -4 2>/dev/null | head -1 || echo 127.0.0.1)
 EOF
 sudo chmod 600 "$ENV_FILE"
 echo "Wrote $ENV_FILE (chmod 600). Fill GOOGLE_CLIENT_ID/SECRET, then run scripts/start-supabase.sh."
