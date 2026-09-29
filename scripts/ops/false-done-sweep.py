@@ -105,6 +105,18 @@ they make the per-gap verdict computable on demand (`--gap <ID>` for one,
 `--multi-close-only --json` for the live cohort) rather than encoding a
 snapshot that immediately rots. No behavior change needed.
 
+CREDIBLE-1091 re-verified the same three AC again on 2026-09-29 (CREDIBLE-279
+slice): file present + executable + tracked in git, `--multi-close-only`/
+`--json` flags work, `scripts/ci/test-false-done-sweep.sh` still passes
+(7/7, including the deterministic --multi-close-only --json fixture), and a
+live run reports 81 bookkeeping-closed gaps across 6 bookkeeping PRs (within
+the 239-gap, multi-close-eligible cohort) — same as every re-verification
+since CREDIBLE-1264, not the 79 the gap's AC names. The registry keeps
+growing (see the drift note above), so a static "79" count frozen at gap-
+filing time is expected to be stale by the time any PR lands; the durable
+fix remains this script + its CI test, which make the count computable on
+demand instead of encoding a snapshot. No behavior change needed.
+
 Usage:
   python3 scripts/ops/false-done-sweep.py --multi-close-only      # cheapest, highest yield
   python3 scripts/ops/false-done-sweep.py --all --limit 400       # broader
