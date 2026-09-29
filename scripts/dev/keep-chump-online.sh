@@ -83,6 +83,19 @@ ollama_ready() {
   curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:11434/api/tags" 2>/dev/null || true
 }
 
+# RESILIENT-1502: nodes that route their fleet workers through a working
+# backend (headless claude / free-tier cascade — see FLEET_BACKEND default in
+# scripts/dispatch/worker.sh) never install Ollama. Without this guard the
+# "Starting Ollama..." branch below still fires `nohup ollama serve` every
+# time this script runs (farmer-brown calls it in a loop), which fails
+# instantly with "nohup: failed to run command 'ollama': No such file or
+# directory" and spams logs/ollama-serve.log forever instead of surfacing a
+# single actionable health error.
+if [[ "$USE_OLLAMA" == "1" ]] && ! command -v ollama >/dev/null 2>&1; then
+  log "HEALTH ERROR: USE_OLLAMA=1 but 'ollama' binary is not installed on this host — skipping Ollama startup (not retrying). Install ollama, or route this node's fleet workers through FLEET_BACKEND=claude / a configured CHUMP_FREE_TIER_PROVIDERS cascade instead."
+  USE_OLLAMA=0
+fi
+
 if [[ "$USE_OLLAMA" == "1" ]]; then
   if [[ "$(ollama_ready)" != "200" ]]; then
     log "Starting Ollama..."
