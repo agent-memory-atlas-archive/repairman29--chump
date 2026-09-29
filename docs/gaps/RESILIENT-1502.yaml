@@ -1,0 +1,19 @@
+- id: RESILIENT-1502
+  domain: RESILIENT
+  title: "RESILIENT: cuphead workers are circuit-open - chump-local backend starts ollama, which is not installed on cuphead (node ships nothing)"
+  status: open
+  priority: P1
+  effort: s
+  description: |
+    cuphead (Oracle A1 arm64, 4 OCPU, 23 GB; also hosts the Supabase stack in a 4 GB slice and the NATS hub) runs pull workers (scripts/dispatch/worker.sh) whose chump-local backend tries to launch ollama; the binary is not installed, so every cycle fails (rc=1) and the circuit breaker opens (worker_circuit_open). Rough shape: (a) decide the backend for cuphead workers and state why: install + supervise ollama (systemd, memory-capped outside supabase.slice, a model that fits; see RESILIENT-1438 for the ollama.service.d cap pattern) OR route cuphead workers to a working backend (headless claude with CLAUDE_CODE_OAUTH_TOKEN from ~/.chump/oauth-token.json, or the free-tier cascade); (b) apply it so it survives reboot; (c) make a missing backend binary a single clear health error instead of a retry loop; (d) prove a real pick->ship cycle from cuphead. Do not starve the Supabase stack: check free -m and api.postsub.io/auth/v1/health before and after.
+  acceptance_criteria:
+    - cuphead workers use a backend that exists on the box (decision + reason in the PR); no worker_circuit_open for backend-missing in 2h after the change
+    - At least one gap picked by a cuphead worker ships as a merged PR (receipt)
+    - A missing backend binary produces one clear health error (not a retry loop), covered by a test
+    - "Supabase stack unaffected: free -m before/after and https://api.postsub.io/auth/v1/health = 200"
+  opened_date: '2026-09-29'
+  preferred_machine: cuphead
+  outcome_id: NODE-SHIPS
+  evidence: |
+    COMMAND: tail worker log + ~/chump/logs/ollama-serve.log + command -v ollama on cuphead (2026-09-29). OUTPUT: worker: chump-local exited ERROR_1 (rc=1) on INFRA-2641, cooldown, ALERT kind=worker_circuit_open consecutive_dispatch_failures=3; ollama-serve.log repeats nohup: failed to run command ollama: No such file or directory; no ollama binary on cuphead (arm64, 23 GB); origin/main had 3 commits in the prior 24h. Headless claude on cuphead works when CLAUDE_CODE_OAUTH_TOKEN is exported. THEORY: cuphead's pull workers use the chump-local backend, which needs a local ollama that was never installed, so the node ships nothing and loops. ALT: just install ollama - not decided blindly: memory budget (Supabase slice 4 GB + NATS hub) and model choice must fit; routing cuphead to a working backend may be the better fix.
+

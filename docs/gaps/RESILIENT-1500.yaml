@@ -11,7 +11,9 @@
     - An emit on CJ (chump-coord emit WARN ...) is received by chump-coord watch on cuphead, and the reverse
     - No node env references the dead Helsinki URL; CJ's local broker decision is stated and applied
     - Workers on cuphead and CJ still pick and ship (no regression) after the env change
-  depends_on: [CREDIBLE-1478]
+  depends_on: [CREDIBLE-1478, CREDIBLE-1479]
+  notes: |
+    [2026-09-29T22:44:27Z] [2026-09-29] Heads-up from CREDIBLE-1478 live check: the FLEET user's permissions are only chump.> (pub+sub). chump-coord connect() creates KV buckets + a JetStream stream and uses request/reply, so FLEET needs $JS.API.>, $KV.>, _INBOX.> (and $JS.ACK.> for consumers) or connect fails. Fix the FLEET permissions first.
   opened_date: '2026-09-29'
   preferred_machine: cuphead
   outcome_id: FLEET-BUS
