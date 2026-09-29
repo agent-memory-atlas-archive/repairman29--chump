@@ -386,3 +386,29 @@ Scanned 374 CI gate step(s) across 1 primary workflow (`ci.yml`) + 27 sibling wo
 
 None. Every scanned CI gate has a mirror, a Tier-D reason, or an allowlist entry.
 
+## Triage bookkeeping‑only gaps (CREDIBLE‑1093)
+
+`CREDIBLE-279` identified a cohort of bookkeeping-only gaps (docs/process
+entries with no shippable code AC) that had drifted without a definitive
+closed-vs-open verdict. Run the triage script to sweep every gap tagged with
+the `CREDIBLE-279` marker and force each one to a definitive state — closed
+(with `closed_pr` recorded) if it landed, reopened if it never did:
+
+```
+./scripts/triage_bookkeeping_gaps.sh
+```
+
+Expected output is a single summary line of the form:
+
+```
+Processed <N> gaps: <X> closed, <Y> reopened
+```
+
+where `<N>` is the count of gaps carrying the `CREDIBLE-279` marker found in
+`.chump/state.db` at run time (the canonical gap store post-INFRA-188 —
+there is no `data/gaps.yaml`/`docs/gaps.yaml` file to read), `<X>` is how
+many already had a `closed_pr` on file, and `<Y>` is how many were forced
+back to `status: open` because no landed PR was found. A reviewer can rerun
+the script at any time to confirm no gap in that cohort is left without a
+verdict.
+
