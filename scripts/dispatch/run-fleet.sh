@@ -103,6 +103,9 @@ _ARG_LOCKS_DIR=""
 _ARG_TMUX_SESSION=""
 _FLEET_RESTART=0
 _FLEET_DRY_RUN_ARG=0
+# CREDIBLE-1020: --detect-zero-launchd runs the zero-process launchd-job
+# detector and exits, skipping the rest of the fleet-launcher body.
+_FLEET_DETECT_ZERO_LAUNCHD=0
 _POSITIONAL=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -122,6 +125,8 @@ while [[ $# -gt 0 ]]; do
             _FLEET_RESTART=1; shift ;;
         --dry-run)
             _FLEET_DRY_RUN_ARG=1; shift ;;
+        --detect-zero-launchd)
+            _FLEET_DETECT_ZERO_LAUNCHD=1; shift ;;
         --help|-h)
             sed -n '2,/^set -/p' "$0" | sed 's/^# \?//' | head -60
             exit 0
@@ -166,6 +171,42 @@ fi
 SCRIPT_DIR="$REPO_ROOT/scripts/dispatch"
 # INFRA-469: route every `chump` invocation through the wedge-heal shim.
 export PATH="$REPO_ROOT/bin:$PATH"
+
+# CREDIBLE-1020 (CREDIBLE-274 slice): reads a launchd plist's Label via
+# PlistBuddy (falls back to a plain grep/sed parse on non-macOS boxes,
+# where /usr/libexec/PlistBuddy doesn't exist — e.g. Linux dev/CI hosts).
+_launchd_plist_label() {
+    local plist="$1"
+    if [[ -x /usr/libexec/PlistBuddy ]]; then
+        /usr/libexec/PlistBuddy -c 'Print :Label' "$plist" 2>/dev/null
+        return
+    fi
+    grep -A1 '<key>Label</key>' "$plist" 2>/dev/null \
+        | grep '<string>' | head -1 \
+        | sed -e 's/.*<string>//' -e 's/<\/string>.*//'
+}
+
+# Walks all .plist files under scripts/launchd and ~/Library/LaunchAgents,
+# extracts each job's Label, and prints the plist path for any job whose
+# label has no matching running process (candidate (a), CREDIBLE-274 slice).
+_detect_zero_launchd_jobs() {
+    local dir plist label
+    for dir in "$REPO_ROOT/scripts/launchd" "$HOME/Library/LaunchAgents"; do
+        [[ -d "$dir" ]] || continue
+        while IFS= read -r -d '' plist; do
+            label="$(_launchd_plist_label "$plist")"
+            [[ -n "$label" ]] || continue
+            if ! pgrep -f "$label" >/dev/null 2>&1; then
+                echo "$plist"
+            fi
+        done < <(find "$dir" -maxdepth 1 -name '*.plist' -print0 2>/dev/null)
+    done
+}
+
+if [[ "$_FLEET_DETECT_ZERO_LAUNCHD" -eq 1 ]]; then
+    _detect_zero_launchd_jobs
+    exit 0
+fi
 
 # INFRA-351: source $REPO_ROOT/.env (if present) so spawned worker panes
 # inherit ANTHROPIC_API_KEY / OPENAI_API_KEY / TOGETHER_API_KEY etc. and
