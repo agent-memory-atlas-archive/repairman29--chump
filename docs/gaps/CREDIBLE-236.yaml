@@ -1,7 +1,7 @@
 - id: CREDIBLE-236
   domain: CREDIBLE
   title: "CREDIBLE: rotate the NATS bus password — I exposed it in a session transcript"
-  status: open
+  status: superseded
   priority: P1
   effort: xs
   description: |
@@ -11,6 +11,9 @@
     - every consumer is inventoried and verified to both PUBLISH and RECEIVE after the rotation; a consumer that cannot be updated is named rather than left broken
     - "the new secret never appears in a transcript, a commit, or argv — it goes only into the 600 root:root config and whatever env the consumers already read"
     - the ambient.jsonl file-based fallback is confirmed still working, so an auth mismatch degrades to file-based events instead of a silent fleet
+  notes: |
+    [2026-09-29T15:03:10Z] [2026-09-29] SUPERSEDED by CREDIBLE-1478. The leaked 2026-08-08 secret lived only on the Helsinki broker, which was decommissioned 2026-08-17, so it can no longer authenticate anywhere and this AC cannot be met as written. The live broker (cuphead) has no auth at all; CREDIBLE-1478 adds accounts + fresh secrets there (outcome FLEET-BUS).
+  opened_date: '2026-08-19'
   outcome_id: CREDIBLE-000
   evidence: |
     COMMAND: ssh helsinki 'sudo cat /etc/nats/nats.conf'  |  OUTPUT: the file contents, including authorization{user: chump, password: <64-hex>} for both the main listener and leafnodes, were printed into a Claude Code session transcript on 2026-08-08 while auditing the box. File perms on disk are correct (600 root:root) — the exposure is entirely the transcript.  |  THEORY: same class as the tvly-dev key pasted earlier the same day. A credential that has appeared in a transcript, session export, or log must be treated as compromised regardless of how well-permissioned the file is, because transcripts persist in storage nobody audits. The password is shared between the main listener and the leafnode listener, so one rotation covers both — and every consumer that authenticates with it must be updated in the same pass or it goes silent, which in this fleet is indistinguishable from healthy (cf the curator dead 12 days).  |  ALT: considered treating it as low-risk because the bus is now firewalled and tailnet-only — rejected: shop rule 4 is revoke-before-publish and the fleet has a documented history of exactly this reasoning going wrong. Considered rotating it myself — refused: I do not handle credentials, and generating plus distributing this one is the operator's action.

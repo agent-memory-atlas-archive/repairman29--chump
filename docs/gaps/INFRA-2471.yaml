@@ -9,5 +9,11 @@
     - a checked-in com.chump.fleet-setenv.plist template under scripts/setup/ so reboot-persistence is reproducible on any install
     - "chump-worker.rs + jetstream_consumer.rs default to nats://127.0.0.1:4222 and fall back to pull only on actual connect failure, instead of gating on whether CHUMP_NATS_URL happens to be set (root cause: server up 2 days, push-tier never connected because the env var was unset)"
     - chump-fleet-bootstrap.sh --check verifies the broker is reachable via chump-coord ping and warns kind=nats_mesh_dark when the server is up but no client traffic is flowing
+  notes: |
+    [2026-08-29T06:50:22Z] INFRA-3832 auto-block: 3 consecutive non-ship cycles (last kind=rc=1, rc=1, cycle_log=6001B). Worker kept re-picking + looping; blocked to leave the pick pool. Un-block after fixing the spec / decomposing.
+    [2026-09-20T16:04:20Z] 2026-09-20 fleet audit: confirmed root cause of NATS mesh dark = CJ leafnode remote pointed at 100.101.188.30:7422 (Helsinki), decommissioned 2026-08-17 — no live hub has existed since then (this is a dead-IP rot issue, not the CHUMP_NATS_URL propagation bug this gap targets). Decided direction: cuphead becomes the new NATS hub. Execution is GATED on CREDIBLE-236 (leaked NATS credential must be rotated first — Jeff's step, not autonomous). CJ stale leafnode dial cleaned up same day (see RESILIENT-1434 note) so the dead-dial alarm stops, but that is cleanup only, not the hub build this gap covers.
+    
+    [2026-09-29T15:03:11Z] [2026-09-29] Node-side CHUMP_NATS_URL wiring is now RESILIENT-1500 (outcome FLEET-BUS). The launchd/macOS installer half targets the Mac, which is an observer, not a fleet node; decide keep/close separately.
+  opened_date: '2026-07-26'
   outcome_id: MISSION-010
 
