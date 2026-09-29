@@ -1,0 +1,19 @@
+- id: RESILIENT-1457
+  domain: RESILIENT
+  title: "RESILIENT: stop losing finished fleet work — branches pushed without PRs, reaper stashing live attempts, stale DIRTY PRs never refreshed"
+  status: open
+  priority: P1
+  effort: m
+  description: |
+    WHY: the fleet is one worker (fleet-1) and it loses most of what it writes. In the 15.5h after the 2026-09-28 halt was lifted: 7 attempts, 2 merged. One finished commit was pushed with no PR (EFFECTIVE-633, rescued by hand as #4900); three EFFECTIVE-1336 attempts were stashed by stale-worktree-reaper into wip/ branches; and PR #4891 sat DIRTY for 3 days though it merged cleanly against main. Nothing counted any of this as waste, so the fleet looked quiet instead of leaky. See evidence.
+    
+    Rough shape: (a) ship-wall: after bot-merge.sh (or the worker ship step) pushes a branch, verify a PR exists for it; if not, open it (gh pr create + auto-merge) or emit kind=ship_wall_no_pr with the reason — never exit "success" with a PR-less branch. (b) reaper: stale-worktree-reaper must not stash a worktree whose lease is live or whose worker PID is alive; when it does stash, emit kind=worktree_reaped with gap id + reason, and record the attempt so the picker backs off that gap (INFRA-3832 auto-block should count reaps). (c) sweeper: a periodic job lists origin branches matching chump/*-fleet-* with commits ahead of main, no PR, older than 30 min -> open PR or file a salvage note on the gap; and PRs in DIRTY/BEHIND state whose merge-tree against main is clean -> merge main in and push (reuse pr-auto-rebase / queue-driver if present — check before writing new code). (d) metric: fleet brief shows attempts vs PRs vs merges per 24h so this leak is visible.
+  acceptance_criteria:
+    - A worker ship step that pushes a branch always ends with an open PR for it or an emitted ship_wall_no_pr event naming the cause; a CI test covers the no-PR path
+    - stale-worktree-reaper never stashes a worktree with a live lease or live worker PID (test with a synthetic live lease); each reap emits worktree_reaped with gap id and counts toward the gap auto-block
+    - A scheduled sweeper opens PRs for fleet branches ahead of main with no PR after 30 min, and refreshes DIRTY/BEHIND PRs whose merge against main is clean; proven on a synthetic branch
+    - chump fleet brief reports attempts, PRs opened, and merges for the last 24h
+  skills_required: coord,bash,rust
+  evidence: |
+    COMMAND: git for-each-ref refs/remotes/origin --sort=-committerdate (fleet-1 branches since 2026-09-28T21:15Z); gh search open PRs. OUTPUT: 7 fleet-1 attempts in 15.5h -> 2 merged (EFFECTIVE-1457, -625), 1 PR open (EFFECTIVE-1900), 1 branch pushed with a clean commit but NO PR (chump/effective-633-fleet-1-20260928-213942, 221 LOC, opened by hand as #4900), 3 attempts at EFFECTIVE-1336 ended as wip/ branches with "[stale-worktree-reaper auto-stash]" (01:59, 05:36, 05:51Z), then no fleet-1 branch activity 05:51-12:42Z. Separately PR #4891 sat DIRTY 3 days although it merged clean against main (stale mergeability, no auto-rebase). THEORY: work is lost after the code is written — at the ship step (push without PR) and to the reaper (stashing worktrees the worker is still using or abandoned without a ship verdict) — and no detector counts attempts-that-produced-code-but-no-PR. ALT: the gaps were simply too hard — rejected for 633 (finished, coherent commit) and for #4891 (all required checks green).
+
