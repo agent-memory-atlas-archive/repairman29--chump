@@ -170,8 +170,15 @@ for f in "${NODE_FILES[@]}"; do
     [[ -z "$node_id" ]] && node_id="$(basename "$f" .json)"
     [[ "$node_id" == "$SELF_NODE" ]] && continue
 
+    # Best-effort nodes must NEVER escalate to a fleet-halting operator-recall.
+    # A node marked always_on=false (phone/laptop) or with no resolved tailnet IP
+    # is EXPECTED to be offline; probe/use it elsewhere, but do not watch it here.
+    always_on="$(node_field "$f" always_on)"
+    [[ -z "$always_on" ]] && always_on="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("hardware",{}).get("always_on",""))' "$f" 2>/dev/null)"
+    case "$always_on" in false|False|FALSE) continue;; esac
+
     tailnet_ip="$(node_field "$f" tailnet_ip)"
-    if [[ -z "$tailnet_ip" ]]; then
+    if [[ -z "$tailnet_ip" || "$tailnet_ip" == "unknown" || "$tailnet_ip" == "null" ]]; then
         continue
     fi
 
