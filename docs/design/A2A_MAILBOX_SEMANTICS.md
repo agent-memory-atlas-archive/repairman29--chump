@@ -167,6 +167,36 @@ No version bump required to consume the new flag; agents on older chumps just ig
 
 v0 explicitly assumes in-fleet trust (operator runs all sessions). Layer 4f closes the holes.
 
+## Acceptance Criteria Flag (CREDIBLE-1270 / CREDIBLE-284 slice)
+
+`chump gap reserve` accepts two flags governing acceptance-criteria capture on
+new gaps:
+
+- **`--acceptance-criteria <text>`** — supplies the gap's acceptance criteria
+  verbatim at reserve time. The value is split on `|` into individual bullet
+  items (e.g. `"bullet one|bullet two"` becomes two AC entries) and stored
+  unmodified — no truncation, templating, or rewriting. Omitting this flag
+  falls back to the INFRA-756 default obs-AC template (unless
+  `--skip-obs-acs` is also passed).
+- **`--no-ac-required`** — bypasses the enforcement below for a gap that
+  genuinely has no meaningful AC yet (e.g. an exploratory P2/P3 spike). Use
+  is audited: bypassing emits an `ac_gate_bypassed` event to
+  `.chump-locks/ambient.jsonl` with the gap's priority, domain, and title.
+
+**Enforcement rule.** A gap filed with `--priority P0` or `--priority P1`
+that would otherwise end up with empty acceptance criteria (i.e.
+`--skip-obs-acs` was passed and `--acceptance-criteria` was not) is rejected:
+`chump gap reserve` prints an error to stderr and exits non-zero, unless
+`--no-ac-required` is also supplied. P2/P3 gaps are never gated — the default
+obs-AC template already fills acceptance criteria for the common path, so in
+practice this gate fires only for P0/P1 gaps that explicitly opt out of the
+template without supplying their own text.
+
+Rationale: a P0/P1 gap with empty acceptance criteria is unpickable in
+practice (`chump gap audit-priorities` already flags these as "vague
+pickable" after the fact) — this flag closes the gate at file time instead
+of catching it downstream.
+
 ## Open questions
 
 - (MB-Q1) Should glob expansion include the trust-anchor signature check at send-time, or trust the operator-supplied pattern? Defer to Layer 4f.
