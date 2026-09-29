@@ -1,0 +1,23 @@
+- id: ZERO-WASTE-125
+  domain: ZERO-WASTE
+  title: "ZERO-WASTE: self-pruning rulebook — the OS measures every rule and gate, and deletes the ones that do not earn their keep"
+  status: open
+  priority: P1
+  effort: l
+  description: |
+    WHY: the rulebook has outgrown what an agent can hold. Measured 2026-09-29: CLAUDE.md 700 lines + AGENTS.md 1129 lines, 155 docs/process/*.md, 28 git hooks, 1490 scripts/ci/test-*.sh, 29 workflows. Agents fail at the edges: e.g. PR #4888 (a gap-data-only PR) went red because its title contained "unblock", which the rescue-class regex gate treated as a rescue; reserving CREDIBLE-1459 hit three stacked gates (outcome, evidence, similarity). Rules get added after every incident and never removed. Operator decision (Jeff 2026-09-29): cut the rulebook hard, and the OS must learn to do it itself — not a one-time hand edit.
+    
+    WHAT: a recurring self-pruning loop where every rule must keep earning its place, with the burden of proof on the rule.
+    
+    Rough shape: (a) Rule registry — inventory every rule with an id, source (doc section / hook / CI script / reserve gate), and the ambient/CI signal it emits when it fires; unregistered gates get a registry entry automatically. (b) Value metrics over a trailing 30d window from ambient.jsonl + CI check-runs: fires, bypasses, catches (fire followed by a fix commit on the same PR), false positives (fire then bypass/retitle with no code change), cost (CI minutes, agent retries). (c) Weekly prune cycle: rules with 0 catches in 30d, or bypass/false-positive rate > 50%, or superseded by a done-check (CREDIBLE-1459) become delete candidates; the loop broadcasts a FEEDBACK kind=proposal per batch and, on PASSED (or no -1 with evidence by deadline), files a gap that deletes the rule AND its gate AND its doc text in one PR. Keeping a rule requires a +1 citing a real catch. (d) Hard budget enforced in CI: CLAUDE.md <= 150 lines, AGENTS.md <= 300 lines; once at budget, adding a rule requires removing one (one-in-one-out). Detail moves to on-demand docs only if something actually reads them. (e) Protected floor that is never auto-pruned: never push to main, no secrets in repo/logs, proprietary/ ban, no destructive/irreversible ops without operator, the T1-T4 escalation triggers.
+    
+    The first cycle must actually cut, not just report. Decompose at claim time (chump gap decompose ZERO-WASTE-125).
+  acceptance_criteria:
+    - A rule registry covers every CLAUDE.md/AGENTS.md rule, git hook, CI gate and gap-reserve gate, each with a firing signal; a CI check fails when a new gate lands without a registry entry
+    - "`chump rules audit --window 30d` reports fires / catches / bypasses / false positives / cost per rule from ambient.jsonl + CI data, and ranks delete candidates"
+    - A scheduled weekly prune cycle broadcasts consensus proposals for delete candidates and files the deletion gap automatically on PASSED; protected-floor rules are never proposed
+    - CI enforces CLAUDE.md <= 150 lines and AGENTS.md <= 300 lines, with one-in-one-out once at budget
+    - "First cycle lands: CLAUDE.md + AGENTS.md combined shrink by >= 60% (from 1829 lines) and the count of blocking CI/pre-commit gates drops by >= 30%, with fleet ship rate and trunk-red rate no worse over the following 7 days"
+  skills_required: rust,coord,ci
+  preferred_backend: claude
+

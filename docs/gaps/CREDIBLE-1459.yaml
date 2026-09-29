@@ -1,0 +1,29 @@
+- id: CREDIBLE-1459
+  domain: CREDIBLE
+  title: "CREDIBLE: gap done-checks — every gap carries an executable probe; the OS closes and reopens gaps by running it"
+  status: open
+  priority: P1
+  effort: m
+  description: |
+    WHY: ChumpOS verifies artifacts (PR merged, YAML changed), not outcomes. Evidence 2026-09-26..29: #4879 "shipped" RESILIENT-314 with a notes doc (CI green, zero AC met); later the cuphead stack went live on 4 hosts yet the gap stayed open — status drifts in both directions and only a human with curl noticed. Workers looped on RESILIENT-314 until INFRA-3832 auto-blocked it, because prose AC give no machine-checkable target.
+    
+    WHAT: a gap-level done_check — a small executable probe stored on the gap (shell command or script path, exit 0 = outcome true). The OS runs it on a schedule and on every ship attempt, and gap status follows the probe, not the PR.
+    
+    REUSE, do not rebuild: crates/chump-verify/src/external_verify_merge.rs already emits kind=outcome_probe_verified / outcome_probe_failed (one-shot, per-PR, URL-only); scripts/coord/outcome-verify-heal-consumer.sh (INFRA-3654) already reopens a gap + pages on outcome_probe_failed; src/task_contract.rs has VerifyContract. Generalize these into a persistent per-gap check; emit the SAME event kinds so the existing heal consumer keeps working.
+    
+    Rough shape: (a) done_check column in state.db + YAML field + `chump gap set --done-check`; (b) `chump gap check <ID>|--all` runs probes with timeout, sandboxed env, no secrets in output; (c) ship path: `chump gap ship` refuses to close a gap whose done_check fails (bypass flag audited); (d) scheduler (launchd/systemd timer, reuse existing cron install path) runs --all hourly over done + open gaps: pass on open gap -> propose close (emit event; auto-close behind a flag), fail on done gap -> reopen via existing heal consumer; (e) `chump gap reserve --priority P0|P1` requires --done-check OR an explicit --done-check-manual "<why this cannot be probed>" (audited), mirroring the outcome/evidence gates; (f) backfill: write done_checks for RESILIENT-314 and PRODUCT-304..308 as the first real users.
+    
+    Example done_check (RESILIENT-314): for h in api.postsub.io api.mytrove.app api.playsmuggler.com api.sendpov.xyz; do curl -fsS -m10 https://$h/auth/v1/health >/dev/null || exit 1; done; for p in 5432 8000 3000; do timeout 5 bash -c "</dev/tcp/161.153.42.233/$p" && exit 1; done; exit 0
+    
+    Decompose at claim time (chump gap decompose CREDIBLE-1459) if needed.
+  acceptance_criteria:
+    - A gap can store a done_check (state.db + YAML round-trip via chump gap set --done-check / gap dump), and `chump gap check <ID>` runs it with a timeout and reports PASS/FAIL with exit code + trimmed output
+    - "`chump gap ship` refuses to close a gap whose done_check fails; bypass flag emits an audited ambient event"
+    - A scheduled `chump gap check --all` emits outcome_probe_verified / outcome_probe_failed per gap; a failing check on a done gap is reopened by the existing outcome-verify-heal-consumer (proven by a CI test with a synthetic gap)
+    - "`chump gap reserve --priority P0|P1` requires --done-check or an audited --done-check-manual reason"
+    - RESILIENT-314 and PRODUCT-304..308 have real done_checks set, and `chump gap check RESILIENT-314` output is pasted in the PR
+  skills_required: rust,sqlite,coord
+  preferred_backend: claude
+  evidence: |
+    COMMAND: curl https://api.postsub.io/auth/v1/health (and 3 sibling hosts); git show origin/main:docs/gaps/RESILIENT-314.yaml | grep status. OUTPUT: all 4 hosts 200 while RESILIENT-314 status: open; earlier PR #4879 merged a notes doc only, CI green, zero AC met. THEORY: ChumpOS verifies artifacts (PR merged, YAML changed) not outcomes; gap status drifts from reality in both directions. ALT: agents just forgot gap ship / wrote weak AC — rejected: outcome_probe (external_verify_merge.rs) is one-shot per PR and only for URL-shaped claims, so even a diligent agent has no durable per-gap check.
+
