@@ -1074,7 +1074,7 @@ impl GapStore {
                     CAST(acceptance_criteria AS TEXT) AS acceptance_criteria,depends_on,notes,source_doc,created_at,CASE WHEN typeof(closed_at)='integer' THEN closed_at ELSE NULL END AS closed_at,
                     opened_date,closed_date,closed_pr,skills_required,preferred_backend,
                     preferred_machine,estimated_minutes,required_model,shipped_in,outcome_id,evidence
-             FROM gaps WHERE status=?1 ORDER BY closed_at ASC",
+             FROM gaps WHERE status=?1 ORDER BY closed_at ASC, id ASC",
         )?;
         let rows = stmt.query_map(params![status], make_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -10703,6 +10703,53 @@ meta:
         );
         assert_eq!(si["integration_id"], "integration-2026-05-29-1500");
         assert_eq!(si["merge_sha"], "babe0022");
+    }
+
+    // ── CREDIBLE-1094: list_by_status_ordered monotonic-by-closed_at ──────────
+
+    #[test]
+    fn list_by_status_ordered_is_monotonic_by_closed_at() {
+        let (store, _dir) = test_store();
+        let a = store.reserve("INFRA", "gap a", "P2", "s").unwrap();
+        let b = store.reserve("INFRA", "gap b", "P2", "s").unwrap();
+        let c = store.reserve("INFRA", "gap c", "P2", "s").unwrap();
+
+        // Ship out of ID order with explicit closed_at timestamps so the
+        // ordering under test can only come from the closed_at column, not
+        // from insertion/ID order.
+        store
+            .conn
+            .execute(
+                "UPDATE gaps SET status='done', closed_at=?1 WHERE id=?2",
+                params![300_i64, a],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE gaps SET status='done', closed_at=?1 WHERE id=?2",
+                params![100_i64, b],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE gaps SET status='done', closed_at=?1 WHERE id=?2",
+                params![200_i64, c],
+            )
+            .unwrap();
+
+        let ordered = store.list_by_status_ordered("done").unwrap();
+        let ids: Vec<&str> = ordered.iter().map(|g| g.id.as_str()).collect();
+        assert_eq!(ids, vec![b.as_str(), c.as_str(), a.as_str()]);
+
+        let closed_ats: Vec<i64> = ordered.iter().map(|g| g.closed_at.unwrap()).collect();
+        let mut sorted = closed_ats.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            closed_ats, sorted,
+            "returned vector must be monotonic by closed_at"
+        );
     }
 }
 
