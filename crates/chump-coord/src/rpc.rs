@@ -696,6 +696,26 @@ pub async fn register_worker_rpc_handlers(
     })
     .await?;
 
+    // prune_ledger: return the deterministic set of low-Crit dormant ledger
+    // entry ids eligible for pruning (CREDIBLE-1049, CREDIBLE-356 slice).
+    // args: {"entries": [{"id","criticality","dormant","timestamp"}, ...], "threshold": f64}
+    serve_rpc_with_nats(Some(nats), session_id, "prune_ledger", |args| {
+        let entries: Vec<crate::ledger::LedgerEntry> = args
+            .get("entries")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e: serde_json::Error| e.to_string())?
+            .unwrap_or_default();
+        let threshold = args
+            .get("threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.5);
+        let pruned = crate::ledger::prune_ledger(&entries, threshold);
+        Ok(serde_json::json!({"pruned": pruned}))
+    })
+    .await?;
+
     Ok(serde_json::json!({"registered": true, "session_id": session_id}))
 }
 

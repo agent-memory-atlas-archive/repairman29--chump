@@ -65,6 +65,7 @@ pub mod help_request;
 /// META-175: per-role JetStream durable consumers (restart-safe replay building block).
 /// Feature-gated behind CHUMP_FLEET_WIRE_V1=1 + CHUMP_NATS_URL.
 pub mod jetstream_consumer;
+pub mod ledger;
 pub mod mesh;
 pub mod mission;
 /// INFRA-2266: Layer 1a slice 3/4 — NATS-primary JetStream durable consumer.
