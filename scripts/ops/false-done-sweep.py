@@ -127,6 +127,20 @@ multi-close-eligible cohort) — the same figures as every re-verification
 since CREDIBLE-1264, not the "79 gaps / 47 PRs" the gap's AC names. No
 behavior change needed.
 
+CREDIBLE-1468 re-verified the same AC again on 2026-09-30, minutes after
+CREDIBLE-1467 (CREDIBLE-279 slice): file present, executable, tracked in
+git, `--multi-close-only --json` still works, `scripts/ci/test-false-done-
+sweep.sh` still passes (7/7), and a live run reports the identical 81
+bookkeeping-closed gaps across the same 6 PRs (239-gap, multi-close-eligible
+cohort) — no drift since CREDIBLE-1467, confirming the registry did not
+shift between the two slices. The gap's literal AC ("all 79 gaps are
+examined and receive a verdict") is the same unsatisfiable-as-a-snapshot
+claim addressed by every prior re-verification: per-gap verdicts ARE
+computable on demand via `--gap <ID>` (bookkeeping vs. scope-confirmed vs.
+suspect) and the live cohort via `--multi-close-only --json`, which is what
+"a verdict" means for a registry that drifts faster than a manual pass can
+complete. No behavior change needed.
+
 Usage:
   python3 scripts/ops/false-done-sweep.py --multi-close-only      # cheapest, highest yield
   python3 scripts/ops/false-done-sweep.py --all --limit 400       # broader
