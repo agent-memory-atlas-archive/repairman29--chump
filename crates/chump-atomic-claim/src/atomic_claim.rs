@@ -102,6 +102,17 @@ pub struct ClaimArgs {
     /// parse time, since the requirement only applies when `--paths`
     /// actually spans multiple top-level directories).
     pub reason: Option<String>,
+    /// INFRA-5758 (INFRA-1689 slice): optional `<file>::<symbol>` region
+    /// scope, e.g. `src/foo.rs::dispatch_fanout`. Appended to the lease's
+    /// `paths` array alongside any `--paths` CSV entries so overlap
+    /// detection sees it; `ast-crawler::region` (INFRA-5759) later resolves
+    /// the `symbol` half to an AST line range. Mutually exclusive with
+    /// `--no-region`.
+    pub region: Option<String>,
+    /// INFRA-5758: explicit opt-out of region-scoped leasing even when a
+    /// `<file>::<symbol>`-shaped value would otherwise be inferred (e.g.
+    /// forces a plain whole-file lease). Mutually exclusive with `--region`.
+    pub no_region: bool,
 }
 
 impl ClaimArgs {
@@ -117,6 +128,9 @@ impl ClaimArgs {
                        --role ROLE      (mandatory) Role hint for the claiming session (e.g. shepherd, target)\n  \
                        --scope SCOPE    (optional) Scope hint for the claiming session (e.g. a module or concern)\n  \
                        --paths CSV      Record path scope (comma-separated globs); enables overlap detection\n  \
+                       --region FILE::SYMBOL  Record a symbol-region scope (e.g. src/foo.rs::my_fn);\n                              \
+                                        merged into the lease's paths array alongside --paths\n  \
+                       --no-region      Opt out of region-scoped leasing (mutually exclusive with --region)\n  \
                        --broad          Allow --paths to span >1 top-level directory (requires --reason)\n  \
                        --reason TEXT    Justification for --broad (mandatory when --broad is set)\n  \
                        --session ID     Explicit session ID (default derived from env / pid)\n  \
@@ -179,6 +193,8 @@ impl ClaimArgs {
         let mut scope: Option<String> = None;
         let mut broad = false;
         let mut reason: Option<String> = None;
+        let mut region: Option<String> = None;
+        let mut no_region = false;
 
         let mut i = 2;
         while i < args.len() {
@@ -271,6 +287,21 @@ impl ClaimArgs {
                     );
                     i += 2;
                 }
+                "--region" => {
+                    let v = args
+                        .get(i + 1)
+                        .ok_or_else(|| anyhow!("--region needs a value"))?
+                        .to_string();
+                    if !v.contains("::") {
+                        bail!("--region must be <file>::<symbol> (got {v})");
+                    }
+                    region = Some(v);
+                    i += 2;
+                }
+                "--no-region" => {
+                    no_region = true;
+                    i += 1;
+                }
                 other => bail!("unknown flag: {other}"),
             }
         }
@@ -288,6 +319,10 @@ impl ClaimArgs {
                  --scope is optional: a module or concern name.\n  \
                  --paths remains optional and advisory (no path validation if omitted)."
             );
+        }
+
+        if region.is_some() && no_region {
+            bail!("--region and --no-region are mutually exclusive");
         }
 
         let worktree_base = std::env::var("CHUMP_WORKTREE_BASE")
@@ -319,7 +354,22 @@ impl ClaimArgs {
             scope,
             broad,
             reason,
+            region,
+            no_region,
         })
+    }
+
+    /// INFRA-5758: merge `--paths` CSV with `--region` (if set) into a single
+    /// CSV suitable for the existing paths-array writers, which are agnostic
+    /// to whether an entry is a plain path or a `file::symbol` region. A
+    /// `--no-region` claim (or no `--region` at all) is a pure passthrough.
+    pub fn paths_csv_with_region(&self) -> Option<String> {
+        match (&self.paths, &self.region) {
+            (None, None) => None,
+            (Some(p), None) => Some(p.clone()),
+            (None, Some(r)) => Some(r.clone()),
+            (Some(p), Some(r)) => Some(format!("{p},{r}")),
+        }
     }
 }
 
@@ -1655,12 +1705,16 @@ pub fn run_claim(mut args: ClaimArgs) -> Result<ClaimReport> {
         );
     }
 
-    // 7b. Write JSON lease file to .chump-locks/<session>.json.
+    // 7b. Write JSON lease file to .chump-locks/<session>.json. INFRA-5758:
+    // a `--region <file>::<symbol>` value is merged into the same CSV as
+    // `--paths` — the paths-array writers are agnostic to region-suffixed
+    // entries.
+    let paths_csv_with_region = args.paths_csv_with_region();
     let lease_file = match write_or_merge_lease(
         &lock_dir,
         &session_id,
         &args.gap_id,
-        args.paths.as_deref(),
+        paths_csv_with_region.as_deref(),
         14_400, // 4h TTL
         false,
     ) {
@@ -1703,7 +1757,7 @@ pub fn run_claim(mut args: ClaimArgs) -> Result<ClaimReport> {
         &ambient_log,
         &args.gap_id,
         &session_id,
-        args.paths.as_deref().unwrap_or(""),
+        paths_csv_with_region.as_deref().unwrap_or(""),
         14_400, // 4h TTL in seconds
     );
 
@@ -6888,6 +6942,122 @@ mod tests {
         let argv: Vec<String> = vec!["claim".into(), "INFRA-6624".into(), "--scope".into()];
         let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
         assert!(format!("{err:#}").contains("--scope needs a value"));
+    }
+
+    // INFRA-5758 (INFRA-1689 slice): --region flag.
+    #[test]
+    fn from_argv_region_flag_alongside_paths() {
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-5758".into(),
+            "--role".into(),
+            "shepherd".into(),
+            "--paths".into(),
+            "docs/foo.md".into(),
+            "--region".into(),
+            "src/foo.rs::dispatch_fanout".into(),
+        ];
+        let args = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap();
+        assert_eq!(args.region.as_deref(), Some("src/foo.rs::dispatch_fanout"));
+        assert!(!args.no_region);
+        assert_eq!(
+            args.paths_csv_with_region().as_deref(),
+            Some("docs/foo.md,src/foo.rs::dispatch_fanout")
+        );
+    }
+
+    #[test]
+    fn from_argv_region_flag_without_paths() {
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-5758".into(),
+            "--role".into(),
+            "shepherd".into(),
+            "--region".into(),
+            "src/foo.rs::dispatch_fanout".into(),
+        ];
+        let args = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap();
+        assert!(args.paths.is_none());
+        assert_eq!(
+            args.paths_csv_with_region().as_deref(),
+            Some("src/foo.rs::dispatch_fanout")
+        );
+    }
+
+    #[test]
+    fn from_argv_region_missing_double_colon_errors() {
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-5758".into(),
+            "--role".into(),
+            "shepherd".into(),
+            "--region".into(),
+            "src/foo.rs".into(),
+        ];
+        let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
+        assert!(format!("{err:#}").contains("--region must be <file>::<symbol>"));
+    }
+
+    #[test]
+    fn from_argv_no_region_flag() {
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-5758".into(),
+            "--role".into(),
+            "shepherd".into(),
+            "--no-region".into(),
+        ];
+        let args = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap();
+        assert!(args.no_region);
+        assert!(args.region.is_none());
+        assert!(args.paths_csv_with_region().is_none());
+    }
+
+    #[test]
+    fn from_argv_region_and_no_region_mutually_exclusive() {
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-5758".into(),
+            "--role".into(),
+            "shepherd".into(),
+            "--region".into(),
+            "src/foo.rs::dispatch_fanout".into(),
+            "--no-region".into(),
+        ];
+        let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
+        assert!(format!("{err:#}").contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn write_basic_lease_stores_region_entry_in_paths_array() {
+        // AC3: round-trip a lease whose paths CSV contains a `file::symbol`
+        // region entry through the real on-disk writer (not just the struct).
+        let tmp = std::env::temp_dir().join(format!(
+            "infra5758-region-{}",
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let lease_path = write_basic_lease(
+            &tmp,
+            "test-session-region",
+            "INFRA-5758",
+            Some("docs/foo.md,src/foo.rs::dispatch_fanout"),
+            14_400,
+        )
+        .expect("write");
+
+        let body = std::fs::read_to_string(&lease_path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            parsed["paths"],
+            serde_json::json!(["docs/foo.md", "src/foo.rs::dispatch_fanout"])
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

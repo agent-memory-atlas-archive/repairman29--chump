@@ -244,8 +244,18 @@ fn normalise_pattern(p: &str) -> String {
 ///     `src/deep/nested.rs`, etc. Does NOT match `src_v2/...`.
 ///   - `ChumpMenu/**` → same as `ChumpMenu/`; both forms supported.
 ///   - `**` → matches any path.
+///   - `src/foo.rs::symbol_name` (INFRA-5758) — a region-scoped claim over
+///     one AST symbol inside `src/foo.rs`. Matching strips the `::symbol`
+///     suffix and falls through to the plain-file rules above, so a region
+///     claim still conflicts with (and is found by) whole-file readers that
+///     predate region support — file-level granularity, not symbol-level.
 fn path_matches(pattern: &str, candidate: &str) -> bool {
     let cand = normalise_path(candidate);
+
+    // Region-scoped pattern (`file::symbol`) — match on the file half only.
+    if let Some((file, _symbol)) = pattern.split_once("::") {
+        return path_matches(file, &cand);
+    }
 
     // ** glob (any path).
     if pattern.trim() == "**" {
@@ -691,6 +701,47 @@ mod tests {
         assert!(!path_matches("src/", "docs/foo.rs"));
         // `src` without slash must NOT swallow `src_v2`
         assert!(!path_matches("src", "src_v2/foo.rs"));
+    }
+
+    #[test]
+    #[serial_test::serial(ambient_env)]
+    fn path_matches_region_entry() {
+        // INFRA-5758: a `file::symbol` pattern matches on the file half.
+        assert!(path_matches("src/foo.rs::my_fn", "src/foo.rs"));
+        assert!(!path_matches("src/foo.rs::my_fn", "src/bar.rs"));
+        // Directory-prefix + region suffix on the pattern side still works.
+        assert!(path_matches("src/::my_fn", "src/foo.rs"));
+    }
+
+    #[test]
+    #[serial_test::serial(ambient_env)]
+    fn lease_roundtrip_with_region_and_plain_paths() {
+        // AC1/AC3: a lease's `paths` array mixes plain `file` entries and
+        // `file::region` entries; round-tripping through serde must preserve
+        // both verbatim (backward-compat: a reader that doesn't understand
+        // `::region` still sees a valid path-like string).
+        let lease = Lease {
+            session_id: "sess-region".into(),
+            paths: vec![
+                "src/foo.rs".to_string(),
+                "src/bar.rs::dispatch_fanout".to_string(),
+            ],
+            taken_at: "2026-04-17T01:57:48Z".into(),
+            expires_at: "2026-04-17T02:27:48Z".into(),
+            heartbeat_at: "2026-04-17T01:57:48Z".into(),
+            purpose: "region round-trip test".into(),
+            worktree: String::new(),
+            gap_id: Some("INFRA-5758".into()),
+            pending_new_gap: None,
+        };
+        let json = serde_json::to_string(&lease).unwrap();
+        let back: Lease = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, lease);
+        assert_eq!(back.paths[0], "src/foo.rs");
+        assert_eq!(back.paths[1], "src/bar.rs::dispatch_fanout");
+        // The region entry still covers its file for conflict detection.
+        assert!(back.covers("src/bar.rs"));
+        assert!(!back.covers("src/other.rs"));
     }
 
     #[test]
