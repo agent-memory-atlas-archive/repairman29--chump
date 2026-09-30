@@ -5,6 +5,14 @@
 #  (a) --acceptance-criteria stores the provided string verbatim
 #  (b) P0/P1 gap with --skip-obs-acs and no --acceptance-criteria is rejected
 #  (c) --no-ac-required bypasses the rejection and emits ac_gate_bypassed to ambient.jsonl
+#
+# CREDIBLE-1473 re-verified this AC on 2026-09-30 (CREDIBLE-284 slice): the
+# --acceptance-criteria flag, the P0/P1 rejection gate, and the
+# --no-ac-required bypass (mirroring the --outcome/--evidence firewall
+# pattern one-for-one — same enforce_priorities gate, same audited bypass
+# flag, same *_gate_bypassed ambient event) were already shipped under
+# CREDIBLE-1270/#4704. All 8 checks in this file still pass unmodified. No
+# behavior change needed.
 
 set -euo pipefail
 
