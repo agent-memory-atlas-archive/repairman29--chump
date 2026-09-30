@@ -353,8 +353,19 @@ trap 'remove_heartbeat_and_daemon; orch_log_end "worker.sh" "$?"' EXIT
 # unless we actively re-read a file that run-fleet.sh's refresher keeps current).
 # Falls back to ANTHROPIC_API_KEY when token file is missing/empty/expired.
 refresh_oauth_token() {
-    local token_file="${CHUMP_OAUTH_TOKEN_FILE:-}"
-    [[ -z "$token_file" ]] && return 0  # api_key mode — nothing to do
+    # RESILIENT-1506: an operator who explicitly forced API-key mode does
+    # not want this function to silently promote OAuth back over it just
+    # because oauth-token.json happens to exist on disk.
+    [[ "${CHUMP_AUTH_MODE:-}" == "api-key" ]] && return 0
+    # RESILIENT-1506: default to the well-known oauth-token.json path when
+    # CHUMP_OAUTH_TOKEN_FILE isn't exported (e.g. providers.env's
+    # CLAUDE_CODE_OAUTH_TOKEN line got stripped, or worker.sh was invoked
+    # outside run-fleet.sh). The refresher daemon
+    # (scripts/coord/oauth-token-refresh.sh) keeps this file current
+    # regardless of what env vars a given launch passed through, so reading
+    # it natively survives a providers.env cleanup that would otherwise
+    # silently skip this whole function.
+    local token_file="${CHUMP_OAUTH_TOKEN_FILE:-${HOME}/.chump/oauth-token.json}"
     local tok=""
     if [[ -f "$token_file" ]]; then
         tok=$(python3 -c "

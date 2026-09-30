@@ -354,13 +354,24 @@ pub fn detect_credentials() -> AuthCredentials {
         .trim()
         .to_string();
 
-    // 2. OAUTH refresh file (CHUMP_OAUTH_TOKEN_FILE written by control.sh every 5 min)
+    // 2. OAUTH refresh file (CHUMP_OAUTH_TOKEN_FILE written by control.sh every 5 min).
     //    Only overrides oauth_token when env is empty.
+    //    RESILIENT-1506: CHUMP_OAUTH_TOKEN_FILE is normally exported by
+    //    providers.env / run-fleet.sh, not baked into this binary — so a
+    //    stripped providers.env line silently dropped this entire source and
+    //    took the fleet down (2026-09-28) even though the refresher daemon
+    //    kept ~/.chump/oauth-token.json perfectly current the whole time.
+    //    Default to that well-known path so the file is read natively
+    //    whenever the env var is absent, same as
+    //    scripts/dispatch/chump-farmer-run.sh's TOKEN_FILE fallback.
     if creds.oauth_token.is_empty() {
-        if let Ok(tok_path) = std::env::var("CHUMP_OAUTH_TOKEN_FILE") {
-            if let Some(tok) = read_oauth_token_file(Path::new(&tok_path)) {
-                creds.oauth_token = tok;
-            }
+        let tok_path = std::env::var("CHUMP_OAUTH_TOKEN_FILE")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(default_oauth_token_file);
+        if let Some(tok) = read_oauth_token_file(&tok_path) {
+            creds.oauth_token = tok;
         }
     }
 
@@ -719,6 +730,15 @@ pub(crate) fn chump_config_path() -> PathBuf {
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| "/tmp".into());
     PathBuf::from(home).join(".chump").join("config.toml")
+}
+
+/// The well-known oauth-token.json path the refresher daemon keeps current
+/// (RESILIENT-1506), used as the fallback when CHUMP_OAUTH_TOKEN_FILE is unset.
+fn default_oauth_token_file() -> PathBuf {
+    let home = std::env::var("CHUMP_HOME")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home).join(".chump").join("oauth-token.json")
 }
 
 /// Read a single `key = "value"` from a named section of ~/.chump/config.toml.
@@ -1170,6 +1190,34 @@ mod tests {
             || {
                 let creds = detect_credentials();
                 assert_eq!(creds.oauth_token, "sk-ant-oat01-fresh");
+            },
+        );
+    }
+
+    #[test]
+    fn reads_oauth_token_from_default_path_when_env_var_unset() {
+        // RESILIENT-1506: CHUMP_OAUTH_TOKEN_FILE not exported (providers.env
+        // stripped) must still find ~/.chump/oauth-token.json natively.
+        let dir = tempfile::tempdir().unwrap();
+        let chump_dir = dir.path().join(".chump");
+        std::fs::create_dir_all(&chump_dir).unwrap();
+        std::fs::write(
+            chump_dir.join("oauth-token.json"),
+            r#"{"token":"sk-ant-oat01-default-path","written_at":"2026-09-28T00:00:00Z"}"#,
+        )
+        .unwrap();
+
+        with_env(
+            &[("CHUMP_HOME", dir.path().to_str().unwrap())],
+            &[
+                "ANTHROPIC_API_KEY",
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                "CHUMP_AUTH_MODE",
+                "CHUMP_OAUTH_TOKEN_FILE",
+            ],
+            || {
+                let creds = detect_credentials();
+                assert_eq!(creds.oauth_token, "sk-ant-oat01-default-path");
             },
         );
     }
