@@ -2271,9 +2271,39 @@ events:
       (CHUMP_NOTIFY_KIND=chump_digest, verdict direct). Deterministic state-read
       only, no LLM — distinct from board_ceo_briefing_posted (the Sonnet strategy
       layer). Records the digest window merge/gap/organ counts so each post is
-      provable without a desktop session open.
+      provable without a desktop session open. RESILIENT-1496: emitted ONLY when
+      notify-operator's own stderr confirms an actual Discord send ("delivered")
+      — not merely a 0 exit code, which notify_operator also returns for
+      deliberate no-op paths. See chump_digest_suppressed for that case.
     consumers: [ambient]
     fields_required: [ts, kind]
+
+  - kind: chump_digest_suppressed
+    effect_metric: self
+    emitter: scripts/dispatch/digest-beat.sh (RESILIENT-376 / RESILIENT-1496)
+    trigger: the digest organ ran and called notify_operator, which returned 0
+      (no error) but did NOT actually reach Discord — e.g. the
+      CHUMP_OPERATOR_AUTOPOST_DM kill-switch is off, DISCORD_TOKEN /
+      CHUMP_READY_DM_USER_ID is unset, or the message was deferred to the
+      curation queue. Exists because treating notify_operator's exit code alone
+      as "posted" is how the digest organ could fire on schedule and reach
+      nobody for weeks while every cycle logged success (the 0/106-delivered
+      incident, RESILIENT-1496). scripts/coord/digest-delivery-liveness.sh reads
+      this kind to alarm when CHUMP_OPERATOR_AUTOPOST_DM is on but the last
+      cycle was still suppressed.
+    consumers: [ambient, scripts/coord/digest-delivery-liveness.sh]
+    fields_required: [ts, kind]
+
+  - kind: digest_delivery_broken
+    effect_metric: self
+    emitter: scripts/coord/digest-delivery-liveness.sh (RESILIENT-1496)
+    trigger: CHUMP_OPERATOR_AUTOPOST_DM is on (automated DMs are supposed to be
+      delivering) but the last recorded chump_digest_posted/chump_digest_suppressed
+      event was a suppression, not a real send. Deliberately NOT raised when the
+      kill-switch is off — that state is the operator's own 2026-09-13 decision
+      and is reported quiet-by-design, not broken.
+    consumers: [ambient]
+    fields_required: [ts, kind, last_event]
 
   - kind: discord_command_agent_dispatched
     effect_metric: self

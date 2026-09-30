@@ -220,13 +220,19 @@ for p in ph:
 " <<< "$DIGEST_JSON"
 fi
 
-# Discord webhook (best-effort; never fails the cron run).
+# Discord delivery (best-effort; never fails the cron run).
+#
+# RESILIENT-1496: this used to POST ONLY to a webhook URL read from
+# .chump/discord-config.json — a file that never existed on the operator's
+# machine, so --discord-webhook was a silent no-op from day one (INFRA-1302).
+# The canonical Discord destination that actually exists and is exercised
+# daily is DISCORD_TOKEN + CHUMP_READY_DM_USER_ID via
+# scripts/coord/lib/notify-operator.sh (the same path digest-beat.sh /
+# RESILIENT-376 uses). Prefer the webhook file when an operator has set one up
+# (kept for backward compat), else fall back to the canonical DM path so this
+# flag has one working destination instead of a config file nobody wrote.
 if [ "$DISCORD" = "1" ]; then
-    DISCORD_CFG="$REPO_ROOT/.chump/discord-config.json"
-    if [ -f "$DISCORD_CFG" ]; then
-        WEBHOOK="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('digest_webhook',''))" "$DISCORD_CFG" 2>/dev/null)"
-        if [ -n "$WEBHOOK" ]; then
-            CONTENT=$(python3 -c "
+    CONTENT=$(python3 -c "
 import json, sys
 d = json.loads(sys.stdin.read())
 t = d['totals']
@@ -239,9 +245,23 @@ if fb:
     lines.append('Top feedback: ' + ', '.join(f\"{c['n_sessions']}× {c['subject']}\" for c in fb[:3]))
 print('\\n'.join(lines))
 " <<< "$DIGEST_JSON")
-            curl -s -X POST -H 'content-type: application/json' \
-                -d "$(python3 -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$CONTENT")" \
-                "$WEBHOOK" >/dev/null 2>&1 || true
+
+    DISCORD_CFG="$REPO_ROOT/.chump/discord-config.json"
+    WEBHOOK=""
+    if [ -f "$DISCORD_CFG" ]; then
+        WEBHOOK="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('digest_webhook',''))" "$DISCORD_CFG" 2>/dev/null)"
+    fi
+    if [ -n "$WEBHOOK" ]; then
+        curl -s -X POST -H 'content-type: application/json' \
+            -d "$(python3 -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$CONTENT")" \
+            "$WEBHOOK" >/dev/null 2>&1 || true
+    else
+        CHUMP_NOTIFY_KIND=chump_digest
+        export CHUMP_NOTIFY_KIND
+        # shellcheck source=lib/notify-operator.sh
+        if [ -f "$SCRIPT_DIR/lib/notify-operator.sh" ]; then
+            source "$SCRIPT_DIR/lib/notify-operator.sh"
+            notify_operator "$CONTENT" || true
         fi
     fi
 fi

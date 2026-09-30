@@ -248,15 +248,37 @@ fi
 
 # ── post via the shared operator DM path ─────────────────────────────────────
 # Register verdict `direct` (delivered, not an escalation) via CHUMP_NOTIFY_KIND.
+#
+# RESILIENT-1496: notify_operator returns 0 not only on a real Discord send but
+# also for deliberate no-op paths — CHUMP_OPERATOR_AUTOPOST_DM kill-switch off,
+# DISCORD_TOKEN/CHUMP_READY_DM_USER_ID unset, curation-queue defer. Treating
+# that 0 as "posted" is exactly how this organ could run 106 times and reach
+# nobody while every cycle logged success. Capture notify-operator's own stderr
+# (it already says "delivered" only on a real send) and record which one
+# actually happened, so a liveness check downstream can tell "organ didn't run"
+# apart from "organ ran, nothing reached the phone".
 export CHUMP_NOTIFY_KIND=chump_digest
-if source "$REPO_ROOT/scripts/coord/lib/notify-operator.sh" && notify_operator "$DIGEST"; then
+NOTIFY_OUT="$(mktemp)"
+if source "$REPO_ROOT/scripts/coord/lib/notify-operator.sh" && notify_operator "$DIGEST" 2>"$NOTIFY_OUT"; then
+    cat "$NOTIFY_OUT" >&2
     printf '%s' "$now_epoch" > "$MARKER"
-    printf '{"ts":"%s","kind":"chump_digest_posted","merges":%s,"gaps_closed":%s,"organs_up":%s,"organs_total":%s}\n' \
-        "$(ts)" "${merge_count:-0}" "${gaps_closed:-0}" "${organs_up:-0}" "${organs_total:-0}" \
+    if grep -q '\[notify-operator\] delivered' "$NOTIFY_OUT"; then
+        # scanner-anchor: "kind":"chump_digest_posted"
+        EVENT_KIND="chump_digest_posted"
+        log "posted + marker updated"
+    else
+        # scanner-anchor: "kind":"chump_digest_suppressed"
+        EVENT_KIND="chump_digest_suppressed"
+        log "digest NOT actually delivered (see notify-operator output above) — recording as suppressed, not posted"
+    fi
+    rm -f "$NOTIFY_OUT"
+    printf '{"ts":"%s","kind":"%s","merges":%s,"gaps_closed":%s,"organs_up":%s,"organs_total":%s}\n' \
+        "$(ts)" "$EVENT_KIND" "${merge_count:-0}" "${gaps_closed:-0}" "${organs_up:-0}" "${organs_total:-0}" \
         >> "$LOCK_DIR/ambient.jsonl" 2>/dev/null || true
-    log "posted + marker updated"
     exit 0
 else
+    cat "$NOTIFY_OUT" >&2
+    rm -f "$NOTIFY_OUT"
     log "notify_operator FAILED — marker NOT advanced (will retry next beat)"
     exit 1
 fi

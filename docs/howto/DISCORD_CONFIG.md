@@ -86,3 +86,24 @@ So when started from ChumpMenu, Discord runs with CWD and `CHUMP_HOME` equal to 
 4. **Start:** From repo root run `./run-discord.sh` or `./run-discord-ollama.sh`, or use ChumpMenu with repo path set to that root (e.g. `~/Projects/Chump`).
 
 If the bot doesn’t reply: see [DISCORD_TROUBLESHOOTING.md](../operations/DISCORD_TROUBLESHOOTING.md).
+
+## Operator digests (RESILIENT-376 / RESILIENT-1496)
+
+Both digest paths deliver through the **same canonical destination** —
+`DISCORD_TOKEN` + `CHUMP_READY_DM_USER_ID` via
+`scripts/coord/lib/notify-operator.sh` — not a separate webhook config file:
+
+- `scripts/dispatch/digest-beat.sh` (fired by `chump-digest.timer`, twice daily).
+- `scripts/coord/operator-digest.sh --discord-webhook` falls back to the same
+  path when `.chump/discord-config.json` doesn't exist (it prefers the webhook
+  file only if an operator has explicitly set one up).
+
+`notify_operator` returns 0 both for a real Discord send **and** for
+deliberate no-ops (the `CHUMP_OPERATOR_AUTOPOST_DM` kill-switch off, missing
+token/user-id, curation-queue defer) — a 0 exit code alone does not mean the
+message reached the phone. `digest-beat.sh` distinguishes the two by grepping
+notify-operator's own stderr for `delivered`, and emits `kind=chump_digest_posted`
+only on a real send, `kind=chump_digest_suppressed` otherwise. Check whether the
+organ is actually landing: `bash scripts/coord/digest-delivery-liveness.sh`
+(alarms only when `CHUMP_OPERATOR_AUTOPOST_DM` is on but the last cycle was
+suppressed — quiet-by-design when the kill-switch is off).
