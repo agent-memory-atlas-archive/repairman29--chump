@@ -91,6 +91,17 @@ pub struct ClaimArgs {
     /// session (e.g. a module or concern name). Stored for later validation;
     /// not yet enforced against a scope registry.
     pub scope: Option<String>,
+    /// INFRA-5775 (INFRA-1863 slice): explicit override allowing `--paths`
+    /// to span more than one top-level directory. Requires `reason` to also
+    /// be set. Without this flag, a multi-top-level-dir `--paths` is
+    /// auto-narrowed to the most-specific common parent directory instead
+    /// of being rejected outright.
+    pub broad: bool,
+    /// INFRA-5775: human-readable justification for a `--broad` claim.
+    /// Mandatory whenever `--broad` is set (enforced at the gate, not at
+    /// parse time, since the requirement only applies when `--paths`
+    /// actually spans multiple top-level directories).
+    pub reason: Option<String>,
 }
 
 impl ClaimArgs {
@@ -106,6 +117,8 @@ impl ClaimArgs {
                        --role ROLE      (mandatory) Role hint for the claiming session (e.g. shepherd, target)\n  \
                        --scope SCOPE    (optional) Scope hint for the claiming session (e.g. a module or concern)\n  \
                        --paths CSV      Record path scope (comma-separated globs); enables overlap detection\n  \
+                       --broad          Allow --paths to span >1 top-level directory (requires --reason)\n  \
+                       --reason TEXT    Justification for --broad (mandatory when --broad is set)\n  \
                        --session ID     Explicit session ID (default derived from env / pid)\n  \
                        --no-doctor      Skip gap-doctor reconciliation (faster, but skips drift repair)\n  \
                        --no-import      Skip yaml->state.db re-import (faster, but assumes registry is fresh)\n  \
@@ -164,6 +177,8 @@ impl ClaimArgs {
         let mut rename = false;
         let mut role: Option<String> = None;
         let mut scope: Option<String> = None;
+        let mut broad = false;
+        let mut reason: Option<String> = None;
 
         let mut i = 2;
         while i < args.len() {
@@ -244,6 +259,18 @@ impl ClaimArgs {
                     );
                     i += 2;
                 }
+                "--broad" => {
+                    broad = true;
+                    i += 1;
+                }
+                "--reason" => {
+                    reason = Some(
+                        args.get(i + 1)
+                            .ok_or_else(|| anyhow!("--reason needs a value"))?
+                            .to_string(),
+                    );
+                    i += 2;
+                }
                 other => bail!("unknown flag: {other}"),
             }
         }
@@ -290,6 +317,8 @@ impl ClaimArgs {
             rename,
             role,
             scope,
+            broad,
+            reason,
         })
     }
 }
@@ -701,7 +730,7 @@ pub fn run_check_only(args: ClaimArgs) -> Result<CheckReport> {
 
 /// Run the atomic claim. Each step is a separate function so the unit
 /// tests can exercise individual pieces in isolation.
-pub fn run_claim(args: ClaimArgs) -> Result<ClaimReport> {
+pub fn run_claim(mut args: ClaimArgs) -> Result<ClaimReport> {
     // RESILIENT-073: fleet kill switch — fail-closed autonomy level gate.
     // FIRST: must run BEFORE any state mutation OR any chump op that can
     // fail. Reads ~/.chump/AUTONOMY_LEVEL: 0 or missing/corrupt → STOP.
@@ -792,6 +821,41 @@ pub fn run_claim(args: ClaimArgs) -> Result<ClaimReport> {
                     open_branch,
                 );
             }
+        }
+    }
+
+    // INFRA-5775 (INFRA-1863 slice): broad-scope claim guard. A `--paths`
+    // declaration spanning >1 top-level directory either needs an explicit
+    // `--broad --reason '<text>'` override, or gets auto-narrowed to the
+    // most-specific directory common to every declared path.
+    if let Some(paths_csv) = args.paths.clone() {
+        match check_broad_scope_and_narrow(&paths_csv, args.broad, args.reason.as_deref()) {
+            Ok(Some(narrowed)) => {
+                eprintln!(
+                    "[claim] INFRA-5775: --paths '{}' spans >1 top-level directory; \
+                     auto-narrowed to '{}'. Pass --broad --reason '<text>' to keep the \
+                     original scope.",
+                    paths_csv, narrowed
+                );
+                args.paths = Some(narrowed);
+            }
+            Ok(None) => {
+                if args.broad {
+                    let early_session_id = args
+                        .session_id
+                        .clone()
+                        .unwrap_or_else(|| derive_session_id(&args.gap_id));
+                    let ambient_log_early = args.repo_root.join(".chump-locks/ambient.jsonl");
+                    emit_broad_scope_claim(
+                        &ambient_log_early,
+                        &args.gap_id,
+                        &early_session_id,
+                        &paths_csv,
+                        args.reason.as_deref().unwrap_or(""),
+                    );
+                }
+            }
+            Err(e) => return Err(e),
         }
     }
 
@@ -1767,6 +1831,127 @@ fn emit_lease_broad_dir_claim(
 }
 
 // ── end INFRA-1885 ───────────────────────────────────────────────────────────
+
+/// INFRA-5775 (INFRA-1863 slice): return the first path component (the
+/// top-level directory) of a repo-relative path. A bare filename with no
+/// slash counts as its own "directory" for this purpose.
+fn top_level_dir_of(path: &str) -> &str {
+    path.split('/').next().unwrap_or(path)
+}
+
+/// INFRA-5775: check whether `paths_csv` spans more than one top-level
+/// directory (AC1) and, if so, either validate the `--broad --reason`
+/// override or compute an auto-narrowed replacement (AC2).
+///
+/// Returns:
+///   - `Ok(None)` — single top-level directory, or a valid `--broad` +
+///     `--reason` override (caller keeps the original paths).
+///   - `Ok(Some(narrowed_csv))` — no override supplied; caller should
+///     replace the declared paths with `narrowed_csv`.
+///   - `Err(_)` — `--broad` was set without `--reason`.
+fn check_broad_scope_and_narrow(
+    paths_csv: &str,
+    broad: bool,
+    reason: Option<&str>,
+) -> Result<Option<String>> {
+    let paths: Vec<&str> = paths_csv
+        .split(',')
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if paths.len() < 2 {
+        return Ok(None);
+    }
+
+    let mut top_dirs: Vec<&str> = paths.iter().map(|p| top_level_dir_of(p)).collect();
+    top_dirs.sort_unstable();
+    top_dirs.dedup();
+    if top_dirs.len() <= 1 {
+        return Ok(None);
+    }
+
+    if broad {
+        let has_reason = reason.map(|r| !r.trim().is_empty()).unwrap_or(false);
+        if !has_reason {
+            bail!(
+                "INFRA-5775: --broad requires --reason '<text>' explaining why a claim \
+                 spanning multiple top-level directories ({dirs}) is necessary.",
+                dirs = top_dirs.join(", ")
+            );
+        }
+        return Ok(None);
+    }
+
+    Ok(Some(common_parent_dir(&paths)))
+}
+
+/// INFRA-5775: compute the most-specific directory common to every path in
+/// `paths` (longest common path-component prefix). Falls back to the repo
+/// root ("." ) when the paths share no common ancestor directory — which is
+/// always the case when their top-level directories already diverge.
+fn common_parent_dir(paths: &[&str]) -> String {
+    let component_lists: Vec<Vec<&str>> = paths.iter().map(|p| p.split('/').collect()).collect();
+    let min_len = component_lists.iter().map(|c| c.len()).min().unwrap_or(0);
+
+    let mut common_len = 0;
+    for i in 0..min_len {
+        let candidate = component_lists[0][i];
+        if component_lists[1..].iter().all(|cl| cl[i] == candidate) {
+            common_len = i + 1;
+        } else {
+            break;
+        }
+    }
+
+    if common_len == 0 {
+        ".".to_string()
+    } else {
+        component_lists[0][..common_len].join("/")
+    }
+}
+
+/// INFRA-5775: emit `kind=broad_scope_claim` to ambient.jsonl when a
+/// `--broad --reason` override is used to keep a multi-top-level-dir
+/// `--paths` claim. Best-effort — silently no-ops if the file isn't
+/// writable.
+// scanner-anchor: "kind":"broad_scope_claim"
+fn emit_broad_scope_claim(
+    ambient_log: &Path,
+    gap_id: &str,
+    session_id: &str,
+    paths_csv: &str,
+    reason: &str,
+) {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (y, mo, d, h, mi, s) = secs_to_ymdhms(secs);
+    let ts = format!("{y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z");
+    let line = format!(
+        "{{\"ts\":\"{ts}\",\"kind\":\"broad_scope_claim\",\
+         \"session_id\":\"{sid}\",\"gap\":\"{gap}\",\
+         \"paths\":\"{paths}\",\"reason\":\"{reason}\"}}\n",
+        ts = ts,
+        sid = json_escape(session_id),
+        gap = json_escape(gap_id),
+        paths = json_escape(paths_csv),
+        reason = json_escape(reason),
+    );
+    if let Some(parent) = ambient_log.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(ambient_log)
+        .and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(line.as_bytes())
+        });
+}
+
+// ── end INFRA-5775 ───────────────────────────────────────────────────────────
 
 /// INFRA-1025 AC6: check whether <remote>/<branch> exists on the remote.
 /// Uses `git ls-remote --exit-code` which exits 2 when the ref is absent.
@@ -6703,6 +6888,83 @@ mod tests {
         let argv: Vec<String> = vec!["claim".into(), "INFRA-6624".into(), "--scope".into()];
         let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
         assert!(format!("{err:#}").contains("--scope needs a value"));
+    }
+
+    #[test]
+    fn from_argv_broad_and_reason_flags() {
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-5775".into(),
+            "--role".into(),
+            "shepherd".into(),
+            "--paths".into(),
+            "src/foo.rs,docs/bar.md".into(),
+            "--broad".into(),
+            "--reason".into(),
+            "cross-cutting rename".into(),
+        ];
+        let args = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap();
+        assert!(args.broad);
+        assert_eq!(args.reason.as_deref(), Some("cross-cutting rename"));
+    }
+
+    #[test]
+    fn from_argv_reason_missing_value_errors() {
+        let argv: Vec<String> = vec![
+            "claim".into(),
+            "INFRA-5775".into(),
+            "--role".into(),
+            "shepherd".into(),
+            "--reason".into(),
+        ];
+        let err = ClaimArgs::from_argv(&argv, PathBuf::from(".")).unwrap_err();
+        assert!(format!("{err:#}").contains("--reason needs a value"));
+    }
+
+    // INFRA-5775 (INFRA-1863 slice): broad-scope claim guard.
+    #[test]
+    fn broad_scope_single_top_dir_passes_through() {
+        let result = check_broad_scope_and_narrow("src/foo.rs,src/bar.rs", false, None).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn broad_scope_multi_dir_without_broad_auto_narrows() {
+        let result = check_broad_scope_and_narrow("src/foo.rs,docs/bar.md", false, None).unwrap();
+        assert_eq!(result, Some(".".to_string()));
+    }
+
+    #[test]
+    fn broad_scope_multi_dir_narrows_to_shared_ancestor() {
+        // Both paths share "src/module" as their deepest common ancestor
+        // even though the *top-level* dir ("src") is the same for both —
+        // this exercises common_parent_dir's prefix computation directly.
+        let narrowed = common_parent_dir(&["src/module/a.rs", "src/module/sub/b.rs"]);
+        assert_eq!(narrowed, "src/module");
+    }
+
+    #[test]
+    fn broad_scope_multi_dir_with_broad_and_reason_passes() {
+        let result = check_broad_scope_and_narrow(
+            "src/foo.rs,docs/bar.md",
+            true,
+            Some("cross-cutting rename"),
+        )
+        .unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn broad_scope_multi_dir_with_broad_missing_reason_errors() {
+        let err = check_broad_scope_and_narrow("src/foo.rs,docs/bar.md", true, None).unwrap_err();
+        assert!(format!("{err:#}").contains("--broad requires --reason"));
+    }
+
+    #[test]
+    fn broad_scope_multi_dir_with_broad_empty_reason_errors() {
+        let err =
+            check_broad_scope_and_narrow("src/foo.rs,docs/bar.md", true, Some("  ")).unwrap_err();
+        assert!(format!("{err:#}").contains("--broad requires --reason"));
     }
 
     #[test]

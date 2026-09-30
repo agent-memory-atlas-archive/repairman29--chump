@@ -800,6 +800,15 @@ events:
     consumers: [fleet-brief, audit-log]
     fields_required: [ts, kind, session_id, gap, paths, reason]
 
+  - kind: broad_scope_claim
+    effect_metric: self
+    emitter: crates/chump-atomic-claim/src/atomic_claim.rs emit_broad_scope_claim (INFRA-5775)
+    trigger: operator used --broad --reason to claim --paths spanning more
+      than one top-level directory, overriding the INFRA-5775 auto-narrow
+      guard. Emitted for audit.
+    consumers: [fleet-brief, audit-log]
+    fields_required: [ts, kind, session_id, gap, paths, reason]
+
   - kind: gap_claim_nats_conflict
     effect_metric: self
     emitter: src/atomic_claim.rs nats_dual_write (INFRA-986)
