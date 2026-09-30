@@ -104,6 +104,15 @@ for alias_name in cargo-toml-append js-append rust-main-append; do
   fi
 done
 
+# ── Register generic 'union' driver (INFRA-1419) ─────────────────────────────
+# Line-level union merge via `git merge-file`, for paths where a custom
+# append-only/YAML-aware driver isn't warranted. No script file needed — the
+# driver command is the literal `git merge-file` invocation.
+DRIVER_NAME="union"
+git config "merge.${DRIVER_NAME}.name" "Line-level union merge via git merge-file (INFRA-1419)"
+git config "merge.${DRIVER_NAME}.driver" "git merge-file -p -L LEFT -L BASE -L RIGHT %A %O %B > %A"
+echo "[install-merge-drivers] OK: ${DRIVER_NAME} registered"
+
 # Verify .gitattributes wiring
 if [[ -f .gitattributes ]]; then
     echo "[install-merge-drivers] .gitattributes wiring check:"
