@@ -7,6 +7,23 @@
 //! Testability:
 //!   - `CHUMP_GH` env var overrides the `gh` binary path (mock injection).
 //!   - `CHUMP_REPO_ROOT` env var overrides the repo root (fake gap YAMLs).
+//!
+//! ## Boilerplate-AC exclusion (CREDIBLE-1471, CREDIBLE-279 slice)
+//!
+//! `chump gap reserve` without an explicit `--acceptance-criteria` mints a
+//! templated placeholder bullet (`default_acceptance_criteria` in
+//! `src/main.rs`): `"The change described by \"<what>\" is implemented in the
+//! relevant <domain> code path(s)."`. That sentence can never be covered *or*
+//! failed by a diff — it restates the gap title, not a checkable behavior —
+//! so counting it toward the denominator inflates confidence and, at scale
+//! (CREDIBLE-279: 79 `done` gaps closed by PRs touching zero implementation
+//! files), let genuinely uncovered gaps read as fully scored. [`is_boilerplate_ac`]
+//! detects this exact template (domain-agnostic — it matches on the
+//! surrounding phrase, not the substituted title/domain) and
+//! [`score_against_bullets`] drops matching bullets before scoring, so they
+//! never enter `AcCoverageResult::bullets` and never affect
+//! [`AcCoverageResult::confidence`] or `done_auditor::is_over_claim`'s
+//! denominator.
 
 use std::process::Command;
 
@@ -164,6 +181,23 @@ pub fn load_ac_bullets(gap_id: &str) -> Result<Vec<String>, String> {
         return Ok(vec![]);
     }
     Ok(serde_json::from_str::<Vec<String>>(ac_field).unwrap_or_default())
+}
+
+// ── boilerplate-AC detector ───────────────────────────────────────────────────
+
+/// CREDIBLE-1471: detect the templated placeholder AC minted by
+/// `default_acceptance_criteria` (`src/main.rs`) for gaps reserved without an
+/// explicit `--acceptance-criteria`: `"The change described by \"<what>\" is
+/// implemented in the relevant <domain> code path(s)."`. Domain-agnostic by
+/// design — it matches on the fixed surrounding phrase, not the substituted
+/// `<what>`/`<domain>` values, so it catches every domain variant (INFRA,
+/// CREDIBLE, ZERO-WASTE, …) that the template produces.
+///
+/// This sentence restates the gap title; no diff can cover or fail it, so it
+/// must never enter the AC-coverage denominator (see module docs above).
+pub fn is_boilerplate_ac(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("is implemented in the relevant") && lower.contains("code path")
 }
 
 // ── waiver parser ─────────────────────────────────────────────────────────────
@@ -1003,6 +1037,14 @@ fn score_against_bullets(
     trailer_text: String,
     repo: Option<&str>,
 ) -> AcCoverageResult {
+    // CREDIBLE-1471: drop templated boilerplate bullets before scoring — they
+    // can't be covered or failed by any diff and must not count toward the
+    // coverage denominator (see module docs + `is_boilerplate_ac`).
+    let raw_bullets: Vec<String> = raw_bullets
+        .into_iter()
+        .filter(|b| !is_boilerplate_ac(b))
+        .collect();
+
     // Fetch diff (external repo via --repo when supplied).
     let diff = match repo {
         Some(r) => run_gh(&["pr", "diff", &pr_number.to_string(), "--repo", r]),
@@ -2189,6 +2231,80 @@ mod tests {
             result.status,
             CoverageStatus::Advisory,
             "with CHUMP_VERIFY_LIVE_BLOCKING unset (default off), advisory mode must still fail open"
+        );
+    }
+
+    // ── CREDIBLE-1471: boilerplate-AC exclusion ─────────────────────────────
+
+    #[test]
+    fn credible1471_is_boilerplate_ac_matches_every_domain_variant() {
+        assert!(is_boilerplate_ac(
+            "The change described by \"add a foo widget\" is implemented in the relevant EFFECTIVE code path(s)."
+        ));
+        assert!(is_boilerplate_ac(
+            "The change described by \"fix the bar\" is implemented in the relevant INFRA code path(s)."
+        ));
+    }
+
+    #[test]
+    fn credible1471_is_boilerplate_ac_does_not_match_real_criteria() {
+        assert!(!is_boilerplate_ac(
+            "At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change."
+        ));
+        assert!(!is_boilerplate_ac(
+            "The CLI exits non-zero when the lease file is missing."
+        ));
+    }
+
+    #[test]
+    fn credible1471_boilerplate_bullet_excluded_from_coverage_denominator() {
+        let bullets = vec![
+            "The change described by \"add a foo widget\" is implemented in the relevant EFFECTIVE code path(s).".to_string(),
+        ];
+        let result = score_against_bullets(
+            1,
+            "EFFECTIVE-TEST".to_string(),
+            bullets,
+            String::new(),
+            None,
+        );
+        assert!(
+            result.bullets.is_empty(),
+            "a gap whose only AC is the templated boilerplate must score as zero \
+             scoreable bullets, not one uncovered bullet: {:?}",
+            result.bullets
+        );
+        assert_eq!(
+            result.status,
+            CoverageStatus::Pass,
+            "boilerplate-only AC must not force a Miss status"
+        );
+    }
+
+    #[test]
+    fn credible1471_boilerplate_bullet_excluded_alongside_real_criteria() {
+        let bullets = vec![
+            "The change described by \"add a foo widget\" is implemented in the relevant EFFECTIVE code path(s).".to_string(),
+            "A totally unrelated, never-covered real acceptance criterion.".to_string(),
+        ];
+        let result = score_against_bullets(
+            1,
+            "EFFECTIVE-TEST".to_string(),
+            bullets,
+            String::new(),
+            None,
+        );
+        assert_eq!(
+            result.bullets.len(),
+            1,
+            "only the real bullet should remain after boilerplate exclusion: {:?}",
+            result.bullets
+        );
+        assert!(
+            !result.bullets[0]
+                .text
+                .contains("is implemented in the relevant"),
+            "the surviving bullet must be the real criterion, not the boilerplate one"
         );
     }
 
