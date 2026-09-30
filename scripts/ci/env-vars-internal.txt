@@ -3098,3 +3098,20 @@ CHUMP_VISION_KEEPER_MIN_SUMMARY_PCT
 CHUMP_KEEPALIVE_DISCORD
 # detected in: (standard input)
 CHUMP_KEEPALIVE_EMBED
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_CARGO_REAPER_GIT_DIR
+# detected in: (standard input)
+CHUMP_DF_BIN
+# detected in: (standard input)
+CHUMP_INFRA_WATCHER_DISK_MARGIN_GB
+# detected in: (standard input)
+CHUMP_INFRA_WATCHER_PLIST_DIR
+# detected in: (standard input)
+CHUMP_JOURNALD_CONF_DIR
+# detected in: (standard input)
+CHUMP_JOURNALD_DRY_RUN
+# detected in: (standard input)
+CHUMP_JOURNALD_MAX_USE

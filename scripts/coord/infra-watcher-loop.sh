@@ -7,6 +7,8 @@
 #   audit-daemons  — launchd plist health (StartInterval / StartCalendarInterval)
 #   check-runners  — self-hosted runner ghost-online detection
 #   check-disk     — /tmp + /private/tmp + .chump-locks disk pressure
+#   check-disk-headroom — proactive $HOME free-GB margin alarm (INFRA-7890),
+#                    pages BEFORE the cargo-target-reaper's 20GB critical floor
 #   check-procs    — claude process count + load avg
 #   check-ptys     — pty allocation vs kern.tty.ptmx_max (RESILIENT-092)
 #
@@ -100,7 +102,7 @@ _header() { printf '\n=== infra-watcher: %s ===\n' "$1"; }
 # Optionally verify the associated process has heartbeated recently.
 cmd_audit_daemons() {
     _header "audit-daemons"
-    local plist_dir="${HOME}/Library/LaunchAgents"
+    local plist_dir="${CHUMP_INFRA_WATCHER_PLIST_DIR:-${HOME}/Library/LaunchAgents}"
     local found_any=0
     local findings=0
 
@@ -307,6 +309,41 @@ cmd_check_disk() {
     done < <("${CHUMP_DF_BIN:-df}" -h "${paths[@]}" 2>/dev/null | tail -n +2)
 
     [[ "$any_critical" -eq 0 ]] && printf '[infra-watcher] check-disk: all paths below %d%% threshold\n' "$threshold"
+    return 0
+}
+
+# ── check-disk-headroom ─────────────────────────────────────────────────────
+# INFRA-7890: disk defense was reactive-only — nothing paged until the
+# cargo-target-reaper's own DISK_CRITICAL_GB (default 20) free-GB floor was
+# already breached, at which point the reaper's aggressive mode is the first
+# and only signal. This check pages BEFORE that floor: it trends free-GB on
+# $HOME against the same DISK_CRITICAL_GB floor plus a margin, so an operator
+# (or the reaper) gets advance warning while there's still headroom to act.
+cmd_check_disk_headroom() {
+    _header "check-disk-headroom"
+
+    local critical_gb="${CHUMP_DISK_CRITICAL_GB:-20}"
+    local margin_gb="${CHUMP_INFRA_WATCHER_DISK_MARGIN_GB:-15}"
+    local warn_floor=$(( critical_gb + margin_gb ))
+
+    local free_kb free_gb
+    free_kb="$("${CHUMP_DF_BIN:-df}" -k "$HOME" 2>/dev/null | awk 'NR==2{print $4}')"
+    if [[ ! "$free_kb" =~ ^[0-9]+$ ]]; then
+        printf '[infra-watcher] check-disk-headroom: could not read free space for %s — skipping\n' "$HOME"
+        return 0
+    fi
+    free_gb=$(( free_kb / 1024 / 1024 ))
+
+    if [[ "$free_gb" -lt "$critical_gb" ]]; then
+        _emit_finding "disk_headroom" "critical" \
+            "free=${free_gb}GB on \$HOME is BELOW the cargo-target-reaper critical floor (${critical_gb}GB) — reaper aggressive mode should already be engaged; page if it is not"
+    elif [[ "$free_gb" -lt "$warn_floor" ]]; then
+        _emit_finding "disk_headroom" "warning" \
+            "free=${free_gb}GB on \$HOME is trending toward the ${critical_gb}GB critical floor (margin=${margin_gb}GB, warn_floor=${warn_floor}GB) — proactive action recommended before the reactive reaper kicks in"
+    else
+        printf '[infra-watcher] check-disk-headroom: OK free=%dGB (warn_floor=%dGB, critical_floor=%dGB)\n' \
+            "$free_gb" "$warn_floor" "$critical_gb"
+    fi
     return 0
 }
 
@@ -728,6 +765,7 @@ cmd_tick() {
     cmd_audit_daemon_health
     cmd_check_runners
     cmd_check_disk
+    cmd_check_disk_headroom
     cmd_check_procs
     cmd_check_ptys
     cmd_check_repo_vars
@@ -765,12 +803,13 @@ case "$CMD" in
     audit-daemon-health)     cmd_audit_daemon_health "$@" ;;
     check-runners)           cmd_check_runners "$@" ;;
     check-disk)              cmd_check_disk "$@" ;;
+    check-disk-headroom)     cmd_check_disk_headroom "$@" ;;
     check-procs)             cmd_check_procs "$@" ;;
     check-ptys)              cmd_check_ptys "$@" ;;
     check-repo-vars)         cmd_check_repo_vars "$@" ;;
     check-oauth-freshness)   cmd_check_oauth_freshness "$@" ;;
     *)
-        printf 'Usage: %s {tick|audit-daemons|check-runners|check-disk|check-procs|check-ptys|check-repo-vars|check-oauth-freshness}\n' \
+        printf 'Usage: %s {tick|audit-daemons|check-runners|check-disk|check-disk-headroom|check-procs|check-ptys|check-repo-vars|check-oauth-freshness}\n' \
             "$(basename "$0")" >&2
         exit 1
         ;;

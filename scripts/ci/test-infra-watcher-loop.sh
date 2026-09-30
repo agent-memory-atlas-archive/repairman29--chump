@@ -229,6 +229,66 @@ EOF
     unset CHUMP_PGREP_BIN
 }
 
+# ── Case 6: disk headroom trending toward critical (INFRA-7890) ──────────────
+test_disk_headroom_warning() {
+    local testdir
+    testdir="$(_setup_env)"
+
+    # Stub df -k $HOME to report 25GB free — inside the default warn_floor
+    # (critical=20GB + margin=15GB = 35GB) but not yet below the 20GB
+    # critical floor itself.
+    local stub_dir="${testdir}/stubs"
+    mkdir -p "$stub_dir"
+    cat > "${stub_dir}/df" <<'EOF'
+#!/usr/bin/env bash
+printf 'Filesystem     1K-blocks      Used Available Use%% Mounted on\n'
+printf '/dev/sda1      153092000 126280000  26214400  83%% /\n'
+EOF
+    chmod +x "${stub_dir}/df"
+    export CHUMP_DF_BIN="${stub_dir}/df"
+
+    _run_loop "$testdir" check-disk-headroom 2>/dev/null || true
+
+    _assert_finding \
+        "${testdir}/.chump-locks/ambient.jsonl" \
+        "disk_headroom" \
+        "Case 6: 25GB free (below warn_floor=35GB, above critical=20GB) → disk_headroom warning"
+
+    rm -rf "$testdir"
+    unset CHUMP_DF_BIN
+}
+
+# ── Case 7: disk headroom below the reaper's critical floor ──────────────────
+test_disk_headroom_critical() {
+    local testdir
+    testdir="$(_setup_env)"
+
+    # Stub df -k $HOME to report 10GB free — below the 20GB critical floor.
+    local stub_dir="${testdir}/stubs"
+    mkdir -p "$stub_dir"
+    cat > "${stub_dir}/df" <<'EOF'
+#!/usr/bin/env bash
+printf 'Filesystem     1K-blocks      Used Available Use%% Mounted on\n'
+printf '/dev/sda1      153092000 142680000  10485760  93%% /\n'
+EOF
+    chmod +x "${stub_dir}/df"
+    export CHUMP_DF_BIN="${stub_dir}/df"
+
+    _run_loop "$testdir" check-disk-headroom 2>/dev/null || true
+
+    if grep -q '"category":"disk_headroom".*"severity":"critical"' "${testdir}/.chump-locks/ambient.jsonl" 2>/dev/null; then
+        printf 'PASS: %s\n' "Case 7: 10GB free (below critical=20GB) → disk_headroom critical"
+        PASS=$((PASS + 1))
+    else
+        printf 'FAIL: %s\n' "Case 7: 10GB free (below critical=20GB) → disk_headroom critical" >&2
+        cat "${testdir}/.chump-locks/ambient.jsonl" >&2
+        FAIL=$((FAIL + 1))
+    fi
+
+    rm -rf "$testdir"
+    unset CHUMP_DF_BIN
+}
+
 # ── Case 5: all-green — no findings ───────────────────────────────────────────
 test_all_green() {
     local testdir
@@ -309,6 +369,8 @@ fi
 test_daemon_plist_missing_interval
 test_runner_ghost_online
 test_disk_pressure
+test_disk_headroom_warning
+test_disk_headroom_critical
 test_process_bloat
 test_all_green
 

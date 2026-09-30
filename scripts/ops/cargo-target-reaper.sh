@@ -592,6 +592,45 @@ if [[ -d "$RUNNER_CACHE_BASE" ]]; then
     done
 fi
 
+# ── (i) INFRA-7890: orphaned root-level .cargo-test-target / .cargo-build-target ──
+# Per-worktree build dirs (INFRA-1138 / INFRA-1374) are meant to live inside a
+# linked worktree under /tmp/chump-* (reaped by class f above). The main
+# checkout at $REPO_ROOT is never itself claimed as a worktree, so a
+# .cargo-test-target or .cargo-build-target directly under $REPO_ROOT is a
+# leftover from a direct (non-worktree) test/build run — now superseded by the
+# shared sccache rustc-wrapper cache, so it's pure orphaned waste rather than a
+# live per-worktree cache. Gated the same way as class (g): skip if a cargo
+# lock or open fd suggests a build is mid-flight.
+_root_orphan_target_count=0
+for _root_ctt in "${REPO_ROOT}/.cargo-test-target" "${REPO_ROOT}/.cargo-build-target"; do
+    [[ -d "$_root_ctt" ]] || continue
+    _rctt_age=$(( ( $(date +%s) - $(stat -f%m "$_root_ctt" 2>/dev/null || stat -c%Y "$_root_ctt" 2>/dev/null || echo 0) ) / 86400 ))
+    if [[ $_rctt_age -le $FLEET_AGE_D ]]; then
+        echo "  skip (root cargo target <${FLEET_AGE_D}d old): ${_root_ctt}"
+        continue
+    fi
+    if [[ -f "${_root_ctt}/.cargo-lock" ]]; then
+        echo "  skip (cargo lock active — transient): ${_root_ctt}"
+        continue
+    fi
+    if command -v lsof >/dev/null 2>&1 && lsof -F n +D "$_root_ctt" 2>/dev/null | grep -q .; then
+        echo "  skip (process has files open — active build): ${_root_ctt}"
+        continue
+    fi
+    _rctt_size=$(du -sk "$_root_ctt" 2>/dev/null | awk '{print $1 * 1024}' || echo 0)
+    echo "${_dry_label}  root orphaned cargo target: ${_root_ctt} (${_rctt_age}d old, ~$(( _rctt_size / 1024 / 1024 ))MB)"
+    if [[ $EXECUTE -eq 1 ]]; then
+        rm -rf "$_root_ctt" 2>/dev/null || true
+    fi
+    _total_bytes=$(( _total_bytes + _rctt_size ))
+    _reaped_count=$(( _reaped_count + 1 ))
+    _root_orphan_target_count=$(( _root_orphan_target_count + 1 ))
+    printf '{"ts":"%s","kind":"cargo_target_reaped","path":"%s","bytes_freed":%d,"age_days":%d,"dry_run":%s,"class":"root_orphan_cargo_target"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_root_ctt" "$_rctt_size" "$_rctt_age" \
+        "$([[ $EXECUTE -eq 1 ]] && echo 'false' || echo 'true')" \
+        >> "$AMBIENT_LOG" 2>/dev/null || true
+done
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 _total_mb=$(( _total_bytes / 1024 / 1024 ))
 echo ""
@@ -600,10 +639,10 @@ if [[ $EXECUTE -eq 0 && $_reaped_count -gt 0 ]]; then
     echo "[cargo-target-reaper] Re-run with --execute to actually delete."
 fi
 
-# Summary ambient event — includes worktree_orphan_count (INFRA-1170) + INFRA-2125 class counts + INFRA-2188 runner_scope_count + aggressive_mode flag.
-printf '{"ts":"%s","kind":"cargo_target_reaper_summary","reaped_count":%d,"bytes_freed":%d,"execute":%s,"worktree_orphan_count":%d,"cross_build_count":%d,"cargo_test_target_count":%d,"lease_auto_merge_count":%d,"runner_scope_count":%d,"aggressive_mode":%s}\n' \
+# Summary ambient event — includes worktree_orphan_count (INFRA-1170) + INFRA-2125 class counts + INFRA-2188 runner_scope_count + INFRA-7890 root_orphan_target_count + aggressive_mode flag.
+printf '{"ts":"%s","kind":"cargo_target_reaper_summary","reaped_count":%d,"bytes_freed":%d,"execute":%s,"worktree_orphan_count":%d,"cross_build_count":%d,"cargo_test_target_count":%d,"lease_auto_merge_count":%d,"runner_scope_count":%d,"root_orphan_target_count":%d,"aggressive_mode":%s}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_reaped_count" "$_total_bytes" \
     "$([[ $EXECUTE -eq 1 ]] && echo 'true' || echo 'false')" \
     "$_tmp_orphan_count" "$_cross_build_count" "$_cargo_test_target_count" "$_lease_armed_count" \
-    "$_runner_scope_count" "$([[ $AGGRESSIVE_MODE -eq 1 ]] && echo 'true' || echo 'false')" \
+    "$_runner_scope_count" "$_root_orphan_target_count" "$([[ $AGGRESSIVE_MODE -eq 1 ]] && echo 'true' || echo 'false')" \
     >> "$AMBIENT_LOG" 2>/dev/null || true
