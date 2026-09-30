@@ -16,5 +16,5 @@ Environment=HOME=/root
 # Source providers.env (export-format creds) then exec the organ — same pattern
 # as chump-pr-lander.service. Non-login shell so the host-rewriter's injected
 # Environment=PATH (with the run-user's ~/.cargo/bin) stays authoritative.
-ExecStart=/bin/bash -c 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec bash /root/Projects/chump/scripts/coord/pr-shepherd-daemon.sh'
+ExecStart=/bin/bash -c 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec bash /root/Projects/chump/scripts/coord/pr-shepherd-daemon.sh tick'
 TimeoutStartSec=300
