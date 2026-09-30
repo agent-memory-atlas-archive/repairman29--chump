@@ -37,6 +37,17 @@
 #   CHUMP_DISK_CRITICAL_GB (default 20) — when df reports free < N GB on
 #   $HOME, FINGERPRINT_AGE_D is forced to 1 and FLEET_AGE_D to 2 for this
 #   run. Emits kind=cargo_reaper_aggressive_mode_engaged on entry.
+#
+# NOT covered here (PRODUCT-256): ~/.cargo/chump-shared-target — the
+# CARGO_TARGET_DIR every worker/worktree/CI run actually builds into
+# (scripts/dispatch/worker.sh, scripts/dispatch/run-fleet.sh). It grows
+# unbounded (156G observed 2026-08-09) and none of classes (a)-(h) above
+# reach it. Coverage lives in a separate, purpose-built script:
+# scripts/coord/shared-target-cache-reaper.sh (RESILIENT-1045, cap-based,
+# invoked unconditionally at the top of scripts/coord/disk-pressure-reaper.sh
+# on every tick regardless of tier). Don't assume this script's silence on
+# chump-shared-target means it's uncovered fleet-wide — check that script
+# first.
 
 set -euo pipefail
 

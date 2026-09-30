@@ -147,8 +147,15 @@ if [[ "$tier" -ge 2 ]]; then
   # INFRA-2188: also invoke ops/cargo-target-reaper which covers
   # ~/.cache/chump-runner/cargo-target (the 40-60GB runner path that
   # target-dir-reaper misses entirely).
+  #
+  # PRODUCT-256: this does NOT cover ~/.cargo/chump-shared-target (the
+  # shared CARGO_TARGET_DIR most workers actually build into, 156G
+  # observed 2026-08-09). That path is reaped separately by
+  # shared-target-cache-reaper.sh, invoked unconditionally above at the
+  # top of this script's every tick — see the RESILIENT-1045 block near
+  # the top of this file.
   if [[ -x "$CARGO_TARGET_REAPER_OPS" ]]; then
-    info "tier $tier: invoking ops/cargo-target-reaper (covers ~/.cache/chump-runner)"
+    info "tier $tier: invoking ops/cargo-target-reaper (covers ~/.cache/chump-runner only; chump-shared-target reaped separately above)"
     if [[ "$DRY_RUN" -eq 1 ]]; then
       "$CARGO_TARGET_REAPER_OPS" 2>&1 | tail -5
     else
