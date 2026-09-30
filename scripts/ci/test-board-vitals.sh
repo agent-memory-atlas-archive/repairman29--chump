@@ -130,6 +130,24 @@ ALSTATE_BOUNDARY="$TMP/almanac-boundary.state"; printf '50 95\n' > "$ALSTATE_BOU
   source "$LIB"; board_vitals_check ) >/dev/null 2>&1
 _emitted "exactly 95% (not >95) → still pages almanac_coverage_low" "$AB" '"board_vitals_page_dryrun".*"almanac_coverage_low"'
 
+# ── CREDIBLE-1476: CHUMP_BOARD_VITALS_ALMANAC_FLOOR is clamped to >=95 ───────
+# A careless/misconfigured env override (e.g. ALMANAC_FLOOR=50) must never
+# weaken the 95% mission floor — mirrors the CREDIBLE-1210 clamp already
+# enforced in almanac-vision-keeper.sh's MIN_SUMMARY_PCT.
+echo "[test-board-vitals] ALMANAC_FLOOR below 95 is clamped to 95, not honored"
+AC="$TMP/almanac-clamp.jsonl"; : > "$AC"
+ALSTATE_CLAMP="$TMP/almanac-clamp.state"; printf '80 80\n' > "$ALSTATE_CLAMP"  # summary_pct=80
+( set -a
+  CHUMP_AMBIENT_LOG="$AC"; CHUMP_BOARD_VITALS_STATE_DIR="$TMP/state-almanac-clamp"
+  CHUMP_BOARD_VITALS_DRY_RUN=1; CHUMP_BOARD_VITALS_ESCALATE=0
+  CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+  CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+  CHUMP_BOARD_VITALS_ALMANAC_STATE="$ALSTATE_CLAMP"
+  CHUMP_BOARD_VITALS_ALMANAC_FLOOR=50   # attempt to weaken the floor below 95
+  set +a
+  source "$LIB"; board_vitals_check ) >/dev/null 2>&1
+_emitted "80% summarized with FLOOR=50 still pages (clamped to 95)" "$AC" '"board_vitals_page_dryrun".*"almanac_coverage_low"'
+
 # ── clean cycle never pages ──────────────────────────────────────────────────
 echo "[test-board-vitals] clean cycle is phone-quiet"
 B="$TMP/clean.jsonl"; : > "$B"
