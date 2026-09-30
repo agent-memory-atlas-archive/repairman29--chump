@@ -57,6 +57,7 @@ Less-used directories (small scope):
 | **Generate registry for foreign repo** | `scripts/ops/generate-capabilities-registry.sh <repo-path>` | Column A `chump ingest` wrapper; writes `<repo-path>/docs/CAPABILITIES_REGISTRY.json` |
 | **Check capabilities freshness** | `scripts/ci/check-capabilities-freshness.sh` | Is the catalog stale? Loud `[STALE]` banner past 30d; `--strict` to block (CREDIBLE-240) |
 | **Which provider fronts a tool** | `scripts/ops/capability-provider-join.sh` | Joins the capabilities registry to `privateer/charter.json` (CREDIBLE-240) |
+| **Sweep for false-done gaps** | `scripts/ops/false-done-sweep.py --multi-close-only --json` | Flags `status:done` gaps whose closing PR shipped no implementation file (CREDIBLE-279); see module docstring for tiers |
 | **Install hooks** | `scripts/setup/install-hooks.sh` | Idempotent; run after worktree add |
 | **Install ambient** | `scripts/setup/install-ambient-hooks.sh` | SessionStart/PreToolUse hooks for matrix wiring |
 | **Fix bare worktree** | `scripts/setup/fix-worktree-show-toplevel.sh` | Heals `core.bare=true` poison (INFRA-810) |
