@@ -195,5 +195,25 @@ else
 fi
 
 echo
+echo "--- INFRA-6615: --help lists subcommands ---"
+HELP_OUT="$(CHUMP_REPO="$FIXTURE" "$BIN" harvest --help 2>&1)"
+HELP_RC=$?
+[ "$HELP_RC" -eq 0 ] && ok "--help: exit 0" || bad "--help: expected exit 0, got $HELP_RC"
+ALL_LISTED=1
+for sub in scan check brief deep-scan; do
+    if ! echo "$HELP_OUT" | grep -q "$sub"; then
+        bad "--help: missing subcommand '$sub' in output"
+        ALL_LISTED=0
+    fi
+done
+[ "$ALL_LISTED" -eq 1 ] && ok "--help: lists scan, check, brief, deep-scan"
+
+echo
+echo "--- INFRA-6615: no subcommand -> usage error, exit 2 ---"
+CHUMP_REPO="$FIXTURE" "$BIN" harvest >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 2 ] && ok "no subcommand: exit 2" || bad "no subcommand: expected exit 2, got $rc"
+
+echo
 echo "=== $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ]

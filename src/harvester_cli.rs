@@ -121,7 +121,11 @@ fn count_high_severity_alerts() -> usize {
 }
 
 pub fn run(args: &[String]) -> i32 {
-    let sub = args.first().map(String::as_str).unwrap_or("help");
+    let Some(sub) = args.first().map(String::as_str) else {
+        eprintln!("chump harvest: missing subcommand");
+        eprintln!("run 'chump harvest --help' for usage");
+        return 2;
+    };
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
 
     match sub {
