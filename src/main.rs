@@ -45,7 +45,10 @@ mod blocker_detect;
 mod briefing;
 mod browser;
 mod browser_tool;
-mod calc_tool;
+// INFRA-7938 (INFRA-1965 slice): calc_tool now lives in the lib crate
+// (src/lib.rs); re-exported here so existing `crate::calc_tool::X` call
+// sites in this binary keep resolving unchanged.
+pub use chump::calc_tool;
 mod cancel_registry;
 mod cascade_stats;
 mod checkpoint_db;
