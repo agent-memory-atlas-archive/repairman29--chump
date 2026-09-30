@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "generated_at": "2026-09-20T15:23:14Z",
+    "generated_at": "2026-09-30T22:05:11Z",
     "generator": "scripts/arsenal/build.py v0",
     "operator": "repairman29",
     "scope": "public repos only",
@@ -87,7 +87,11 @@
       ],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "dry-run + unified-diff code-fix flow (no mutation until confirmed) in src/commands/fix.ts (fixCommand --dry-run / -y option handling around lib/fix.js runFix())",
+        "per-ecosystem migration-rule corpus (angular/jest/next/react/typescript/vite/vue major-version bumps) in migrations/*.json, consumed by src/commands/explain.ts and src/commands/compare.ts",
+        "credit-metered AI command pricing model (explain=1, fix=3 credits; unlimited-subscription tiers vs. taste-test free credits) in pricing.json"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -111,7 +115,9 @@
       "primitives": [
         "ci-cd"
       ],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "cargo-dist-generated multi-platform Homebrew formula (arm64/x86_64 macOS + Linux tarball matrix with per-target sha256) in Formula/chump.rb"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -128,7 +134,9 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "ElectroDB-backed entity/service split for game domain objects (CharacterEntity + characterService.createCharacter) in packages/backend/db/entities/character.entity.ts + packages/backend/db/services/character.service.ts"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     },
@@ -145,7 +153,10 @@
       "topics": [],
       "cluster": "misc",
       "primitives": [],
-      "extracted_primitives": [],
+      "extracted_primitives": [
+        "ACP agent registry builder: per-agent-dir aggregation into a versioned registry.json with npm/pypi package-version normalization in .github/workflows/build_registry.py (REGISTRY_VERSION, registry_utils.extract_npm_package_version)",
+        "unauthenticated daily ACP protocol-adaptation matrix prober (initialize -> session/new -> unstable-method probing, snapshot + latest JSON/MD output) in .github/workflows/protocol_matrix.py"
+      ],
       "extracted_primitives_by_file": [],
       "local_clone": null
     }

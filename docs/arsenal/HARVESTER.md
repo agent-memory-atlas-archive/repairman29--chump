@@ -95,6 +95,27 @@ python3 scripts/arsenal/build.py
 | `repos_by_name.*.extracted_primitives_by_file` | structured per-file hits from the automated scanner — `{file, line, primitive, match}` — one entry per (file, primitive, pattern) |
 | `unmatched_local_roots` | git roots on disk that don't map to a known repairman29 repo |
 
+### Coverage-push scope boundary (INFRA-7927, post-INFRA-7881)
+
+`extracted_primitives` entries come from `CHUMP_ARSENAL_CURATION`'s
+`extracted_primitives` map (default `~/.chump/arsenal/curation.json`),
+merged by repo name regardless of `CHUMP_ARSENAL_PUBLIC_ONLY`. That means a
+"coverage push" deep-scan pass has two legitimate destinations, and they are
+**not interchangeable**:
+
+- **Public repos** (`chump harvest check`-visible in the committed
+  `GLOBAL_ARSENAL.json`) — curation entries for these are safe to commit
+  here because the repo names and code are already public. See
+  `scripts/arsenal/curation.json.example` for the shape.
+- **Private repos** — findings go into the operator's own
+  `~/.chump/arsenal/curation.json` (outside every git tree, per INFRA-7881)
+  and into the operator-catalog copy of `HARVEST_ROADMAP.md`. Do **not**
+  recreate private repo names + citations in any file under `docs/arsenal/`
+  — that's exactly the leak INFRA-7881 fixed. A coverage-push gap whose AC
+  cites a fleet-wide repo count (e.g. "45 of 76") is scoped against the
+  operator's private catalog for the private slice, and against the
+  committed catalog only for the public repos within it.
+
 ### Per-file primitive indexing (INFRA-1864)
 
 CP-002 found a Discovery Failure footprint: `<repo>/src/shredder.rs` had a

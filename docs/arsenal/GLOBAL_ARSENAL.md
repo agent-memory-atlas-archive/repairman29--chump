@@ -1,6 +1,6 @@
 # Global Arsenal — Chump Fleet Codex
 
-_Generated 2026-09-20T15:23:14Z by scripts/arsenal/build.py v0_
+_Generated 2026-09-30T22:05:11Z by scripts/arsenal/build.py v0_
 
 **Operator:** repairman29
 **GitHub repos:** 5  

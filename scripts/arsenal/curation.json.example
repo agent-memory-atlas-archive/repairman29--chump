@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy to ~/.chump/arsenal/curation.json (or $CHUMP_ARSENAL_CURATION) and fill in with real fleet data. This example uses only generic/placeholder repo names — never commit real private-repo findings into this tree (INFRA-7881).",
+  "clusters": [
+    ["chump-engine", "^chump$|^chump-|^homebrew-chump$"],
+    ["your-cluster-name", "^your-repo-prefix"]
+  ],
+  "primitive_patterns": {
+    "auth": "auth|oauth|login|session",
+    "payment": "payment|stripe|billing|checkout",
+    "chat": "chat|messaging|message",
+    "ci-cd": "github.*actions|cargo-dist",
+    "calendar": "calendar|scheduler|cron"
+  },
+  "extracted_primitives": {
+    "your-repo-name": [
+      "one-line description of a verified primitive, cited with a repo-relative file path (and line/function if useful) — e.g. 'JWT session refresh middleware in src/auth/refresh.ts (refreshSession())'"
+    ]
+  }
+}
