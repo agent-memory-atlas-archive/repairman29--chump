@@ -8,6 +8,15 @@
 #
 # Each subcommand: exit 0 on synthetic happy path, exit 2 on bad input
 # (missing required argument / unknown subcommand).
+#
+# INFRA-7923 re-verified the `chump harvest check` AC on 2026-09-30 (INFRA-1823
+# slice): accepting a gap ID or free-form topic string (src/harvester_cli.rs
+# `check` arm), reading `clusters` + `primitives_index` from
+# docs/arsenal/GLOBAL_ARSENAL.json, and printing an overlap report with
+# exact `repo/file:line` citations (scripts/arsenal/harvest.sh `check` arm,
+# `extracted_primitives_by_file` block) were already shipped under
+# INFRA-1823/#3698 and INFRA-6615/#4924. All 16 checks in this file still
+# pass unmodified. No behavior change needed.
 
 set -uo pipefail
 
