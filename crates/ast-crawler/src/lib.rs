@@ -46,6 +46,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tree_sitter::{Node, Parser, Tree};
 
+pub mod region;
+pub use region::{resolve_region, RegionResolution, SymbolRange};
+
 /// One importable / referenceable top-level symbol within a source file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Symbol {
