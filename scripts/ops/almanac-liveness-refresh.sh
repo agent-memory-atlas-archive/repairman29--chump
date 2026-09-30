@@ -30,9 +30,10 @@
 # Env:
 #   CHUMP_ALMANAC_BIN            — path to the almanac binary
 #                                   (default: $HOME/Projects/almanac/target/release/almanac)
-#   CHUMP_ALMANAC_REPO           — path to the almanac source checkout used to
-#                                   build the binary if absent
-#                                   (default: $HOME/Projects/almanac)
+#   CHUMP_ALMANAC_REPO           — path to the almanac source checkout whose
+#                                   git origin the builder tracks (INFRA-8038 builds
+#                                   from a dedicated ~/.almanac/almanac-build-src clone
+#                                   pinned to origin/main) (default: $HOME/Projects/almanac)
 #   CHUMP_ALMANAC_MARKER         — path to the last-indexed-commit marker file
 #                                   written by almanac-refresh-guard.py
 #                                   (default: $HOME/Projects/almanac.last-indexed-commit)
@@ -78,30 +79,81 @@ emit() {  # kind, extra-json (no leading/trailing comma)
     printf '%s\n' "$line" >> "$AMBIENT_LOG" 2>/dev/null || true
 }
 
-# ── 1. Binary presence ──────────────────────────────────────────────────────
+# ── 1. Binary freshness ──────────────────────────────────────────────────────
+# INFRA-8038: keep the index-builder BINARY current, not merely present. The old
+# logic built ONLY when the binary was absent (a present-but-stale binary lived
+# forever), built --bin almanac ONLY (never the almanac-mcp server agents query),
+# never pulled the source, and built from the WORKER checkout ($ALMANAC_REPO) —
+# which fleet workers move onto feature branches — so a node could silently run
+# months-old almanac. Fix: a DEDICATED build checkout that only ever tracks
+# origin/main (nothing else touches it, so a hard reset is safe), rebuild BOTH
+# bins whenever the built commit drifts from origin/main (stamped beside the
+# binary), reusing the existing target dir so the rebuild is incremental and
+# lands exactly where consumers already read it.
 built=0
-if [[ -x "$ALMANAC_BIN" ]]; then
-    echo "[almanac-liveness-refresh] binary present: $ALMANAC_BIN"
-else
-    echo "[almanac-liveness-refresh] MISSING: $ALMANAC_BIN"
+BUILD_SRC="$HOME/.almanac/almanac-build-src"
+BIN_STAMP="${ALMANAC_BIN}.commit"
+BIN_DIR="$(dirname "$ALMANAC_BIN")"
+TARGET_DIR="$(dirname "$BIN_DIR")"
+# Track whatever origin the node's almanac checkout uses (GitHub is canonical),
+# falling back to the known canonical remote when there is no checkout.
+ALMANAC_REMOTE="$(git -C "$ALMANAC_REPO" config --get remote.origin.url 2>/dev/null || echo "https://github.com/repairman29/almanac.git")"
+
+want_commit=""
+if command -v git >/dev/null 2>&1 && command -v cargo >/dev/null 2>&1; then
     if [[ "$DRY_RUN" == "1" ]]; then
-        echo "[almanac-liveness-refresh]   (dry-run) would build from $ALMANAC_REPO"
-    elif [[ -d "$ALMANAC_REPO" ]] && command -v cargo >/dev/null 2>&1; then
-        if (cd "$ALMANAC_REPO" && cargo build --release --bin almanac) >/dev/null 2>&1; then
-            echo "[almanac-liveness-refresh]   built binary from $ALMANAC_REPO"
+        [[ -d "$BUILD_SRC/.git" ]] || echo "[almanac-liveness-refresh]   (dry-run) would clone $ALMANAC_REMOTE -> $BUILD_SRC"
+    elif [[ ! -d "$BUILD_SRC/.git" ]]; then
+        git clone --quiet "$ALMANAC_REMOTE" "$BUILD_SRC" 2>/dev/null || true
+    fi
+    if [[ "$DRY_RUN" != "1" && -d "$BUILD_SRC/.git" ]]; then
+        ( cd "$BUILD_SRC" \
+            && git fetch --quiet origin main 2>/dev/null \
+            && git reset --hard --quiet origin/main 2>/dev/null ) || true
+    fi
+    want_commit="$(git -C "$BUILD_SRC" rev-parse --short HEAD 2>/dev/null || true)"
+fi
+
+have_commit=""
+[[ -f "$BIN_STAMP" ]] && have_commit="$(cat "$BIN_STAMP" 2>/dev/null || true)"
+
+# Rebuild when a binary is missing OR the built commit has drifted from
+# origin/main. With no stamp yet (first run after INFRA-8038) a present binary
+# reads as drifted and is rebuilt once, which stamps it going forward.
+build_reason=""
+if [[ ! -x "$ALMANAC_BIN" || ! -x "$MCP_BIN" ]]; then
+    build_reason="missing"
+elif [[ -n "$want_commit" && "$want_commit" != "$have_commit" ]]; then
+    build_reason="drift"
+fi
+
+if [[ -z "$build_reason" ]]; then
+    echo "[almanac-liveness-refresh] binary current: $ALMANAC_BIN @ ${have_commit:-unknown}"
+elif [[ "$DRY_RUN" == "1" ]]; then
+    echo "[almanac-liveness-refresh]   (dry-run) would rebuild ($build_reason): ${have_commit:-none} -> ${want_commit:-?}"
+elif [[ -d "$BUILD_SRC/.git" ]]; then
+    if ( cd "$BUILD_SRC" && CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --bin almanac --bin almanac-mcp ) >/dev/null 2>&1; then
+        printf '%s\n' "$want_commit" > "$BIN_STAMP" 2>/dev/null || true
+        echo "[almanac-liveness-refresh]   rebuilt ($build_reason): ${have_commit:-none} -> ${want_commit}"
+        if [[ "$build_reason" == "drift" ]]; then
+            # scanner-anchor: "kind":"almanac_liveness_binary_rebuilt"  (INFRA-8038;
+            # fires when a PRESENT binary was stale vs origin/main and got rebuilt
+            # — the exact drift the old absent-only build logic silently missed)
+            emit almanac_liveness_binary_rebuilt "\"from\":\"${have_commit:-none}\",\"to\":\"$want_commit\""
+        else
             # scanner-anchor: "kind":"almanac_liveness_binary_built"  (INFRA-3643;
             # fires when the systemd organ finds the almanac binary missing on
             # a Linux factory node and builds it from the tracked checkout)
-            emit almanac_liveness_binary_built "\"repo\":\"$ALMANAC_REPO\""
-            built=1
-        else
-            echo "[almanac-liveness-refresh]   WARN: build failed (non-fatal; retried next cycle)" >&2
-            # scanner-anchor: "kind":"almanac_liveness_binary_build_failed"
-            emit almanac_liveness_binary_build_failed "\"repo\":\"$ALMANAC_REPO\""
+            emit almanac_liveness_binary_built "\"repo\":\"$BUILD_SRC\""
         fi
+        built=1
     else
-        echo "[almanac-liveness-refresh]   SKIP: no almanac checkout at $ALMANAC_REPO or no cargo on PATH"
+        echo "[almanac-liveness-refresh]   WARN: build failed (non-fatal; retried next cycle)" >&2
+        # scanner-anchor: "kind":"almanac_liveness_binary_build_failed"
+        emit almanac_liveness_binary_build_failed "\"repo\":\"$BUILD_SRC\""
     fi
+else
+    echo "[almanac-liveness-refresh]   SKIP: no build checkout at $BUILD_SRC or no git/cargo on PATH"
 fi
 
 # ── 2. Index freshness ───────────────────────────────────────────────────────

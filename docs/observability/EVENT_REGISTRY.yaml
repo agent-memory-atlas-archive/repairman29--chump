@@ -7308,6 +7308,16 @@ events:
     consumers: [fleet-brief, ops-audit]
     fields_required: [ts, kind, repo]
 
+  - kind: almanac_liveness_binary_rebuilt
+    effect_metric: self
+    emitter: scripts/ops/almanac-liveness-refresh.sh (INFRA-8038)
+    trigger: a PRESENT almanac binary was stale relative to origin/main and the
+      liveness organ rebuilt it (both bins) from a dedicated main-tracking
+      checkout — the binary drift the old absent-only build logic silently
+      missed, leaving nodes running months-old almanac.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, from, to]
+
   - kind: almanac_liveness_binary_build_failed
     effect_metric: self
     emitter: scripts/ops/almanac-liveness-refresh.sh (INFRA-3643)
