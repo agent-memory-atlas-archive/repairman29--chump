@@ -369,12 +369,44 @@ def is_mirrored(run_cmd):
 
 
 # ── RESILIENT-586: Auto-recognize gates added in the same PR diff ────────────
-def get_added_jobs_from_diff(yml_path):
-    """Return set of job names that were added in the current git diff (PR)."""
+def get_merge_base_ref():
+    """Return the merge-base of origin/main and HEAD, or None if unavailable.
+
+    RESILIENT-1495: a clean CI checkout has an empty `git diff HEAD` (the
+    working tree matches HEAD), so diffing against HEAD never finds the
+    PR's own added gates. Diff against the merge-base with origin/main
+    instead, which captures everything the PR itself changed.
+    """
     import subprocess
     try:
+        subprocess.run(
+            ["git", "fetch", "-q", "origin", "main"],
+            capture_output=True, text=True, timeout=15
+        )
+    except Exception:
+        pass
+    try:
         result = subprocess.run(
-            ["git", "diff", "HEAD", "--", str(yml_path)],
+            ["git", "merge-base", "origin/main", "HEAD"],
+            capture_output=True, text=True, timeout=10
+        )
+        ref = result.stdout.strip()
+        return ref if ref else None
+    except Exception:
+        return None
+
+
+_MERGE_BASE_REF = get_merge_base_ref()
+
+
+def get_added_jobs_from_diff(yml_path):
+    """Return set of job names that were added in the current PR (vs. merge-base)."""
+    import subprocess
+    if not _MERGE_BASE_REF:
+        return set()
+    try:
+        result = subprocess.run(
+            ["git", "diff", _MERGE_BASE_REF, "HEAD", "--", str(yml_path)],
             capture_output=True, text=True, timeout=10
         )
         added_jobs = set()
