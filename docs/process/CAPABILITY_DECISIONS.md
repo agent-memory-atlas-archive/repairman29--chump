@@ -114,3 +114,33 @@ gate was cautious is as load-bearing as the gate itself.
 - **DEPTH tier:** D2 (behavior-flip via tracked config; blast radius = which
   gaps a starved worker picks; fails safe to the prior off-path when the policy
   file is absent, and honors an explicit opt-out).
+
+## `check_live_outcome` node resolution — no silent localhost fallback (INFRA-3652, PEER-VERI-05)
+
+- **What changed:** `check_systemd_unit_live` (crates/chump-verify/src/
+  pr_ac_coverage.rs, used by `check_live_outcome`) used to call
+  `resolve_target_node_for_unit` (INFRA-7098) and, on `None` (no NATS, no
+  manifest, stale manifest, no machine field), silently fall back to probing
+  `systemctl` on the **local** host. That fallback was the exact
+  "assume localhost" anti-pattern this gap exists to remove: a proof-AC
+  bullet naming a unit that lives on a different node (e.g. `closetjunky`)
+  could be "verified" by checking the wrong box entirely. Unresolvable
+  targets now fail CLOSED with `"target node unresolved for <unit>"` instead.
+  Resolving to a non-current host now always runs `ssh <node> systemctl
+  is-active <unit>` (INFRA-3728); resolving to the current host still runs
+  local `systemctl`.
+- **Why not gated:** this tightens a gate that was already fail-closed on the
+  *diff-keyword-match* axis (CREDIBLE-281) — it only removes a path that
+  could silently produce a false pass by checking the wrong host, never a
+  path that could produce a false fail on a previously-passing claim (a
+  bullet naming a unit nobody can place was already a dubious proof claim).
+  `CHUMP_VERIFY_LIVE_BLOCKING` (above) remains the separate ratchet for
+  whether a proof-AC miss blocks the PR at all; this change only affects
+  whether a miss is *correctly classified* as a miss.
+- **Gaps named:** INFRA-3652 (this slice, PEER-VERI-05), INFRA-7098 (node
+  resolution via capability-manifest KV), INFRA-3728 (remote `ssh systemctl`
+  probe). Mission: MISSION-010.
+- **DEPTH tier:** D1 (pure classification fix inside an existing gate's
+  decision function; no new flag, no new blast radius — a bullet that was
+  already failing closed on an unverifiable claim now fails closed for the
+  correct reason instead of the wrong one).

@@ -494,10 +494,11 @@ fn run_remote_systemctl(node: &str, unit: &str) -> Result<String, String> {
 
 /// INFRA-7098: resolve the hostname that owns `unit` by reading its
 /// `CapabilityManifest` from the NATS capabilities KV
-/// (`chump_coord::capability::resolve_target_node`). Fails closed to `None`
-/// on any error — no NATS reachable, no manifest for `unit`, a stale
-/// manifest, or a manifest with no `machine` set — so callers fall back to
-/// the pre-existing local-only probe rather than erroring out.
+/// (`chump_coord::capability::resolve_target_node`). Returns `None` on any
+/// error — no NATS reachable, no manifest for `unit`, a stale manifest, or a
+/// manifest with no `machine` set. Per INFRA-3652 AC-2, a `None` here is NOT
+/// treated as "assume localhost" by [`check_systemd_unit_live`] — it fails
+/// closed instead.
 ///
 /// `CoordClient::connect` already bounds the NATS dial with its own
 /// `tokio::time::timeout` (`CHUMP_NATS_TIMEOUT_MS`, default 500ms), so a
@@ -578,39 +579,23 @@ fn find_url_token(bullet: &str) -> Option<String> {
     None
 }
 
-/// Check whether a proof bullet's claimed live outcome is actually true
-/// right now. Returns `(verified, detail)`. Fails closed: a bullet whose
-/// text names no mechanically-checkable target (no literal
-/// `<unit>.service`/`.timer`, `kind=<event>`, or URL) is `(false, ..)` —
-/// the gate never takes a proof claim on faith.
-fn check_live_outcome(bullet: &str) -> (bool, String) {
-    if let Some(unit) = find_systemd_unit_token(bullet) {
-        // INFRA-7098: resolve which host actually owns `unit` via the
-        // capability manifest KV, and probe that host — local systemctl if
-        // it's us, `ssh <node> systemctl` (INFRA-3728) if it's someone else.
-        // `resolve_target_node_for_unit` fails closed to `None` (no NATS, no
-        // manifest, stale manifest, no machine field) so the pre-existing
-        // local-only path is exactly what runs when target-node resolution
-        // isn't available — AC-2/AC-4.
-        if let Some(node) = resolve_target_node_for_unit(&unit) {
-            if !is_current_host(&node) {
-                return match run_remote_systemctl(&node, &unit) {
-                    Ok(state) => {
-                        let ok = state == "active";
-                        (
-                            ok,
-                            format!("ssh {node} systemctl is-active {unit} -> \"{state}\""),
-                        )
-                    }
-                    Err(e) => (
-                        false,
-                        format!("remote check of {unit} on {node} failed: {e}"),
-                    ),
-                };
-            }
-        }
-        return match Command::new(systemctl_bin())
-            .args(["is-active", &unit])
+/// INFRA-3652: resolve which host owns `unit` (via `resolve`, normally
+/// [`resolve_target_node_for_unit`]) and probe THAT host — local systemctl
+/// when it resolves to the current host, `ssh <node> systemctl`
+/// (INFRA-3728) when it resolves elsewhere. Unlike the earlier INFRA-7098
+/// cut, an unresolved target no longer silently falls back to a local
+/// probe (that fallback was exactly the "assume localhost" anti-pattern
+/// AC-2 exists to kill) — it fails CLOSED with a detail naming the unit, so
+/// a claim about a unit on a node the gate can't place never gets rubber-
+/// stamped by accidentally checking the wrong box.
+///
+/// `resolve` is injected so unit tests can exercise resolves-remote /
+/// remote-active / remote-failed / unresolved without a live NATS server —
+/// see the `infra3652_*` tests below.
+fn check_systemd_unit_live(unit: &str, resolve: impl Fn(&str) -> Option<String>) -> (bool, String) {
+    match resolve(unit) {
+        Some(node) if is_current_host(&node) => match Command::new(systemctl_bin())
+            .args(["is-active", unit])
             .output()
         {
             Ok(out) => {
@@ -622,7 +607,32 @@ fn check_live_outcome(bullet: &str) -> (bool, String) {
                 false,
                 format!("systemctl unavailable ({e}); cannot confirm {unit}"),
             ),
-        };
+        },
+        Some(node) => match run_remote_systemctl(&node, unit) {
+            Ok(state) => {
+                let ok = state == "active";
+                (
+                    ok,
+                    format!("ssh {node} systemctl is-active {unit} -> \"{state}\""),
+                )
+            }
+            Err(e) => (
+                false,
+                format!("remote check of {unit} on {node} failed: {e}"),
+            ),
+        },
+        None => (false, format!("target node unresolved for {unit}")),
+    }
+}
+
+/// Check whether a proof bullet's claimed live outcome is actually true
+/// right now. Returns `(verified, detail)`. Fails closed: a bullet whose
+/// text names no mechanically-checkable target (no literal
+/// `<unit>.service`/`.timer`, `kind=<event>`, or URL) is `(false, ..)` —
+/// the gate never takes a proof claim on faith.
+fn check_live_outcome(bullet: &str) -> (bool, String) {
+    if let Some(unit) = find_systemd_unit_token(bullet) {
+        return check_systemd_unit_live(&unit, resolve_target_node_for_unit);
     }
     if let Some(kind) = find_event_kind_token(bullet) {
         let path = ambient_log_path();
@@ -2616,5 +2626,149 @@ mod redteam {
         assert_eq!(v2.len(), 1);
         assert_eq!(v2[0].index, 1);
         assert_eq!(v2[0].status, JudgeStatus::Unmet);
+    }
+
+    // ── INFRA-3652: node-aware live-outcome probe ───────────────────────────
+    //
+    // `check_systemd_unit_live` takes the resolver as a parameter precisely so
+    // these tests don't need a live NATS server / capability manifest to
+    // exercise the resolves-remote / remote-active / remote-failed /
+    // unresolved branches (the resolver param is only a test seam —
+    // production always calls it with `resolve_target_node_for_unit`, see
+    // `check_live_outcome`).
+
+    /// Serializes these tests' process-global env-var mutations (`CHUMP_AC_GATE_SYSTEMCTL_BIN`,
+    /// `CHUMP_MACHINE_LABEL`) against parallel test threads — this module has no
+    /// access to `tests::AMBIENT_ENV_LOCK` (module-private), so it gets its own.
+    static INFRA3652_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn infra3652_write_stub_bin(
+        dir: &std::path::Path,
+        name: &str,
+        body: &str,
+    ) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn infra3652_resolves_remote_and_probes_that_node_when_active() {
+        let _guard = INFRA3652_ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "infra3652-remote-active-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let args_file = dir.join("args.txt");
+        let stub = infra3652_write_stub_bin(
+            &dir,
+            "ssh-stub.sh",
+            &format!(
+                "#!/bin/sh\necho \"$@\" > {:?}\necho active\nexit 0\n",
+                args_file
+            ),
+        );
+        std::env::set_var("CHUMP_MACHINE_LABEL", "infra3652-test-local-host");
+        std::env::set_var("CHUMP_AC_GATE_SYSTEMCTL_BIN", &stub);
+        let (ok, detail) = check_systemd_unit_live("chump-node-refresh.service", |_| {
+            Some("closetjunky".to_string())
+        });
+        std::env::remove_var("CHUMP_AC_GATE_SYSTEMCTL_BIN");
+        std::env::remove_var("CHUMP_MACHINE_LABEL");
+        let args_seen = std::fs::read_to_string(&args_file).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            args_seen.contains("closetjunky") && args_seen.contains("chump-node-refresh.service"),
+            "ssh must be invoked against the resolved node and the named unit, got: {args_seen:?}"
+        );
+        assert!(ok, "remote active state must verify: {detail}");
+        assert!(
+            detail.contains("closetjunky"),
+            "detail must name the resolved target node: {detail}"
+        );
+    }
+
+    #[test]
+    fn infra3652_remote_failed_state_fails_and_names_node() {
+        // AC-3: the proof-AC shape naming chump-node-refresh.service, known
+        // failed on closetjunky (CJ) — must evaluate to (false, detail)
+        // naming closetjunky and the real failed state, not rubber-stamp it.
+        let _guard = INFRA3652_ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "infra3652-remote-failed-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stub =
+            infra3652_write_stub_bin(&dir, "ssh-stub.sh", "#!/bin/sh\necho failed\nexit 3\n");
+        std::env::set_var("CHUMP_MACHINE_LABEL", "infra3652-test-local-host");
+        std::env::set_var("CHUMP_AC_GATE_SYSTEMCTL_BIN", &stub);
+        let (ok, detail) = check_systemd_unit_live("chump-node-refresh.service", |_| {
+            Some("closetjunky".to_string())
+        });
+        std::env::remove_var("CHUMP_AC_GATE_SYSTEMCTL_BIN");
+        std::env::remove_var("CHUMP_MACHINE_LABEL");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!ok, "a failed remote unit must not verify: {detail}");
+        assert!(
+            detail.contains("closetjunky") && detail.contains("chump-node-refresh.service"),
+            "detail must name both the node and the unit so the receipt is checkable: {detail}"
+        );
+    }
+
+    #[test]
+    fn infra3652_unresolved_target_fails_closed_with_named_detail() {
+        // AC-2: an unresolvable target must fail CLOSED with a detail naming
+        // the unit -- it must NOT silently fall back to a local probe (that
+        // fallback is exactly the "assume localhost" anti-pattern this gap
+        // removes).
+        let (ok, detail) = check_systemd_unit_live("chump-node-refresh.service", |_| None);
+        assert!(!ok, "an unresolved target must fail closed: {detail}");
+        assert_eq!(
+            detail,
+            "target node unresolved for chump-node-refresh.service"
+        );
+    }
+
+    #[test]
+    fn infra3652_resolves_to_current_host_runs_local_probe() {
+        // When resolution says the unit lives on THIS host, the gate must
+        // still take the local systemctl path (AC-1's "local execution
+        // remains only when the target resolves to the current host").
+        let _guard = INFRA3652_ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "infra3652-local-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stub = infra3652_write_stub_bin(
+            &dir,
+            "systemctl-stub.sh",
+            "#!/bin/sh\necho active\nexit 0\n",
+        );
+        std::env::set_var("CHUMP_MACHINE_LABEL", "infra3652-this-host");
+        std::env::set_var("CHUMP_AC_GATE_SYSTEMCTL_BIN", &stub);
+        let (ok, detail) = check_systemd_unit_live("chump-local.service", |_| {
+            Some("infra3652-this-host".to_string())
+        });
+        std::env::remove_var("CHUMP_AC_GATE_SYSTEMCTL_BIN");
+        std::env::remove_var("CHUMP_MACHINE_LABEL");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(ok, "local active state must verify: {detail}");
+        assert!(
+            detail.starts_with("systemctl is-active"),
+            "resolving to the current host must take the local (non-ssh) path: {detail}"
+        );
     }
 }
