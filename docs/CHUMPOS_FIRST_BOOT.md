@@ -30,6 +30,26 @@ gets to a terminal and runs one thing (`curl … | sh`, a bot told to do it, one
 voice command). The install starts; **Rust compiles for a few minutes.** That dead time
 is a UX liability — we must not just sit there.
 
+The "bot told to do it" path is zero-touch (INFRA-3629): no human ever opens an editor
+to paste creds. A bot/orchestrator passes exactly ONE credential source and the install
+materializes `~/.chump/providers.env` itself:
+
+```bash
+# Source A: inline env var (value never appears in ps/argv/logs — only the
+# source used, and which required keys are present/missing, is logged)
+CHUMP_BOOTSTRAP_CREDS="$(printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nGH_TOKEN=%s\n' "$OAUTH" "$GH")" \
+  curl -fsSL https://raw.githubusercontent.com/repairman29/chump/main/scripts/setup/chump-node-install.sh \
+  | bash -s -- --role brain
+
+# Source B: a ready-made file (KEY=VALUE lines), copied/scp'd onto the box first
+bash scripts/setup/chump-node-install.sh --role brain --creds-file /path/to/providers.env
+```
+
+Missing-but-required keys after materialization produce a single clear error listing
+exactly what to supply — see `chump-node-install.sh --help` for the full contract. The
+same `--creds-file` / `$CHUMP_BOOTSTRAP_CREDS` contract is honored by
+`scripts/setup/provision-chumpd-host.sh` for the always-on substrate host path.
+
 **Act 2 — The Concierge (during the compile).** A voice fills the wait:
 > "Beep boop… Hi, I'm Chump. Who are you? …It's a pleasure to meet you. Let's gather some
 > intel while the factory is being assembled for you."

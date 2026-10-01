@@ -38,12 +38,25 @@
 #   scripts/setup/provision-chumpd-host.sh --check         # report readiness only; exit 0 (ready) / 1 (missing deps)
 #   scripts/setup/provision-chumpd-host.sh --dry-run        # print every action, mutate nothing
 #   scripts/setup/provision-chumpd-host.sh --uninstall       # stop + remove the chumpd service (leaves repo clone)
+#   scripts/setup/provision-chumpd-host.sh --creds-file PATH  # zero-touch: materialize chumpd.env from a ready-made env file
 #
 # FRESH UBUNTU 24.04 QUICKSTART (headless cabinet box), from a clean install:
 #   git clone https://github.com/repairman29/chump.git ~/chump-host
 #   cd ~/chump-host && bash scripts/setup/provision-chumpd-host.sh --install-deps
 #   # then fill in ~/.chump/chumpd.env (GH token + LLM backend) and:
 #   systemctl --user start chumpd && systemctl --user status chumpd
+#
+# Zero-touch creds (INFRA-3629/INFRA-7815, the "bot told to do it" path — no
+# human ever opens an editor): supply creds from exactly ONE source and the
+# chumpd.env write step materializes it for you instead of a TODO_ template:
+#   --creds-file PATH          path to a ready-made env file (KEY=VALUE lines:
+#                               GH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, etc.)
+#   $CHUMP_BOOTSTRAP_CREDS     the same file body, inline, e.g.:
+#     CHUMP_BOOTSTRAP_CREDS="$(printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nGH_TOKEN=%s\n' "$OAUTH" "$GH")" \
+#       bash scripts/setup/provision-chumpd-host.sh --install-deps
+# Neither source's VALUES ever appear in `ps`, argv, or this script's logs —
+# only the source used and which required keys are present/missing are
+# logged. If ~/.chump/chumpd.env already exists it is left alone (idempotent).
 #
 # Env overrides:
 #   CHUMPD_PROVISION_DIR       clone target dir (default: $HOME/chump-host)
@@ -70,18 +83,20 @@ fi
 
 MODE="run"
 INSTALL_DEPS=0   # RESILIENT-185: --install-deps installs system packages on a fresh box
-for arg in "$@"; do
-  case "$arg" in
-    --check)        MODE="check" ;;
-    --dry-run)      MODE="dry-run" ;;
-    --uninstall)    MODE="uninstall" ;;
-    --install-deps) INSTALL_DEPS=1 ;;
+CREDS_FILE=""    # INFRA-7815 (INFRA-3629 slice): zero-touch creds, see materialize_chumpd_env below
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --check)        MODE="check"; shift ;;
+    --dry-run)      MODE="dry-run"; shift ;;
+    --uninstall)    MODE="uninstall"; shift ;;
+    --install-deps) INSTALL_DEPS=1; shift ;;
+    --creds-file)   CREDS_FILE="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,60p' "$0" | sed 's/^# \?//'
       exit 0
       ;;
     # fail() isn't defined yet at parse time — use a plain echo here.
-    *) echo "[provision-chumpd-host] FAIL: unknown argument: $arg" >&2; exit 2 ;;
+    *) echo "[provision-chumpd-host] FAIL: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -436,6 +451,30 @@ else
     # EnvironmentFile=). No secret VALUES — just the keys with TODO markers,
     # so the operator fills them in out-of-band (RESILIENT-173).
     CHUMPD_ENV="$HOME/.chump/chumpd.env"
+    # INFRA-7815 (INFRA-3629 slice): zero-touch creds — if the caller handed
+    # us a ready-made env body via --creds-file or $CHUMP_BOOTSTRAP_CREDS,
+    # materialize chumpd.env straight from it instead of the TODO_ template
+    # below. Never echoes secret VALUES — only which source was used and
+    # which required keys are present/missing (RESILIENT-173).
+    if [[ ! -f "$CHUMPD_ENV" && "$MODE" != "dry-run" && ( -n "$CREDS_FILE" || -n "${CHUMP_BOOTSTRAP_CREDS:-}" ) ]]; then
+      mkdir -p "$HOME/.chump"
+      if [[ -n "$CREDS_FILE" ]]; then
+        [[ -f "$CREDS_FILE" ]] || { fail "--creds-file not found: $CREDS_FILE"; exit 1; }
+        { printf 'CHUMP_REPO=%s\n' "$CHUMPD_PROVISION_DIR"; cat "$CREDS_FILE"; } > "$CHUMPD_ENV"
+        log "materialized $CHUMPD_ENV from --creds-file (path only; values not logged)"
+      else
+        { printf 'CHUMP_REPO=%s\n' "$CHUMPD_PROVISION_DIR"; printf '%s\n' "$CHUMP_BOOTSTRAP_CREDS"; } > "$CHUMPD_ENV"
+        log "materialized $CHUMPD_ENV from \$CHUMP_BOOTSTRAP_CREDS (env var; values not logged)"
+      fi
+      chmod 600 "$CHUMPD_ENV"
+      missing=""
+      grep -qE '^(export )?GH_TOKEN=.+' "$CHUMPD_ENV" || missing="$missing GH_TOKEN"
+      if [[ -n "$missing" ]]; then
+        fail "chumpd.env materialized but missing required keys:$missing — supply via --creds-file/\$CHUMP_BOOTSTRAP_CREDS and re-run"
+        exit 1
+      fi
+      log "chumpd.env ok ($(grep -cE '^(export )?[A-Z_]+=' "$CHUMPD_ENV") keys, mode $(stat -c %a "$CHUMPD_ENV" 2>/dev/null || stat -f %Lp "$CHUMPD_ENV" 2>/dev/null))"
+    fi
     if [[ ! -f "$CHUMPD_ENV" && "$MODE" != "dry-run" ]]; then
       mkdir -p "$HOME/.chump"
       cat > "$CHUMPD_ENV" <<'ENVEOF'

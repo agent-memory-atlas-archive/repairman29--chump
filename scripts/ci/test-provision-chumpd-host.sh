@@ -149,16 +149,85 @@ else
   fail "provisioner does not substitute __RUN_USER__ into the unit file"
 fi
 
-# 7. --check / --uninstall / --dry-run flags present (documented usage surface)
+# 7. --check / --uninstall / --dry-run / --creds-file flags present (documented usage surface)
 echo
 echo "-- 7. Documented flags present"
-for flag in '\-\-check' '\-\-dry-run' '\-\-uninstall'; do
+for flag in '\-\-check' '\-\-dry-run' '\-\-uninstall' '\-\-creds-file'; do
   if grep -q -- "$flag" "$SCRIPT"; then
     ok "flag $flag present"
   else
     fail "flag $flag NOT found in script"
   fi
 done
+
+# 9. Zero-touch creds (INFRA-7815 / INFRA-3629 slice) shape checks
+echo
+echo "-- 9. Zero-touch creds materialization shape"
+if grep -q 'CHUMP_BOOTSTRAP_CREDS' "$SCRIPT"; then
+  ok "\$CHUMP_BOOTSTRAP_CREDS source is wired"
+else
+  fail "\$CHUMP_BOOTSTRAP_CREDS not referenced in script"
+fi
+if grep -qE 'CREDS_FILE="\$2"' "$SCRIPT"; then
+  ok "--creds-file argument value is parsed"
+else
+  fail "--creds-file argument value is not parsed"
+fi
+if grep -qE "missing required keys.*GH_TOKEN|GH_TOKEN.*missing" "$SCRIPT"; then
+  ok "missing-required-key error path references GH_TOKEN"
+else
+  fail "no missing-required-key error path found for GH_TOKEN"
+fi
+if grep -qE 'log "materialized \$CHUMPD_ENV from' "$SCRIPT"; then
+  ok "materialization log line names the source, not the values"
+else
+  fail "materialization log line not found"
+fi
+# Functional check: run just the chumpd.env materialization logic in isolation
+# (not the full provisioner — that would require a real clone + cargo build).
+MAT_TMP="$(mktemp -d "${TMPDIR:-/tmp}/chumpd-creds-mat.XXXXXX")"
+trap 'rm -rf "$MAT_TMP"' RETURN 2>/dev/null || true
+printf 'GH_TOKEN=ghp_secret_should_not_leak\nCLAUDE_CODE_OAUTH_TOKEN=sk_secret_should_not_leak\n' > "$MAT_TMP/creds.env"
+MAT_LOG="$MAT_TMP/out.log"
+(
+  set -euo pipefail
+  CHUMPD_PROVISION_DIR="$MAT_TMP/repo"
+  CREDS_FILE="$MAT_TMP/creds.env"
+  MODE="run"
+  CHUMPD_ENV="$MAT_TMP/chumpd.env"
+  fail() { echo "FAIL: $*" >&2; }
+  log()  { echo "LOG: $*"; }
+  if [[ ! -f "$CHUMPD_ENV" && "$MODE" != "dry-run" && ( -n "$CREDS_FILE" || -n "${CHUMP_BOOTSTRAP_CREDS:-}" ) ]]; then
+    mkdir -p "$(dirname "$CHUMPD_ENV")"
+    if [[ -n "$CREDS_FILE" ]]; then
+      [[ -f "$CREDS_FILE" ]] || { fail "--creds-file not found: $CREDS_FILE"; exit 1; }
+      { printf 'CHUMP_REPO=%s\n' "$CHUMPD_PROVISION_DIR"; cat "$CREDS_FILE"; } > "$CHUMPD_ENV"
+      log "materialized $CHUMPD_ENV from --creds-file (path only; values not logged)"
+    fi
+    chmod 600 "$CHUMPD_ENV"
+    missing=""
+    grep -qE '^(export )?GH_TOKEN=.+' "$CHUMPD_ENV" || missing="$missing GH_TOKEN"
+    if [[ -n "$missing" ]]; then
+      fail "chumpd.env materialized but missing required keys:$missing"
+      exit 1
+    fi
+  fi
+) > "$MAT_LOG" 2>&1
+if [[ -f "$MAT_TMP/chumpd.env" ]] && grep -qF 'GH_TOKEN=ghp_secret_should_not_leak' "$MAT_TMP/chumpd.env"; then
+  ok "--creds-file materializes chumpd.env with supplied keys"
+else
+  fail "chumpd.env was not materialized with the supplied --creds-file contents"
+fi
+if [[ "$(stat -c %a "$MAT_TMP/chumpd.env" 2>/dev/null || stat -f %Lp "$MAT_TMP/chumpd.env" 2>/dev/null)" == "600" ]]; then
+  ok "materialized chumpd.env has mode 600"
+else
+  fail "materialized chumpd.env is not mode 600"
+fi
+if grep -qF 'ghp_secret_should_not_leak' "$MAT_LOG"; then
+  fail "secret value leaked into materialization log output"
+else
+  ok "secret value never appears in materialization log output"
+fi
 
 # 8. Rust-First-Bypass trailer (META-064 shell-OK justification)
 echo
