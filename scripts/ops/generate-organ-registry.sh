@@ -7,10 +7,25 @@
 # says "keep the two in sync if that table changes") — a second grammar for
 # the same source of truth, one edit away from drifting silently the same
 # way chump-backlog-sync-writer.timer sat undeclared for 21 days (CREDIBLE-292).
-# This script closes that gap: it extracts the ORGANS table directly out of
-# install-node-housekeeping.sh (no re-typing) and GENERATES
+# This script closes that gap: it derives the ORGANS table the SAME WAY
+# install-node-housekeeping.sh itself does (no re-typing) and GENERATES
 # scripts/ops/organ-registry.txt from it, so the registry can never drift
 # from the table that actually installs the organs.
+#
+# INFRA-3648 (roll-call regression found + fixed in this slice): until this
+# fix, this script awk-parsed a literal `ORGANS="...heredoc..."` assignment
+# out of install-node-housekeeping.sh. INFRA-7766 replaced that heredoc with
+# `ORGANS="$(housekeeping_organs_from_manifest "$ORGAN_MANIFEST_FILE")"` (a
+# function call, sourced from organ-manifest.txt's `housekeeping=` tokens) —
+# the awk pattern silently matched the new one-line assignment as if it were
+# a self-terminating single-line table, producing a garbage single "organ"
+# whose name was the literal text `$(housekeeping_organs_from_manifest
+# "$ORGAN_MANIFEST_FILE")`. test-generate-organ-registry.sh caught this (the
+# exact "roll-call fails when a launched organ is absent from the registry"
+# class this gap's AC2 calls for) once this slice re-ran it. Fix: call the
+# SAME library function the installer calls, instead of parsing the
+# installer's source text — there is now exactly one code path that resolves
+# the organ roster, not two that can drift apart again.
 #
 # Format mirrors scripts/ops/organ-manifest.txt's enabled/paging_off
 # directive syntax:
@@ -23,6 +38,8 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SOURCE_FILE="$REPO_ROOT/scripts/setup/install-node-housekeeping.sh"
+ROSTER_LIB="$REPO_ROOT/scripts/ops/lib/node-housekeeping-roster-lib.sh"
+ORGAN_MANIFEST_FILE="${CHUMP_ORGAN_MANIFEST:-$REPO_ROOT/scripts/ops/organ-manifest.txt}"
 OUT_FILE="$REPO_ROOT/scripts/ops/organ-registry.txt"
 
 if [ ! -f "$SOURCE_FILE" ]; then
@@ -30,22 +47,17 @@ if [ ! -f "$SOURCE_FILE" ]; then
   exit 1
 fi
 
-# Extract the ORGANS="..." table without sourcing the rest of the installer
-# (which performs real installs). It's a single ORGANS="...multi-line..."
-# assignment terminated by a bare trailing double-quote on the last data
-# line (no closing `"` on its own line), so awk tracks start/end explicitly
-# rather than relying on a sed range match. Each data line is
-# "name|repo-relative-script[ args]|cadence-seconds".
-organs_table="$(awk '
-  /^ORGANS="/ { sub(/^ORGANS="/, ""); in_organs=1 }
-  in_organs {
-    if (sub(/"[[:space:]]*$/, "")) { print; in_organs=0; next }
-    print
-  }
-' "$SOURCE_FILE")"
+if [ ! -f "$ROSTER_LIB" ]; then
+  echo "generate-organ-registry: missing roster lib $ROSTER_LIB" >&2
+  exit 1
+fi
+
+# shellcheck source=lib/node-housekeeping-roster-lib.sh
+. "$ROSTER_LIB"
+organs_table="$(housekeeping_organs_from_manifest "$ORGAN_MANIFEST_FILE")"
 
 if [ -z "$organs_table" ]; then
-  echo "generate-organ-registry: could not extract ORGANS table from $SOURCE_FILE" >&2
+  echo "generate-organ-registry: could not resolve an organ roster (manifest=$ORGAN_MANIFEST_FILE)" >&2
   exit 1
 fi
 

@@ -27,12 +27,12 @@
 #               wrapped script self-loops forever (no external cadence).
 
 enabled  node-orchestrator      launcher=~/.chump/organs/node-orchestrator.sh     pgrep=~/.chump/organs/node-orchestrator.sh     heartbeat=0      # wraps scripts/ops/node-orchestrator.sh
-enabled  rot-reaper             launcher=~/.chump/organs/rot-reaper.sh            pgrep=~/.chump/organs/rot-reaper.sh            heartbeat=1800   # wraps scripts/ops/rot-reaper.sh
 enabled  worktree-reaper        launcher=~/.chump/organs/worktree-reaper.sh       pgrep=~/.chump/organs/worktree-reaper.sh       heartbeat=900    # wraps scripts/ops/stale-worktree-reaper.sh
 enabled  disk-monitor           launcher=~/.chump/organs/disk-monitor.sh          pgrep=~/.chump/organs/disk-monitor.sh          heartbeat=300    # wraps scripts/ops/disk-health-monitor.sh
 enabled  main-health-watchdog   launcher=~/.chump/organs/main-health-watchdog.sh  pgrep=~/.chump/organs/main-health-watchdog.sh  heartbeat=600    # wraps scripts/ops/main-health-watchdog.sh
-enabled  pr-lander              launcher=~/.chump/organs/pr-lander.sh             pgrep=~/.chump/organs/pr-lander.sh             heartbeat=600    # wraps scripts/dispatch/pr-lander-beat.sh
 enabled  cargo-sweep-gc         launcher=~/.chump/organs/cargo-sweep-gc.sh        pgrep=~/.chump/organs/cargo-sweep-gc.sh        heartbeat=3600   # wraps scripts/ops/cargo-sweep-gc.sh
 enabled  reviver                launcher=~/.chump/organs/reviver.sh               pgrep=~/.chump/organs/reviver.sh               heartbeat=60     # wraps scripts/coord/post-push-integrity-watch.sh
 enabled  pr-stuck-live-scan     launcher=~/.chump/organs/pr-stuck-live-scan.sh    pgrep=~/.chump/organs/pr-stuck-live-scan.sh    heartbeat=3600   # wraps scripts/ops/stuck-pr-filer.sh
 enabled  pr-stuck-cluster-detector launcher=~/.chump/organs/pr-stuck-cluster-detector.sh pgrep=~/.chump/organs/pr-stuck-cluster-detector.sh heartbeat=1800   # wraps scripts/coord/pr-stuck-cluster-detector.sh
+enabled  pr-lander              launcher=~/.chump/organs/pr-lander.sh             pgrep=~/.chump/organs/pr-lander.sh             heartbeat=600    # wraps scripts/dispatch/pr-lander-beat.sh
+enabled  rot-reaper             launcher=~/.chump/organs/rot-reaper.sh            pgrep=~/.chump/organs/rot-reaper.sh            heartbeat=1800   # wraps scripts/ops/rot-reaper.sh
