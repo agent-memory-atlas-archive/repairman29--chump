@@ -163,10 +163,52 @@ has_revert_commit=0
 # plain-text mention of the filename/basename. Previously ONLY an explicit
 # "Revert" commit subject satisfied this rule, so a PR that deleted a file
 # and called it out in prose still false-positived.
+#
+# CREDIBLE-1483: the original lookup was a bare `gh pr view --json body`,
+# which relies on gh inferring the PR # from the current checkout. In the
+# Actions pull_request checkout (detached merge ref) gh cannot infer the
+# PR, the call fails, and `|| true` swallowed the error silently — so
+# PR_BODY_FOR_B was ALWAYS empty in CI and the body-mention bypass could
+# never pass. Fix: resolve an explicit PR number (env PR_NUMBER, else
+# .pull_request.number from GITHUB_EVENT_PATH) and pass it to `gh pr view`
+# explicitly; fall back to reading .pull_request.body straight from
+# GITHUB_EVENT_PATH (works with no API call, but won't see a body edited
+# after the push on a re-run since the event payload is replayed as-is).
+# Warn — don't silently swallow — if neither path yields a body.
 PR_BODY_FOR_B=""
-if command -v gh &>/dev/null; then
-    PR_BODY_FOR_B="$(gh pr view --json body -q .body 2>/dev/null || true)"
+_pr_body_source=""
+if [[ -n "${PR_BODY_OVERRIDE:-}" ]]; then
+    PR_BODY_FOR_B="$PR_BODY_OVERRIDE"
+    _pr_body_source="env:PR_BODY_OVERRIDE"
+elif command -v gh &>/dev/null; then
+    _pr_num_for_b="${PR_NUMBER:-}"
+    if [[ -z "$_pr_num_for_b" && -n "${GITHUB_EVENT_PATH:-}" && -f "${GITHUB_EVENT_PATH:-}" ]] \
+        && command -v jq &>/dev/null; then
+        _pr_num_for_b="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
+    fi
+    if [[ -n "$_pr_num_for_b" && -n "${GITHUB_REPOSITORY:-}" ]]; then
+        PR_BODY_FOR_B="$(gh pr view "$_pr_num_for_b" --repo "$GITHUB_REPOSITORY" \
+            --json body -q .body 2>/dev/null || true)"
+        [[ -n "$PR_BODY_FOR_B" ]] && _pr_body_source="gh:pr=$_pr_num_for_b"
+    fi
+    if [[ -z "$PR_BODY_FOR_B" ]]; then
+        # Bare fallback — works locally against a branch with an open PR.
+        PR_BODY_FOR_B="$(gh pr view --json body -q .body 2>/dev/null || true)"
+        [[ -n "$PR_BODY_FOR_B" ]] && _pr_body_source="gh:bare"
+    fi
+    unset _pr_num_for_b
 fi
+if [[ -z "$PR_BODY_FOR_B" && -n "${GITHUB_EVENT_PATH:-}" && -f "${GITHUB_EVENT_PATH:-}" ]] \
+    && command -v jq &>/dev/null; then
+    PR_BODY_FOR_B="$(jq -r '.pull_request.body // empty' "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
+    [[ -n "$PR_BODY_FOR_B" ]] && _pr_body_source="event_path"
+fi
+if [[ -z "$PR_BODY_FOR_B" ]]; then
+    warn "Rule B: could not read PR body (no PR_NUMBER/GITHUB_EVENT_PATH/gh match) — body-mention bypass unavailable this run"
+else
+    info "Rule B: PR body resolved via $_pr_body_source"
+fi
+unset _pr_body_source
 file_mentioned_in_pr_body() {
     local f="$1"
     [[ -z "$PR_BODY_FOR_B" ]] && return 1
