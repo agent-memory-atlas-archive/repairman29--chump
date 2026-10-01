@@ -327,90 +327,105 @@ materialize_creds() {
   fi
 }
 
-# Interactive acquire (INFRA-3688): prompt user for GitHub auth method and
-# run claude setup-token to obtain CLAUDE_CODE_OAUTH_TOKEN. Writes
-# ~/.chump/providers.env with CHUMP_AUTH_MODE=oauth and the acquired tokens.
-# Never echoes secret values to stdout or logs. File created with mode 0600.
-# Returns 0 on success, non-zero on failure.
-acquire_creds() {
-  [ -f "$CREDS" ] && { ok "creds already exist at $CREDS — skipping acquire"; return 0; }
-  echo
-  printf '\033[1m=== Interactive Credential Acquisition ===\033[0m\n'
-  printf 'No pre-supplied creds found. Two ways to authenticate:\n'
-  printf '  1) GitHub Device Flow (gh auth login) — recommended\n'
-  printf '  2) Paste a GH_TOKEN directly\n'
-  printf '\n'
-  local choice=""
-  while [ -z "$choice" ]; do
-    printf 'Choose method [1/2]: '
-    read -r choice
-    case "$choice" in
-      1|2) ;;
-      *) choice="";;
-    esac
-  done
-
-  local gh_token=""
-  if [ "$choice" = 1 ]; then
-    info ACQUIRE "running gh auth login --hostname github.com --git-protocol https --web"
-    if command -v gh >/dev/null 2>&1; then
-      gh auth login --hostname github.com --git-protocol https --web || {
-        no "gh auth login failed"
-        return 1
-      }
-      gh_token="$(gh auth token 2>/dev/null)" || {
-        no "failed to retrieve GH_TOKEN from gh"
-        return 1
-      }
-    else
-      no "gh CLI not found — install GitHub CLI first, then re-run"
-      return 1
-    fi
-  else
-    printf 'Paste your GitHub personal access token (will not echo): '
-    stty -echo 2>/dev/null
-    read -r gh_token
-    stty echo 2>/dev/null
-    printf '\n'
-    if [ -z "$gh_token" ]; then
-      no "empty token — aborting"
-      return 1
-    fi
-  fi
-
-  local oauth_token=""
-  if command -v claude >/dev/null 2>&1; then
-    info ACQUIRE "running claude setup-token to obtain CLAUDE_CODE_OAUTH_TOKEN..."
-    oauth_token="$(claude setup-token 2>/dev/null)" || true
-    [ -z "$oauth_token" ] && no "claude setup-token failed or returned empty — falling back to manual entry"
-  else
-    no "claude CLI not found — falling back to manual entry"
-  fi
-
-  if [ -z "$oauth_token" ]; then
-    printf 'Paste your CLAUDE_CODE_OAUTH_TOKEN (will not echo): '
-    stty -echo 2>/dev/null
-    read -r oauth_token
-    stty echo 2>/dev/null
-    printf '\n'
-  fi
-
-  if [ -z "$oauth_token" ]; then
-    no "empty CLAUDE_CODE_OAUTH_TOKEN — aborting"
-    return 1
-  fi
-
-  # Write providers.env with mode 0600, never echoing values
+# Writes/updates a single KEY=VALUE pair in $CREDS, preserving every other
+# line already in the file (e.g. a previously-acquired sibling key, or
+# DISCORD_TOKEN) and forcing mode 0600. Never echoes the value.
+write_cred_key() {
+  local key="$1" value="$2"
   mkdir -p "$STATE_DIR"
   (
     umask 077
-    cat > "$CREDS" <<EOF
-CHUMP_AUTH_MODE=oauth
-GH_TOKEN=$gh_token
-CLAUDE_CODE_OAUTH_TOKEN=$oauth_token
-EOF
+    touch "$CREDS"
+    grep -vE "^(export )?${key}=" "$CREDS" > "$CREDS.tmp" 2>/dev/null || true
+    mv "$CREDS.tmp" "$CREDS"
+    printf '%s=%s\n' "$key" "$value" >> "$CREDS"
   )
   chmod 600 "$CREDS" 2>/dev/null || true
+}
+
+# Space-separated subset of $REQUIRED_CRED_KEYS not yet present (with a
+# non-empty value) in $CREDS. Empty output means the required set is
+# already satisfied — the idempotent "nothing to do" case.
+creds_missing_required_keys() {
+  local missing="" k
+  for k in $REQUIRED_CRED_KEYS; do
+    if [ -f "$CREDS" ] && grep -qE "^(export )?$k=.+" "$CREDS"; then :; else missing="$missing $k"; fi
+  done
+  printf '%s' "$missing" | sed -E 's/^ //'
+}
+
+# Interactive acquire (INFRA-3688 / INFRA-3626): prompt the user only for the
+# REQUIRED_CRED_KEYS that are still missing — GitHub auth via `gh auth login`
+# (device flow) or a pasted GH_TOKEN, and CLAUDE_CODE_OAUTH_TOKEN via
+# `claude setup-token` (or manual paste as fallback). Merges each acquired
+# key into $CREDS via write_cred_key so any key the caller already had
+# (zero-touch materialize, a prior partial run, DISCORD_TOKEN, etc.) is left
+# untouched — idempotent. Never echoes secret values to stdout or logs.
+# File ends at mode 0600. Returns 0 on success, non-zero on failure.
+acquire_creds() {
+  local missing
+  missing="$(creds_missing_required_keys)"
+  [ -z "$missing" ] && { ok "creds already satisfy required keys at $CREDS — skipping acquire"; return 0; }
+
+  echo
+  printf '\033[1m=== Interactive Credential Acquisition ===\033[0m\n'
+  printf 'Missing required creds:%s\n' "$missing"
+
+  case " $missing " in
+    *' GH_TOKEN '*)
+      printf '\nTwo ways to authenticate with GitHub:\n'
+      printf '  1) GitHub Device Flow (gh auth login) — recommended\n'
+      printf '  2) Paste a GH_TOKEN directly\n\n'
+      local choice=""
+      while [ -z "$choice" ]; do
+        printf 'Choose method [1/2]: '
+        read -r choice
+        case "$choice" in 1|2) ;; *) choice="";; esac
+      done
+
+      local gh_token=""
+      if [ "$choice" = 1 ]; then
+        command -v gh >/dev/null 2>&1 || { no "gh CLI not found — install GitHub CLI first, then re-run"; return 1; }
+        info ACQUIRE "running gh auth login --hostname github.com --git-protocol https --web"
+        gh auth login --hostname github.com --git-protocol https --web || { no "gh auth login failed"; return 1; }
+        gh_token="$(gh auth token 2>/dev/null)" || { no "failed to retrieve GH_TOKEN from gh"; return 1; }
+      else
+        printf 'Paste your GitHub personal access token (will not echo): '
+        stty -echo 2>/dev/null
+        read -r gh_token
+        stty echo 2>/dev/null
+        printf '\n'
+      fi
+      [ -z "$gh_token" ] && { no "empty GH_TOKEN — aborting"; return 1; }
+      write_cred_key GH_TOKEN "$gh_token"
+      ok "GH_TOKEN acquired (value not logged)"
+      ;;
+  esac
+
+  case " $missing " in
+    *' CLAUDE_CODE_OAUTH_TOKEN '*)
+      local oauth_token=""
+      if command -v claude >/dev/null 2>&1; then
+        info ACQUIRE "running claude setup-token to obtain CLAUDE_CODE_OAUTH_TOKEN..."
+        oauth_token="$(claude setup-token 2>/dev/null)" || true
+        [ -z "$oauth_token" ] && no "claude setup-token failed or returned empty — falling back to manual entry"
+      else
+        no "claude CLI not found — falling back to manual entry"
+      fi
+      if [ -z "$oauth_token" ]; then
+        printf 'Paste your CLAUDE_CODE_OAUTH_TOKEN (will not echo): '
+        stty -echo 2>/dev/null
+        read -r oauth_token
+        stty echo 2>/dev/null
+        printf '\n'
+      fi
+      [ -z "$oauth_token" ] && { no "empty CLAUDE_CODE_OAUTH_TOKEN — aborting"; return 1; }
+      write_cred_key CLAUDE_CODE_OAUTH_TOKEN "$oauth_token"
+      ok "CLAUDE_CODE_OAUTH_TOKEN acquired (value not logged)"
+      ;;
+  esac
+
+  write_cred_key CHUMP_AUTH_MODE oauth
   ok "creds written to $CREDS (mode 600; values not logged)"
   return 0
 }
@@ -418,7 +433,15 @@ EOF
 # ---------- 3b. CREDS CHECK ----------
 check_creds() {
   materialize_creds
-  [ -f "$CREDS" ] || { no "creds missing: $CREDS (supply --creds-file PATH or \$CHUMP_BOOTSTRAP_CREDS)"; return 1; }
+  # INFRA-3626: when required keys are still missing after the zero-touch
+  # sources above, invoke the interactive acquisition step instead of only
+  # failing — but only when attached to a real terminal and not explicitly
+  # suppressed, so an unattended/CI run degrades to the prior fail-loud
+  # behavior rather than blocking on a `read` that will never return.
+  if [ -n "$(creds_missing_required_keys)" ] && [ -t 0 ] && [ "${CHUMP_NODE_NONINTERACTIVE:-0}" != 1 ]; then
+    acquire_creds || true
+  fi
+  [ -f "$CREDS" ] || { no "creds missing: $CREDS (supply --creds-file PATH or \$CHUMP_BOOTSTRAP_CREDS, or run interactively to be prompted)"; return 1; }
   local missing="" k
   for k in $REQUIRED_CRED_KEYS; do
     grep -qE "^(export )?$k=.+" "$CREDS" || missing="$missing $k"
