@@ -156,6 +156,26 @@ while IFS=$'\t' read -r insertions deletions filepath; do
         fi
     done
 
+    # INFRA-8033: the exact-basename check above misses PRs whose commit
+    # message describes a deletion in prose ("remove obsolete root-bootstrap
+    # test") without quoting the full hyphenated filename
+    # (test-resilient-1097-organ-deploy-bootstrap.sh) — that's what tripped
+    # pr-hygiene on #4854/INFRA-7895 mid-rescue even though the PR body
+    # (once opened) did mention the deletion. Fall back to matching any
+    # single significant word (>=5 chars, skipping the generic "test"
+    # prefix) from the basename — a deletion is "unrelated" only when NONE
+    # of its distinguishing words show up anywhere in context.
+    if [[ "$mentioned" -eq 0 && -n "$base" ]]; then
+        IFS='-_' read -r -a base_words <<< "$base"
+        for word in "${base_words[@]}"; do
+            [[ "$word" == "test" || ${#word} -lt 5 ]] && continue
+            if echo "$PR_CONTEXT" | grep -qF "$word"; then
+                mentioned=1
+                break
+            fi
+        done
+    fi
+
     if [[ "$mentioned" -eq 0 ]]; then
         flagged_files+=("$filepath (net -${net_del} lines)")
         total_flagged_deletions=$((total_flagged_deletions + net_del))

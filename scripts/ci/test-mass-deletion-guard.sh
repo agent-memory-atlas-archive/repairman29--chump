@@ -87,6 +87,27 @@ out="$(cd "$REPO4" && GITHUB_BASE_REF=main bash "$GUARD" --warn-only 2>&1 || tru
 echo "$out" | grep -q "No mass unrelated deletions" || fail "Test 4: mentioned-file deletion should pass"
 pass "Test 4: mentioned-file mass deletion passes"
 
+# ── Test 4c (INFRA-8033): prose-described deletion passes even without the
+#    exact hyphenated filename in the commit message ──────────────────────
+# Reproduces the pr-hygiene false-positive that hit #4854/INFRA-7895: the
+# deleted file was scripts/ci/test-resilient-1097-organ-deploy-bootstrap.sh
+# but the commit message only described it in prose ("remove obsolete
+# root-bootstrap test"), never quoting the full basename.
+REPO4C="$TMP/repo4c"
+make_repo "$REPO4C"
+mkdir -p "$REPO4C/scripts/ci"
+python3 -c "print('\n'.join(f'line {i}' for i in range(200)))" > "$REPO4C/scripts/ci/test-resilient-1097-organ-deploy-bootstrap.sh"
+git -C "$REPO4C" add scripts/
+git -C "$REPO4C" commit -q -m "chore: initial"
+git -C "$REPO4C" checkout -q -b feature
+rm "$REPO4C/scripts/ci/test-resilient-1097-organ-deploy-bootstrap.sh"
+git -C "$REPO4C" add -A
+git -C "$REPO4C" commit -q -m "INFRA-7895: remove obsolete root-bootstrap test (superseded by unconditional --user placement)"
+
+out="$(cd "$REPO4C" && GITHUB_BASE_REF=main bash "$GUARD" --warn-only 2>&1 || true)"
+echo "$out" | grep -q "No mass unrelated deletions" || fail "Test 4c: prose-described deletion (word-level match) should pass: $out"
+pass "Test 4c: prose-described deletion matches on a significant word, not just the exact basename"
+
 # ── Test 4b (INFRA-5744): explicit Revert commit exempts unrelated mass deletion ──
 REPO4B="$TMP/repo4b"
 make_repo "$REPO4B"
