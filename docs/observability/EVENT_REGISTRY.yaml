@@ -7375,13 +7375,35 @@ events:
     consumers: [fleet-brief, ops-audit]
     fields_required: [ts, kind, marker, age_s, floor_s, dry_run]
 
+  - kind: almanac_liveness_reindex_triggered
+    effect_metric: self
+    emitter: scripts/ops/almanac-liveness-refresh.sh (INFRA-3639)
+    trigger: the liveness organ found the fleet index empty (indexed_files==0)
+      or scripts/ops/index-almanac.sh's own sweep marker missing/stale and
+      drove index-almanac.sh itself, instead of waiting on that separate
+      hourly organ which may never have been installed
+      (scripts/setup/install-index-almanac-timer.sh) on this node — the exact
+      "tonight-blindness" (binary healthy, index silently empty) this gap
+      exists to self-heal.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, indexed_files_before, fleet_marker_age_s]
+
+  - kind: almanac_liveness_reindex_failed
+    effect_metric: self
+    emitter: scripts/ops/almanac-liveness-refresh.sh (INFRA-3639)
+    trigger: the fleet index was empty/stale and the triggered
+      scripts/ops/index-almanac.sh sweep itself failed — non-fatal, retried
+      next cycle.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, indexed_files]
+
   - kind: almanac_liveness_refresh_tick
     effect_metric: self
     emitter: scripts/ops/almanac-liveness-refresh.sh (INFRA-3643)
     trigger: every liveness/refresh cycle, success or no-op — the heartbeat
       proving the systemd organ itself is alive on the Linux factory.
     consumers: [fleet-brief]
-    fields_required: [ts, kind, built, stale, dry_run]
+    fields_required: [ts, kind, built, stale, reindexed, dry_run]
 
   - kind: almanac_install_completed
     effect_metric: self

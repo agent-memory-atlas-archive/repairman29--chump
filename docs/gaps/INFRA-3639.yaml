@@ -1,0 +1,18 @@
+- id: INFRA-3639
+  domain: INFRA
+  title: "MISSION: TREK-14 —  Self-revive the eyes: rebuild a vanished almanac binary + re-index an empty/stale index automatically"
+  status: done
+  priority: P2
+  effort: m
+  description: |
+    [RESILIENT/m] Part of the install-a-Trek-from-0 epic (outcome MISSION-010). Mines: scripts/setup/refresh-runner-binary.sh (SHA-idempotent rebuild-from-origin model); scripts/setup/install-node-refresh-systemd.sh (supervisor twin); install-almanac-organ.sh (rebuild primitive); CJ ollama nomic-embed backend. Depends on: almanac_health probe: emit measurable eyes-alive each cycle.
+  acceptance_criteria:
+    - A revivable gate detects binary_present=false OR index empty/stale (over threshold) from almanac_health and automatically rebuilds almanac via install-almanac-organ.sh then re-indexes fleet repos on CJ using the local ollama nomic-embed backend — no human
+    - Implemented by extending refresh-runner-binary.sh (or an almanac twin service) so the almanac binary is refreshed like chump's is today; SHA-idempotent so a healthy binary is a no-op
+    - "ADVERSARIAL VERIFY-LIVE: deleting the CJ almanac binary and waiting one cycle results in rebuild + `almanac stats` >0 again, with an almanac_health line showing recovery — the exact tonight-blindness must self-heal. Depth tier + gaps named."
+  notes: |
+    Decomposed into 5 slices: INFRA-7833, INFRA-7834, INFRA-7835, INFRA-7836, INFRA-7837
+  opened_date: '2026-08-21'
+  closed_date: '2026-10-01'
+  closed_pr: 4954
+

@@ -1255,6 +1255,12 @@ jobs:
       - name: almanac summarize watchdog (RESILIENT-354)
         run: bash scripts/ci/test-almanac-summarize-watchdog.sh
 
+      - name: self-revive almanac binary + index (INFRA-3639)
+        run: bash scripts/ci/test-refresh-almanac-binary.sh
+
+      - name: almanac liveness organ fleet-reindex self-heal (INFRA-3639)
+        run: bash scripts/ci/test-almanac-liveness-reindex.sh
+
       - name: default-flip advisory guard (INFRA-762)
         run: bash scripts/ci/test-default-flip-guard.sh
 
