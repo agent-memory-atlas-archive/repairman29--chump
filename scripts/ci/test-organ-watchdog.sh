@@ -930,4 +930,76 @@ echo "$out32" | grep -q "elevating systemctl management calls" \
 echo "$out32" | grep -q "healed=0" || fail "32: expected a clean healthy cycle with the stub; output: $out32"
 pass "32: an injected systemctl stub is never sudo-wrapped (self-elevation is scoped to the real default binary)"
 
+# ── 33-35. RESILIENT-1498: sustained AUTONOMY_LEVEL=0 halt pages, exactly once ──
+# 2026-09-26 incident: AUTONOMY_LEVEL sat at 0 for ~2 days, zero operator page.
+# The AUTONOMY_HALT detector (RESILIENT-321) already existed in
+# operator-recall.sh, but was only invoked (full auto-scan) from control.sh — a
+# tmux PANE that does not run when the fleet session itself is down. These
+# prove organ-watchdog.sh (a root systemd timer, independent of
+# AUTONOMY_LEVEL/tmux) now calls operator-recall.sh's full scan every cycle,
+# that a sustained halt therefore gets paged, and that the page fires exactly
+# once across repeated cycles (operator-recall.sh's own cooldown gate dedupes).
+STUB33="$TMP/systemctl-healthy33"
+cat > "$STUB33" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$STUB33"
+
+# ── 33. operator-recall.sh IS invoked every cycle (proof of wiring) ─────────
+RECALL_CALL_LOG33="$TMP/recall-calls33.log"
+RECALL_STUB33="$TMP/recall-stub33.sh"
+cat > "$RECALL_STUB33" <<EOF
+#!/usr/bin/env bash
+echo "invoked \$*" >> "$RECALL_CALL_LOG33"
+exit 0
+EOF
+chmod +x "$RECALL_STUB33"
+AMB33="$TMP/ambient33.jsonl"
+: > "$AMB33"
+: > "$RECALL_CALL_LOG33"
+CHUMP_ORGAN_WATCHDOG_SYSTEMCTL_BIN="$STUB33" CHUMP_ORGAN_WATCHDOG_DEPLOY_SCRIPT="$NOOP_DEPLOY" \
+    CHUMP_ORGAN_WATCHDOG_AUTONOMY_RECALL_SCRIPT="$RECALL_STUB33" \
+    CHUMP_AMBIENT_LOG="$AMB33" "$WATCHDOG" >/dev/null 2>&1
+grep -q "^invoked $" "$RECALL_CALL_LOG33" \
+    || fail "33: expected organ-watchdog to invoke operator-recall.sh (full scan, no --condition) every cycle; calls: $(cat "$RECALL_CALL_LOG33")"
+pass "33: organ-watchdog invokes operator-recall.sh's full auto-detect scan every cycle (not gated behind the tmux fleet pane)"
+
+# ── 34/35. Real operator-recall.sh + sustained halt: pages AUTONOMY_HALT on
+#      the first cycle, does NOT re-page on a second cycle (cooldown-deduped) ──
+FAKE_HOME34="$(mktemp -d)"
+mkdir -p "$FAKE_HOME34/.chump"
+echo "0" > "$FAKE_HOME34/.chump/AUTONOMY_LEVEL"
+AMB34="$TMP/ambient34.jsonl"
+: > "$AMB34"
+_epoch=$(( $(date +%s) - 7200 ))
+_ts="$(python3 -c "
+import sys
+from datetime import datetime, timezone
+print(datetime.fromtimestamp(int(sys.argv[1]), tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+" "$_epoch")"
+printf '{"ts":"%s","kind":"fleet_stopped_kill_switch","source":"worker","agent_id":"test","autonomy_level":0,"note":"RESILIENT-073"}\n' "$_ts" >> "$AMB34"
+
+# Cycle 1: expect exactly one AUTONOMY_HALT page.
+HOME="$FAKE_HOME34" CHUMP_AUTONOMY_HALT_MIN_SECS=1800 \
+    CHUMP_ORGAN_WATCHDOG_SYSTEMCTL_BIN="$STUB33" CHUMP_ORGAN_WATCHDOG_DEPLOY_SCRIPT="$NOOP_DEPLOY" \
+    CHUMP_AMBIENT_LOG="$AMB34" REPO_ROOT="$REPO_ROOT" "$WATCHDOG" >/dev/null 2>&1
+_pages_cycle1=$(grep -c '"kind":"operator_recall".*"condition":"AUTONOMY_HALT"' "$AMB34" 2>/dev/null || true)
+_pages_cycle1="${_pages_cycle1//[[:space:]]/}"
+[[ "$_pages_cycle1" == "1" ]] \
+    || fail "34: expected exactly 1 AUTONOMY_HALT page after cycle 1, got $_pages_cycle1; ambient: $(cat "$AMB34")"
+pass "34: sustained AUTONOMY_LEVEL=0 halt (2h, >= 1800s threshold) pages AUTONOMY_HALT exactly once via organ-watchdog's cycle"
+
+# Cycle 2 (simulates the next 5-min timer fire): still halted, must NOT re-page
+# inside operator-recall.sh's cooldown window.
+HOME="$FAKE_HOME34" CHUMP_AUTONOMY_HALT_MIN_SECS=1800 \
+    CHUMP_ORGAN_WATCHDOG_SYSTEMCTL_BIN="$STUB33" CHUMP_ORGAN_WATCHDOG_DEPLOY_SCRIPT="$NOOP_DEPLOY" \
+    CHUMP_AMBIENT_LOG="$AMB34" REPO_ROOT="$REPO_ROOT" "$WATCHDOG" >/dev/null 2>&1
+_pages_cycle2=$(grep -c '"kind":"operator_recall".*"condition":"AUTONOMY_HALT"' "$AMB34" 2>/dev/null || true)
+_pages_cycle2="${_pages_cycle2//[[:space:]]/}"
+[[ "$_pages_cycle2" == "1" ]] \
+    || fail "35: expected still exactly 1 AUTONOMY_HALT page after cycle 2 (cooldown must dedupe); got $_pages_cycle2; ambient: $(cat "$AMB34")"
+pass "35: a second watchdog cycle while still halted does not re-page (operator-recall.sh cooldown dedupes — exactly one page for the sustained halt)"
+rm -rf "$FAKE_HOME34"
+
 echo "ALL PASS"

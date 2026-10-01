@@ -94,7 +94,15 @@
 #   CHUMP_BINARY_REFRESH_UNIT            — unit name for the binary-refresh
 #                                           organ (default
 #                                           chump-node-refresh.service)
+#   CHUMP_ORGAN_WATCHDOG_AUTONOMY_RECALL_SCRIPT — RESILIENT-1498: override for
+#                                           operator-recall.sh (section 6,
+#                                           invoked unconditionally every
+#                                           cycle for AUTONOMY_HALT et al.)
+#                                           deliberately separate from
+#                                           CHUMP_ORGAN_WATCHDOG_RECALL_SCRIPT
+#                                           (section 3, WORKER_HALT only)
 #
+
 # Exit codes:
 #   0  normal (whether or not any organ needed healing)
 #   1  systemctl unavailable (non-Linux dev box, or not installed) — quiet
@@ -840,6 +848,34 @@ if [[ "${CHUMP_ORGAN_WATCHDOG_BINARY_HEAL:-0}" == "1" ]]; then
             fi
         fi
     fi
+fi
+
+# ── 6. Sustained AUTONOMY_LEVEL=0 kill-switch halt (RESILIENT-1498) ─────────
+# 2026-09-26 incident: AUTONOMY_LEVEL sat at 0 for ~2 days with zero operator
+# page. RESILIENT-321 already taught scripts/dispatch/operator-recall.sh how
+# to detect + page on a sustained AUTONOMY_HALT (fleet_stopped_kill_switch
+# events older than CHUMP_AUTONOMY_HALT_MIN_SECS while AUTONOMY_LEVEL is
+# still 0) — but the only place that invoked the FULL auto-detect scan
+# (operator-recall.sh with no --condition) on a schedule was control.sh, a
+# tmux PANE spawned by run-fleet.sh. A halted/absent interactive fleet
+# session means control.sh never runs, so the detector code existed but was
+# never *called* for the whole 2-day window. This watchdog, in contrast, is
+# a root systemd timer (chump-organ-watchdog.timer) that runs independent of
+# AUTONOMY_LEVEL, tmux, or any interactive session — the correct place to
+# anchor a halt-class detector that must survive the very condition it
+# detects. operator-recall.sh itself owns detection, cooldown-gated ambient
+# emission, and the webhook POST (CHUMP_OPERATOR_RECALL_URL) — this section
+# only guarantees it actually gets invoked every cycle.
+# Deliberately a SEPARATE override var from CHUMP_ORGAN_WATCHDOG_RECALL_SCRIPT
+# (section 3, WORKER_HALT): that one is only invoked on a sustained
+# zero-worker condition, while this call fires unconditionally every cycle —
+# sharing the var would make every section-3 test's "recall must not be
+# called yet" assertion see an unrelated call from this section.
+RECALL_SCRIPT_AUTONOMY="${CHUMP_ORGAN_WATCHDOG_AUTONOMY_RECALL_SCRIPT:-$REPO_ROOT/scripts/dispatch/operator-recall.sh}"
+if [[ "$DRY_RUN" == "1" ]]; then
+    echo "[organ-watchdog] (dry-run) would invoke operator-recall.sh full scan (AUTONOMY_HALT, etc.)"
+elif [[ -x "$RECALL_SCRIPT_AUTONOMY" ]]; then
+    CHUMP_AMBIENT_LOG="$AMBIENT_LOG" "$RECALL_SCRIPT_AUTONOMY" 2>&1 | grep '^\[operator-recall\]' || true
 fi
 
 # Heartbeat — always emit so a dead watchdog is itself observable (paired
