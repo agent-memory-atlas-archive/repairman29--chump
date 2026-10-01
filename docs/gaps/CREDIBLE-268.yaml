@@ -1,9 +1,12 @@
 - id: CREDIBLE-268
   domain: CREDIBLE
   title: merging one PR marked THREE unrelated P1 gaps done with its closed_pr — work that was never started is now terminal
-  status: open
+  status: already_satisfied
   priority: P1
   effort: m
+  notes: |
+    [2026-10-01] CREDIBLE-268: already_satisfied — all 3 fixes verified live on main, registry reconciliation only (no new code). FIX1 (title + explicit `Closes:` trailer only, no body scan): `_extract_gap_ids_for_closure` in scripts/ops/github-webhook-receiver.py, landed PR #3569, hardened by CREDIBLE-1072 (PR #4819, removed the broader body-scanning twin `_extract_gap_ids` from the closure path). FIX2 (route through `chump gap ship`, not `gap set`, so INFRA-1392 PROOF-OF-MERGE applies and closed_date is written): `_auto_flip_gaps_done` calls `chump gap ship <id> --closed-pr <N>`, landed PR #3569, reverified by CREDIBLE-1073 (PR #4820). FIX3 (file-overlap check as an extension of scripts/ci/test-gap-closure-consistency.sh, not a new detector): landed PR #3569, made unconditional by CREDIBLE-1297 (PR #4721). AC9's repair path (INFRA-3580) is status:done. Auto-flip stays suppressed by default via the CHUMP_WEBHOOK_AUTOFLOW/CHUMP_WEBHOOK_AUTOFLIP operator opt-in gate pending production soak, consistent with AC10's "no silent re-enable" intent — superseding rather than contradicting the original "stop the receiver" lever. Nothing left to build.
+  closed_date: '2026-10-01'
   acceptance_criteria:
     - "MECHANISM FOUND AND VERIFIED ON MAIN — no longer a hypothesis. scripts/ops/github-webhook-receiver.py: _extract_gap_ids (line 161) runs regex \\b([A-Z][A-Z-]+-\\d+)\\b over BOTH title AND body; _auto_flip_gaps_done (line 243, CREDIBLE-092) then runs `chump gap set <ID> --status done --closed-pr <N>` for EVERY id it found, on any merged PR. The receiver is RUNNING (1 process confirmed). That is the whole bug"
     - "IT EXPLAINS THE TWO THINGS THAT PREVIOUSLY DID NOT ADD UP: (1) it calls `gap set`, NOT `gap ship`, so INFRA-1392 PROOF-OF-MERGE never fires — that guard lives on the ship path only. Two routes to status=done, one guarded. (2) `gap set --status done` does not write closed_date, which is exactly why every falsely-closed gap has closed_pr set and closed_date empty"
