@@ -11738,6 +11738,49 @@ events:
     fields_required: [ts, kind, repo_path, failure_class, transient, elapsed_ms, error]
     # payload: {repo_path: str, failure_class: str, transient: bool,
     #           elapsed_ms: int, error: str}
+
+  # ── MISSION-055: chump ingest --import-backlog (DEFINED-backlog import) ──
+
+  - kind: ingest_backlog_import_started
+    effect_metric: effective
+    emitter: src/ingest.rs (MISSION-055)
+    # scanner-anchor: "kind":"ingest_backlog_import_started"
+    trigger: >
+      `chump ingest <repo-path> --import-backlog` begins execution, after
+      repo-path validation passes. Fields: repo_path.
+    consumers: [ops-audit, fleet-brief]
+    fields_required: [ts, kind, repo_path]
+    # payload: {repo_path: str}
+    status: stable
+
+  - kind: ingest_backlog_import_completed
+    effect_metric: effective
+    emitter: src/ingest.rs (MISSION-055)
+    # scanner-anchor: "kind":"ingest_backlog_import_completed"
+    trigger: >
+      `chump ingest <repo-path> --import-backlog` finished reading the
+      repo's defined backlog (.beast-mode-tasks.json / beads / TODO) and
+      filing one gap per new item via `chump gap reserve`. Fields: repo_path,
+      source (which backlog file was read), items_found, gaps_created,
+      gaps_skipped_existing (items whose `[ingest:<repo>:<key>]` title
+      marker already existed — the idempotency guarantee).
+    consumers: [ops-audit, fleet-brief]
+    fields_required: [ts, kind, repo_path, source, items_found, gaps_created, gaps_skipped_existing]
+    # payload: {repo_path: str, source: str, items_found: int,
+    #           gaps_created: int, gaps_skipped_existing: int}
+    status: stable
+
+  - kind: ingest_backlog_import_failed
+    effect_metric: effective
+    emitter: src/ingest.rs (MISSION-055)
+    # scanner-anchor: "kind":"ingest_backlog_import_failed"
+    trigger: >
+      `chump ingest <repo-path> --import-backlog` found no recognized
+      backlog source under repo_path. Fields: repo_path, error.
+    consumers: [ops-audit, fleet-brief]
+    fields_required: [ts, kind, repo_path, error]
+    # payload: {repo_path: str, error: str}
+    status: stable
     status: stable
 
   # ── INFRA-1784: chump ingest --confirm-mutations (orchestration, INFRA-1746 phase 5) ─
