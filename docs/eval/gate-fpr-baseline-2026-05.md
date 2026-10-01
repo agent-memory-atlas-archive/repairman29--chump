@@ -35,7 +35,7 @@ give per-gate fire/TP/FP counts with operator-provided classifications.
 | #1669 | feat(INFRA-944): chump gap dep-clean subcommand — strips s | pass | pass |
 | #1650 | feat(INFRA-964): RESILIENT — chump fleet daemon (OS-owned  | pass | pass |
 | #1668 | feat(INFRA-975): RESILIENT — pre-claim + worker disk-low g | pass | pass |
-| #1666 | feat(CREDIBLE-045): generic agent attribution in ship-rate � | pass | pass |
+| #1666 | feat(CREDIBLE-045): generic agent attribution in ship-rate — | pass | pass |
 | #1662 | feat(CREDIBLE-041): no-bundle-PR policy — Rule C in check- | pass | pass |
 | #1663 | docs(CREDIBLE-042): PR_HYGIENE.md — document all 6 require | pass | pass |
 | #1660 | fix(CREDIBLE): ship_quality infra537 tests time-bomb on fixe | pass | pass |

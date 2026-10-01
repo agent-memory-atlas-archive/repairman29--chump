@@ -1,0 +1,32 @@
+site_name: Chump Doctrine
+site_description: The Chump agent-fleet doctrine corpus — process, architecture, and design docs.
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+  - awesome-pages
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - fenced_code
+  - pymdownx.superfences
+
+exclude_docs: |
+  proprietary/**
