@@ -209,15 +209,15 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 patch = { version = "0.7", default-features = false }
-jsonschema = { version = "0.56", default-features = false }
+jsonschema = { version = "0.58", default-features = false }
 serde_yaml = "0.9"
 mistralrs = { version = "0.8.1", optional = true, default-features = false }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 web-push = { version = "0.11", default-features = false, features = ["hyper-client"], optional = true }
 mimalloc = { version = "0.1", default-features = false }
-wasmtime = "48"
-wasmtime-wasi = "48"
+wasmtime = "49"
+wasmtime-wasi = "49"
 wasi-common = "46"
 sha2 = "0.11.0"
 hex = "0.4.3"
