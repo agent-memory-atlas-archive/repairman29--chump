@@ -125,9 +125,14 @@ pub struct RuleReport {
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 const USAGE: &str = "Usage: chump verify --stage <pre-commit|commit-msg|ci> [options]
+   or: chump verify --live <gap-id|pr-number> [--revive] [--json]
 
 Unified policy engine (CREDIBLE-155) — typed rules over parsed diff
 semantics, one implementation for local hooks and CI.
+
+`--live` is a separate mode (INFRA-3653, PEER-VERI-06): it probes a gap's
+PROOF ACs against their resolved target node (not this host) and prints a
+BUILT/WIRED/DETECTABLE/REVIVABLE verdict. See `chump verify --live --help`.
 
 Options:
   --stage <s>       pre-commit (preview of staged diff), commit-msg
@@ -146,6 +151,15 @@ Every bypass appends one audited kind=verify_bypassed line to
 Exit codes: 0 pass/preview, 1 rule failure (binding or --strict), 2 engine error.";
 
 pub fn run(argv: &[String]) -> i32 {
+    // `chump verify --live <gap|pr>` (INFRA-3653, PEER-VERI-06) — a distinct
+    // mode from the --stage diff-policy engine above: probes a gap's PROOF
+    // ACs against their RESOLVED target node instead of parsing a git diff.
+    // Dispatched first so it never falls through to the `--stage is required`
+    // error below.
+    if argv.first().map(String::as_str) == Some("--live") {
+        return crate::pr_ac_coverage::run_live(&argv[1..]);
+    }
+
     let mut stage: Option<Stage> = None;
     let mut msg_file: Option<String> = None;
     let mut base = "origin/main".to_string();

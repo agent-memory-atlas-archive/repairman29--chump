@@ -505,17 +505,32 @@ fn run_remote_systemctl(node: &str, unit: &str) -> Result<String, String> {
 /// bare current-thread runtime is enough to drive it synchronously without
 /// risking a hang when NATS is unreachable (the common case in unit tests
 /// and most CI runs).
+///
+/// INFRA-3653: the `chump` binary's own `main` is `#[tokio::main]`, so by
+/// the time any CLI command reaches here a Tokio runtime is ALREADY driving
+/// the current thread — building a second one with `Builder::build()` and
+/// calling `block_on` on it panics ("Cannot start a runtime from within a
+/// runtime"), it does not just fall back to `None`. `chump verify --live`
+/// hit this immediately against a real systemd-unit proof bullet (the same
+/// path `chump pr ac-coverage` exercises). Spawning a dedicated OS thread
+/// and building/driving the runtime THERE sidesteps the nesting check
+/// entirely — the new thread has no ambient runtime of its own.
 fn resolve_target_node_for_unit(unit: &str) -> Option<String> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .ok()?;
-    rt.block_on(async {
-        let client = chump_coord::CoordClient::connect_or_skip().await?;
-        chump_coord::capability::resolve_target_node(&client.capabilities_kv, unit)
-            .await
-            .ok()
+    let unit = unit.to_string();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        rt.block_on(async {
+            let client = chump_coord::CoordClient::connect_or_skip().await?;
+            chump_coord::capability::resolve_target_node(&client.capabilities_kv, &unit)
+                .await
+                .ok()
+        })
     })
+    .join()
+    .ok()?
 }
 
 /// True when `node` names the current host, per the same
@@ -1816,6 +1831,273 @@ pub fn cited_paths(bullet: &str) -> Vec<String> {
     out
 }
 
+// ── live-outcome Roll-Call CLI (INFRA-3653, PEER-VERI-06) ──────────────────
+//
+// `chump pr ac-coverage` / `check_live_outcome` above prove-or-fail a PR's
+// proof bullets as a side effect of scoring a diff. There was no standalone,
+// repeatable command a human (or a gate step) could run against a gap ID or
+// PR number to get a one-shot Roll-Call: "is the thing this gap claims is
+// live actually live, on the node that owns it, right now". `run_live` is
+// that command — `chump verify --live <gap|pr>`.
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum LiveTier {
+    // Proof bullet exists but names no mechanically-checkable target — all
+    // we know is that something was presumably built.
+    Built,
+    // A target resolved (systemd unit / ambient kind / URL) but the probe
+    // found it is NOT currently true.
+    Wired,
+    // The probe confirmed the claimed live outcome right now.
+    Detectable,
+    // Confirmed live AND (systemd-unit claims, `--revive`) confirmed
+    // restart-capable via a read-only dry-run check.
+    Revivable,
+}
+
+impl LiveTier {
+    fn label(self) -> &'static str {
+        match self {
+            LiveTier::Built => "BUILT",
+            LiveTier::Wired => "WIRED",
+            LiveTier::Detectable => "DETECTABLE",
+            LiveTier::Revivable => "REVIVABLE",
+        }
+    }
+}
+
+struct LiveClaim {
+    bullet: String,
+    tier: LiveTier,
+    detail: String,
+}
+
+fn json_escape_live(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Resolve the CLI's `<gap|pr>` positional argument to a gap id. A bare
+/// integer (optionally `#`-prefixed) is treated as a PR number and resolved
+/// via its title (same convention as `parse_gap_id`); anything else must
+/// already BE a `<DOMAIN>-<N>` gap id.
+fn resolve_gap_id_for_live(target: &str) -> Result<String, String> {
+    if let Ok(pr_num) = target.trim_start_matches('#').parse::<u64>() {
+        let pr_json = run_gh(&["pr", "view", &pr_num.to_string(), "--json", "title"])
+            .map_err(|e| format!("gh pr view {pr_num} failed: {e}"))?;
+        let title = json_extract_string(&pr_json, "title").unwrap_or_default();
+        return parse_gap_id(&title).ok_or_else(|| {
+            format!("PR #{pr_num} title {title:?} has no <DOMAIN>-<N> gap reference")
+        });
+    }
+    match parse_gap_id(target) {
+        Some(id) if id == target => Ok(id),
+        _ => Err(format!(
+            "'{target}' is neither a PR number nor a <DOMAIN>-<N> gap id"
+        )),
+    }
+}
+
+fn local_is_enabled(unit: &str) -> Result<String, String> {
+    let out = Command::new(systemctl_bin())
+        .args(["is-enabled", unit])
+        .output()
+        .map_err(|e| format!("systemctl unavailable: {e}"))?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn run_remote_is_enabled(node: &str, unit: &str) -> Result<String, String> {
+    let ssh_bin =
+        std::env::var("CHUMP_AC_GATE_SYSTEMCTL_BIN").unwrap_or_else(|_| "ssh".to_string());
+    let out = Command::new(&ssh_bin)
+        .arg(node)
+        .arg("systemctl")
+        .arg("is-enabled")
+        .arg(unit)
+        .output()
+        .map_err(|e| format!("failed to spawn `{ssh_bin}` for {node}: {e}"))?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Read-only revivability probe for a systemd-unit proof claim: NEVER
+/// restarts anything. Resolves the same target node `check_live_outcome`
+/// probes (INFRA-7098) so a remotely-owned unit is checked via `ssh`, not
+/// against the local runner.
+fn check_revivable(unit: &str) -> (bool, String) {
+    let enabled_state = match resolve_target_node_for_unit(unit) {
+        Some(node) if !is_current_host(&node) => run_remote_is_enabled(&node, unit),
+        _ => local_is_enabled(unit),
+    };
+    match enabled_state {
+        Ok(state) => {
+            let revivable = matches!(
+                state.as_str(),
+                "enabled" | "enabled-runtime" | "static" | "indirect" | "generated" | "transient"
+            );
+            (
+                revivable,
+                format!("systemctl is-enabled {unit} -> \"{state}\" (dry-run; nothing restarted)"),
+            )
+        }
+        Err(e) => (false, format!("revivability check failed: {e}")),
+    }
+}
+
+/// `chump verify --live <gap|pr> [--revive] [--json]` (INFRA-3653,
+/// PEER-VERI-06) — one repeatable Roll-Call command: load the gap's PROOF
+/// ACs (bullets containing PROVEN-BY/PROOF:), probe each mechanically-
+/// checkable claim against its resolved target node via
+/// [`check_live_outcome`], and print a per-claim receipt plus one overall
+/// BUILT/WIRED/DETECTABLE/REVIVABLE verdict. `--revive` additionally runs a
+/// read-only `systemctl is-enabled` dry-run against systemd-unit claims —
+/// it never restarts anything, so the command changes nothing on the target
+/// node by default OR with `--revive`. Exits 0 iff the weakest claim reaches
+/// at least DETECTABLE; non-zero (1) otherwise so this is usable as a gate
+/// step. Exits 2 on a bad invocation (unresolvable target, engine error).
+pub fn run_live(args: &[String]) -> i32 {
+    let mut target: Option<String> = None;
+    let mut revive = false;
+    let mut json = false;
+    for a in args {
+        match a.as_str() {
+            "--revive" => revive = true,
+            "--json" => json = true,
+            "-h" | "--help" => {
+                println!(
+                    "Usage: chump verify --live <gap-id|pr-number> [--revive] [--json]\n\n\
+                     Loads the gap's PROOF ACs (bullets containing PROVEN-BY/PROOF:),\n\
+                     runs each mechanically-checkable claim against its resolved target\n\
+                     node, and prints a per-claim receipt plus one overall\n\
+                     BUILT/WIRED/DETECTABLE/REVIVABLE verdict. Exits non-zero unless the\n\
+                     weakest claim reaches DETECTABLE.\n\n\
+                     --revive  also dry-run-check systemd-unit claims for restart\n\
+                     feasibility (systemctl is-enabled only -- never restarts anything).\n\
+                     --json    machine-readable output."
+                );
+                return 0;
+            }
+            other if target.is_none() => target = Some(other.to_string()),
+            other => {
+                eprintln!("chump verify --live: unexpected argument '{other}'");
+                return 2;
+            }
+        }
+    }
+
+    let Some(target) = target else {
+        eprintln!("chump verify --live: a <gap-id|pr-number> argument is required");
+        return 2;
+    };
+
+    let gap_id = match resolve_gap_id_for_live(&target) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("chump verify --live: {e}");
+            return 2;
+        }
+    };
+
+    let bullets = match load_ac_bullets(&gap_id) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("chump verify --live: cannot load AC for {gap_id}: {e}");
+            return 2;
+        }
+    };
+
+    let proof_bullets: Vec<String> = bullets.into_iter().filter(|b| is_proof_bullet(b)).collect();
+
+    if proof_bullets.is_empty() {
+        if json {
+            println!(
+                "{{\"gap_id\":\"{}\",\"verdict\":\"UNPROVEN\",\"claims\":[],\"detail\":\"no PROVEN-BY/PROOF: bullet found\"}}",
+                json_escape_live(&gap_id)
+            );
+        } else {
+            println!("{gap_id}: no PROVEN-BY/PROOF: bullet found -- nothing to verify live");
+        }
+        return 1;
+    }
+
+    let mut claims = Vec::new();
+    for bullet in &proof_bullets {
+        let (confirmed, mut detail) = check_live_outcome(bullet);
+        let unit = find_systemd_unit_token(bullet);
+        let has_target = unit.is_some()
+            || find_event_kind_token(bullet).is_some()
+            || find_url_token(bullet).is_some();
+        let mut tier = if has_target {
+            if confirmed {
+                LiveTier::Detectable
+            } else {
+                LiveTier::Wired
+            }
+        } else {
+            LiveTier::Built
+        };
+
+        if revive {
+            if let Some(unit) = &unit {
+                let (revivable, revive_detail) = check_revivable(unit);
+                detail.push_str(&format!(" | {revive_detail}"));
+                // Revivable is strictly ABOVE Detectable: it means "live, AND
+                // would survive a restart" — a currently-failed/inactive unit
+                // stays Wired (unproven) no matter how revivable it is. A
+                // dead unit that could theoretically be restarted is not the
+                // same claim as a unit that IS live right now.
+                if confirmed && revivable {
+                    tier = LiveTier::Revivable;
+                }
+            }
+        }
+
+        claims.push(LiveClaim {
+            bullet: bullet.clone(),
+            tier,
+            detail,
+        });
+    }
+
+    let overall = claims
+        .iter()
+        .map(|c| c.tier)
+        .min()
+        .unwrap_or(LiveTier::Built);
+    let proven = overall >= LiveTier::Detectable;
+
+    if json {
+        let claims_json: Vec<String> = claims
+            .iter()
+            .map(|c| {
+                format!(
+                    "{{\"bullet\":\"{}\",\"tier\":\"{}\",\"detail\":\"{}\"}}",
+                    json_escape_live(&c.bullet),
+                    c.tier.label(),
+                    json_escape_live(&c.detail)
+                )
+            })
+            .collect();
+        println!(
+            "{{\"gap_id\":\"{}\",\"verdict\":\"{}\",\"claims\":[{}]}}",
+            json_escape_live(&gap_id),
+            overall.label(),
+            claims_json.join(",")
+        );
+    } else {
+        println!("chump verify --live {gap_id}");
+        for c in &claims {
+            println!("  [{}] {}", c.tier.label(), c.bullet.trim());
+            println!("      {}", c.detail);
+        }
+        println!("VERDICT: {}", overall.label());
+    }
+
+    if proven {
+        0
+    } else {
+        1
+    }
+}
+
 // ── unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1913,6 +2195,60 @@ mod tests {
         assert!(!p.contains("Additional context"));
         let p2 = build_ac_writer_prompt("t", "d", "diff --git a/x b/x");
         assert!(p2.contains("Additional context"));
+    }
+
+    #[test]
+    fn infra3653_resolve_gap_id_for_live_accepts_bare_gap_id() {
+        assert_eq!(
+            resolve_gap_id_for_live("INFRA-3653"),
+            Ok("INFRA-3653".to_string())
+        );
+    }
+
+    #[test]
+    fn infra3653_resolve_gap_id_for_live_rejects_non_gap_non_number() {
+        assert!(resolve_gap_id_for_live("not-a-gap-or-number").is_err());
+    }
+
+    #[test]
+    fn infra3653_live_tier_order_matches_verdict_ladder() {
+        // BUILT < WIRED < DETECTABLE < REVIVABLE — overall verdict takes the
+        // weakest claim (min), so a Wired claim must never be out-ranked by
+        // a Detectable one when both are present.
+        assert!(LiveTier::Built < LiveTier::Wired);
+        assert!(LiveTier::Wired < LiveTier::Detectable);
+        assert!(LiveTier::Detectable < LiveTier::Revivable);
+        let claims = [LiveTier::Revivable, LiveTier::Wired, LiveTier::Detectable];
+        assert_eq!(claims.iter().min(), Some(&LiveTier::Wired));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn infra3653_run_live_no_proof_bullets_is_unproven() {
+        // load_ac_bullets shells out to `chump gap show`; point CHUMP_REAL_BINARY
+        // at a stub that returns descriptive-only AC (no PROOF:/PROVEN-BY marker)
+        // so this stays offline and deterministic. Serialized: mutates the
+        // process-global CHUMP_REAL_BINARY env var (same hazard AMBIENT_ENV_LOCK
+        // guards above for CHUMP_AMBIENT_LOG).
+        let script = std::env::temp_dir().join("infra3653_stub_no_proof.sh");
+        std::fs::write(
+            &script,
+            "#!/bin/bash\necho '{\"acceptance_criteria\":\"[\\\"The thing works\\\"]\"}'\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::env::set_var("CHUMP_REAL_BINARY", &script);
+        let code = run_live(&["INFRA-9999999".to_string()]);
+        std::env::remove_var("CHUMP_REAL_BINARY");
+        let _ = std::fs::remove_file(&script);
+        assert_eq!(
+            code, 1,
+            "no proof bullets must be reported unproven (exit 1)"
+        );
     }
 
     #[test]
