@@ -110,6 +110,12 @@ organ_unit_host_rewrite() {
     grep -q "^Environment=HOME=" "$dest" || sed -i "/^\[Service\]/a Environment=HOME=${run_home%/}" "$dest"
     grep -q "^WorkingDirectory=" "$dest" || sed -i "/^\[Service\]/a WorkingDirectory=${repo_on_host}" "$dest"
     grep -q "^Environment=PATH=" "$dest" || sed -i "/^\[Service\]/a Environment=PATH=${run_home%/}/.cargo/bin:/usr/local/bin:/usr/bin:/bin" "$dest"
+    # INFRA-3632: every organ resolves the ONE canonical gap store via
+    # ~/.chump/node.env (CHUMP_STATE_DIR/CHUMP_STATE_DB/CHUMP_TEAM_URL/
+    # CHUMP_TEAM_API_KEY/CHUMP_STORE_BACKEND) instead of falling back to a
+    # repo-local .chump/state.db. The leading `-` makes it optional so a box
+    # mid-bootstrap (node.env not written yet) doesn't fail unit activation.
+    grep -q "^EnvironmentFile=.*node\.env" "$dest" || sed -i "/^\[Service\]/a EnvironmentFile=-${run_home%/}/.chump/node.env" "$dest"
   fi
 
   # RESILIENT-374: re-assert User=root for keep-root organs (the deploy organ).

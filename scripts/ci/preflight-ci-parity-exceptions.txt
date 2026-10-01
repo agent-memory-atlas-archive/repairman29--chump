@@ -418,6 +418,9 @@ test-fleet-health-sentinel.sh   # reason: RESILIENT-1052 — Tier-D daemon-side 
 # ── RESILIENT-1055/1102: organ role-roster + host-rewrite gate ───────────────
 test-resilient-1055-role-roster.sh   # reason: RESILIENT-1055/1102 — Tier-D installer-shaped gate; exercises the shared organ_unit_host_rewrite lib + organ-role-roster.sh + reconcile against tmp fixtures and a stubbed systemctl (no network/root). Asserts the host-rewrite byte contract AND that a baked WorkingDirectory resolves to the box's real, on-disk checkout (RESILIENT-1102: the $HOME/Projects/chump ghost caused status=200/CHDIR). GNU-sed rewrite path runs for real on the ubuntu pr-hygiene runner; no preflight-shaped local code path.
 
+# ── INFRA-3632: canonical-store env wiring gate ───────────────────────────────
+test-infra-3632-canonical-store-env.sh   # reason: INFRA-3632 — Tier-D installer-shaped gate; exercises chump-node-install.sh's write_node_env()/install_shell_hook() against a synthetic $HOME/$NODE_DIR and the shared organ_unit_host_rewrite lib's EnvironmentFile= injection, same shape as test-resilient-1055-role-roster.sh above; no preflight-shaped local code path.
+
 # ── RESILIENT-1050: cold-install FTUE harness (node bring-up, not preflight-shaped) ─
 # ftue-cold-install.yml's `cold-install` job runs scripts/ci/ftue-cold-install.sh
 # in TWO steps — the host-agnostic gate ("cold-install FTUE — contract + live

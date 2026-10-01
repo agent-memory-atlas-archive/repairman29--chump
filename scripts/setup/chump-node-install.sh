@@ -501,6 +501,12 @@ write_node_env() {
   ( umask 077
     {
       printf 'export CHUMP_STATE_DIR=%s\n' "$STATE_DIR"
+      # INFRA-3632: pin the exact var GapStore::db_path() reads
+      # (crates/chump-gap-store/src/lib.rs) so every shell/organ that sources
+      # this file resolves the ONE canonical state.db instead of falling back
+      # to repo_root().join(".chump/state.db") — the fallback a git worktree's
+      # cwd would otherwise silently hit (split-brain store, INFRA-3632 AC2).
+      printf 'export CHUMP_STATE_DB=%s\n' "$STATE_DB"
       printf 'export CHUMP_TEAM_URL=%s\n' "$team_url"
       printf 'export CHUMP_TEAM_API_KEY=%s\n' "$team_api_key"
       printf 'export CHUMP_STORE_BACKEND=%s\n' "$store_backend"
@@ -519,8 +525,39 @@ write_node_env() {
   # Source now so subsequent phases inherit the canonical settings.
   # shellcheck disable=SC1090
   . "$node_env"
-  export CHUMP_STATE_DIR CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE CHUMP_NODE_WORK_ENABLED CHUMP_NODE_MODE CHUMP_RUN_USER
+  export CHUMP_STATE_DIR CHUMP_STATE_DB CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE CHUMP_NODE_WORK_ENABLED CHUMP_NODE_MODE CHUMP_RUN_USER
   ok "node.env written + sourced: $node_env (mode=$CHUMP_NODE_MODE, run-user=$CHUMP_RUN_USER)"
+  install_shell_hook "$node_env"
+}
+
+# ---------- 3d. INTERACTIVE-SHELL HOOK (INFRA-3632 AC1) ----------
+# Without this, an interactive `chump gap list` (or any bare shell invocation
+# of the binary) never sees CHUMP_STATE_DB/CHUMP_TEAM_URL/etc — node.env sits
+# on disk, unread, and the CLI falls back to resolving .chump/state.db off
+# whatever repo the shell's cwd happens to be in (the split-brain this gap
+# exists to close). Idempotent: guarded by a marker comment so re-running
+# install never duplicates the block.
+install_shell_hook() {
+  local node_env="$1"
+  local marker="# chump-node-install: source node.env (INFRA-3632)"
+  # .bashrc is the one file virtually every interactive bash session reads
+  # (directly for non-login shells; via .profile's `. "$HOME/.bashrc"` for
+  # login shells) — create it if a fresh account doesn't have one yet, so the
+  # hook isn't silently skipped on a brand-new user.
+  [ -f "$HOME/.bashrc" ] || : > "$HOME/.bashrc"
+  # .profile is read by plain POSIX sh login shells (Termux may default to
+  # one) — hook it too, but only if it already exists; a bash-only box's
+  # .profile just re-sources .bashrc anyway, so creating one isn't needed.
+  local f
+  for f in "$HOME/.bashrc" "$HOME/.profile"; do
+    [ -f "$f" ] || continue
+    grep -qF "$marker" "$f" 2>/dev/null && continue
+    {
+      printf '\n%s\n' "$marker"
+      printf 'if [ -f "%s" ]; then . "%s"; fi\n' "$node_env" "$node_env"
+    } >> "$f"
+    ok "interactive-shell hook installed: $f sources $node_env"
+  done
 }
 
 # ---------- 4. BINARY ----------
@@ -1541,6 +1578,32 @@ self_test() {
       fi
     else
       no "seed: canonical store empty (0 gaps) — SEED phase may have failed; re-run chump-node-install.sh"
+      fail=1
+    fi
+  fi
+  # INFRA-3632 AC1: interactive-shell hook present (node.env sourced by .bashrc
+  # / .profile), so a bare `chump gap list` from a fresh shell actually sees
+  # CHUMP_STATE_DB instead of silently falling back to cwd-relative resolution.
+  if grep -qF "chump-node-install: source node.env" "$HOME/.bashrc" 2>/dev/null \
+     || grep -qF "chump-node-install: source node.env" "$HOME/.profile" 2>/dev/null; then
+    ok "interactive-shell hook: node.env sourced from .bashrc/.profile"
+  else
+    no "interactive-shell hook missing — re-run chump-node-install.sh to wire .bashrc/.profile"
+    fail=1
+  fi
+  # INFRA-3632 AC2/AC3: the ONE canonical-store contract, verified LIVE with
+  # the actual binary (not just a sqlite3 row-count proxy). A bare
+  # `chump gap list` run from $HOME (no repo context) and from the installed
+  # repo worktree must both resolve to the SAME state.db — the split-brain
+  # this gap exists to close is exactly "cwd silently picks a different file".
+  if [ -x "$BIN" ] && [ -f "$node_env" ]; then
+    local cnt_home cnt_repo
+    cnt_home="$(cd "$HOME" 2>/dev/null && env -i HOME="$HOME" PATH="$PATH" sh -c '. "'"$node_env"'"; "'"$BIN"'" gap list --status open --json' 2>/dev/null | grep -c '"id"')"
+    cnt_repo="$(cd "$NODE_DIR/repo" 2>/dev/null && env -i HOME="$HOME" PATH="$PATH" sh -c '. "'"$node_env"'"; "'"$BIN"'" gap list --status open --json' 2>/dev/null | grep -c '"id"')"
+    if [ -n "$cnt_home" ] && [ "$cnt_home" = "$cnt_repo" ]; then
+      ok "canonical store: \`chump gap list\` from \$HOME and from the repo worktree agree ($cnt_home open gaps)"
+    else
+      no "canonical store MISMATCH: \$HOME resolved $cnt_home open gaps, repo worktree resolved $cnt_repo — two different state.db files in play"
       fail=1
     fi
   fi

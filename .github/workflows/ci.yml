@@ -751,6 +751,13 @@ jobs:
       - name: Organ role-roster + host-rewrite gate (RESILIENT-1055/1102)
         run: bash scripts/ci/test-resilient-1055-role-roster.sh
 
+      # INFRA-3632: node-install pins the canonical-store env (CHUMP_STATE_DB)
+      # into node.env, wires it into every generated organ unit's
+      # EnvironmentFile=, and installs an interactive-shell hook — so no
+      # shell/organ falls back to a repo-local .chump/state.db.
+      - name: Canonical-store env wiring gate (INFRA-3632)
+        run: bash scripts/ci/test-infra-3632-canonical-store-env.sh
+
       # INFRA-1810: installer manifest gate — every scripts/setup/install-*.sh
       # must be mapped to REQUIRED_DAEMONS, optional-installers-allowlist.txt,
       # or deprecated-installers-allowlist.txt. Prevents ship-but-never-install.

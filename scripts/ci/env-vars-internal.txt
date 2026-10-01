@@ -3125,3 +3125,10 @@ CHUMP_ORGAN_WATCHDOG_AUTONOMY_RECALL_SCRIPT
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_NODE_NONINTERACTIVE
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_NODE_MODE
+# detected in: (standard input)
+CHUMP_NODE_WORK_ENABLED
