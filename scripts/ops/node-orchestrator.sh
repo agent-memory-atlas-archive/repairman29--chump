@@ -23,6 +23,7 @@
 # Tracked in-repo so `chump-node-install.sh` installs it on EVERY owned node (COTG).
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${CHUMP_STATE_DIR:-$HOME/.chump}"
 REPO="${CHUMP_REPO_ROOT:-$HOME/Projects/chump}"
 INV="$STATE_DIR/resource-inventory.json"
@@ -172,9 +173,24 @@ sense() {
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CORES" "$LOAD1" "$LOADPCT" "$RAM_AVAIL_MB" "$ROOT_PCT" "${BEST_VOL_MNT:-none}" "$((${BEST_VOL_FREE_KB:-0}/1024/1024))" "$WORKERS_UP" > "$INV"
 }
 
+# heal() — INFRA-3649 AC3: HOUSEKEEPING organs are declared as chump-*.service
+# names for historical reasons, but on a non-systemd-supervised node (CJ:
+# housekeeping runs as bare ~/.chump/organs/<name>.sh loops, not systemd
+# units) a blind `systemctl is-active`/`restart` silently no-ops — is-active
+# returns "unknown"/non-zero for a unit that was never registered, restart
+# errors out (swallowed by `|| true`), and the organ is never actually
+# revived. svc-abstraction.sh's svc_is_alive/svc_revive pick the right
+# supervisor (systemd unit vs bare process) PER ORGAN, so the same heal()
+# body works whether this node runs HOUSEKEEPING as real units or as process
+# organs — and svc_revive already carries the backoff guard + the
+# kind=organ_self_healed emit (AC2/AC4), so heal() doesn't need its own.
+# shellcheck source=svc-abstraction.sh
+source "${CHUMP_ORCH_SVC_ABSTRACTION:-$SCRIPT_DIR/svc-abstraction.sh}"
 heal() {
+  local u name
   for u in $HOUSEKEEPING; do
-    systemctl is-active "$u" >/dev/null 2>&1 || { log "HEAL: $u down -> restart"; sudo systemctl restart "$u" 2>/dev/null || true; }
+    name="${u%.service}"; name="${name#chump-}"
+    svc_is_alive "$name" >/dev/null 2>&1 || { log "HEAL: $name down -> revive"; svc_revive "$name" >/dev/null 2>&1 || true; }
   done
 }
 

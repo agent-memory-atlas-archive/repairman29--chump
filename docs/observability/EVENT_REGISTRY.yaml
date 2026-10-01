@@ -7174,13 +7174,45 @@ events:
 
   - kind: organ_self_healed
     effect_metric: organ_self_heal_rate
-    emitter: scripts/ops/organ-watchdog.sh (INFRA-3595)
+    emitter: scripts/ops/organ-watchdog.sh (INFRA-3595); also
+      scripts/ops/svc-abstraction.sh's svc_revive (INFRA-3649 AC2 — shared
+      systemd/process revive abstraction consumed by node-orchestrator.sh's
+      heal() and any future svc_revive caller)
     trigger: a chump-*.service organ was found in ActiveState=failed (or a
       chump-*.timer enabled but inactive) and the watchdog cleared it with
       `systemctl reset-failed` + restart/start with no human step — the
       operator directive that the board must never hand-restart an organ.
+      svc_revive fires the same kind whenever it successfully revives an
+      organ through EITHER supervisor mechanism it picks per-organ.
     consumers: [fleet-brief, ops-audit, curator]
     fields_required: [ts, kind, unit, action]
+    # NB: svc_revive emits a second field shape under the same kind —
+    # [ts, kind, organ, node, mechanism] (mechanism=systemd|process) —
+    # rather than organ-watchdog.sh's [unit, action]. Both describe "an
+    # organ was revived with no human step"; consumers that need the
+    # mechanism/node dimension read the svc_revive shape, others can treat
+    # either shape's presence as the self-heal signal.
+
+  - kind: organ_self_heal_backoff
+    effect_metric: self
+    emitter: scripts/ops/svc-abstraction.sh's svc_revive (INFRA-3649 AC4)
+    trigger: two svc_revive attempts for the same organ landed within
+      CHUMP_SVC_RAPID_DEATH_S (default 120s) of each other — a repeated-death
+      signal. This attempt still proceeds (one more try), but a backoff is
+      armed in the shared CHUMP_ORGAN_RECONCILE_BACKOFF_DIR registry so the
+      NEXT attempt within CHUMP_SVC_BACKOFF_COOLDOWN_S (default 1800s) is
+      skipped outright instead of respawn-looping the organ every tick.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, organ, node, reason]
+
+  - kind: organ_self_heal_backoff_skip
+    effect_metric: self
+    emitter: scripts/ops/svc-abstraction.sh's svc_revive (INFRA-3649 AC4)
+    trigger: svc_revive was called for an organ still cooling down from a
+      prior organ_self_heal_backoff — the revive is deliberately skipped
+      (no systemctl/process action taken) rather than retried every tick.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, organ, node]
 
   - kind: organ_timer_reanchored
     effect_metric: organ_self_heal_rate

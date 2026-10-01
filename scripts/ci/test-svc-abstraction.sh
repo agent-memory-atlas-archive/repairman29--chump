@@ -26,6 +26,14 @@ pass "script present, syntax clean"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Isolate ambient-log + backoff-registry writes to $TMP for the WHOLE file —
+# svc_revive (INFRA-3649 AC2/AC4) always emits + always touches the backoff
+# registry, so every section below must stay off the real repo's
+# .chump-locks/{ambient.jsonl,organ-backoff}/ or repeated test runs pollute
+# shared local state with svc-<organ>.json backoff files that never expire.
+export CHUMP_AMBIENT_LOG="$TMP/ambient.jsonl"
+export CHUMP_ORGAN_RECONCILE_BACKOFF_DIR="$TMP/organ-backoff"
+
 # ── 1. Process mechanism: svc_is_alive false, svc_revive launches organ ────
 export CHUMP_SVC_ORGANS_DIR="$TMP/organs"
 export CHUMP_SVC_LOGS_DIR="$TMP/logs"
@@ -128,5 +136,54 @@ svc_is_alive heal-me >/dev/null 2>&1
 grep -q "is-active chump-heal-me.service" "$CALL_LOG" || fail "forced systemd mechanism should call is-active"
 pass "CHUMP_SVC_FORCE_MECHANISM=systemd forces the systemd path"
 export CHUMP_SVC_FORCE_MECHANISM=""
+
+# ── 6. INFRA-3649 AC2: successful revive emits kind=organ_self_healed ──────
+AMBIENT_TEST="$TMP/ambient.jsonl"
+BACKOFF_TEST="$TMP/organ-backoff"
+export CHUMP_AMBIENT_LOG="$AMBIENT_TEST"
+export CHUMP_ORGAN_RECONCILE_BACKOFF_DIR="$BACKOFF_TEST"
+export CHUMP_SVC_NODE="test-node-1"
+export CHUMP_SVC_FORCE_MECHANISM="systemd"
+: > "$AMBIENT_TEST"
+svc_revive heal-me >/dev/null 2>&1
+grep -q '"kind":"organ_self_healed"' "$AMBIENT_TEST" || fail "svc_revive (systemd) should emit kind=organ_self_healed"
+grep -q '"organ":"heal-me"' "$AMBIENT_TEST" || fail "organ_self_healed missing organ field"
+grep -q '"node":"test-node-1"' "$AMBIENT_TEST" || fail "organ_self_healed missing node field"
+grep -q '"mechanism":"systemd"' "$AMBIENT_TEST" || fail "organ_self_healed should report mechanism=systemd"
+pass "svc_revive (systemd) emits kind=organ_self_healed with organ/node/mechanism"
+
+export CHUMP_SVC_FORCE_MECHANISM="process"
+: > "$AMBIENT_TEST"
+svc_revive test-organ >/dev/null 2>&1
+grep -q '"kind":"organ_self_healed"' "$AMBIENT_TEST" || fail "svc_revive (process) should emit kind=organ_self_healed"
+grep -q '"mechanism":"process"' "$AMBIENT_TEST" || fail "organ_self_healed should report mechanism=process"
+pass "svc_revive (process) emits kind=organ_self_healed with mechanism=process"
+pkill -f "organs/test-organ.sh" >/dev/null 2>&1 || true
+
+# ── 7. INFRA-3649 AC4: adversarial repeated-death backoff ──────────────────
+rm -rf "$BACKOFF_TEST"
+export CHUMP_SVC_RAPID_DEATH_S=3600
+export CHUMP_SVC_BACKOFF_COOLDOWN_S=3600
+export CHUMP_SVC_FORCE_MECHANISM="process"
+: > "$AMBIENT_TEST"
+svc_revive test-organ >/dev/null 2>&1   # 1st attempt — establishes last-revive marker
+pkill -f "organs/test-organ.sh" >/dev/null 2>&1 || true
+: > "$AMBIENT_TEST"
+svc_revive test-organ >/dev/null 2>&1   # dies again "immediately" (within RAPID_DEATH_S) — arms backoff
+grep -q '"kind":"organ_self_heal_backoff"' "$AMBIENT_TEST" || fail "2nd rapid-repeat revive should emit organ_self_heal_backoff"
+grep -q '"kind":"organ_self_healed"' "$AMBIENT_TEST" || fail "2nd rapid-repeat revive should still attempt (and succeed) this once"
+pass "rapid repeated death (2nd revive within RAPID_DEATH_S) arms backoff but still attempts once more"
+
+pkill -f "organs/test-organ.sh" >/dev/null 2>&1 || true
+: > "$AMBIENT_TEST"
+if svc_revive test-organ >/dev/null 2>&1; then
+    fail "3rd revive should be SKIPPED while backoff is active (rc should be non-zero)"
+fi
+grep -q '"kind":"organ_self_heal_backoff_skip"' "$AMBIENT_TEST" || fail "3rd revive should emit organ_self_heal_backoff_skip"
+! grep -q '"kind":"organ_self_healed"' "$AMBIENT_TEST" || fail "3rd revive should NOT actually respawn while backed off"
+pass "backoff guard: subsequent revive is skipped (not respawn-looped) while cooling down"
+pkill -f "organs/test-organ.sh" >/dev/null 2>&1 || true
+
+unset CHUMP_SVC_RAPID_DEATH_S CHUMP_SVC_BACKOFF_COOLDOWN_S CHUMP_SVC_FORCE_MECHANISM CHUMP_SVC_NODE
 
 echo "=== all svc-abstraction tests passed ==="
