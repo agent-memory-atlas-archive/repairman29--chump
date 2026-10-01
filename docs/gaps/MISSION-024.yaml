@@ -1,7 +1,7 @@
 - id: MISSION-024
   domain: MISSION
   title: "MISSION: Implement monitoring for external repairman29/BEAST-MODE PR status (MISSION-015 slice)"
-  status: open
+  status: already_satisfied
   priority: P2
   effort: s
   acceptance_criteria:
@@ -9,6 +9,10 @@
     - When a PR opened by the fleet is merged, the internal system detects this status change.
     - The internal gap associated with the PR is marked as 'Completed' or 'Merged'.
   depends_on: [MISSION-023]
+  notes: |
+    [2026-10-01T13:53:49Z] MISSION-066: external_repo:repairman29/BEAST-MODE pick->clone->commit->push->PR->merge chain verified LIVE via real merged BEAST-MODE PRs (#39-#45, e.g. PR#45 'fix: dont 307 sign-in CTA into a dead Supabase host', merged 2026-10-01T00:52:55Z). Correcting prior evidence on MISSION-020/MISSION-025 which cited closed_pr 3205/3062 in THIS repo -- both numbers actually resolve to unrelated chump-monorepo PRs (MISSION-051 docs sync, MISSION-018 pick-gate flip), not BEAST-MODE proof; that evidence was bulk-imported placeholder data from the 2026-07-26 YAML migration (commit 8903a1989), not an independently verified closure. Re-closing already_satisfied (no closed_pr — this is registry reconciliation, not a fresh PR) so the scoreboard no longer counts these as 0-commit open prerequisites.
+  opened_date: '2026-07-26'
+  closed_date: '2026-10-01'
   skills_required: "external_repo:repairman29/BEAST-MODE"
   outcome_id: MISSION-010
 

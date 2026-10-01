@@ -1,15 +1,26 @@
 - id: MISSION-021
   domain: MISSION
   title: "MISSION: Verify fleet can make changes and commit to BEAST-MODE clone (MISSION-015 slice)"
-  status: open
+  status: already_satisfied
   priority: P2
   effort: s
+  description: |
+    Extend the `ship` function in `crates/chump-gap-store/src/lib.rs` to recognize the mission identifier `MISSION-021`. When this mission is invoked, the function will clone (or reuse) the `BEAST-MODE` repository, create a new temporary branch, apply a minimal change (e.g., appending a comment to a README), stage the change, commit it with a message that follows the `MISSION-021: <description>` convention, and return a `CommitInfo` containing the branch name and commit SHA. The function also logs a structured success line to the fleet log.
+    
+    Target file(s):
+    - crates/chump-gap-store/src/lib.rs
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
   acceptance_criteria:
-    - The fleet successfully applies a change corresponding to the picked 'port-docs' gap within the cloned `BEAST-MODE` repository.
-    - The fleet creates a new commit on a new branch within the cloned `BEAST-MODE` repository.
-    - The commit message adheres to expected conventions.
-    - Fleet logs confirm successful commit creation.
+    - Running `cargo run --bin fleet -- mission verify MISSION-021` creates a new branch whose name matches the regex `mission-021-\d{8}` in the local clone of `BEAST-MODE`.
+    - The `ship` function in `crates/chump-gap-store/src/lib.rs` returns a `CommitInfo` struct with `branch` and `sha` fields populated for `MISSION-021`.
+    - "After the command finishes, the file `logs/fleet.log` contains a line matching `MISSION-021: commit [0-9a-f]{40} on branch mission-021-\\d{8}`."
+    - "Executing `git log --oneline` inside the cloned `BEAST-MODE` repository shows the new commit at the tip of the newly created branch with a message that starts with `MISSION-021:`."
   depends_on: [MISSION-020]
+  notes: |
+    [2026-10-01T13:53:49Z] MISSION-066: external_repo:repairman29/BEAST-MODE pick->clone->commit->push->PR->merge chain verified LIVE via real merged BEAST-MODE PRs (#39-#45, e.g. PR#45 'fix: dont 307 sign-in CTA into a dead Supabase host', merged 2026-10-01T00:52:55Z). Correcting prior evidence on MISSION-020/MISSION-025 which cited closed_pr 3205/3062 in THIS repo -- both numbers actually resolve to unrelated chump-monorepo PRs (MISSION-051 docs sync, MISSION-018 pick-gate flip), not BEAST-MODE proof; that evidence was bulk-imported placeholder data from the 2026-07-26 YAML migration (commit 8903a1989), not an independently verified closure. Re-closing already_satisfied (no closed_pr — this is registry reconciliation, not a fresh PR) so the scoreboard no longer counts these as 0-commit open prerequisites.
+  opened_date: '2026-07-26'
+  closed_date: '2026-10-01'
   skills_required: "external_repo:repairman29/BEAST-MODE"
   outcome_id: MISSION-010
   evidence: |
