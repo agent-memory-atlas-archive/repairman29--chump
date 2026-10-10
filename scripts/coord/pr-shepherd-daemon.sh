@@ -1358,7 +1358,7 @@ for p in prs:
           echo "[pr-shepherd-daemon] rebasing PR #${pr_num} (${gap_id})" >&2
           local rebase_out rebase_exit
           rebase_exit=0
-          rebase_out=$(CHUMP_GH_CALL_CRITICALITY=background gh pr update-branch --rebase "$pr_num" 2>&1) || rebase_exit=$?
+          rebase_out=$(bash "$REPO_ROOT/scripts/coord/lib/pr_rebase.sh" --now "$pr_num" "$REPO" 2>&1) || rebase_exit=$?
 
           if [ "$rebase_exit" -eq 0 ]; then
             _emit_pr_action_taken "$pr_num" "rebase" "" "$gap_id"

@@ -66,6 +66,15 @@ branch_protection_strict() {
     printf '%s\n' "$strict"
 }
 
+# pr_rebase_now <pr-number> <owner/repo>
+# Unconditional rebase; for callers (pr-shepherd-daemon) that already applied
+# their own strict/merge-queue gate.
+pr_rebase_now() {
+    local pr="${1:?pr_rebase_now <pr-number> <owner/repo>}"
+    local repo="${2:?pr_rebase_now <pr-number> <owner/repo>}"
+    CHUMP_GH_CALL_CRITICALITY=background gh pr update-branch "$pr" --rebase --repo "$repo"
+}
+
 # pr_rebase_if_strict <pr-number> <owner/repo> [base-branch]
 pr_rebase_if_strict() {
     local pr="${1:?pr_rebase_if_strict <pr-number> <owner/repo> [base-branch]}"
@@ -86,8 +95,14 @@ pr_rebase_if_strict() {
 
 # Only run main-flow logic when executed directly (not sourced).
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    if [ "${1:-}" = "--now" ]; then
+        shift
+        [ "$#" -ge 2 ] || { echo "usage: pr_rebase.sh --now <pr-number> <owner/repo>" >&2; exit 1; }
+        pr_rebase_now "$@"
+        exit $?
+    fi
     if [ "$#" -lt 2 ]; then
-        echo "usage: pr_rebase.sh <pr-number> <owner/repo> [base-branch]" >&2
+        echo "usage: pr_rebase.sh [--now] <pr-number> <owner/repo> [base-branch]" >&2
         exit 1
     fi
     pr_rebase_if_strict "$@"
