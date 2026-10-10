@@ -615,6 +615,12 @@ def main() -> int:
         # with the sonnet-xs bypass below. Without this, a P0-MISSION effort>=m gap
         # is invisible to every haiku worker (and routing makes workers haiku), so
         # it starves forever — the literal mechanism of MISSION-026.
+        # RESILIENT-612: deepseek tier gate. flash takes xs/s, pro takes m,
+        # l/xl are refused by both (they go to decompose first).
+        if worker_model == "flash" and e in ("m", "l", "xl") and not _is_p0_mission:
+            continue
+        if worker_model == "pro" and e in ("xs", "s", "l", "xl") and not _is_p0_mission:
+            continue
         if worker_model == "haiku" and e in ("m", "l", "xl") and not _is_p0_mission:
             continue
         # INFRA-2998: the sonnet-refuses-xs gate assumed a MIXED fleet where

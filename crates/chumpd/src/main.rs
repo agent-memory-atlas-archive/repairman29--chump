@@ -228,17 +228,12 @@ fn spawn_worker(cfg: &Config, agent_id: usize) -> std::io::Result<Child> {
     // lets an operator run the fleet on an open model (chump-local) instead
     // of the Claude subscription.
     let backend = std::env::var("CHUMPD_FLEET_BACKEND").unwrap_or_else(|_| "claude".into());
-    // RESILIENT-184: the model/effort gate in _pick_and_claim_gap.py is
-    // keyed on FLEET_MODEL. The sonnet default made chump-local (MiniMax-M3)
-    // workers REFUSE xs gaps (sonnet-xs gate, "don't burn frontier tokens on
-    // cleanup") while ACCEPTING m-effort gaps M3 can't finish — exactly
-    // backwards. Open models want the haiku gate (blocks m/l/xl, allows
-    // xs/s) and an xs,s effort filter. Frozen-picker symptom on chumpd-eu
-    // 2026-07-22: 0 patches across cycles, all on m-effort/empty-desc gaps.
+    // RESILIENT-612: the picker's model/effort gate keys on the deepseek
+    // tier set (flash: xs,s; pro: m; l/xl go to decompose), not haiku/sonnet.
     let (fleet_model, effort_filter) = if backend == "chump-local" {
-        ("haiku", "xs,s")
+        ("flash", "xs,s")
     } else {
-        ("sonnet", "xs,s,m,l,xl")
+        ("pro", "m")
     };
 
     command
