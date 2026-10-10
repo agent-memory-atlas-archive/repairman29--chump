@@ -17,8 +17,9 @@
 # Env:
 #   CHUMP_PR_REBASE_CACHE_DIR   — cache dir (default: <repo>/.chump-locks/branch-protection-cache)
 #   CHUMP_PR_REBASE_CACHE_TTL_S — cache TTL seconds (default: 60)
+#   CHUMP_PR_REBASE_GH          — gh binary override (default: gh; tests/stubs)
 
-set -euo pipefail
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then set -euo pipefail; fi
 
 _PR_REBASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -57,7 +58,7 @@ branch_protection_strict() {
 
     local strict="false"
     local protection_json
-    protection_json=$(gh api "repos/${repo}/branches/${base}/protection" 2>/dev/null || echo '{}')
+    protection_json=$("${CHUMP_PR_REBASE_GH:-gh}" api "repos/${repo}/branches/${base}/protection" 2>/dev/null || echo '{}')
     if grep -q '"strict":[[:space:]]*true' <<< "$protection_json"; then
         strict="true"
     fi
@@ -72,7 +73,7 @@ branch_protection_strict() {
 pr_rebase_now() {
     local pr="${1:?pr_rebase_now <pr-number> <owner/repo>}"
     local repo="${2:?pr_rebase_now <pr-number> <owner/repo>}"
-    CHUMP_GH_CALL_CRITICALITY=background gh pr update-branch "$pr" --rebase --repo "$repo"
+    CHUMP_GH_CALL_CRITICALITY=background "${CHUMP_PR_REBASE_GH:-gh}" pr update-branch "$pr" --rebase --repo "$repo"
 }
 
 # pr_rebase_if_strict <pr-number> <owner/repo> [base-branch]
@@ -86,7 +87,7 @@ pr_rebase_if_strict() {
 
     if [ "$strict" = "true" ]; then
         echo "[pr_rebase] strict=true for ${repo}@${base} — rebasing PR #${pr}"
-        gh pr update-branch "$pr" --rebase --repo "$repo"
+        "${CHUMP_PR_REBASE_GH:-gh}" pr update-branch "$pr" --rebase --repo "$repo"
     else
         echo "[pr_rebase] strict=false for ${repo}@${base} — skipping rebase for PR #${pr}"
         return 0

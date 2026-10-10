@@ -54,6 +54,9 @@ set -uo pipefail
 REPO_ROOT="${CHUMP_REPO:-${CHUMP_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}"
 AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 GH="${CHUMP_UNBLOCK_TEST_GH:-gh}"
+# shellcheck source=lib/pr_rebase.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pr_rebase.sh"
+_shared_rebase() { CHUMP_PR_REBASE_GH="$GH" pr_rebase_if_strict "$1" "${CHUMP_REPO:-repairman29/chump}" main; }
 LIB_CACHE="$REPO_ROOT/scripts/coord/lib/github_cache.sh"
 
 LOOKBACK_S="${CHUMP_UNBLOCK_LOOKBACK_S:-600}"
@@ -457,7 +460,7 @@ stale_sweep() {
             ok=$(( ok + 1 )); continue
         fi
         log "stale-sweep: gh pr update-branch $num ($st, behind=$behind)"
-        if CHUMP_GH_CALL_CRITICALITY=background "$GH" pr update-branch "$num" 2>/dev/null; then
+        if _shared_rebase "$num" 2>/dev/null; then
             state_set "$num" "refreshed" "$mb"
             ok=$(( ok + 1 ))
         else
@@ -550,8 +553,7 @@ while IFS=$'\t' read -r source_pr sig_hash; do
 
         # Safety guard (c): attempt rebase; failure = conflict or API error
         log "cascade-unblock: calling gh pr update-branch $pr_num"
-        if CHUMP_GH_CALL_CRITICALITY=background \
-            "$GH" pr update-branch "$pr_num" 2>/dev/null; then
+        if _shared_rebase "$pr_num" 2>/dev/null; then
             log "cascade-unblock: PR #$pr_num rebase succeeded"
             SUCCESS_PRS+=("$pr_num")
             TOTAL_SUCCESS=$(( TOTAL_SUCCESS + 1 ))

@@ -85,6 +85,9 @@ set -uo pipefail
 REPO_ROOT="${CHUMP_REPO:-${CHUMP_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}}"
 AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 GH="${CHUMP_WIZARD_TEST_GH:-gh}"
+# shellcheck source=lib/pr_rebase.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pr_rebase.sh"
+_shared_rebase() { CHUMP_PR_REBASE_GH="$GH" pr_rebase_if_strict "$1" "${CHUMP_REPO:-repairman29/chump}" main; }
 CHUMP_BIN="${CHUMP_WIZARD_TEST_CHUMP:-chump}"
 
 RECOVERY_RATE_LIMIT="${CHUMP_WIZARD_RECOVERY_RATE_LIMIT:-3}"
@@ -1318,7 +1321,7 @@ PY
         log "Step 5: cascade-rebasing PR #$pr_num (author=$pr_author, head=$pr_head_ref)"
 
         # Trigger rebase via gh pr update-branch
-        if "$GH" pr update-branch "$pr_num" 2>/dev/null; then
+        if _shared_rebase "$pr_num" 2>/dev/null; then
             _CASCADE_REBASES_THIS_RUN=$(( _CASCADE_REBASES_THIS_RUN + 1 ))
             rebased_count=$(( rebased_count + 1 ))
             emit_ambient "wizard_cascade_rebase_triggered" \

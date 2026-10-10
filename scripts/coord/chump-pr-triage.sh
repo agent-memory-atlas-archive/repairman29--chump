@@ -168,7 +168,7 @@ remediation_cmd() {
             if [[ -x "$REBASE_SCRIPT" ]]; then
                 echo "bash $REBASE_SCRIPT --pr $pr"
             else
-                echo "gh pr update-branch $pr --repo repairman29/chump"
+                echo "bash scripts/coord/lib/pr_rebase.sh $pr repairman29/chump main"
             fi
             ;;
         re-arm)

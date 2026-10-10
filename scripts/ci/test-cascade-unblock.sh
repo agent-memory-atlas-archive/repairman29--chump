@@ -113,6 +113,9 @@ case "$ARGS" in
             printf '{"labels":[]}\n'
         fi
         ;;
+    *"api"*"/protection"*)
+        printf '{"required_status_checks":{"strict":true}}\n'
+        ;;
     *"pr update-branch"*)
         pr_num="$(get_pr_num "$@")"
         if [[ -n "$pr_num" ]]; then

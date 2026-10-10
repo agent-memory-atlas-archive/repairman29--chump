@@ -264,8 +264,8 @@ handle_audit_chump_bin_hardcoded() {
     if [[ -n "$audit_fix_on_main" && -n "$acp_fix_on_main" ]]; then
         say "    fix is on main; rebasing PR $pr via gh pr update-branch"
         local out
-        out=$(gh pr update-branch "$pr" --rebase --repo repairman29/chump 2>&1)
-        if echo "$out" | grep -qi "updated\|success"; then
+        out=$(bash "$(dirname "${BASH_SOURCE[0]}")/lib/pr_rebase.sh" "$pr" repairman29/chump main 2>&1)
+        if echo "$out" | grep -qi "updated\|success\|skipping rebase"; then
             say "    REBASED: $pr"
             log_rescue "$pr" "audit_chump_bin_hardcoded" "rebased_against_main"
             emit_event "pr_auto_rescue_invoked" \

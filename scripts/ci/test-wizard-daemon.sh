@@ -790,6 +790,10 @@ case "\$*" in
         echo '{"number":600,"title":"sibling PR","mergeable":"UNKNOWN","mergeStateStatus":"BEHIND","autoMergeRequest":{"enabledAt":"2026-01-01"},"isDraft":false,"headRefName":"chump/sibling","author":{"login":"repairman29"}}'
         exit 0
         ;;
+    *"api"*"/protection"*)
+        echo '{"required_status_checks":{"strict":true}}'
+        exit 0
+        ;;
     *"pr update-branch"*600*)
         echo "rebase called: \$*" >> "\${REBASE_LOG}"
         exit 0
@@ -848,6 +852,10 @@ case "\$*" in
     *"pr view"*700*)
         # PR from a FORK author — not allowed
         echo '{"number":700,"title":"fork PR","mergeable":"UNKNOWN","mergeStateStatus":"BEHIND","autoMergeRequest":{"enabledAt":"2026-01-01"},"isDraft":false,"headRefName":"fork/feature","author":{"login":"external-fork-user"}}'
+        exit 0
+        ;;
+    *"api"*"/protection"*)
+        echo '{"required_status_checks":{"strict":true}}'
         exit 0
         ;;
     *"pr update-branch"*700*)
