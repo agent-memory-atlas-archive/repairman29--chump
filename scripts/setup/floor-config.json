@@ -1,0 +1,7 @@
+{
+  "floor_model": "deepseek/deepseek-v4-flash",
+  "escalation_ladder": ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"],
+  "free_tier_providers": "nvidia/nemotron-3-super-120b-a12b:free@https://openrouter.ai/api/v1:OPENROUTER_API_KEY,openai/gpt-oss-20b@https://api.groq.com/openai/v1:GROQ_API_KEY,deepseek/deepseek-v4-flash@https://openrouter.ai/api/v1:OPENROUTER_API_KEY,deepseek/deepseek-v4-pro@https://openrouter.ai/api/v1:OPENROUTER_API_KEY",
+  "api_base": "https://openrouter.ai/api/v1",
+  "api_key_env": "OPENROUTER_API_KEY"
+}

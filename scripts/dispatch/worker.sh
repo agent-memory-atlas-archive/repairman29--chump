@@ -85,6 +85,11 @@ if [[ -f "$CHUMP_MODEL_LADDER_MANIFEST" ]]; then
     set +a
 fi
 
+# RESILIENT-600: floor-config.json is the single source; it wins over the
+# deprecated env manifest and any providers.env ladder.
+# shellcheck disable=SC1091
+[[ -f "$REPO_ROOT/scripts/setup/load-floor-config.sh" ]] && source "$REPO_ROOT/scripts/setup/load-floor-config.sh"
+
 # Config-under-management: the worker self-heal policy (CHUMP_STARVE_AUTO_RELAX
 # etc.) is single-sourced from this repo-committed file instead of a node's
 # hand-deployed, git-untracked ~/node1-worker-run.sh launcher — the file whose
