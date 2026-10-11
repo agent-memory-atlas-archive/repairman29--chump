@@ -3015,6 +3015,14 @@ impl GapStore {
             );
         }
 
+        // RESILIENT-1110: merged is a proxy, not the definition. Kill it at
+        // the root — refuse status=done if the merge deploys an organ unit
+        // that the target node's own verifier (RESILIENT-1108) currently
+        // reports FAILED.
+        if let Err(msg) = verify_running_and_effective(&self.repo_root, gap_id, closed_pr) {
+            bail!(msg);
+        }
+
         // RESILIENT-469: run `cargo hakari generate` to keep the workspace-hack
         // dedup crate in sync before the gap flips to status=done. Best-effort
         // and non-fatal (missing `cargo-hakari` binary or a hakari-less
@@ -5055,6 +5063,132 @@ pub fn verify_proof_of_merge(repo_root: &Path, gap_id: &str, closed_pr: Option<i
     // Success + a matching commit hash on stdout ⇒ the merge is proven anywhere in
     // main's history. Success + empty ⇒ no commit mentions this gap/PR ⇒ not proven.
     !String::from_utf8_lossy(&o.stdout).trim().is_empty()
+}
+
+/// RESILIENT-1110: redefine "done" = verified running-and-effective on the
+/// target node, not merely merged. `verify_proof_of_merge` above proves the
+/// commit landed on `main` — the exact proxy that hid the all-night CHDIR
+/// incident (every organ merged fine; every organ was dead on the node).
+/// This is the root-kill: when the merge that closes `gap_id` touches an
+/// organ unit file (`scripts/dispatch/chump-*.service` / `.timer`), refuse
+/// to flip status=done if the most recent `organ_success_verify_tick`
+/// (RESILIENT-1108, `scripts/ops/organ-success-verifier.sh`) on record
+/// reports that exact unit FAILED. Fail-open (return Ok) whenever there is
+/// no organ-relevant evidence to check — a gap that never touched a unit
+/// file, or a node with no verifier tick on record yet — so this can never
+/// wedge a plain code-only ship or a brand-new node before its first cycle.
+pub fn verify_running_and_effective(
+    repo_root: &Path,
+    gap_id: &str,
+    closed_pr: Option<i64>,
+) -> Result<(), String> {
+    if !repo_root.join(".git").exists() {
+        return Ok(()); // synthetic test fixture, same fail-open as proof-of-merge
+    }
+
+    // Re-find the merge commit (same lookup verify_proof_of_merge just
+    // proved exists) so we can inspect exactly what it touched.
+    let has_origin_main = std::process::Command::new("git")
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "refs/remotes/origin/main",
+        ])
+        .current_dir(repo_root)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let main_ref = if has_origin_main {
+        "origin/main"
+    } else {
+        "main"
+    };
+    let mut args: Vec<String> = vec![
+        "log".into(),
+        main_ref.into(),
+        "-i".into(),
+        "-F".into(),
+        "-n".into(),
+        "1".into(),
+        "--format=%H".into(),
+        format!("--grep={gap_id}"),
+    ];
+    if let Some(n) = closed_pr {
+        args.push(format!("--grep=(#{n})"));
+    }
+    let Ok(log_out) = std::process::Command::new("git")
+        .args(&args)
+        .current_dir(repo_root)
+        .output()
+    else {
+        return Ok(()); // git unavailable — defensive fail-open
+    };
+    let commit_hash = String::from_utf8_lossy(&log_out.stdout).trim().to_string();
+    if commit_hash.is_empty() {
+        return Ok(()); // nothing to inspect (proof-of-merge already handles this case)
+    }
+
+    let Ok(diff_out) = std::process::Command::new("git")
+        .args(["show", "--name-only", "--format=", &commit_hash])
+        .current_dir(repo_root)
+        .output()
+    else {
+        return Ok(());
+    };
+    let touched_units: Vec<String> = String::from_utf8_lossy(&diff_out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let path = std::path::Path::new(line.trim());
+            let name = path.file_name()?.to_str()?;
+            if name.starts_with("chump-")
+                && (name.ends_with(".service") || name.ends_with(".timer"))
+            {
+                Some(name.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    if touched_units.is_empty() {
+        return Ok(()); // not an organ-deploying change — no gate to apply
+    }
+
+    let ambient_path = repo_root.join(".chump-locks").join("ambient.jsonl");
+    let Ok(contents) = std::fs::read_to_string(&ambient_path) else {
+        return Ok(()); // no ambient stream yet on this node — nothing to check against
+    };
+
+    // Most recent organ_success_verify_tick wins — earlier ticks are stale.
+    let latest_failed_units = contents
+        .lines()
+        .rev()
+        .find_map(|line| {
+            let v: serde_json::Value = serde_json::from_str(line).ok()?;
+            if v.get("kind")?.as_str()? == "organ_success_verify_tick" {
+                Some(v.get("failed_units")?.as_str()?.to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    if latest_failed_units.is_empty() {
+        return Ok(()); // no failed-units data on record — nothing to block on
+    }
+
+    for unit in &touched_units {
+        if latest_failed_units.contains(unit.as_str()) {
+            return Err(format!(
+                "RESILIENT-1110: refusing to flip {gap_id} to status=done — the merge \
+                 touches organ unit {unit}, and the most recent organ_success_verify_tick \
+                 (RESILIENT-1108) reports it FAILED on the target node \
+                 (failed_units=\"{latest_failed_units}\"). Merged is not done; done means \
+                 verified running-and-effective. Fix the organ, wait for a clean \
+                 organ-success-verifier cycle, and retry `chump gap ship`."
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// INFRA-100: parse `2026-04-28T22:30:00Z` style ISO-8601 (lease files use
@@ -7655,6 +7789,137 @@ mod proof_of_merge_tests {
             "NO-SUCH-GAP",
             Some(9000)
         ));
+    }
+
+    // RESILIENT-1110: redefine done as verified running-and-effective, not
+    // merely merged.
+    fn commit_touching_file(
+        dir: &std::path::Path,
+        rel_path: &str,
+        subject: &str,
+    ) -> std::process::Output {
+        let full = dir.join(rel_path);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&full, "placeholder\n").unwrap();
+        hermetic_git(dir, &["add", rel_path]);
+        hermetic_git(dir, &["commit", "-m", subject])
+    }
+
+    #[test]
+    fn organ_gate_blocks_done_when_touched_unit_is_failed() {
+        let dir = tempdir().unwrap();
+        let init = hermetic_git(dir.path(), &["init", "--initial-branch=main", "--quiet"]);
+        if !init.status.success() {
+            return;
+        }
+        hermetic_git(dir.path(), &["config", "user.email", "test@test.local"]);
+        hermetic_git(dir.path(), &["config", "user.name", "test"]);
+        let commit = commit_touching_file(
+            dir.path(),
+            "scripts/dispatch/chump-widget.service",
+            "feat(RESILIENT-9600): deploy the widget organ",
+        );
+        assert!(
+            commit.status.success(),
+            "git commit must succeed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+
+        // Proof-of-merge itself must pass — this proves the NEW gate, not the old one.
+        assert!(verify_proof_of_merge(dir.path(), "RESILIENT-9600", None));
+
+        // Node's own verifier says this exact unit FAILED last cycle.
+        std::fs::create_dir_all(dir.path().join(".chump-locks")).unwrap();
+        std::fs::write(
+            dir.path().join(".chump-locks").join("ambient.jsonl"),
+            "{\"ts\":\"2026-09-11T00:00:00Z\",\"kind\":\"organ_success_verify_tick\",\
+             \"enabled_total\":1,\"verified_ok\":0,\"failed\":1,\"failed_units\":\"chump-widget.service(200/exit-code)\"}\n",
+        )
+        .unwrap();
+
+        let result = verify_running_and_effective(dir.path(), "RESILIENT-9600", None);
+        assert!(
+            result.is_err(),
+            "merged-but-FAILED-on-node organ must be blocked from status=done"
+        );
+        assert!(result.unwrap_err().contains("chump-widget.service"));
+    }
+
+    #[test]
+    fn organ_gate_passes_when_touched_unit_is_verified_ok() {
+        let dir = tempdir().unwrap();
+        let init = hermetic_git(dir.path(), &["init", "--initial-branch=main", "--quiet"]);
+        if !init.status.success() {
+            return;
+        }
+        hermetic_git(dir.path(), &["config", "user.email", "test@test.local"]);
+        hermetic_git(dir.path(), &["config", "user.name", "test"]);
+        let commit = commit_touching_file(
+            dir.path(),
+            "scripts/dispatch/chump-widget.service",
+            "feat(RESILIENT-9601): deploy the widget organ",
+        );
+        assert!(commit.status.success());
+
+        std::fs::create_dir_all(dir.path().join(".chump-locks")).unwrap();
+        std::fs::write(
+            dir.path().join(".chump-locks").join("ambient.jsonl"),
+            "{\"ts\":\"2026-09-11T00:00:00Z\",\"kind\":\"organ_success_verify_tick\",\
+             \"enabled_total\":1,\"verified_ok\":1,\"failed\":0,\"failed_units\":\"\"}\n",
+        )
+        .unwrap();
+
+        assert!(verify_running_and_effective(dir.path(), "RESILIENT-9601", None).is_ok());
+    }
+
+    #[test]
+    fn organ_gate_is_a_noop_for_non_organ_changes() {
+        let dir = tempdir().unwrap();
+        let init = hermetic_git(dir.path(), &["init", "--initial-branch=main", "--quiet"]);
+        if !init.status.success() {
+            return;
+        }
+        hermetic_git(dir.path(), &["config", "user.email", "test@test.local"]);
+        hermetic_git(dir.path(), &["config", "user.name", "test"]);
+        let commit = commit_touching_file(
+            dir.path(),
+            "src/some_module.rs",
+            "feat(RESILIENT-9602): plain code change, no organ involved",
+        );
+        assert!(commit.status.success());
+
+        // Even with a stale ambient log claiming failures elsewhere, a
+        // non-organ change must never be gated.
+        std::fs::create_dir_all(dir.path().join(".chump-locks")).unwrap();
+        std::fs::write(
+            dir.path().join(".chump-locks").join("ambient.jsonl"),
+            "{\"ts\":\"2026-09-11T00:00:00Z\",\"kind\":\"organ_success_verify_tick\",\
+             \"enabled_total\":1,\"verified_ok\":0,\"failed\":1,\"failed_units\":\"chump-other.service(1/exit-code)\"}\n",
+        )
+        .unwrap();
+
+        assert!(verify_running_and_effective(dir.path(), "RESILIENT-9602", None).is_ok());
+    }
+
+    #[test]
+    fn organ_gate_fails_open_with_no_ambient_evidence() {
+        let dir = tempdir().unwrap();
+        let init = hermetic_git(dir.path(), &["init", "--initial-branch=main", "--quiet"]);
+        if !init.status.success() {
+            return;
+        }
+        hermetic_git(dir.path(), &["config", "user.email", "test@test.local"]);
+        hermetic_git(dir.path(), &["config", "user.name", "test"]);
+        let commit = commit_touching_file(
+            dir.path(),
+            "scripts/dispatch/chump-widget.service",
+            "feat(RESILIENT-9603): deploy the widget organ, brand new node",
+        );
+        assert!(commit.status.success());
+        // No .chump-locks/ambient.jsonl at all — never verified yet.
+        assert!(verify_running_and_effective(dir.path(), "RESILIENT-9603", None).is_ok());
     }
 }
 
