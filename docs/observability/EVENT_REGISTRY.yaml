@@ -7113,6 +7113,14 @@ events:
       stat-walk tax) rather than just total bytes, which --maxsize alone does not.
     consumers: [fleet-brief, disk-health-monitor, ops-audit]
     fields_required: [ts, kind, time_days, dry_run, result, rc]
+  - kind: wedged_inode_binaries_reaped
+    effect_metric: disk_free_gb
+    emitter: scripts/ops/cargo-sweep-gc.sh (RESILIENT-1590)
+    trigger: >
+      Each GC pass reaps chump-*.wedged-inode-* binary copies left by the
+      binary-unwedge/refresh path, keeping only the newest per binary.
+    consumers: [fleet-brief, disk-health-monitor, ops-audit]
+    fields_required: [ts, kind, count, dry_run]
 
   # ── INFRA-1237: emit-without-register reconciliation (2026-05-14) ────────
   # 19 kinds that were fired in production but missing from the registry.

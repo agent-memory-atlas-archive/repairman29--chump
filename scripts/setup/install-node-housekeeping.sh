@@ -88,6 +88,27 @@ install_runit() {
   chmod +x "$SVDIR/chump-$name/log/run"; mkdir -p "$STATE/organs/logs/$name"
 }
 
+# RESILIENT-1590: disk self-heal prerequisites, installed on every node (not hand-set).
+# 1) cargo-sweep: without it chump-cargo-sweep-gc silently no-op'd for its whole life.
+export PATH="$HOME/bin:$HOME/.cargo/bin:$PATH"
+if ! command -v cargo-sweep >/dev/null 2>&1; then
+  if command -v cargo >/dev/null 2>&1; then
+    log "installing cargo-sweep (required by cargo-sweep-gc)"
+    cargo install cargo-sweep >/dev/null 2>&1 || log "WARN: cargo install cargo-sweep failed — cargo-sweep-gc will report RED"
+  else
+    log "WARN: cargo absent — cannot install cargo-sweep; cargo-sweep-gc will report RED"
+  fi
+fi
+# 2) journald cap (SystemMaxUse) on systemd hosts.
+if [ "$SUP" = systemd ] && [ -f "$REPO/scripts/setup/configure-journald-cap.sh" ]; then
+  sudo -n bash "$REPO/scripts/setup/configure-journald-cap.sh" >/dev/null 2>&1 \
+    || log "WARN: journald cap not applied (needs sudo)"
+fi
+# 3) disk-health-monitor timer, if a unit exists from an earlier hand install.
+if [ "$SUP" = systemd ]; then
+  sudo systemctl enable --now chump-disk-health-monitor.timer >/dev/null 2>&1 || true
+fi
+
 # reconcile: retire any older hand-installed timer/service variants so we don't double-run
 if [ "$SUP" = systemd ]; then
   for old in chump-rot-reaper.timer chump-worktree-reaper.timer chump-cj-disk-monitor.service; do

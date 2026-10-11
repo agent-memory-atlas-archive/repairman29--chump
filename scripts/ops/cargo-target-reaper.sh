@@ -6,7 +6,8 @@
 #   bash scripts/ops/cargo-target-reaper.sh [--execute] [--fingerprint-age-d N] [--fleet-age-d N]
 #   bash scripts/ops/cargo-target-reaper.sh --event-listen [--execute]
 #
-# By default: dry-run only. Pass --execute to actually delete.
+# By default: dry-run only, EXCEPT under disk pressure (>= CHUMP_REAPER_AUTO_EXECUTE_PCT
+# used, default 80) where it auto-escalates to --execute (RESILIENT-1590); --dry-run forces dry.
 #
 # --event-listen (INFRA-2181): tail-poll ambient.jsonl for kind=integration_cycle_shipped
 #   at 30s cadence; fire a full reap (--execute if passed) within 60s of each event.
@@ -80,6 +81,7 @@ fi
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --execute)            EXECUTE=1 ;;
+        --dry-run)            FORCE_DRY=1 ;;
         --event-listen)       EVENT_LISTEN=1 ;;
         --fingerprint-age-d)  FINGERPRINT_AGE_D="$2"; shift ;;
         --fleet-age-d)        FLEET_AGE_D="$2"; shift ;;
@@ -91,6 +93,17 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# RESILIENT-1590: a dry-run reaper under disk pressure is a no-op that looks alive.
+# Escalate to --execute when $HOME's filesystem is >= CHUMP_REAPER_AUTO_EXECUTE_PCT
+# used (default 80) unless --dry-run was passed explicitly.
+if [[ $EXECUTE -eq 0 && "${FORCE_DRY:-0}" -eq 0 ]]; then
+    _used_pct="$(df -P "$HOME" 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')"
+    if [[ "${_used_pct:-0}" =~ ^[0-9]+$ ]] && (( _used_pct >= ${CHUMP_REAPER_AUTO_EXECUTE_PCT:-80} )); then
+        EXECUTE=1
+        echo "[cargo-target-reaper] disk ${_used_pct}% >= ${CHUMP_REAPER_AUTO_EXECUTE_PCT:-80}% — auto-escalating to --execute"
+    fi
+fi
 
 # ── Event-listener mode (INFRA-2181) ────────────────────────────────────────
 # When --event-listen is passed, tail-poll ambient.jsonl for

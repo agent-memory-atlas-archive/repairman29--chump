@@ -34,6 +34,7 @@ emit() { printf '{"ts":"%s",%s}\n' "$(ts)" "$1" >> "$AMB" 2>/dev/null || true; }
 #   "kind":"cargo_sweep_gc_skipped"
 #   "kind":"cargo_sweep_gc_errored"
 #   "kind":"cargo_sweep_gc_time_pruned"
+#   "kind":"wedged_inode_binaries_reaped"
 
 # ZERO-WASTE-054: locate the REAL cargo. On this host cargo is $HOME/bin/cargo;
 # ~/.cargo/bin/cargo is only a symlink to the rustup shim, which resolves under
@@ -47,9 +48,11 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 0
 fi
 if ! command -v cargo-sweep >/dev/null 2>&1; then
-  echo "[cargo-sweep-gc] cargo-sweep not installed — skipping (install: cargo install cargo-sweep)" >&2
+  echo "[cargo-sweep-gc] cargo-sweep not installed — RED (install: cargo install cargo-sweep)" >&2
   emit "\"kind\":\"cargo_sweep_gc_skipped\",\"reason\":\"cargo-sweep-not-installed\""
-  exit 0
+  # RESILIENT-1590: a GC that cannot GC must go RED (non-zero + errored event), not skip quietly.
+  emit "\"kind\":\"cargo_sweep_gc_errored\",\"cap_mb\":$CAP_MB,\"rc\":3,\"error\":\"cargo-sweep-not-installed\""
+  exit 3
 fi
 if [[ ! -f "$REPO_ROOT/Cargo.toml" ]]; then
   echo "[cargo-sweep-gc] no Cargo.toml at $REPO_ROOT — skipping" >&2
@@ -57,38 +60,61 @@ if [[ ! -f "$REPO_ROOT/Cargo.toml" ]]; then
   exit 0
 fi
 
-# cargo-sweep resolves the target via `cargo metadata`, which honors the repo's
-# .cargo/config target-dir (the shared target). So run it from the repo root.
-out="$(cd "$REPO_ROOT" && cargo-sweep sweep --maxsize "$CAP_MB" $DRY . 2>&1)"
-rc=$?
+# RESILIENT-1590: sweep EVERY target dir builds actually write to, each with its own cap.
+# CHUMP_CARGO_SWEEP_TARGET_DIRS = colon-separated "path[=capMB]" entries (default list below).
+# cargo-sweep honors CARGO_TARGET_DIR, so each dir is swept by pointing it there.
+DEFAULT_DIRS="$REPO_ROOT/target:$HOME/.cargo/chump-shared-target:$HOME/.cache/chump-fleet-target:$HOME/.cargo/chump-coord-release-target"
+[[ -n "${CARGO_TARGET_DIR:-}" ]] && DEFAULT_DIRS="$DEFAULT_DIRS:$CARGO_TARGET_DIR"
+DIRS="${CHUMP_CARGO_SWEEP_TARGET_DIRS:-$DEFAULT_DIRS}"
+DRYJ=false; [[ -n "$DRY" ]] && DRYJ=true
+worst_rc=0; seen=":"
 
-# ZERO-WASTE-054 HONEST SIGNAL: a GC that ERRORED must never report "nothing to
-# clean" — that silent no-op is worse than no GC (the disk safety net looks alive
-# while it's dead). Surface the real error and exit non-zero so launchd/observers
-# see the failure.
-if [[ $rc -ne 0 ]]; then
-  err="$(printf '%s' "$out" | grep -iE 'error|failed|no such|not found' | head -2 | tr '\n' ' ')"
-  echo "[cargo-sweep-gc] ERROR rc=$rc: ${err:-$out}" >&2
-  emit "\"kind\":\"cargo_sweep_gc_errored\",\"cap_mb\":$CAP_MB,\"rc\":$rc,\"error\":\"$(printf '%s' "${err:-see-log}" | tr '"' "'" | cut -c1-200)\""
-  exit "$rc"
-fi
+IFS=':' read -ra ENTRIES <<< "$DIRS"
+for entry in "${ENTRIES[@]}"; do
+  [[ -z "$entry" ]] && continue
+  tdir="${entry%%=*}"; dcap="$CAP_MB"
+  [[ "$entry" == *=* ]] && dcap="${entry#*=}"
+  [[ -d "$tdir" ]] || continue
+  [[ "$seen" == *":$tdir:"* ]] && continue
+  seen="$seen$tdir:"
 
-cleaned="$(printf '%s' "$out" | grep -oiE '(Would clean|Cleaned):? *[0-9.]+ *[KMG]i?B' | head -1)"
-cleaned="${cleaned:-nothing to clean}"
+  out="$(cd "$REPO_ROOT" && CARGO_TARGET_DIR="$tdir" cargo-sweep sweep --maxsize "$dcap" $DRY . 2>&1)"
+  rc=$?
+  # ZERO-WASTE-054 HONEST SIGNAL: an errored GC must never report "nothing to clean".
+  if [[ $rc -ne 0 ]]; then
+    err="$(printf '%s' "$out" | grep -iE 'error|failed|no such|not found' | head -2 | tr '\n' ' ')"
+    echo "[cargo-sweep-gc] ERROR dir=$tdir rc=$rc: ${err:-$out}" >&2
+    emit "\"kind\":\"cargo_sweep_gc_errored\",\"target_dir\":\"$tdir\",\"cap_mb\":$dcap,\"rc\":$rc,\"error\":\"$(printf '%s' "${err:-see-log}" | tr '"' "'" | cut -c1-200)\""
+    worst_rc=$rc
+    continue
+  fi
+  cleaned="$(printf '%s' "$out" | grep -oiE '(Would clean|Cleaned):? *[0-9.]+ *[KMG]i?B' | head -1)"
+  cleaned="${cleaned:-nothing to clean}"
+  echo "[cargo-sweep-gc] dir=$tdir cap=${dcap}MB $([ -n "$DRY" ] && echo dry-run || echo execute) -> ${cleaned} (rc=$rc)"
+  emit "\"kind\":\"cargo_sweep_gc_ran\",\"target_dir\":\"$tdir\",\"cap_mb\":$dcap,\"dry_run\":$DRYJ,\"result\":\"$(printf '%s' "$cleaned" | tr '"' "'")\",\"rc\":$rc"
 
-echo "[cargo-sweep-gc] cap=${CAP_MB}MB $([ -n "$DRY" ] && echo dry-run || echo execute) -> ${cleaned} (rc=$rc)"
-emit "\"kind\":\"cargo_sweep_gc_ran\",\"cap_mb\":$CAP_MB,\"dry_run\":$([ -n "$DRY" ] && echo true || echo false),\"result\":\"$(printf '%s' "$cleaned" | tr '"' "'")\",\"rc\":$rc"
+  # RESILIENT-239: age-based prune complements --maxsize (bounds file COUNT, not just bytes).
+  time_out="$(cd "$REPO_ROOT" && CARGO_TARGET_DIR="$tdir" cargo-sweep sweep --time "$TIME_DAYS" --recursive $DRY . 2>&1)"
+  time_rc=$?
+  time_cleaned="$(printf '%s' "$time_out" | grep -oiE '(Would clean|Cleaned):? *[0-9.]+ *[KMG]i?B' | head -1)"
+  time_cleaned="${time_cleaned:-nothing to clean}"
+  echo "[cargo-sweep-gc] dir=$tdir time-prune days=${TIME_DAYS} -> ${time_cleaned} (rc=$time_rc)"
+  emit "\"kind\":\"cargo_sweep_gc_time_pruned\",\"target_dir\":\"$tdir\",\"time_days\":$TIME_DAYS,\"dry_run\":$DRYJ,\"result\":\"$(printf '%s' "$time_cleaned" | tr '"' "'")\",\"rc\":$time_rc"
+done
 
-# RESILIENT-239: age-based prune complements the maxsize LRU pass above. --maxsize
-# only fires once the cap is hit; --time --recursive walks the fingerprint tree and
-# drops anything untouched in $TIME_DAYS days regardless of total size, which is what
-# actually bounds file COUNT (the 363k-file stat-walk tax) rather than just bytes.
-# Non-fatal: a failure here doesn't invalidate the maxsize pass that already ran.
-time_out="$(cd "$REPO_ROOT" && cargo-sweep sweep --time "$TIME_DAYS" --recursive $DRY . 2>&1)"
-time_rc=$?
-time_cleaned="$(printf '%s' "$time_out" | grep -oiE '(Would clean|Cleaned):? *[0-9.]+ *[KMG]i?B' | head -1)"
-time_cleaned="${time_cleaned:-nothing to clean}"
-echo "[cargo-sweep-gc] time-prune days=${TIME_DAYS} recursive $([ -n "$DRY" ] && echo dry-run || echo execute) -> ${time_cleaned} (rc=$time_rc)"
-emit "\"kind\":\"cargo_sweep_gc_time_pruned\",\"time_days\":$TIME_DAYS,\"dry_run\":$([ -n "$DRY" ] && echo true || echo false),\"result\":\"$(printf '%s' "$time_cleaned" | tr '"' "'")\",\"rc\":$time_rc"
+# RESILIENT-1590: reap chump-*.wedged-inode-* binary copies (69MB each, accumulate from
+# the binary-unwedge/refresh path) — keep only the newest per binary.
+reaped=0
+for d in "$REPO_ROOT/target/release" "$REPO_ROOT/target/debug" "$HOME/.cargo/bin" "$HOME/.local/bin" "$HOME/bin" "$HOME/.chump/bin"; do
+  [[ -d "$d" ]] || continue
+  for base in $(ls "$d" 2>/dev/null | sed -n 's/\(.*\)\.wedged-inode-.*/\1/p' | sort -u); do
+    while IFS= read -r old; do
+      [[ -z "$old" ]] && continue
+      if [[ -z "$DRY" ]]; then rm -f -- "$old" && reaped=$((reaped+1)); else reaped=$((reaped+1)); fi
+    done < <(ls -1t "$d/$base".wedged-inode-* 2>/dev/null | tail -n +2)
+  done
+done
+emit "\"kind\":\"wedged_inode_binaries_reaped\",\"count\":$reaped,\"dry_run\":$DRYJ"
+echo "[cargo-sweep-gc] wedged-inode binaries reaped (kept newest-1): $reaped"
 
-exit 0
+exit "$worst_rc"

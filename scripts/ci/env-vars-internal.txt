@@ -3418,3 +3418,10 @@ CHUMP_NODE_CONVERGE_LOCK_MIN_AGE_S
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_TIMEOUT_KILL_AFTER_S
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_CARGO_SWEEP_TARGET_DIRS
+# detected in: (standard input)
+CHUMP_REAPER_AUTO_EXECUTE_PCT
