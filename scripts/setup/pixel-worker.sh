@@ -5,6 +5,14 @@
 # advances instead of re-hammering one hard gap.
 set -uo pipefail
 
+# RESILIENT-805: kill switch for the cap-wasting loop (Aug 26 pause). Set
+# PIXEL_WORKER_DISABLE=1 or touch $PIXEL_WORKER_DISABLE_FILE to refuse to start.
+PIXEL_WORKER_DISABLE_FILE="${PIXEL_WORKER_DISABLE_FILE:-$HOME/.chump/pixel-worker.disabled}"
+if [ "${PIXEL_WORKER_DISABLE:-0}" = "1" ] || [ -e "$PIXEL_WORKER_DISABLE_FILE" ]; then
+  echo "[pixel-worker] disabled (PIXEL_WORKER_DISABLE / $PIXEL_WORKER_DISABLE_FILE); not starting loop"
+  exit 0
+fi
+
 export CHUMP_HOME="${CHUMP_HOME:-$HOME/chump}"
 export CHUMP_REPO="${CHUMP_REPO:-$HOME/chump-repo}"
 cd "$CHUMP_REPO" || { echo "[pixel-worker] no repo at $CHUMP_REPO" >&2; exit 1; }
