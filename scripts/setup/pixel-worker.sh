@@ -48,6 +48,10 @@ BIN="${CHUMP_BIN:-$CHUMP_HOME/chump}"
 IDLE_S="${PIXEL_WORKER_IDLE_S:-60}"
 COOLDOWN_S="${PIXEL_WORKER_COOLDOWN_S:-3600}"
 REFRESH_S="${PIXEL_WORKER_REFRESH_S:-1800}"
+# Wedge-kill: a claude-in-proot run that exceeds this wall-clock is killed (with
+# its proot children) and the gap cooled down, so one hung glibc claude cannot
+# stall the whole Pixel loop.
+WEDGE_S="${PIXEL_WORKER_WEDGE_S:-1500}"
 FAILED_FILE="$HOME/pixel-worker-failed.tsv"   # gap_id<TAB>epoch_s
 LAST_REFRESH=0
 
@@ -163,8 +167,13 @@ for g in rows:
     # is prohibitively slow on the Pixel. The worker only picks non-rust gaps, so
     # GitHub CI (audit/test + clippy) is authoritative and skips the heavy lanes.
     impl_prompt="Implement gap $GAP in this repository. First run: chump gap show $GAP  to read the full spec. The gap is already claimed for this session; the lease is in .chump-locks/. Implement it per its acceptance criteria, then commit with: bash scripts/coord/chump-commit.sh <changed-files> -m \"$GAP: <subject>\". Do NOT push, do NOT open a PR, do NOT run bot-merge — the node ships separately. Reply DONE once the commit exists."
-    printf "%s" "$impl_prompt" | "$CLAUDE_PROOT_WRAPPER" -p --dangerously-skip-permissions --model "$FLEET_MODEL" 2>&1 | tail -60
+    printf "%s" "$impl_prompt" | timeout -k 30 "$WEDGE_S" "$CLAUDE_PROOT_WRAPPER" -p --dangerously-skip-permissions --model "$FLEET_MODEL" 2>&1 | tail -60
     impl_rc=${PIPESTATUS[1]}
+    if [ "$impl_rc" -eq 124 ] || [ "$impl_rc" -eq 137 ]; then
+      echo "[pixel-worker] gap=$GAP wedge-kill: claude-proot exceeded ${WEDGE_S}s (rc=$impl_rc)" >&2
+      pkill -KILL -f "claude-proot-guest.sh" 2>/dev/null || true
+      pkill -KILL -f "proot-distro login debian" 2>/dev/null || true
+    fi
     if [ "$impl_rc" -eq 0 ] && [ -n "$(git -C "$wt_path" log --oneline origin/main..HEAD 2>/dev/null)" ]; then
       bash "$PIXEL_SHIP" "$GAP" "$wt_path" 2>&1 | tail -30
       rc=${PIPESTATUS[0]}
