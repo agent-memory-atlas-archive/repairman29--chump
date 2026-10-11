@@ -128,6 +128,45 @@ if [ "$lines" -lt 3 ]; then
 fi
 [ "$FAIL" -eq 0 ] && echo "PASS: run ledger has one line per tick"
 
+echo "--- test 6: effort L/M/xl (case-insensitive) selected, P0/P1 first; LLM-down refunds cooldown"
+BIN2="$TMPDIR/bin2"; mkdir -p "$BIN2"
+cp "$BIN/chump-gap-enricher" "$BIN2/"
+cat >"$BIN2/chump" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$1" = "gap" ] && [ "$2" = "list" ]; then
+  cat <<'JSON'
+[
+  {"id":"EFFECTIVE-9103","priority":"P2","effort":"m","title":"p2 m"},
+  {"id":"EFFECTIVE-9101","priority":"P0","effort":"L","title":"p0 L"},
+  {"id":"EFFECTIVE-9102","priority":"P1","effort":"xl","title":"p1 xl"},
+  {"id":"EFFECTIVE-9104","priority":"P1","effort":"M","title":"p1 M"},
+  {"id":"EFFECTIVE-9105","priority":"P0","effort":"XS","title":"p0 XS skipped"}
+]
+JSON
+  exit 0
+fi
+if [ "$1" = "gap" ] && [ "$2" = "decompose" ]; then
+  echo "Error: LLM call failed: no provider" >&2
+  exit 1
+fi
+exit 1
+FAKE
+chmod +x "$BIN2/chump"
+ATTEMPTED="$TMPDIR/attempted2.tsv"; rm -f "$ATTEMPTED"
+out6="$(BIN="$BIN2" PATH="$BIN2:$PATH" CHUMP_REPO_ROOT="$REPO_ROOT" CHUMP_DRAIN_LEDGER="$TMPDIR/ledger2" \
+  CHUMP_DRAIN_ATTEMPTED="$ATTEMPTED" CHUMP_DRAIN_ENRICH_LIMIT=0 CHUMP_DRAIN_DECOMPOSE_LIMIT=4 \
+  CHUMP_DRAIN_ATTEMPT_COOLDOWN_S=86400 CHUMP_DECOMPOSE_API_BASE="http://127.0.0.1:1/unused" \
+  CHUMP_DECOMPOSE_API_KEY=unused CHUMP_DECOMPOSE_MODEL=unused \
+  bash "$REPO_ROOT/scripts/dispatch/gap-drain.sh" 2>&1)"
+for g in 9101 9102 9103 9104; do
+  echo "$out6" | grep -q "decompose EFFECTIVE-$g \.\.\." || { echo "FAIL: EFFECTIVE-$g not selected"; FAIL=1; }
+done
+echo "$out6" | grep -q "decompose EFFECTIVE-9105" && { echo "FAIL: XS gap selected"; FAIL=1; }
+order="$(echo "$out6" | grep -oE "decompose EFFECTIVE-91[0-9]+ \.\.\." | grep -oE "91[0-9]+" | tr '\n' ' ')"
+[ "$order" = "9101 9102 9104 9103 " ] || { echo "FAIL: priority order wrong: $order"; FAIL=1; }
+if [ -s "$ATTEMPTED" ]; then echo "FAIL: cooldown burned on LLM-down failure"; cat "$ATTEMPTED"; FAIL=1; fi
+[ "$FAIL" -eq 0 ] && echo "PASS: case-variant effort, priority order, cooldown refund"
+
 if [ "$FAIL" -eq 0 ]; then
   echo "=== ALL PASS ==="
   exit 0

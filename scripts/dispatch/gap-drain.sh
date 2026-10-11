@@ -107,7 +107,7 @@ try:
         if len(p)>=2 and now-int(p[1])<cooldown: recent.add(p[0])
 except Exception: pass
 def broad(g):
-    return g.get("effort","") in ("m","l")   # decompose only accepts m/l
+    return str(g.get("effort","")).strip().lower() in ("m","l","xl")   # case-insensitive; decompose accepts all but xs/s
 prio={"P0":0,"P1":1,"P2":2,"P3":3}
 cand=[g for g in rows if broad(g) and g.get("id") not in recent]
 cand.sort(key=lambda g:(prio.get(g.get("priority","P3"),9), g.get("id","")))
@@ -134,6 +134,12 @@ for gid in "${BROAD_IDS[@]:-}"; do
     fi
   else
     log "decompose $gid FAILED (exit $?) — see $dlog"
+    # Provider outage is not the gap's fault: refund the cooldown slot.
+    if grep -q "LLM call failed" "$dlog" 2>/dev/null && [ -f "$ATTEMPTED" ]; then
+      grep -vxF "$(printf '%s\t%s' "$gid" "$now_epoch")" "$ATTEMPTED" >"$ATTEMPTED.tmp" 2>/dev/null
+      mv "$ATTEMPTED.tmp" "$ATTEMPTED" 2>/dev/null || true
+      log "decompose $gid LLM unreachable — cooldown refunded"
+    fi
   fi
 done
 
