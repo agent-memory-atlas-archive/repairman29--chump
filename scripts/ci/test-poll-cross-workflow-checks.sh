@@ -77,6 +77,16 @@ else
     fail "missing check-run timeout: got: $out"
 fi
 
+# ---- Test 4b (RESILIENT-1561): still running at timeout -> in_progress (pending), not failure ----
+gh() { echo '[{"name":"audit","status":"in_progress","started_at":"2026-08-20T00:00:00Z"}]'; }
+export -f gh
+out="$("$POLL" --sha deadbeef --check "audit" --timeout-s 2 --interval-s 1 2>/dev/null)"
+if echo "$out" | grep -qx "audit=in_progress"; then
+    ok "still-running lane at timeout stays pending (no false-FAIL)"
+else
+    fail "still-running timeout: got: $out"
+fi
+
 # ---- Test 5: still in_progress on first poll, resolves on second ----
 POLL_COUNT_FILE="$(mktemp)"
 export POLL_COUNT_FILE

@@ -9,12 +9,13 @@
 # per check in the exact vocabulary scripts/ci/aggregator-verified.sh already
 # understands (success | failure | cancelled | skipped).
 #
-# A check that never resolves before --timeout-s is reported as `failure`
-# (fail-closed) rather than left dangling — a GitHub Actions job step can
-# only be success/failure on exit, so there is no real "pending" outcome to
-# hand back to the caller; timing out MUST block the merge, not leave it
-# ambiguous (the exact "wedge waiting on a context that'll never post"
-# failure mode this aggregator replaces).
+# RESILIENT-1561: at --timeout-s, a check that was SEEN but is still
+# queued/in_progress is reported as `in_progress` (aggregator-verified.sh
+# classifies that PENDING, exit 2) — NOT `failure`. A heavy audit.yml still
+# running is not a failed audit; reporting failure caused false-FAIL +
+# rebase + full-rerun loops. A check that NEVER appeared at all (no check-run
+# registered) is still reported `failure` (fail-closed: the "wedge waiting on
+# a context that'll never post" mode).
 #
 # Usage:
 #   poll-cross-workflow-checks.sh --sha SHA --check "name" [--check "name" ...] \
@@ -53,7 +54,8 @@ fi
 
 deadline=$(( $(date +%s) + TIMEOUT_S ))
 declare -A RESULT
-for c in "${CHECKS[@]}"; do RESULT["$c"]="in_progress"; done
+declare -A SEEN
+for c in "${CHECKS[@]}"; do RESULT["$c"]="in_progress"; SEEN["$c"]=0; done
 
 fetch_check_runs() {
     gh api "repos/${REPO}/commits/${SHA}/check-runs" --paginate -q '.check_runs' 2>/dev/null || echo '[]'
@@ -71,6 +73,7 @@ while true; do
             all_terminal=0
             continue
         fi
+        SEEN["$c"]=1
         status="$(echo "$entry" | jq -r '.status')"
         if [[ "$status" != "completed" ]]; then
             all_terminal=0
@@ -90,14 +93,16 @@ while true; do
         break
     fi
     if [[ $(date +%s) -ge $deadline ]]; then
-        echo "[poll-cross-workflow-checks] WARN: timed out after ${TIMEOUT_S}s waiting on: ${CHECKS[*]} (fail-closed)" >&2
+        echo "[poll-cross-workflow-checks] WARN: timed out after ${TIMEOUT_S}s waiting on: ${CHECKS[*]} (still-running lanes stay pending; never-seen lanes fail-closed)" >&2
         break
     fi
     sleep "$INTERVAL_S"
 done
 
 for c in "${CHECKS[@]}"; do
-    # fail-closed: anything still in_progress at loop-exit (timeout) reports failure
-    [[ "${RESULT[$c]}" == "in_progress" ]] && RESULT["$c"]="failure"
+    # never-seen at timeout => fail-closed; seen-but-still-running => stays in_progress (PENDING)
+    if [[ "${RESULT[$c]}" == "in_progress" && "${SEEN[$c]}" -eq 0 ]]; then
+        RESULT["$c"]="failure"
+    fi
     printf '%s=%s\n' "$c" "${RESULT[$c]}"
 done
