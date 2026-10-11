@@ -231,6 +231,25 @@ if _op_in_progress; then
     exit 0
 fi
 
+# --- RESILIENT-1567: clear a stale .git/index.lock -------------------------
+# A crashed git leaves index.lock behind; every later `git reset --hard` then
+# fails and the node silently rots. Clear it only when no git process is alive
+# and the lock is older than the min age (a live git holds it for seconds).
+_clear_stale_index_lock() {
+    local lock; lock="$(git rev-parse --git-path index.lock 2>/dev/null)"
+    [[ -n "$lock" && -e "$lock" ]] || return 1
+    pgrep -x git >/dev/null 2>&1 && return 1
+    local min_age="${CHUMP_NODE_CONVERGE_LOCK_MIN_AGE_S:-120}" mtime age
+    mtime="$(stat -c %Y "$lock" 2>/dev/null || echo 0)"
+    age=$(( $(date +%s) - mtime ))
+    (( age >= min_age )) || return 1
+    rm -f "$lock" 2>/dev/null || return 1
+    log "cleared stale $lock (age ${age}s, no git process running)"
+    emit node_converge_stale_lock_cleared "\"lock\":\"$lock\",\"age_s\":$age"
+    return 0
+}
+_clear_stale_index_lock || true
+
 # --- fetch (auth-independent: a public-repo fetch needs no credentials) -------
 if ! git fetch "$CONVERGE_REMOTE" "$CONVERGE_BRANCH" --quiet 2>>"$LOG"; then
     # Offline / transient network. Not fatal — nothing to converge to that we
@@ -248,6 +267,34 @@ HEAD_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 BEHIND="$(git rev-list --count "HEAD..$CONVERGE_REF" 2>/dev/null || echo 0)"
 case "$BEHIND" in ''|*[!0-9]*) BEHIND=0 ;; esac
 
+# --- RESILIENT-1567: alarm when the node is far behind for too long ----------
+# Silent far-behind == merged-but-not-running. Track when we first saw
+# BEHIND > N; once it has persisted > M minutes, page (re-page every 6h).
+FAR_N="${CHUMP_NODE_CONVERGE_FAR_BEHIND_N:-50}"
+FAR_M="${CHUMP_NODE_CONVERGE_FAR_BEHIND_MIN:-30}"
+FAR_STATE="$LOG_DIR/far-behind-since"
+if (( BEHIND > FAR_N )); then
+    _now="$(date +%s)"
+    [[ -s "$FAR_STATE" ]] || echo "$_now" > "$FAR_STATE"
+    _since="$(cat "$FAR_STATE" 2>/dev/null || echo "$_now")"
+    case "$_since" in ''|*[!0-9]*) _since="$_now" ;; esac
+    _last_page="$(cat "$FAR_STATE.paged" 2>/dev/null || echo 0)"
+    case "$_last_page" in ''|*[!0-9]*) _last_page=0 ;; esac
+    if (( _now - _since >= FAR_M * 60 && _now - _last_page >= 21600 )); then
+        echo "$_now" > "$FAR_STATE.paged"
+        log "ALARM: node is $BEHIND commits behind $CONVERGE_REF for >${FAR_M}min"
+        emit node_converge_far_behind "\"behind\":$BEHIND,\"threshold\":$FAR_N,\"minutes\":$FAR_M,\"repo\":\"$REPO_ROOT\""
+        _nc_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -f "$_nc_dir/../coord/lib/notify-operator.sh" ]]; then
+            ( source "$_nc_dir/../coord/lib/notify-operator.sh" && \
+              CHUMP_NOTIFY_KIND="node_converge_far_behind" \
+              notify_operator "Node $(hostname) is $BEHIND commits behind $CONVERGE_REF for >${FAR_M}min — merged fixes are not running here." ) >>"$LOG" 2>&1 || true
+        fi
+    fi
+else
+    rm -f "$FAR_STATE" "$FAR_STATE.paged" 2>/dev/null || true
+fi
+
 if [[ "$HEAD_SHA" == "$TARGET_SHA" && "$BEHIND" -eq 0 && "$TARGET_SHA" != "unknown" ]]; then
     log "SKIP: already at $CONVERGE_REF ($HEAD_SHA)"
     emit node_converge_skipped "\"reason\":\"already_current\",\"sha\":\"$HEAD_SHA\""
@@ -263,7 +310,8 @@ fi
 # --- converge ----------------------------------------------------------------
 log "converging $REPO_ROOT: HEAD $HEAD_SHA -> $CONVERGE_REF ($TARGET_SHA), behind by $BEHIND"
 PREV_WORKER_HASH="$(_worker_code_hash)"
-if ! converge_mirror_hard_reset "$CONVERGE_REF" >>"$LOG" 2>&1; then
+if ! converge_mirror_hard_reset "$CONVERGE_REF" >>"$LOG" 2>&1 && \
+   ! { _clear_stale_index_lock && converge_mirror_hard_reset "$CONVERGE_REF" >>"$LOG" 2>&1; }; then
     log "FATAL: converge (git reset --hard) to $CONVERGE_REF failed"
     emit node_converge_failed "\"reason\":\"reset_failed\",\"ref\":\"$CONVERGE_REF\",\"target_sha\":\"$TARGET_SHA\""
     exit 1

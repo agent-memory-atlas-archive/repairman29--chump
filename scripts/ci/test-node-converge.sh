@@ -119,4 +119,22 @@ grep -q '"reason":"operation_in_progress"' "$AMBIENT" \
 rmdir "$GITDIR/rebase-merge"
 ok "defers cleanly while a rebase is in progress (never yanks the tree mid-op)"
 
+# ── Test 5: stale index.lock self-heals within one converge ────────────────
+git -C "$CHECKOUT" reset --hard -q "$BASE_SHA"
+GITDIR="$(git -C "$CHECKOUT" rev-parse --absolute-git-dir)"
+: > "$GITDIR/index.lock"
+: > "$AMBIENT"
+CHUMP_NODE_CONVERGE_LOCK_MIN_AGE_S=0 run_converge "$TMP/out5.log" || fail "converge with stale lock exited non-zero: $(cat "$TMP/out5.log")"
+[ ! -e "$GITDIR/index.lock" ] || fail "stale index.lock not cleared"
+[ "$(git -C "$CHECKOUT" rev-parse HEAD)" = "$NEW_SHA" ] || fail "converge did not complete after clearing lock"
+grep -q '"kind":"node_converge_stale_lock_cleared"' "$AMBIENT" || fail "missing stale_lock_cleared event"
+ok "stale index.lock cleared and converge completed in one cycle"
+
+# ── Test 6: far-behind for >M min alarms ───────────────────────────────────
+git -C "$CHECKOUT" reset --hard -q "$BASE_SHA"
+: > "$AMBIENT"
+CHUMP_NODE_CONVERGE_FAR_BEHIND_N=0 CHUMP_NODE_CONVERGE_FAR_BEHIND_MIN=0 run_converge "$TMP/out6.log" || fail "far-behind run failed"
+grep -q '"kind":"node_converge_far_behind"' "$AMBIENT" || fail "missing node_converge_far_behind alarm: $(cat "$AMBIENT")"
+ok "far-behind node raises node_converge_far_behind alarm"
+
 printf '\033[0;32mALL PASS\033[0m scripts/ci/test-node-converge.sh\n'

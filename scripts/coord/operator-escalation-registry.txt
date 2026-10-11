@@ -92,3 +92,4 @@ fleet_health_sentinel_peer_dead	page
 cj_deadman_dark	page
 cj_deadman_worker_wedged	page
 cj_deadman_unreadable	page
+node_converge_far_behind	page	# RESILIENT-1567: node >N commits behind origin/main for >M min — merged fixes not running; operator must diagnose.
