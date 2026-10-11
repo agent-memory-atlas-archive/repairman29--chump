@@ -1576,13 +1576,7 @@ print('1' if (p == 'P0' and dom == 'MISSION' and e in ('m', 'l', 'xl')) else '0'
         >> "${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}" 2>/dev/null || true
 
     # Pick `timeout` (linux) or `gtimeout` (mac brew coreutils); fall back to none.
-    if command -v timeout >/dev/null 2>&1; then
-        TO="timeout ${FLEET_TIMEOUT_S}s"
-    elif command -v gtimeout >/dev/null 2>&1; then
-        TO="gtimeout ${FLEET_TIMEOUT_S}s"
-    else
-        TO=""
-    fi
+    TO="$(build_timeout_prefix "$FLEET_TIMEOUT_S")"
 
     # ── INFRA-525: timeout-checkpoint watchdog ───────────────────────────────
     # Fires at T - CHUMP_TIMEOUT_CHECKPOINT_SECS (default 30s before fleet
@@ -1908,13 +1902,8 @@ Operator or sibling worker can rescue this branch via:
                 # Use shorter timeout for retries (300s) vs initial (FLEET_TIMEOUT_S).
                 if [ "$_wedge_retries" -gt 0 ]; then
                     _retry_to_s="${CHUMP_RETRY_TIMEOUT_S:-300}"
-                    if command -v timeout >/dev/null 2>&1; then
-                        _TO="timeout ${_retry_to_s}s"
-                    elif command -v gtimeout >/dev/null 2>&1; then
-                        _TO="gtimeout ${_retry_to_s}s"
-                    else
-                        _TO="$TO"
-                    fi
+                    _TO="$(build_timeout_prefix "$_retry_to_s")"
+                    [ -n "$_TO" ] || _TO="$TO"
                 else
                     _TO="$TO"
                 fi

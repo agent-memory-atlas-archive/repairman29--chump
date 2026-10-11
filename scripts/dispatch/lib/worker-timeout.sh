@@ -47,3 +47,18 @@ compute_scaled_timeout() {
 
     printf '%s' "$out"
 }
+
+# RESILIENT-1569: plain `timeout Ns` only sends TERM; a hung claude that
+# ignores/blocks TERM outlived the 1800s budget (41min wedge). Add -k so
+# the process is SIGKILLed KILL_AFTER seconds after the TERM.
+# Usage: build_timeout_prefix SECONDS  -> echoes e.g. "timeout -k 30s 1800s" (empty if no timeout binary)
+build_timeout_prefix() {
+    local secs="${1:?build_timeout_prefix: SECONDS required}"
+    local ka="${CHUMP_TIMEOUT_KILL_AFTER_S:-30}"
+    local bin=""
+    if command -v timeout >/dev/null 2>&1; then bin=timeout
+    elif command -v gtimeout >/dev/null 2>&1; then bin=gtimeout
+    fi
+    [ -n "$bin" ] || return 0
+    printf '%s -k %ss %ss' "$bin" "$ka" "$secs"
+}
