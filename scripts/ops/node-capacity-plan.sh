@@ -293,7 +293,7 @@ if [[ -z "${CHUMP_PLAN_LIB_ONLY:-}" && "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; the
       plan "$PLAN"
       cat "$PLAN"
       emit_ambient "$WORKER_BUDGET" "$CORES" "$ORCHESTRATION_HOST" "$EMBED_HOST"
-      log "wrote $PLAN — worker_budget=$WORKER_BUDGET, gpu=$GPU_STATE, orchestration_host=$orchestration_host"
+      log "wrote $PLAN — worker_budget=$WORKER_BUDGET, gpu=$GPU_STATE, orchestration_host=$ORCHESTRATION_HOST"
       ;;
   esac
 fi
