@@ -162,6 +162,31 @@ check_binary() {
     src_newest_mtime="$(find "$REPO_ROOT/src" -name '*.rs' -newer "$binary_path" \
         2>/dev/null | head -1)"
 
+    # RESILIENT-1568: deployed binary commit vs origin/main, plus stray copies.
+    local bin_sha main_sha lag="" copies="" c
+    bin_sha="$("$binary_path" --version 2>/dev/null | grep -oE '\(([a-f0-9]+) built' | head -1 | sed 's/[( ]//g;s/built//' || true)"
+    main_sha="$(git -C "$REPO_ROOT" rev-parse --short=8 origin/main 2>/dev/null || true)"
+    if [[ -n "$bin_sha" && -n "$main_sha" && "$main_sha" != "$bin_sha"* && "$bin_sha" != "$main_sha"* ]]; then
+        if git -C "$REPO_ROOT" merge-base --is-ancestor "$bin_sha" origin/main 2>/dev/null; then
+            lag="$(git -C "$REPO_ROOT" rev-list --count "$bin_sha..origin/main" 2>/dev/null || echo '?')"
+            register_check "binary" "fail" \
+                "deployed binary $bin_sha lags origin/main $main_sha by $lag commits ($binary_path)" \
+                "bash $REPO_ROOT/scripts/ops/node-refresh-chump.sh"
+            return
+        fi
+    fi
+    for c in "$HOME/.cargo/bin/chump" "$HOME/.local/bin/chump" "/usr/local/bin/chump"; do
+        [[ -x "$c" ]] || continue
+        [[ "$(readlink -f "$c")" == "$(readlink -f "$binary_path")" ]] && continue
+        copies="$copies $c"
+    done
+    if [[ -n "$copies" ]]; then
+        register_check "binary" "fail" \
+            "multiple chump binaries: PATH resolves $binary_path but stray copies exist:$copies" \
+            "bash $REPO_ROOT/scripts/ops/node-refresh-chump.sh  # converges copies onto one canonical binary"
+        return
+    fi
+
     if [[ -n "$src_newest_mtime" ]]; then
         register_check "binary" "fail" \
             "binary is older than src/*.rs (source changed since last build)" \

@@ -252,6 +252,31 @@ _install_binary() {
     cp -f "$src" "$TARGET_BIN.new" 2>>"$LOG" || return 1
     chmod +x "$TARGET_BIN.new"
     mv -f "$TARGET_BIN.new" "$TARGET_BIN" || return 1
+    _converge_stale_binaries
+    return 0
+}
+
+# RESILIENT-1568: one canonical binary. Other PATH-resolvable copies of chump
+# (~/.cargo/bin, ~/.local/bin, /usr/local/bin) that differ from $TARGET_BIN are
+# re-pointed at it (symlink), so whichever PATH order a service/worker uses it
+# runs the freshly deployed code. Unwritable locations (e.g. root-owned
+# /usr/local/bin) are reported, not fatal. Opt out: CHUMP_NODE_CONVERGE_BINS=0.
+_converge_stale_binaries() {
+    [[ "${CHUMP_NODE_CONVERGE_BINS:-1}" == "0" ]] && return 0
+    local canon; canon="$(readlink -f "$TARGET_BIN" 2>/dev/null || printf '%s' "$TARGET_BIN")"
+    local c
+    for c in "$HOME/.cargo/bin/chump" "$HOME/.local/bin/chump" "/usr/local/bin/chump"; do
+        [[ -e "$c" || -L "$c" ]] || continue
+        [[ "$(readlink -f "$c" 2>/dev/null)" == "$canon" ]] && continue
+        if ln -sfn "$canon" "$c.new" 2>/dev/null && mv -f "$c.new" "$c" 2>/dev/null; then
+            log "converge: $c -> $canon"
+            emit node_binary_converged "\"path\":\"$c\",\"canonical\":\"$canon\""
+        else
+            rm -f "$c.new" 2>/dev/null || true
+            log "WARN: converge: cannot repoint stale $c (not writable)"
+        fi
+    done
+    return 0
 }
 
 # --- INFRA-3677: prebuilt-artifact pull --------------------------------------
