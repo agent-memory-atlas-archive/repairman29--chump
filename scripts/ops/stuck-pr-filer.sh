@@ -181,6 +181,13 @@ PYEOF
                 continue
             fi
 
+            if [[ "$status" == "blocked" ]]; then
+                printf '\033[0;33m  skip %s: status=blocked, not reopening (PR #%s)\033[0m\n' "$gid" "$pr_num"
+                printf '{"ts":"%s","kind":"respawn_reopen_skipped_blocked","gap":"%s","pr":"%s"}\n' \
+                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$gid" "$pr_num" \
+                    >> "$lock_dir/ambient.jsonl" 2>/dev/null || true
+                continue
+            fi
             if [[ "$status" != "open" ]]; then
                 safe_reopen_gap "$gid" \
                     || printf '\033[0;33m  WARN: chump gap set %s --status open failed\033[0m\n' "$gid"

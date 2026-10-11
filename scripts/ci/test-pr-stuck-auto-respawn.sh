@@ -462,6 +462,26 @@ else
     gap set log: $(cat "$GAP_SET_LOG")"
 fi
 
+# -- Test 9: blocked gap with a respawn event is NOT reopened (RESILIENT-1586)
+echo "Test 9: blocked gap is not reopened by pr_auto_closed_for_respawn"
+cat > "$GAP_FIXTURE" <<EOF
+- id: INFRA-9009
+  status: blocked
+  notes: ""
+EOF
+: > "$AMBIENT"
+printf '{"ts":"%s","kind":"pr_auto_closed_for_respawn","pr":1009,"branch":"chump/test","gap_ids":"INFRA-9009","title":"INFRA-9009: stale"}\n' \
+    "$NOW_ISO2" >> "$AMBIENT"
+: > "$GAP_SET_LOG"
+env "${COMMON_ENV[@]}" CHUMP_STUCK_PR_FILER=1 INFRA_386_AUTOCLOSE=0 "$FILER" >/dev/null 2>&1 || true
+if ! grep -q "gap set INFRA-9009" "$GAP_SET_LOG" \
+   && grep -q '"kind":"respawn_reopen_skipped_blocked"' "$AMBIENT"; then
+    pass
+else
+    fail "blocked gap was reopened or no skip event
+    gap set log: $(cat "$GAP_SET_LOG")"
+fi
+
 echo ""
 echo "=== INFRA-1410 auto-respawn test: $PASS passed, $FAIL failed ==="
 [[ $FAIL -eq 0 ]] || exit 1

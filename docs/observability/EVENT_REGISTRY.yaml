@@ -2693,6 +2693,14 @@ events:
     consumers: [stuck-pr-filer, fleet-brief, audit-log, operator-recall]
     fields_required: [ts, kind, pr, branch, gap_ids, title]
 
+  - kind: respawn_reopen_skipped_blocked
+    effect_metric: self
+    emitter: scripts/ops/stuck-pr-filer.sh (RESILIENT-1586)
+    trigger: pr_auto_closed_for_respawn cites a gap whose status is blocked;
+      the filer skips the reopen so operator/auto blocks are not defeated.
+    consumers: [audit-log]
+    fields_required: [ts, kind, gap, pr]
+
   - kind: pr_stuck_exempt
     effect_metric: self
     emitter: scripts/ops/stale-pr-reaper.sh (INFRA-1410)
