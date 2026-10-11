@@ -78,6 +78,40 @@ fn measure_free_gb(path: &Path) -> Option<f64> {
     Some(chump_disk_inventory::kb_to_gb(avail_kb))
 }
 
+/// Derive CARGO_BUILD_JOBS from physical RAM (~1.2GB per rustc job, half of RAM
+/// budgeted for builds), clamped to 1..=cpus. Falls back to 4 if RAM is unknown.
+fn derive_cargo_build_jobs(total_ram_gb: Option<f64>, cpus: usize) -> usize {
+    let cpus = cpus.max(1);
+    match total_ram_gb {
+        Some(gb) if gb > 0.0 => (((gb * 0.5) / 1.2) as usize).clamp(1, cpus),
+        _ => 4.min(cpus),
+    }
+}
+
+fn measure_total_ram_gb() -> Option<f64> {
+    if let Ok(text) = fs::read_to_string("/proc/meminfo") {
+        let kb: f64 = text
+            .lines()
+            .find(|l| l.starts_with("MemTotal:"))?
+            .split_whitespace()
+            .nth(1)?
+            .parse()
+            .ok()?;
+        return Some(kb / 1024.0 / 1024.0);
+    }
+    let out = Command::new("sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        .ok()?;
+    let bytes: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    Some(bytes / 1024.0 / 1024.0 / 1024.0)
+}
+
+fn cargo_build_jobs() -> usize {
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    derive_cargo_build_jobs(measure_total_ram_gb(), cpus)
+}
+
 const TICK_SECS: u64 = 15;
 /// Worker heartbeats write every ~60s (FLEET-042). m-effort cycles run up to
 /// 2700s with the 1800s base; a heartbeat older than this means the worker is
@@ -236,6 +270,9 @@ fn spawn_worker(cfg: &Config, agent_id: usize) -> std::io::Result<Child> {
         ("pro", "m")
     };
 
+    let build_jobs = cargo_build_jobs();
+    eprintln!("chumpd: worker {agent_id} CARGO_BUILD_JOBS={build_jobs} (derived from RAM/cpus)");
+
     command
         .current_dir(&cfg.repo)
         .env("PATH", path_env)
@@ -253,10 +290,7 @@ fn spawn_worker(cfg: &Config, agent_id: usize) -> std::io::Result<Child> {
         .env("FLEET_INLINE_BRIEFING", "1")
         .env("CHUMP_AGENT_HARNESS", "claude")
         .env("CARGO_TARGET_DIR", cfg.repo.join("target"))
-        // Memory guard: concurrent rustc jobs are the machine's top RAM
-        // consumers (~1.2GB each); 2 workers x default parallelism spikes
-        // past what a 24GB laptop shares with the operator's apps.
-        .env("CARGO_BUILD_JOBS", "4")
+        .env("CARGO_BUILD_JOBS", build_jobs.to_string())
         .env(
             "CHUMP_OAUTH_TOKEN_FILE",
             cfg.home.join(".chump/oauth-token.json"),
@@ -680,6 +714,14 @@ async fn main() {
 #[cfg(test)]
 mod signal_and_gate_tests {
     use super::*;
+
+    #[test]
+    fn build_jobs_scale_with_ram_and_clamp() {
+        assert_eq!(derive_cargo_build_jobs(Some(24.0), 16), 10);
+        assert_eq!(derive_cargo_build_jobs(Some(24.0), 4), 4);
+        assert_eq!(derive_cargo_build_jobs(Some(1.0), 8), 1);
+        assert_eq!(derive_cargo_build_jobs(None, 8), 4);
+    }
 
     #[test]
     fn exit_code_zero_when_no_signal() {
