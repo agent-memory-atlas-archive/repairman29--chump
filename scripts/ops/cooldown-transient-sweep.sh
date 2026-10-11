@@ -136,6 +136,8 @@ fi
 
 # ── apply: re-enable the transient set ──────────────────────────────────────
 CHUMP_BIN="${CHUMP_BIN:-chump}"
+# shellcheck source=scripts/lib/safe-reopen-gap.sh
+. "$(dirname "$0")/../lib/safe-reopen-gap.sh"
 # A) remove transient cooldown files (worker picks them again next cycle).
 printf '%s' "$CD_REENABLE" | while IFS='	' read -r f gid kind; do
   [ -z "$f" ] && continue
@@ -146,6 +148,7 @@ if [ "$have_sqlite" = 1 ] && command -v "$CHUMP_BIN" >/dev/null 2>&1; then
   _note="cooldown-transient-sweep (INFRA-471): re-opened — previous auto-block was a TRANSIENT infra failure (timeout/wedge/outage), not a spec defect. Re-blocks on repeat via INFRA-3832."
   printf '%s' "$AB_REENABLE" | while IFS='	' read -r gid kind; do
     [ -z "$gid" ] && continue
+    CHUMP_REPO="$REPO_ROOT" gap_reopen_allowed "$gid" || { echo "  skipped (operator-blocked): $gid"; continue; }
     if CHUMP_REPO="$REPO_ROOT" "$CHUMP_BIN" gap set "$gid" --status open --add-note "$_note" >/dev/null 2>&1; then
       echo "  re-opened: $gid (last kind=$kind)"
     else

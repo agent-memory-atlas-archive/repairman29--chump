@@ -60,6 +60,8 @@ AMB="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 STATE_DIR="${CHUMP_OUTCOME_VERIFY_STATE_DIR:-$REPO_ROOT/.chump-locks/outcome-verify-heal-consumer}"
 DEDUP_WINDOW_S="${CHUMP_OUTCOME_VERIFY_DEDUP_WINDOW_S:-3600}"
 GAP_BIN="${CHUMP_OUTCOME_VERIFY_GAP_BIN:-chump}"
+# shellcheck source=scripts/lib/safe-reopen-gap.sh
+source "$SCRIPT_DIR/../lib/safe-reopen-gap.sh"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -187,8 +189,13 @@ print(ev.get("note") or ev.get("detail") or "")' 2>/dev/null)"
         # (never closed, or already held) still gets the note so the trail
         # is visible even when the status transition itself is a no-op.
         note_text="HELD: ${kind} — ${note:-live verification failed}"
-        timeout 60 "$GAP_BIN" gap set "$gap" --status open --add-note "$note_text" >/dev/null 2>&1
-        held_rc=$?
+        if CHUMP_BIN="$GAP_BIN" gap_reopen_allowed "$gap"; then
+            timeout 60 "$GAP_BIN" gap set "$gap" --status open --add-note "$note_text" >/dev/null 2>&1
+            held_rc=$?
+        else
+            timeout 60 "$GAP_BIN" gap set "$gap" --add-note "$note_text" >/dev/null 2>&1
+            held_rc=$?
+        fi
 
         # Page the duty officer — AC1. Unlisted in operator-escalation-
         # registry.txt, so notify_operator's default verdict is PAGE.

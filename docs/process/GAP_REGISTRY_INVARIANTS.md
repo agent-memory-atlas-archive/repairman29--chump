@@ -41,3 +41,7 @@ When I-2 detects a stale post-merge gap, a future `--auto-fix` extension
 should run `chump gap ship <GAP-ID> --closed-pr <N>` to flip the gap to
 `done` automatically. Not yet implemented because incorrect auto-ship
 could close gaps whose ACs are genuinely unmet.
+
+## Operator-block marker and the reopen guard (RESILIENT-1587)
+
+To block a gap so that no sweeper reopens it, run `chump gap set X --status blocked --add-note "operator-block: <reason>"`. Every automated writer that flips a gap to `open` (`rot-reaper.sh`, `pr-failure-auto-rescue.sh`, `ghost-gap-reaper.sh`, `cooldown-transient-sweep.sh`, `outcome-verify-heal-consumer.sh`, `triage_bookkeeping_gaps.sh`, `stuck-pr-filer.sh`) goes through `scripts/lib/safe-reopen-gap.sh` (`safe_reopen_gap` / `gap_reopen_allowed`), which refuses when the gap is `status=blocked` and carries the `operator-block:` marker, or is blocked without an `INFRA-3832 auto-block` stamp. Only INFRA-3832 auto-blocked gaps (no `operator-block:` marker) may be reopened automatically. Any new writer of `--status open` must call the helper; `scripts/ci/test-gap-reopen-guard.sh` covers it.

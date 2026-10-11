@@ -54,6 +54,8 @@ fi
 
 _chump="${HOME}/.cargo/bin/chump"
 command -v "$_chump" >/dev/null 2>&1 || _chump="chump"
+# shellcheck source=scripts/lib/safe-reopen-gap.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/safe-reopen-gap.sh"
 
 _emit_ambient() {
     if [[ -x "$REPO_ROOT/scripts/dev/ambient-emit.sh" ]]; then
@@ -168,6 +170,7 @@ for pr_num in bounced:
         [[ -z "$_gid" ]] && continue
 
         echo "[ghost-gap-reaper] INFRA-556: rolling back $_gid — PR #$_pr_num closed without merge"
+        CHUMP_BIN="$_chump" gap_reopen_allowed "$_gid" || continue
         CHUMP_REPO="$REPO_ROOT" CHUMP_BINARY_STALENESS_CHECK=0 CHUMP_ALLOW_RECYCLE=1 \
             "$_chump" gap set "$_gid" --status open 2>/dev/null || {
             echo "[ghost-gap-reaper] WARNING: failed to roll back $_gid"
