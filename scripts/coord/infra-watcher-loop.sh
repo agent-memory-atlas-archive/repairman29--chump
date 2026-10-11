@@ -319,6 +319,14 @@ cmd_check_disk() {
 # and only signal. This check pages BEFORE that floor: it trends free-GB on
 # $HOME against the same DISK_CRITICAL_GB floor plus a margin, so an operator
 # (or the reaper) gets advance warning while there's still headroom to act.
+# RESILIENT-1565: disk_headroom findings trigger an idle-gated reclaim actuator.
+_disk_reclaim_act() {
+    local act="$(dirname "$0")/disk-reclaim-actuator.sh"
+    [[ -x "$act" ]] || return 0
+    CHUMP_DISK_RECLAIM_HIGH_GB="${CHUMP_DISK_RECLAIM_HIGH_GB:-$(( ${CHUMP_DISK_CRITICAL_GB:-20} + ${CHUMP_INFRA_WATCHER_DISK_MARGIN_GB:-15} ))}" \
+        "$act" --execute 2>&1 | sed 's/^/[infra-watcher] /' || true
+}
+
 cmd_check_disk_headroom() {
     _header "check-disk-headroom"
 
@@ -337,9 +345,11 @@ cmd_check_disk_headroom() {
     if [[ "$free_gb" -lt "$critical_gb" ]]; then
         _emit_finding "disk_headroom" "critical" \
             "free=${free_gb}GB on \$HOME is BELOW the cargo-target-reaper critical floor (${critical_gb}GB) — reaper aggressive mode should already be engaged; page if it is not"
+        _disk_reclaim_act
     elif [[ "$free_gb" -lt "$warn_floor" ]]; then
         _emit_finding "disk_headroom" "warning" \
             "free=${free_gb}GB on \$HOME is trending toward the ${critical_gb}GB critical floor (margin=${margin_gb}GB, warn_floor=${warn_floor}GB) — proactive action recommended before the reactive reaper kicks in"
+        _disk_reclaim_act
     else
         printf '[infra-watcher] check-disk-headroom: OK free=%dGB (warn_floor=%dGB, critical_floor=%dGB)\n' \
             "$free_gb" "$warn_floor" "$critical_gb"

@@ -13833,3 +13833,12 @@ events:
     trigger: staging or renaming the new binary failed; the previous binary was left in place and executable
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, target, reason]
+
+  - kind: disk_reclaim
+    status: active
+    effect_metric: resilient
+    emitter: scripts/coord/disk-reclaim-actuator.sh (RESILIENT-1565)
+    emitter_paths: [scripts/coord/disk-reclaim-actuator.sh]
+    trigger: infra-watcher disk_headroom finding invoked the idle-gated reclaim actuator (deferred, aborted, or reclaimed)
+    consumers: [ambient, fleet-brief]
+    fields_required: [ts, kind, detail]

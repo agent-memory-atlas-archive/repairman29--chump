@@ -675,6 +675,18 @@ process_worktree() {
         fi
     fi
 
+    # RESILIENT-1565: a worktree untouched for >ANCIENT hours is abandoned even if
+    # its branch is unmerged. Upstream liveness guards + the wip/ snapshot below
+    # preserve any work; this only removes the checkout.
+    if [[ $reapable -eq 0 && -n "$wt_branch" ]]; then
+        local anc_ts anc_h
+        anc_ts=$(git -C "$wt_path" log -1 --format=%ct 2>/dev/null || echo 0)
+        anc_h=$(( ($(date +%s) - anc_ts) / 3600 ))
+        if [[ $anc_ts -gt 0 && $anc_h -ge ${CHUMP_REAPER_ANCIENT_HOURS:-90} ]]; then
+            reapable=1; reason="abandoned: no commit for ${anc_h}h (>= ${CHUMP_REAPER_ANCIENT_HOURS:-90}h)"
+        fi
+    fi
+
     if [[ $reapable -eq 0 ]]; then
         info "  not reapable: branch ahead of $BASE and remote still exists — keeping"
         KEPT=$((KEPT+1)); return 0
