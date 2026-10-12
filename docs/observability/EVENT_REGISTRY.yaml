@@ -7179,6 +7179,14 @@ events:
     consumers: [fleet-brief, curator, waste-tally]
     fields_required: [ts, kind, gap_id, existing_pr_numbers, current_branch]
 
+  - kind: dup_close_short_circuit
+    effect_metric: self
+    emitter: scripts/coord/bot-merge.sh
+    trigger: bot-merge.sh skipped push/PR/CI for a close-as-duplicate commit
+      because the gap already has a real ship commit on origin/main (RESILIENT-1574).
+    consumers: [fleet-brief, waste-tally]
+    fields_required: [ts, kind, gap_id, subject]
+
   - kind: duplicate_pr_closed
     effect_metric: self
     emitter: scripts/coord/duplicate-pr-detector.sh

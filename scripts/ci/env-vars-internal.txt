@@ -3439,3 +3439,8 @@ CHUMP_DISK_RECLAIM_LOW_GB
 # detected in: (standard input)
 CHUMP_REAPER_ANCIENT_HOURS
 CHUMP_NODE_CONVERGE_BINS
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_DUP_CLOSE_GUARD

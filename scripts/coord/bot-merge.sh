@@ -1648,6 +1648,23 @@ if command -v chump >/dev/null 2>&1 && [[ ${#GAP_IDS[@]} -gt 0 ]]; then
     done
 fi
 
+# RESILIENT-1574: short-circuit close-as-duplicate work for an already-shipped gap
+# BEFORE push/PR/CI. Bypass: CHUMP_DUP_CLOSE_GUARD=0.
+if [[ "${CHUMP_DUP_CLOSE_GUARD:-1}" != "0" && ${#GAP_IDS[@]} -gt 0 ]]; then
+    # shellcheck source=lib/dup-close-guard.sh
+    source "$(dirname "$0")/lib/dup-close-guard.sh"
+    _dc_subject="$(git -C "$REPO_ROOT" log -1 --format=%s HEAD 2>/dev/null || true)"
+    for _gid in "${GAP_IDS[@]}"; do
+        if dup_close_guard_match "$_dc_subject" "$_gid" origin/main; then
+            echo "[bot-merge] RESILIENT-1574: '$_dc_subject' is a close-as-duplicate and $_gid already shipped on main — skipping PR/CI." >&2
+            printf '{"ts":"%s","kind":"dup_close_short_circuit","gap_id":"%s","subject":"%s"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_gid" "${_dc_subject//\"/}" \
+                >> "${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}" 2>/dev/null || true
+            exit 0
+        fi
+    done
+fi
+
 cd "$REPO_ROOT"
 # INFRA-469: route every `chump` call through the wedge-heal shim.
 export PATH="$REPO_ROOT/bin:$PATH"
