@@ -221,8 +221,8 @@ except Exception as e:
     if [[ -n "$_gap_id" ]] && command -v sqlite3 >/dev/null 2>&1 && [[ -f "$REPO_ROOT/.chump/state.db" ]]; then
         _gap_status="$(sqlite3 "$REPO_ROOT/.chump/state.db" \
             "SELECT status FROM gaps WHERE id='$_gap_id' LIMIT 1;" 2>/dev/null || true)"
-        if [[ "$_gap_status" == "done" || "$_gap_status" == "shipped" ]]; then
-            log "SKIP reopen PR #$pr_num — gap $_gap_id already $_gap_status (superseded dupe / intentional close, not a stale-push auto-close)"
+        if [[ "$_gap_status" == "done" || "$_gap_status" == "shipped" || "$_gap_status" == "blocked" ]]; then
+            log "SKIP reopen PR #$pr_num — gap $_gap_id is $_gap_status (intentional/terminal close: done, shipped, or operator-blocked — not a stale-push auto-close). INFRA-8111: a blocked gap's duplicate PRs must not be resurrected."
             continue
         fi
     fi
