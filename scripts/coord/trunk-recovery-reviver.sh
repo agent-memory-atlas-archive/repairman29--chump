@@ -74,6 +74,7 @@ set -uo pipefail
 # ── Resolve paths ─────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+source "$SCRIPT_DIR/../lib/safe-reopen-gap.sh"   # INFRA-8111: pr_reopen_allowed guard
 
 AMBIENT="${CHUMP_AMBIENT_PATH:-${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}}"
 mkdir -p "$(dirname "$AMBIENT")" 2>/dev/null || true
@@ -426,6 +427,10 @@ sys.exit(0 if '$LABEL' in labels else 1)
             continue
         fi
 
+        if ! pr_reopen_allowed "$num" "$REPO"; then
+            log "PR #$num: skip revive — gap is operator-blocked (INFRA-8111; don't reopen/fresh-PR a blocked gap)."
+            continue
+        fi
         log "PR #$num ($branch): trunk-red victim — reviving"
         if [[ -n "$DRY_RUN" ]]; then
             log "  DRY_RUN: would reopen (or fresh-PR) + re-arm auto-merge for #$num"

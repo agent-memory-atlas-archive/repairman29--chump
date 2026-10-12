@@ -58,30 +58,45 @@ from datetime import datetime
 prs_file = sys.argv[1]
 skip_fresh_mins = int(sys.argv[2])
 data = json.load(open(prs_file))
-GAP_RE = re.compile(r'\b([A-Z]+-\d+)\b')
+# Only the LEADING gap id identifies a PR's gap (chump convention is
+# "GAP-ID: title"). A gap id merely MENTIONED later in the title — e.g.
+# "fix(dedup): ... (RESILIENT-1562 wedge)" — must NOT group the PR as a
+# duplicate of that gap. The old `\b...\b` findall-anywhere matched such
+# mentions and nearly closed the dedup fix's own PR (INFRA-8111).
+GAP_RE = re.compile(r'^\s*([A-Z]+-\d+)\b')
 groups = defaultdict(list)
 for p in data:
-    title = p.get('title', '')
-    gids = list(set(GAP_RE.findall(title)))
-    for g in gids:
-        groups[g].append(p)
+    m = GAP_RE.match(p.get('title', ''))
+    if m:
+        groups[m.group(1)].append(p)
 decisions = []
 now = time.time()
 for g, prs in groups.items():
     if len(prs) < 2:
         continue
-    too_fresh = False
-    for p in prs:
-        upd = datetime.fromisoformat(p['updated_at'].replace('Z', '+00:00'))
-        age_min = (now - upd.timestamp()) / 60
-        if age_min < skip_fresh_mins:
-            too_fresh = True
-            break
-    if too_fresh:
-        continue
+    # Freshness guard (INFRA-8111 fix): exclude only the INDIVIDUAL PRs updated
+    # within skip_fresh_mins from being closed (they may be mid-creation). A
+    # single fresh PR must NOT exempt the whole group — a perpetually-refreshed
+    # swarm (a new attempt every ~hour, rescue organ re-touching them) is exactly
+    # the case that needs deduping, and the old `any-fresh -> skip whole group`
+    # logic guaranteed the janitor never ran on it (the RESILIENT-1562 wedge:
+    # 21 open PRs for one gap, "no eligible groups" for 33h).
+    def _too_fresh(p):
+        # Key on CREATED time, not updated_at: a rescue/shepherd organ touches
+        # updated_at constantly (mass-reopen), so updated_at is fresh forever and
+        # the janitor could never act. A PR created long ago is a stale swarm
+        # member regardless of bot pokes. (INFRA-8111: the RESILIENT-1562 wedge.)
+        created = datetime.fromisoformat(p['created_at'].replace('Z', '+00:00'))
+        return (now - created.timestamp()) / 60 < skip_fresh_mins
     prs_sorted = sorted(prs, key=lambda x: x['created_at'])
-    winner = prs_sorted[0]
-    losers = prs_sorted[1:]
+    stable = [p for p in prs_sorted if not _too_fresh(p)]
+    # winner: oldest stable PR (longest in queue); fall back to oldest overall
+    winner = (stable or prs_sorted)[0]
+    # close every other PR except any still inside the fresh window (next run gets them)
+    losers = [p for p in prs_sorted
+              if p['number'] != winner['number'] and not _too_fresh(p)]
+    if not losers:
+        continue
     decisions.append({
         'gap_id': g,
         'winner': {'n': winner['number'], 'title': winner['title']},

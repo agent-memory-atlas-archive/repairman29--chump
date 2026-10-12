@@ -27,6 +27,22 @@ gap_reopen_allowed() {
     return 0
 }
 
+# pr_reopen_allowed <PR-NUM> <REPO> -> rc 0 allowed, 3 refused.
+# Guard for reopen call sites (pr-rescue, trunk-recovery-reviver) that act on
+# PRs by CI/trunk heuristics and must NOT resurrect a PR whose gap an operator
+# has blocked (INFRA-8111: the RESILIENT-1562 swarm kept coming back because
+# these paths reopened blind to gap status). Extracts the LEADING gap id from
+# the PR title (chump convention "GAP-ID: title") and defers to
+# gap_reopen_allowed. No gap id or a gh lookup miss -> allowed (fail-open: never
+# block legitimate rescue on a lookup failure; only refuse a positively-blocked gap).
+pr_reopen_allowed() {
+    local pr="$1" repo="$2" title gid
+    title="$(gh pr view "$pr" --repo "$repo" --json title --jq '.title' 2>/dev/null || true)"
+    gid="$(printf '%s' "$title" | grep -oE '^[[:space:]]*[A-Z]+-[0-9]+' | tr -d '[:space:]' || true)"
+    [[ -z "$gid" ]] && return 0
+    gap_reopen_allowed "$gid"
+}
+
 safe_reopen_gap() {
     local gid="$1" bin="${CHUMP_BIN:-chump}" status notes
     status="$("$bin" gap show "$gid" --field status 2>/dev/null | tr -d '[:space:]' || true)"

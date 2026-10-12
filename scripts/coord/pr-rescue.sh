@@ -107,6 +107,7 @@ source "${SCRIPT_DIR}/lib/ambient-write.sh"
 export CHUMP_GH_SCRIPT="pr-rescue.sh"
 # shellcheck source=../lib/orchestrator-log.sh
 source "${SCRIPT_DIR}/../lib/orchestrator-log.sh"
+source "${SCRIPT_DIR}/../lib/safe-reopen-gap.sh"   # INFRA-8111: pr_reopen_allowed guard
 orch_log_start "pr-rescue.sh" "$@"
 trap 'orch_log_end "pr-rescue.sh" "$?"' EXIT
 REPO="${GITHUB_REPOSITORY:-}"
@@ -297,6 +298,11 @@ for PR_NUM in ${PR_NUMBERS}; do
                 continue
             fi
 
+            if ! pr_reopen_allowed "${PR_NUM}" "${REPO}"; then
+                log "PR #${PR_NUM}: skip re-fire — gap is operator-blocked (INFRA-8111; don't resurrect a blocked gap's PR)."
+                SKIPPED=$((SKIPPED + 1))
+                continue
+            fi
             log "PR #${PR_NUM}: ZERO CI runs after ${AGE_MINUTES}m — re-firing via close/reopen."
             # The marker goes down BEFORE the close/reopen. If the reopen fails
             # we must still never retry this SHA blindly; a missing marker after
