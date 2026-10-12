@@ -41,6 +41,10 @@ emit() {
     printf '{"ts":"%s","kind":"%s"%s}\n' "$ts" "$kind" "${extra:+,$extra}" >> "$AMBIENT" 2>/dev/null || true
 }
 
+# INFRA-8098: Rust-aware helpers — a non-Rust commit advancing HEAD is not lag.
+# shellcheck source=scripts/lib/rust-head.sh
+[ -f "$REPO_ROOT/scripts/lib/rust-head.sh" ] && . "$REPO_ROOT/scripts/lib/rust-head.sh"
+
 # 1. Current main sha + its commit time (best-effort fetch; tolerate offline).
 git -C "$REPO_ROOT" fetch origin main --quiet 2>/dev/null || true
 MAIN_SHA="$(git -C "$REPO_ROOT" rev-parse origin/main 2>/dev/null)"
@@ -57,6 +61,19 @@ MAIN_SHA_SHORT="${MAIN_SHA:0:${#INSTALLED_SHA_SHORT}}"
 [ -z "$INSTALLED_SHA_SHORT" ] && INSTALLED_SHA_SHORT="unknown"
 
 # 3. Compare.
+# INFRA-8098: Rust-aware — the binary is current if it contains the last
+# Rust-affecting commit, even when HEAD has advanced past it on doc/script/yaml
+# commits (which compile to a byte-identical binary). This is checked BEFORE the
+# exact-HEAD match so non-Rust lag never trips a false merge_deploy_lag_exceeded.
+if declare -F binary_has_rust_head >/dev/null 2>&1 && [ "$INSTALLED_SHA_SHORT" != "unknown" ]; then
+    RUST_SHA="$(rust_head_sha "$REPO_ROOT" "origin/main")"
+    if binary_has_rust_head "$RUST_SHA" "$INSTALLED_SHA_SHORT" "$REPO_ROOT"; then
+        echo "[lag-watchdog] current (rust-aware): installed=$INSTALLED_SHA_SHORT contains last Rust commit ${RUST_SHA:0:12}; HEAD=$MAIN_SHA_SHORT is non-Rust ahead"
+        emit "merge_deploy_lag_ok" "\"sha\":\"$MAIN_SHA_SHORT\",\"reason\":\"rust_current\",\"rust_sha\":\"${RUST_SHA:0:12}\""
+        exit 0
+    fi
+fi
+
 if [ "$INSTALLED_SHA_SHORT" = "$MAIN_SHA_SHORT" ] && [ "$INSTALLED_SHA_SHORT" != "unknown" ]; then
     echo "[lag-watchdog] current: installed=$INSTALLED_SHA_SHORT == main=$MAIN_SHA_SHORT"
     emit "merge_deploy_lag_ok" "\"sha\":\"$MAIN_SHA_SHORT\""

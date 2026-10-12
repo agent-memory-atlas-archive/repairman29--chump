@@ -72,6 +72,9 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${CHUMP_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+# INFRA-8098: Rust-aware deploy helpers (rust_head_sha / binary_has_rust_head)
+# shellcheck source=scripts/lib/rust-head.sh
+[ -f "$REPO_ROOT/scripts/lib/rust-head.sh" ] && . "$REPO_ROOT/scripts/lib/rust-head.sh"
 AMBIENT="$REPO_ROOT/.chump-locks/ambient.jsonl"
 STATE_DIR="$REPO_ROOT/.chump-locks"
 DEPLOYED_SHA_FILE="$STATE_DIR/auto-deploy-last-sha.txt"
@@ -216,11 +219,40 @@ if [[ -n "$LAST_SHA" && "$LAST_SHA" == "$MAIN_SHA" ]]; then
     exit 0
 fi
 
+# INFRA-8098: OS-aware default install target (Linux nodes → ~/.cargo/bin/chump;
+# macOS → Homebrew prefix). Must be resolved before the Rust-aware skip below.
+if [ -n "${CHUMP_RUNNER_BIN:-}" ]; then
+    TARGET_BIN="$CHUMP_RUNNER_BIN"
+elif [ "$(uname -s)" = "Darwin" ]; then
+    TARGET_BIN="/opt/homebrew/bin/chump"
+else
+    TARGET_BIN="$HOME/.cargo/bin/chump"
+fi
+
+# (b2) Rust-aware skip (INFRA-8098). origin/main HEAD advancing is NOT a reason
+# to rebuild — only a Rust-affecting commit changes the binary. Doc/script/yaml
+# commits advance HEAD but compile to a byte-identical binary. Rebuilding the
+# ~190k-LOC binary on every such commit burned cuphead's build cores and tripped
+# the merged-not-running false alarm every ~20 min. If the installed binary
+# already contains the last Rust-affecting commit, record the new HEAD (so the
+# cheap HEAD-equality skip fires next cycle) and exit WITHOUT a rebuild.
+if declare -F binary_has_rust_head >/dev/null 2>&1; then
+    RUST_SHA="$(rust_head_sha "$REPO_ROOT" "origin/main")"
+    INSTALLED_BUILD_SHA="$(extract_build_sha "$TARGET_BIN" 2>/dev/null || echo unknown)"
+    if binary_has_rust_head "$RUST_SHA" "$INSTALLED_BUILD_SHA" "$REPO_ROOT"; then
+        log "SKIP: HEAD advanced to $MAIN_SHA_SHORT but installed binary ($INSTALLED_BUILD_SHA) already contains the last Rust-affecting commit (${RUST_SHA:0:12}) — non-Rust lag, no rebuild"
+        printf '%s\n' "$MAIN_SHA" > "$DEPLOYED_SHA_FILE"
+        emit_ambient "binary_auto_deploy_skipped" \
+            "\"reason\":\"no_rust_change\",\"sha\":\"$MAIN_SHA_SHORT\",\"rust_sha\":\"${RUST_SHA:0:12}\",\"binary_sha\":\"$INSTALLED_BUILD_SHA\""
+        ls -t "$LOG_DIR"/auto-deploy-*.log 2>/dev/null | tail -n +25 | xargs -I{} rm -f {} 2>/dev/null || true
+        exit 0
+    fi
+fi
+
 log "DEPLOY: origin/main advanced (last_deployed=${LAST_SHA:-none}, current=$MAIN_SHA_SHORT)"
 
 # (c) Delegate to refresh-runner-binary.sh (isolated worktree build)
 # That script handles: create detached worktree → cargo build --release → hardcopy → teardown
-TARGET_BIN="${CHUMP_RUNNER_BIN:-/opt/homebrew/bin/chump}"
 PREV_SHA="$(extract_build_sha "$TARGET_BIN" || echo unknown)"
 [[ -n "$PREV_SHA" ]] || PREV_SHA="unknown"
 

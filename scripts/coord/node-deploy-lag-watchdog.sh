@@ -38,6 +38,9 @@ set -uo pipefail
 
 REPO_ROOT="${CHUMP_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 STATE_DIR="$REPO_ROOT/.chump-locks"
+# INFRA-8098: Rust-aware helpers — a non-Rust commit advancing HEAD is not lag.
+# shellcheck source=scripts/lib/rust-head.sh
+[ -f "$REPO_ROOT/scripts/lib/rust-head.sh" ] && . "$REPO_ROOT/scripts/lib/rust-head.sh"
 AMBIENT="${CHUMP_AMBIENT_LOG:-$STATE_DIR/ambient.jsonl}"
 SLO="${CHUMP_NODE_DEPLOY_LAG_SLO_SECS:-1800}"
 UNIT="${CHUMP_NODE_DEPLOY_LAG_UNIT:-chump-node-refresh.service}"
@@ -89,6 +92,17 @@ MAIN_SHA_SHORT="${MAIN_SHA:0:${#INSTALLED_SHA_SHORT}}"
 [[ -z "$INSTALLED_SHA_SHORT" ]] && INSTALLED_SHA_SHORT="unknown"
 
 # 4. Compare.
+# INFRA-8098: Rust-aware — the binary is current if it contains the last
+# Rust-affecting commit, even when HEAD advanced past it on non-Rust commits.
+if declare -F binary_has_rust_head >/dev/null 2>&1 && [[ "$INSTALLED_SHA_SHORT" != "unknown" ]]; then
+    RUST_SHA="$(rust_head_sha "$REPO_ROOT" "origin/main")"
+    if binary_has_rust_head "$RUST_SHA" "$INSTALLED_SHA_SHORT" "$REPO_ROOT"; then
+        echo "[node-deploy-lag-watchdog] current (rust-aware): installed=$INSTALLED_SHA_SHORT contains last Rust commit ${RUST_SHA:0:12}; HEAD=$MAIN_SHA_SHORT is non-Rust ahead"
+        emit "node_deploy_lag_ok" "\"sha\":\"$MAIN_SHA_SHORT\",\"reason\":\"rust_current\",\"rust_sha\":\"${RUST_SHA:0:12}\""
+        exit 0
+    fi
+fi
+
 if [[ "$INSTALLED_SHA_SHORT" == "$MAIN_SHA_SHORT" && "$INSTALLED_SHA_SHORT" != "unknown" ]]; then
     echo "[node-deploy-lag-watchdog] current: installed=$INSTALLED_SHA_SHORT == main=$MAIN_SHA_SHORT"
     emit "node_deploy_lag_ok" "\"sha\":\"$MAIN_SHA_SHORT\""

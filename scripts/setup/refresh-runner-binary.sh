@@ -22,7 +22,18 @@
 set -uo pipefail
 
 REPO_ROOT="${CHUMP_REPO_ROOT:-/Users/jeffadkins/Projects/Chump}"
-TARGET_BIN="${CHUMP_RUNNER_BIN:-/opt/homebrew/bin/chump}"
+# INFRA-8098: OS-aware default install target. Linux fleet nodes install to
+# ~/.cargo/bin/chump (first in the worker PATH); only macOS uses the Homebrew
+# prefix. The old unconditional /opt/homebrew/bin default made the install `cp`
+# fail ("No such file or directory") on every Linux node — cp_failed every
+# cycle, so the binary never deployed on cuphead.
+if [ -n "${CHUMP_RUNNER_BIN:-}" ]; then
+    TARGET_BIN="$CHUMP_RUNNER_BIN"
+elif [ "$(uname -s)" = "Darwin" ]; then
+    TARGET_BIN="/opt/homebrew/bin/chump"
+else
+    TARGET_BIN="$HOME/.cargo/bin/chump"
+fi
 CARGO_BIN="${CHUMP_CARGO_BIN:-$HOME/.cargo/bin/chump}"
 AMBIENT="$REPO_ROOT/.chump-locks/ambient.jsonl"
 LOG_DIR="$REPO_ROOT/.chump-locks/binary-refresh-logs"
