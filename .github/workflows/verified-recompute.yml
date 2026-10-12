@@ -1,0 +1,51 @@
+name: verified-recompute
+
+# RESILIENT-1562: `verified` (ci.yml) aggregates audit.yml + ACP smoke, which live in
+# other workflows. Rather than depend on a fixed wall-clock poll window opening
+# early enough, ci.yml's `verified` polls only a short grace period (lanes still
+# running stay PENDING) and THIS workflow re-runs `verified` on the terminal
+# workflow_run event of Audit / integrations. The verdict is therefore a function
+# of the audit/ACP terminal state, not of timing.
+
+on:
+  workflow_run:
+    workflows: [Audit, integrations]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: verified-recompute-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  rerun-verified:
+    if: github.event.workflow_run.event == 'pull_request' || github.event.workflow_run.event == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Re-run verified for this SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          ci_run="$(gh api "repos/${GH_REPO}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=1" -q '.workflow_runs[0].id // empty')"
+          if [ -z "$ci_run" ]; then echo "no ci.yml run for ${SHA}; nothing to recompute"; exit 0; fi
+          # verified may still be running (it will then see the terminal state itself);
+          # wait for it to finish, then re-run so the verdict reflects audit/ACP terminal state.
+          for _ in $(seq 1 40); do
+            row="$(gh api "repos/${GH_REPO}/actions/runs/${ci_run}/jobs" --paginate -q '.jobs[] | select(.name=="verified") | "\(.id) \(.status) \(.conclusion)"' | tail -1)"
+            [ -z "$row" ] && { echo "no verified job yet"; exit 0; }
+            set -- $row
+            if [ "$2" = "completed" ]; then
+              if [ "$3" = "success" ]; then echo "verified already green"; exit 0; fi
+              gh api -X POST "repos/${GH_REPO}/actions/jobs/$1/rerun" && echo "re-ran verified job $1 (run ${ci_run})"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::warning::verified still running after 10m; leaving to its own poll"

@@ -570,6 +570,9 @@ jobs:
   # (scripts/ci/poll-cross-workflow-checks.sh, since GH Actions `needs:` only
   # sees same-workflow jobs) — then prints a single PASS/FAIL verdict + emits
   # kind=verified_aggregator_decision to ambient.jsonl for offline audit.
+  # RESILIENT-1562: the poll is only a short grace; lanes still running stay
+  # PENDING and .github/workflows/verified-recompute.yml re-runs this job on
+  # Audit/integrations workflow_run completion (event-driven, no 600s window).
   #
   # Not yet required by branch-protection/ruleset 15133729 as of this commit
   # — flipping happens as an immediate follow-up once this cross-workflow
@@ -595,7 +598,7 @@ jobs:
             --sha "$sha" \
             --check "audit" \
             --check "ACP protocol smoke test (Zed / JetBrains compatible)" \
-            --timeout-s 600 --interval-s 15 > /tmp/cross-workflow-lanes.txt
+            --timeout-s 120 --interval-s 15 > /tmp/cross-workflow-lanes.txt
           cat /tmp/cross-workflow-lanes.txt
           audit_result="$(grep '^audit=' /tmp/cross-workflow-lanes.txt | cut -d= -f2)"
           acp_result="$(grep '^ACP protocol smoke test' /tmp/cross-workflow-lanes.txt | cut -d= -f2)"
