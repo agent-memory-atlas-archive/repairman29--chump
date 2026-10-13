@@ -1,0 +1,18 @@
+RESILIENT-1140 Verification Summary
+====================================
+
+Gap: Verify run-fleet.sh uses "claude -p" instead of "--once"
+
+Acceptance Criteria Status:
+✅ AC #1: PASS - grep -R "claude --once" scripts/dispatch/run-fleet.sh returns no matches
+✅ AC #2: PASS - grep -n "claude -p" scripts/dispatch/run-fleet.sh finds auth probe invocation on lines 736-738
+✅ AC #3: PASS - Auth probe successfully uses pattern: timeout 90 claude -p "ok"
+
+Details:
+- run-fleet.sh already uses "claude -p" for auth probing
+- Lines 736 and 738 contain the auth probe invocations
+- Both subscribe and api-key auth paths use "claude -p" correctly
+- No legacy "--once" flag found anywhere in the file
+
+This gap was already satisfied by prior implementation; no code changes needed.
+Verification completed on 2026-10-13.
