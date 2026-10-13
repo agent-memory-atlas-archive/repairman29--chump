@@ -69,6 +69,21 @@ converge_mirror_hard_reset() {
             "$untracked" "$ref" >&2
     fi
 
+    # RESILIENT-1217: a mirror converging to origin/main must END on branch
+    # main. A bare `reset --hard` drags whatever branch (or detached HEAD) was
+    # left checked out to origin/main instead of returning to main.
+    if [ "$ref" = "origin/main" ]; then
+        local cur
+        cur="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
+        if [ "$cur" != "main" ]; then
+            printf '[converge-mirror] on %s, not main — switching back to main\n' "${cur:-detached HEAD}" >&2
+            if git checkout -q -f -B main "$ref"; then
+                return 0
+            fi
+            printf '[converge-mirror] WARN: could not switch to main; resetting in place\n' >&2
+        fi
+    fi
+
     # reset --hard converges over untracked collisions a merge would refuse,
     # and leaves gitignored runtime DBs untouched.
     git reset --hard "$ref"
