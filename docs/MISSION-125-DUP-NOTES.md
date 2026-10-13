@@ -13,3 +13,5 @@ still passes clean. Still no new code needed; close as duplicate of #5245.
 Third re-file re-verified at HEAD `b1e6f9507`: `scripts/ci/test-auto-adopt.sh` still passes clean. No new code needed; duplicate of #5245.
 
 Fourth re-file re-verified at HEAD `d0c777cb0`: `scripts/ci/test-auto-adopt.sh` still passes clean. No new code needed; duplicate of #5245.
+
+Fifth re-file re-verified at HEAD `a4d40f9d4`: `scripts/ci/test-auto-adopt.sh` still passes clean. No new code needed; duplicate of #5245.
