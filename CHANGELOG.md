@@ -25,6 +25,11 @@ single source of truth, with the fleet's own PRs providing the proof.
 **Duty officer resilience:**
 - The duty-officer daemon falls back to a UID-derived `XDG_RUNTIME_DIR`/`DBUS_SESSION_BUS_ADDRESS` when the environment doesn't set them, so it survives launch contexts (cron, non-interactive shells) where a login session hasn't populated them.
 
+**Node auto-converge organ decoupling (RESILIENT-1189):**
+- Fixed a race condition where `node-refresh` (pinning the binary to the last-green commit) was fighting `node-converge` (updating the working tree to origin/main HEAD) over the same shared tree. Root cause: the checkout was permanently reset to a pre-commit parent on machines where green lagged origin/main HEAD by a commit with no build artifact.
+- Solution: decouple the source tree convergence from binary pinning. `node-refresh` now converges the working tree to origin/main HEAD every cycle (same target and primitive as `node-converge`, so they never race), before skipping a binary rebuild. The binary stays pinned to green via an independent `BUILD_PIN_SHA` derived from a detached worktree, leaving the main checkout at HEAD. This also ensures bash-only updates (manifest changes, installer arrays, unit files) reach production even when the binary is unchanged.
+- Migration note: `scripts/ops/organ-manifest.txt` and `scripts/setup/install-helsinki-atc.sh` must be on origin/main before the `node-refresh` daemon fires; a working tree stuck at an older commit will not see these files and cannot install the organ. Run `git fetch origin main && git reset --hard origin/main` on any stuck checkout to recover.
+
 **Scale:** ~280 PRs merged 2026-09-06 → 2026-09-20 across this theme plus the ongoing RESILIENT/CREDIBLE/INFRA backlog. See `git log origin/main --since=2026-09-06` for the full ledger; this section names the dominant shape, not every PR.
 
 ### Added — Agent Client Protocol (ACP) maturity
