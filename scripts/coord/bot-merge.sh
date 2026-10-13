@@ -2732,8 +2732,17 @@ if [[ -n "$_changed_files" ]]; then
     while IFS= read -r _f; do
         [[ -z "$_f" ]] && continue
         case "$_f" in
+            # Cargo manifests change the build graph → NOT safe (must run clippy).
+            Cargo.toml|Cargo.lock|*/Cargo.toml|*/Cargo.lock) _unsafe_count=$((_unsafe_count + 1)) ;;
             *.rs)                              _rs_count=$((_rs_count + 1)) ;;
-            scripts/*|docs/*|*.md|*.yaml|*.sh) ;;
+            # INFRA-8112: a diff of only these cannot change clippy's result
+            # (clippy lints Rust). CI still runs clippy as the real gate. The
+            # safe-set previously omitted *.yml and .github/* — so a gate-wiring
+            # PR (e.g. wiring gitleaks/osv-scanner into .github/workflows/*.yml)
+            # fell through to a full `cargo clippy --workspace` that timed out
+            # the 900s wall-clock budget on slow nodes (INFRA-2426). That is the
+            # bot_merge_timeout that blocked INFRA-8112 from shipping.
+            scripts/*|docs/*|.github/*|*.md|*.yaml|*.yml|*.sh) ;;
             *)                                 _unsafe_count=$((_unsafe_count + 1)) ;;
         esac
     done <<< "$_changed_files"
