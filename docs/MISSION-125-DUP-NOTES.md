@@ -17,3 +17,5 @@ Fourth re-file re-verified at HEAD `d0c777cb0`: `scripts/ci/test-auto-adopt.sh` 
 Fifth re-file re-verified at HEAD `a4d40f9d4`: `scripts/ci/test-auto-adopt.sh` still passes clean. No new code needed; duplicate of #5245.
 
 Sixth re-file re-verified at HEAD `c8227ce00`: `scripts/ci/test-auto-adopt.sh` still passes clean. No new code needed; duplicate of #5245.
+
+Seventh re-file re-verified at HEAD `cc956eca3`: `scripts/ci/test-auto-adopt.sh` still passes clean. No new code needed; duplicate of #5245.
