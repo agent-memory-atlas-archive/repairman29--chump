@@ -97,6 +97,45 @@ EFFORT_RANK = {"xs": 0, "s": 1, "m": 2, "l": 3, "xl": 4, "": 9}
 # resolver all share ONE definition and cannot drift (RESILIENT-1114).
 
 
+def _inflight_pr_gaps(repo_root: str) -> set:
+    """R1 (RESILIENT-1592) — gap-ids that already have an OPEN, un-merged PR.
+
+    Such a gap must NOT be re-picked: re-picking spawns a duplicate PR and IS the
+    re-ship loop (RESILIENT-1573 churned 37 cycles and 3 PRs — #5312/#5315 left
+    orphaned open — before #5320 finally landed). A gap leaves this set when its
+    PR merges (-> gap done) or the PR is closed by the dup/orphan closers
+    (-> re-pickable), so this never permanently wedges a genuinely-failed gap.
+
+    Keyed on the bare "<GAP-ID>:" ship-title convention — identical to
+    check-gap-status-flip.sh:34 and gap-doctor-reconcile.py:576 — so a
+    `fix(X:)` *reference* PR (which does not implement the gap) never counts.
+    The webhook cache drops old closed PRs, so `merged_at IS NULL` ~= an active
+    open PR (blocked/dirty merge states). Fail-open (empty set) on ANY cache
+    error so a missing or locked cache never wedges the picker.
+    """
+    cache = os.path.join(repo_root, ".chump", "github_cache.db")
+    if not os.path.exists(cache):
+        return set()
+    out: set = set()
+    try:
+        import sqlite3
+        pat = re.compile(r"^([A-Z][A-Z0-9]*-\d+):")
+        con = sqlite3.connect(f"file:{cache}?mode=ro", uri=True)
+        try:
+            rows = con.execute(
+                "SELECT title FROM pr_state WHERE merged_at IS NULL AND title IS NOT NULL"
+            ).fetchall()
+        finally:
+            con.close()
+        for (title,) in rows:
+            m = pat.match((title or "").lstrip())
+            if m:
+                out.add(m.group(1))
+    except Exception:
+        return set()
+    return out
+
+
 def _is_pickable_open(g: dict) -> bool:
     """True only for genuinely-open, un-shipped, un-linked gaps.
 
@@ -659,6 +698,11 @@ def main() -> int:
     # (worker.sh scans commit subjects), so a gap-store propagation lag can
     # never cause an immediate re-pick of just-shipped work.
     merged_recent = set(os.environ.get("MERGED_RECENT_GAPS", "").split())
+    # R1 (RESILIENT-1592): gaps with an in-flight open PR are not re-pickable —
+    # the loop-breaker. Unconditional (no opt-out bypass, per INFRA-2429); the
+    # helper already fails-open to an empty set on any cache error, so a missing
+    # or locked cache degrades to prior behaviour without a kill-switch.
+    inflight = _inflight_pr_gaps(os.environ.get("REPO_ROOT", "."))
     cooled = cooled_down_gaps(
         os.environ.get("COOLDOWN_DIR", ""),
         worker_id=os.environ.get("WORKER_ID", os.environ.get("AGENT_ID", "")),
@@ -720,6 +764,11 @@ def main() -> int:
         # MERGED_RECENT_GAPS above) even if the gap-store status field hasn't
         # caught up to "done" yet.
         if gid in merged_recent:
+            continue
+        if gid in inflight:
+            # R1 (RESILIENT-1592): an open un-merged PR already exists for this
+            # gap — wait for it to land or be closed; do not spawn a duplicate.
+            reasons["inflight_pr"] += 1
             continue
         if gid in cooled:
             reasons["cooled_down"] += 1
