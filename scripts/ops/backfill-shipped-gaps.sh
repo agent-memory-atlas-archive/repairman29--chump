@@ -75,8 +75,17 @@ esac
 
 echo "[backfill] mode=$MODE  window=last $DAYS days (since $since_date)"
 
-# Gap-ID regex matches the workflow's regex exactly. Domains kept in sync.
-GAP_ID_REGEX='^([a-z]+\()?(INFRA|EFFECTIVE|RESILIENT|DOC|META|MISSION|CREDIBLE)-([0-9]+)'
+# Gap-ID regex — a bare "<GAP-ID>: …" title prefix means "this PR SHIPS this gap"
+# and is the only form that closes a gap. A conventional-commit scope like
+# "fix(INFRA-8112): …" REFERENCES the gap without closing it (see
+# check-gap-status-flip.sh §convention + INFRA-066) — e.g. a PR that unblocks a
+# gap's ship but does not implement it. This regex MUST require the bare
+# "<DOMAIN>-<NUM>:" prefix so it matches check-gap-status-flip.sh:34 and
+# gap-doctor-reconcile.py:576 exactly. The old permissive form
+# ^([a-z]+\()?(DOMAIN)-([0-9]+) stripped the "fix(" and false-closed any gap
+# merely named in a fix(X:) title — it closed INFRA-8112 off PR #5317, a
+# clippy-classifier fix that never implemented the toolkit.
+GAP_ID_REGEX='^(INFRA|EFFECTIVE|RESILIENT|DOC|META|MISSION|CREDIBLE)-([0-9]+):'
 
 # Query the merged PRs via `gh pr list --state merged`.
 # gh search prs lacks `mergedAt`; gh pr list returns it cleanly. --limit 1000
@@ -116,9 +125,12 @@ skipped_unknown=0
 while IFS=$'\t' read -r pr_number pr_title; do
     total_prs=$((total_prs + 1))
     # Bash regex: build inside the [[ ]] guard.
-    if [[ "$pr_title" =~ ^([a-z]+\()?(INFRA|EFFECTIVE|RESILIENT|DOC|META|MISSION|CREDIBLE)-([0-9]+) ]]; then
-        domain="${BASH_REMATCH[2]}"
-        num="${BASH_REMATCH[3]}"
+    # Only a bare "<GAP-ID>: …" prefix closes (ships) the gap; "fix(X:) …" is a
+    # reference, not a close (see GAP_ID_REGEX note above). This prevents the
+    # false-close of a gap merely named in an enabler PR's scope.
+    if [[ "$pr_title" =~ ^(INFRA|EFFECTIVE|RESILIENT|DOC|META|MISSION|CREDIBLE)-([0-9]+): ]]; then
+        domain="${BASH_REMATCH[1]}"
+        num="${BASH_REMATCH[2]}"
         gap_id="${domain}-${num}"
         matched=$((matched + 1))
 
