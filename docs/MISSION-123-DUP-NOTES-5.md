@@ -48,3 +48,8 @@ passes clean (AC1-AC4). Already delivered by #5225 / #5288; no new code.
 
 Re-verified at HEAD `3ed1f2580`: `bash scripts/ci/test-node-capacity-plan.sh`
 passes clean (AC1-AC4). Already delivered by #5225 / #5288; no new code.
+
+## Tenth occurrence
+
+Re-verified at HEAD `2859134e9`: `bash scripts/ci/test-node-capacity-plan.sh`
+passes clean (AC1-AC4). Already delivered by #5225 / #5288; no new code.
