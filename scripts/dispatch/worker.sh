@@ -518,7 +518,7 @@ classify_rc() {
 # the PR by identity regardless of whether the head branch still exists or
 # which order the branch-push vs. PR-create race landed in.
 _detect_ship_evidence() {
-    local _gap_id="$1" _branch="$2" _ev="" _cache_db="${REPO_ROOT}/.chump/github_cache.db"
+    local _gap_id="$1" _branch="$2" _min_pr="${3:-${_cycle_pr_hwm:-0}}" _ev="" _cache_db="${REPO_ROOT}/.chump/github_cache.db"
     if [ -f "$_cache_db" ]; then
         _ev="$(sqlite3 "$_cache_db" \
             "SELECT number FROM pr_state WHERE head_ref='${_branch}' LIMIT 1" 2>/dev/null || true)"
@@ -526,7 +526,7 @@ _detect_ship_evidence() {
             # RESILIENT-1451: branch may be gone (merged + deleted) — fall
             # back to a title match keyed on GAP ID, not the live head ref.
             _ev="$(sqlite3 "$_cache_db" \
-                "SELECT number FROM pr_state WHERE title LIKE '${_gap_id}:%' ORDER BY number DESC LIMIT 1" 2>/dev/null || true)"
+                "SELECT number FROM pr_state WHERE title LIKE '${_gap_id}:%' AND number > ${_min_pr} ORDER BY number DESC LIMIT 1" 2>/dev/null || true)"
         fi
     fi
     if [ -z "$_ev" ]; then
@@ -544,7 +544,7 @@ _detect_ship_evidence() {
         # lookup above, for the live-gh fallback path — search by GAP ID in
         # the PR title instead of the (possibly deleted) head branch.
         _ev="$(gh pr list --search "${_gap_id} in:title" --state all --json number \
-            --jq '.[0].number // empty' 2>/dev/null || true)"
+            --jq "[.[] | select(.number > ${_min_pr})] | .[0].number // empty" 2>/dev/null || true)"
     fi
     [ -n "$_ev" ] && { printf '%s\n' "$_ev"; return 0; }
     return 1
@@ -1447,6 +1447,17 @@ print('1' if (p == 'P0' and dom == 'MISSION' and e in ('m', 'l', 'xl')) else '0'
     # INFRA-536: cycle timing — record wall-clock start so we can emit
     # elapsed_s in the cycle_end ambient event for p90 measurement.
     _cycle_start_s=$(date +%s)
+    # RESILIENT-1585: PR-number high-water mark at claim time (pr_state has no
+    # created_at column). _detect_ship_evidence's GAP-ID title fallbacks only
+    # accept PRs numbered above it, so historical PRs of the same gap can't
+    # masquerade as this cycle's ship.
+    _cycle_pr_hwm="$(sqlite3 "${REPO_ROOT}/.chump/github_cache.db" \
+        "SELECT COALESCE(MAX(number),0) FROM pr_state" 2>/dev/null || true)"
+    if [ -z "$_cycle_pr_hwm" ] || [ "$_cycle_pr_hwm" = "0" ]; then
+        _cycle_pr_hwm="$(gh pr list --state all --limit 1 --json number \
+            --jq '.[0].number // 0' 2>/dev/null || true)"
+    fi
+    _cycle_pr_hwm="${_cycle_pr_hwm:-0}"
     log "picked gap $GAP_ID"
 
     # INFRA-569: dry-run mode — preview without committing resources.
