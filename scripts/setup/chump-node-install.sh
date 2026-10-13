@@ -1644,6 +1644,35 @@ self_test() {
     # shellcheck disable=SC1090
     . "$node_env"
   fi
+
+  # INFRA-3706: resolve and verify canonical store path from node.env
+  local resolved_store_dir="$CHUMP_STATE_DIR"
+  if [ -z "$resolved_store_dir" ]; then
+    no "Error: CHUMP_STATE_DIR not set (node.env may be missing or unreadable)"
+    return 1
+  fi
+
+  # Check for local .chump/state.db in current directory
+  if [ -f ".chump/state.db" ]; then
+    no "Error: local .chump/state.db detected; use canonical store"
+    return 1
+  fi
+
+  # Verify resolved store path matches the canonical STATE_DIR
+  if [ "$resolved_store_dir" != "$STATE_DIR" ]; then
+    no "Error: resolved store path does not match CHUMP_STATE_DIR"
+    return 1
+  fi
+
+  ok "Canonical store verified: $resolved_store_dir"
+
+  # INFRA-3706 AC4: invoke chump gap list to complete the test
+  if ! "$BIN" gap list --status open --json >/dev/null 2>&1; then
+    no "Error: chump gap list failed"
+    return 1
+  fi
+  ok "chump gap list executed successfully"
+
   if [ "$CONTROL_PLANE_ONLY" = 1 ]; then
     CHUMP_NODE_WORK_ENABLED=0
     CHUMP_NODE_MODE="control-plane"
