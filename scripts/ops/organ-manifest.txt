@@ -292,6 +292,11 @@ enabled     chump-outcome-verify-heal-consumer.timer  role=brain requires=bin:ch
 # Backstop for the fragile bot-merge auto-close; without it the gap store drifts from GitHub.
 enabled     chump-gap-closure-reconcile.timer  role=janitor requires=bin:gh
 
+# chump-gap-close-decomposed.timer: auto-close decomposed umbrella gaps (RESILIENT-1366).
+# Periodically walks the gap store and closes parent umbrellas whose decomposed
+# child slices have all shipped.
+enabled     chump-gap-close-decomposed.timer  role=janitor requires=bin:chump
+
 # RESILIENT-366: chump-armed-rebaser.timer and chump-board-cycle.timer are both
 # in install-helsinki-atc.sh's SYSTEM_TIMERS roster but, until this line, were
 # MISSING from this manifest — meaning organ-reconcile could never revive
