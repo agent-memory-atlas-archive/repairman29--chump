@@ -9,7 +9,7 @@
 #
 # THE 9 SIGNS (group / lead_or_lag):
 #   1 merge_throughput    flow/lagging     merges/24h
-#   2 oldest_pr_age       flow/leading     oldest open PR age (minutes)
+#   2 oldest_open_pr_age_min flow/leading     oldest open PR age (minutes)
 #   3 ci_run_pass_rate    quality/leading  CI RUN pass-rate % (success/decided
 #                                           runs, 24h) — distinct from
 #                                           dashboard/ci-qa-score's
@@ -126,7 +126,7 @@ NOW_EPOCH="$(date -u +%s)"
 # ════════════════════════════════════════════════════════════════════════════
 # merge_throughput  merges/24h            hi   green>30  amber>=10  red<10
 CFG_MERGE_GREEN=30;   CFG_MERGE_AMBER=10
-# oldest_pr_age     minutes               lo   green<60  amber<=240 red>240
+# oldest_open_pr_age_min minutes            lo   green<60  amber<=240 red>240
 CFG_OLDPR_GREEN=60;   CFG_OLDPR_AMBER=240
 # ci_run_pass_rate  percent               hi   green>90  amber>=75  red<75
 CFG_CI_GREEN=90;      CFG_CI_AMBER=75
@@ -184,7 +184,7 @@ else
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
-# 2 · oldest_pr_age  (flow / leading)  — THE CLOCK. Age of the oldest open PR.
+# 2 · oldest_open_pr_age_min (flow / leading) — THE CLOCK. Age of the oldest open PR.
 # ════════════════════════════════════════════════════════════════════════════
 oldest_created="$(gh pr list --repo "$GH_REPO" --state open --limit 400 --json createdAt \
                   --jq 'sort_by(.createdAt)|.[0].createdAt // empty' 2>/dev/null)"
@@ -193,14 +193,14 @@ if [[ -n "$oldest_created" ]]; then
   age_min=$(( (NOW_EPOCH - oldest_epoch) / 60 ))
   (( age_min < 0 )) && age_min=0
   s="$(status_lo "$age_min" "$CFG_OLDPR_GREEN" "$CFG_OLDPR_AMBER")"
-  SIGNS+=("$(mksign oldest_pr_age "Oldest Open PR Age" flow leading \
+  SIGNS+=("$(mksign oldest_open_pr_age_min "Oldest Open PR Age" flow leading \
     "$(jnum "$age_min")" "minutes" "$s" \
     "clear/diagnose the oldest PR NOW (the clock)" \
     "oldest open PR created $oldest_created ($age_min min ago) (gh pr list, min createdAt)" \
     "{\"green\":\"<$CFG_OLDPR_GREEN\",\"amber\":\"$CFG_OLDPR_GREEN-$CFG_OLDPR_AMBER\",\"red_desc\":\">$CFG_OLDPR_AMBER min\"}")")
 else
   # no open PRs is a GREEN clock, not unknown
-  SIGNS+=("$(mksign oldest_pr_age "Oldest Open PR Age" flow leading \
+  SIGNS+=("$(mksign oldest_open_pr_age_min "Oldest Open PR Age" flow leading \
     0 "minutes" "green" \
     "clear/diagnose the oldest PR NOW (the clock)" \
     "no open PRs on $GH_REPO — the clock is empty" \

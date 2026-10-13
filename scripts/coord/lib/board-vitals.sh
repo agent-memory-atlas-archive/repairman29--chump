@@ -523,14 +523,14 @@ board_vitals_check() {
     # So: bypass the in-flight gate whenever main is currently red — the drought
     # + worker-silence conditions still both have to hold, so this only fires
     # once the line has genuinely gone dead for the full window.
-    local last_merge_ep merge_age_min="" prs_in_flight
+    local last_merge_ep last_merge_age_min="" prs_in_flight
     last_merge_ep="$(git -C "$(_bv_repo_root)" log origin/main -1 --format=%ct 2>/dev/null)"
     [[ "$last_merge_ep" =~ ^[0-9]+$ ]] || last_merge_ep=0
     prs_in_flight="$(_bv_prs_in_flight)"
     [[ "$prs_in_flight" =~ ^-?[0-9]+$ ]] || prs_in_flight=-1
     if (( last_merge_ep > 0 )); then
-        merge_age_min=$(( (now - last_merge_ep) / 60 ))
-        if (( merge_age_min >= drought_min )) \
+        last_merge_age_min=$(( (now - last_merge_ep) / 60 ))
+        if (( last_merge_age_min >= drought_min )) \
            && ( (( prs_in_flight == 0 )) || (( main_red_span >= 1 )) ) \
            && (( worker_silent == 1 )); then
             incidents=$((incidents+1))
@@ -541,15 +541,15 @@ board_vitals_check() {
             local diag=""
             if [[ "${CHUMP_BOARD_VITALS_ESCALATE:-1}" == "1" ]] && [[ "${CHUMP_BOARD_VITALS_DRY_RUN:-0}" != "1" ]]; then
                 _bv_emit "board_vitals_novel_escalation" \
-                    "\"merge_age_min\":\"${merge_age_min}\",\"worker_silent_min\":\"${worker_age_min}\""
-                diag="$(_bv_llm_diagnose "merge_age_min=${merge_age_min}; prs_in_flight=0; worker_silent_min=${worker_age_min}; disk_pct=${disk_pct}")"
+                    "\"last_merge_age_min\":\"${last_merge_age_min}\",\"worker_silent_min\":\"${worker_age_min}\""
+                diag="$(_bv_llm_diagnose "last_merge_age_min=${last_merge_age_min}; prs_in_flight=0; worker_silent_min=${worker_age_min}; disk_pct=${disk_pct}")"
             fi
             local in_flight_desc="0 PRs in flight"
             if (( prs_in_flight != 0 )) && (( main_red_span >= 1 )); then
                 in_flight_desc="${prs_in_flight} PR(s) BLOCKED behind red main (not real progress)"
             fi
             _bv_maybe_page "merge_stall" \
-"🔴 **Merge stall — the line is dead.** No merge to main in ${merge_age_min}m (threshold ${drought_min}m), ${in_flight_desc}, and the worker has produced nothing for ${worker_age_min}m. Past the self-heal window — a human needs to look.$( [[ -n "$diag" ]] && printf '\nLLM triage: %s' "$diag" ) (board-vitals.sh)"
+"🔴 **Merge stall — the line is dead.** No merge to main in ${last_merge_age_min}m (threshold ${drought_min}m), ${in_flight_desc}, and the worker has produced nothing for ${worker_age_min}m. Past the self-heal window — a human needs to look.$( [[ -n "$diag" ]] && printf '\nLLM triage: %s' "$diag" ) (board-vitals.sh)"
         fi
     fi
 
@@ -651,15 +651,15 @@ board_vitals_check() {
     fi
 
     _bv_emit "board_vitals_tick" \
-"\"incidents\":${incidents},\"disk_pct\":\"${disk_pct}\",\"merge_age_min\":\"${merge_age_min}\",\"worker_silent\":${worker_silent},\"main_red_span_min\":${main_red_span}"
+"\"incidents\":${incidents},\"disk_pct\":\"${disk_pct}\",\"last_merge_age_min\":\"${last_merge_age_min}\",\"worker_silent\":${worker_silent},\"main_red_span_min\":${main_red_span}"
 
     # RESILIENT-410: unconditional proof-of-life to STDOUT — so the resident
     # watch is visible in the board-cycle beat's systemd JOURNAL (where the
     # human board looks with journalctl), not only in .chump-locks/ambient.jsonl.
     # Without this line a healthy watch (incidents=0, emits only to ambient) is
     # indistinguishable from a dead one in the journal. Prints EVERY run.
-    printf '[board-vitals] tick — incidents=%s disk=%s%% merge_age=%sm worker_silent=%s main_red_span=%sm%s\n' \
-        "${incidents}" "${disk_pct:-?}" "${merge_age_min:-?}" "${worker_silent}" "${main_red_span}" \
+    printf '[board-vitals] tick — incidents=%s disk=%s%% last_merge_age=%sm worker_silent=%s main_red_span=%sm%s\n' \
+        "${incidents}" "${disk_pct:-?}" "${last_merge_age_min:-?}" "${worker_silent}" "${main_red_span}" \
         "$( (( incidents > 0 )) && printf ' — PAGED (see board_vitals_page_sent)' || true )"
     return 0
 }
