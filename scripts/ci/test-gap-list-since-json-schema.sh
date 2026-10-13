@@ -67,12 +67,18 @@ for domain in "${DOMAINS[@]}"; do
     title="credible-061-fixture-$(echo "$domain" | tr '[:upper:]' '[:lower:]')"
     seeded=0
     for attempt in 1 2 3; do
+        # RESILIENT, CREDIBLE domains require --evidence for P1 gaps (CREDIBLE-107 gate)
+        evidence_arg=""
+        if [[ "$domain" == "RESILIENT" ]] || [[ "$domain" == "CREDIBLE" ]]; then
+            evidence_arg="--evidence test fixture"
+        fi
         if err="$("$BIN" gap reserve \
                     --domain "$domain" \
                     --priority P1 \
                     --effort xs \
                     --title "$title" \
                     --force-duplicate \
+                    $evidence_arg \
                     --quiet 2>&1)"; then
             seeded=1
             break

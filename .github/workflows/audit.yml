@@ -491,6 +491,10 @@ jobs:
           source scripts/ci/lib/discover-chump-bin.sh
           bash scripts/ci/test-cross-pr-contract.sh
 
+      - name: gap list --json seed consistency — fixture produces ≥5 gaps (CREDIBLE-061)
+        if: matrix.shard == 1
+        run: bash scripts/ci/test-credible-061-seed-consistency.sh
+
       - name: gap list --json schema audit — required fields present in every gap object (CREDIBLE-061)
         if: matrix.shard == 1
         run: bash scripts/ci/test-gap-list-since-json-schema.sh
