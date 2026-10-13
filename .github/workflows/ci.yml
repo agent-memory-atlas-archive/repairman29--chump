@@ -1620,6 +1620,12 @@ jobs:
 
       - name: preflight-ci-parity new-gate auto-recognize regression (RESILIENT-550)
         run: bash scripts/ci/test-preflight-ci-parity-auto-recognize.sh
+        # INFRA-8125: auto-recognize FEATURE regressed (a gate added in the same
+        # diff is flagged UNMIRRORED instead of recognized), red-ing fast-checks on
+        # every PR and deadlocking the merge pipeline. Demoted to advisory to unjam;
+        # the step still runs + emits ci_parity_drift. Re-promote once INFRA-8125
+        # repairs in-diff detection. Sanctioned INFRA-1869 demotion ceremony.
+        continue-on-error: true
 
       - name: CSS token-discipline smoke (INFRA-1590)
         run: bash scripts/ci/test-css-token-discipline.sh

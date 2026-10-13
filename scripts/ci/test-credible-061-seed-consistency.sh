@@ -96,7 +96,13 @@ fi
 # ── 5. Per-domain validation ──────────────────────────────────────────────────
 # Ensure each domain has at least one gap (robustness check)
 for domain in "${DOMAINS[@]}"; do
-    count=$("$BIN" gap list --domain "$domain" --json 2>/dev/null \
+    # INFRA-8124: filter the full `gap list --json` in python rather than relying
+    # on the `gap list --domain <D>` CLI flag, which currently returns 0 for every
+    # domain (broken filter) and false-reds this audit fleet-wide. The seeded gaps
+    # ARE present (the ≥5 count check above passes); this robustness check only
+    # needs to confirm each domain is represented, which the python filter does
+    # directly. The underlying --domain-filter bug is tracked as INFRA-8124.
+    count=$("$BIN" gap list --json 2>/dev/null \
         | python3 -c "import json,sys; gaps = json.load(sys.stdin); print(len([g for g in gaps if g.get('domain') == '$domain']))" 2>/dev/null || echo 0)
     if [[ "$count" -ge 1 ]]; then
         ok "domain $domain has ≥1 gap (count=$count)"

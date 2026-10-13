@@ -67,7 +67,22 @@ Each entry is a markdown sub-heading with a structured body:
 > Hopefully this stays empty. Every entry here is a discipline regression
 > that an operator accepted as the lesser evil. Track 'em.
 
-(no entries yet)
+## preflight-ci-parity new-gate auto-recognize regression (RESILIENT-550)
+
+- **CI file:** .github/workflows/ci.yml
+- **CI line (anchor):** preflight-ci-parity new-gate auto-recognize regression (RESILIENT-550)
+- **Demoted at:** 2026-10-13 20:40:00 UTC
+- **Demoted by:** INFRA-8125
+- **Demote reason:** the auto-recognize FEATURE regressed (a gate defined in the
+  same PR diff is flagged UNMIRRORED instead of recognized), turning this
+  regression test red on every PR and deadlocking the whole merge pipeline
+  (0/17 armed PRs landable). Demoted to advisory (continue-on-error) so the
+  pipeline can flow; the step still runs + emits ci_parity_drift. NOTE: this is
+  the RESILIENT-550 regression test, not the promoted test-preflight-ci-parity
+  drift gate (that stays strict). Re-promote when INFRA-8125 repairs in-diff
+  detection. Pairs with Phase R3 (META-195 consensus admin-merge) — root is
+  --admin letting unmirrored gates accumulate.
+
 
 ## Adding an entry (workflow)
 
