@@ -1617,6 +1617,9 @@ jobs:
       - name: preflight-ci-parity synthetic-gate smoke (INFRA-2084)
         run: bash scripts/ci/test-preflight-ci-parity-smoke.sh
 
+      - name: preflight-ci-parity new-gate auto-recognize regression (RESILIENT-550)
+        run: bash scripts/ci/test-preflight-ci-parity-auto-recognize.sh
+
       - name: CSS token-discipline smoke (INFRA-1590)
         run: bash scripts/ci/test-css-token-discipline.sh
 
