@@ -33,3 +33,8 @@ rather than hand-fixed, per the no-hand-work discipline.
 
 Re-verified at HEAD `0b5704586`: `bash scripts/ci/test-node-capacity-plan.sh`
 passes clean (AC1-AC4). Already delivered by #5225 / #5288; no new code.
+
+## Seventh occurrence
+
+Re-verified at HEAD `94a6cc381`: `bash scripts/ci/test-node-capacity-plan.sh`
+passes clean (AC1-AC4). Already delivered by #5225 / #5288; no new code.
