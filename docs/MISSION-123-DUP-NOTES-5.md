@@ -28,3 +28,8 @@ closed four prior times (PRs #5225-closure, #5232, #5236, #5239, #5240).
 The underlying re-filing mechanism should be investigated so the fleet
 stops burning claim/ship cycles on an already-shipped slice — flagged here
 rather than hand-fixed, per the no-hand-work discipline.
+
+## Sixth occurrence
+
+Re-verified at HEAD `0b5704586`: `bash scripts/ci/test-node-capacity-plan.sh`
+passes clean (AC1-AC4). Already delivered by #5225 / #5288; no new code.
