@@ -841,12 +841,7 @@ def main() -> int:
         if worker_model == "pro" and e in ("xs", "s", "l", "xl") and not _is_p0_mission:
             reasons["model_effort_gate"] += 1
             continue
-        if worker_model == "haiku" and e in ("m", "l", "xl") and not _is_p0_mission:
-            reasons["model_effort_gate"] += 1
-            continue
-        if worker_model == "sonnet" and e == "xs" and not _is_p0_mission:
-            reasons["model_effort_gate"] += 1
-            continue
+        # RESILIENT-1138: haiku/sonnet effort gates retired; only deepseek tiers gate.
         try:
             dep_list = parse_dep_list(g.get("depends_on"))
         except MalformedDepList:

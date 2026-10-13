@@ -621,23 +621,7 @@ def main() -> int:
             continue
         if worker_model == "pro" and e in ("xs", "s", "l", "xl") and not _is_p0_mission:
             continue
-        if worker_model == "haiku" and e in ("m", "l", "xl") and not _is_p0_mission:
-            continue
-        # INFRA-2998: the sonnet-refuses-xs gate assumed a MIXED fleet where
-        # haiku workers pick up xs/s slack. run-fleet.sh defaults FLEET_MODEL
-        # to sonnet (all-sonnet fleet) and INFRA-2997 flipped routing.yaml's
-        # xs/s routes away from haiku (flat subscription = no per-token cost
-        # delta, and haiku stalls ~60% of cycles — RESILIENT-154). Refusing
-        # xs here left regular (non-P0-MISSION) xs gaps with no worker at
-        # all. Gate is now opt-in for operators who reintroduce a real mixed
-        # haiku+sonnet fleet.
-        if (
-            worker_model == "sonnet"
-            and e == "xs"
-            and not _is_p0_mission
-            and os.environ.get("CHUMP_MIXED_FLEET_XS_GATE", "0") == "1"
-        ):
-            continue
+        # RESILIENT-1138: haiku/sonnet effort gates retired; only deepseek tiers gate.
         # Conservative: skip gaps with non-empty depends_on.
         # INFRA-397: depends_on arrives as a JSON-encoded string from
         # `chump gap list --json` (e.g. "[]" or '["INFRA-100"]'), not a

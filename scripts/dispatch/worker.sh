@@ -1780,7 +1780,8 @@ When done, reply with the PR number only (e.g. \"#1234\")."
             # explicitly; xs/s used to fall to haiku, now defaults sonnet.
             FLEET_MODEL="${FLEET_MODEL-sonnet}"
             _model_arg=()
-            [[ -n "$FLEET_MODEL" ]] && _model_arg=(--model "$FLEET_MODEL")
+            # RESILIENT-1138: flash/pro are deepseek tier labels, not claude model ids.
+            [[ -n "$FLEET_MODEL" && "$FLEET_MODEL" != "flash" && "$FLEET_MODEL" != "pro" ]] && _model_arg=(--model "$FLEET_MODEL")
 
             # INFRA-1045: apply harness git identity (opencode-bigpickle, etc.)
             if [[ -n "${HARNESS_GIT_EMAIL:-}" ]]; then

@@ -2,7 +2,7 @@
 # INFRA-471: test model-class-aware fleet routing.
 #
 # Verifies that:
-#   1. haiku workers skip effort=m/l/xl gaps at pick time
+#   1. flash (deepseek) workers take xs/s only; haiku/sonnet gates retired (RESILIENT-1138)
 #   2. sonnet workers pick effort=xs gaps by default (INFRA-2998: all-sonnet
 #      fleet); refusal is opt-in via CHUMP_MIXED_FLEET_XS_GATE=1
 #   3. _resolve_model.py returns the correct model class per routing.yaml
@@ -22,7 +22,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; FAIL=$((FAIL+1)); }
 
 # ── Test fixture: fake gap JSON with various effort levels ─────────────────
 GAP_JSON='[
-  {"id":"TEST-001","domain":"INFRA","priority":"P1","effort":"xs","status":"open","created_at":1},
+  {"id":"TEST-001","domain":"INFRA","priority":"P1","effort":"xs","status":"open","created_at":1,"acceptance_criteria":"has real criteria"},
   {"id":"TEST-002","domain":"INFRA","priority":"P1","effort":"s", "status":"open","created_at":2},
   {"id":"TEST-003","domain":"INFRA","priority":"P1","effort":"m", "status":"open","created_at":3},
   {"id":"TEST-004","domain":"INFRA","priority":"P1","effort":"l", "status":"open","created_at":4},
@@ -49,82 +49,37 @@ run_picker() {
     printf '%s' "$result"
 }
 
-# ── 1. haiku refuses m/l/xl ─────────────────────────────────────────────────
-# With haiku, only TEST-001 (xs) and TEST-002 (s) are eligible.
-# Picker sorts by effort rank then created_at → should pick TEST-001 (xs, rank=0).
-picked="$(run_picker haiku)"
+# ── 1. flash (deepseek) takes xs/s only; haiku gate retired (RESILIENT-1138) ──
+picked="$(run_picker flash)"
 if [[ "$picked" == "TEST-001" ]] || [[ "$picked" == "TEST-002" ]]; then
-    ok "haiku picks xs/s (picked=$picked)"
+    ok "flash picks xs/s (picked=$picked)"
 else
-    fail "haiku should pick xs/s but got: '$picked'"
+    fail "flash should pick xs/s but got: '$picked'"
 fi
 
-# Verify haiku does NOT pick m
-GAP_JSON_M='[{"id":"TEST-M","domain":"INFRA","priority":"P1","effort":"m","status":"open","created_at":1}]'
 tmpf="$(mktemp -t routing-test.XXXXXX)"
-printf '%s' "$GAP_JSON_M" > "$tmpf"
-haiku_m="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=haiku FLEET_PRIORITY_FILTER="" \
+printf '[{"id":"TEST-M","domain":"INFRA","priority":"P1","effort":"m","status":"open","created_at":1,"acceptance_criteria":"has real criteria"}]' > "$tmpf"
+flash_m="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=flash FLEET_PRIORITY_FILTER="" \
     FLEET_DOMAIN_FILTER="" FLEET_EFFORT_FILTER="" EXCLUDE_RE="^$" \
     ACTIVE_GAPS="" WORKER_INDEX=1 COOLDOWN_DIR="" \
     python3 "$PICK_SCRIPT" 2>/dev/null || true)"
 rm -f "$tmpf"
-if [[ -z "$haiku_m" ]]; then
-    ok "haiku refuses effort=m"
-else
-    fail "haiku should refuse effort=m but picked: '$haiku_m'"
-fi
+if [[ -z "$flash_m" ]]; then ok "flash refuses effort=m"; else fail "flash should refuse effort=m, got: '$flash_m'"; fi
 
-# Verify haiku does NOT pick l
-GAP_JSON_L='[{"id":"TEST-L","domain":"INFRA","priority":"P1","effort":"l","status":"open","created_at":1}]'
+# haiku/sonnet gates are retired: both pick any effort
 tmpf="$(mktemp -t routing-test.XXXXXX)"
-printf '%s' "$GAP_JSON_L" > "$tmpf"
-haiku_l="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=haiku FLEET_PRIORITY_FILTER="" \
-    FLEET_DOMAIN_FILTER="" FLEET_EFFORT_FILTER="" EXCLUDE_RE="^$" \
-    ACTIVE_GAPS="" WORKER_INDEX=1 COOLDOWN_DIR="" \
-    python3 "$PICK_SCRIPT" 2>/dev/null || true)"
+printf '[{"id":"TEST-XS","domain":"INFRA","priority":"P1","effort":"xs","status":"open","created_at":1,"acceptance_criteria":"has real criteria"}]' > "$tmpf"
+for mdl in sonnet haiku; do
+    got="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=$mdl FLEET_PRIORITY_FILTER="" \
+        FLEET_DOMAIN_FILTER="" FLEET_EFFORT_FILTER="" EXCLUDE_RE="^$" \
+        ACTIVE_GAPS="" WORKER_INDEX=1 COOLDOWN_DIR="" \
+        CHUMP_MIXED_FLEET_XS_GATE=1 python3 "$PICK_SCRIPT" 2>/dev/null || true)"
+    if [[ "$got" == "TEST-XS" ]]; then ok "$mdl picks effort=xs (gate retired)"; else fail "$mdl should pick xs, got: '$got'"; fi
+done
 rm -f "$tmpf"
-if [[ -z "$haiku_l" ]]; then
-    ok "haiku refuses effort=l"
-else
-    fail "haiku should refuse effort=l but picked: '$haiku_l'"
-fi
-
-# ── 2. sonnet picks xs by default (INFRA-2998) ─────────────────────────────
-# The sonnet-refuses-xs gate assumed a MIXED fleet where haiku handles xs/s.
-# run-fleet.sh defaults to an all-sonnet fleet (FLEET_MODEL=sonnet), so the
-# gate is now opt-in via CHUMP_MIXED_FLEET_XS_GATE=1 — default (unset) is
-# sonnet picks xs.
-GAP_JSON_XS='[{"id":"TEST-XS","domain":"INFRA","priority":"P1","effort":"xs","status":"open","created_at":1,"acceptance_criteria":"has real criteria"}]'
-tmpf="$(mktemp -t routing-test.XXXXXX)"
-printf '%s' "$GAP_JSON_XS" > "$tmpf"
-sonnet_xs="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=sonnet FLEET_PRIORITY_FILTER="" \
-    FLEET_DOMAIN_FILTER="" FLEET_EFFORT_FILTER="" EXCLUDE_RE="^$" \
-    ACTIVE_GAPS="" WORKER_INDEX=1 COOLDOWN_DIR="" \
-    python3 "$PICK_SCRIPT" 2>/dev/null || true)"
-rm -f "$tmpf"
-if [[ "$sonnet_xs" == "TEST-XS" ]]; then
-    ok "sonnet picks effort=xs by default (all-sonnet fleet, INFRA-2998)"
-else
-    fail "sonnet should pick effort=xs by default but got: '$sonnet_xs'"
-fi
-
-# sonnet refuses xs when the mixed-fleet opt-in gate is explicitly enabled
-tmpf="$(mktemp -t routing-test.XXXXXX)"
-printf '%s' "$GAP_JSON_XS" > "$tmpf"
-sonnet_xs_gated="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=sonnet FLEET_PRIORITY_FILTER="" \
-    FLEET_DOMAIN_FILTER="" FLEET_EFFORT_FILTER="" EXCLUDE_RE="^$" \
-    ACTIVE_GAPS="" WORKER_INDEX=1 COOLDOWN_DIR="" \
-    CHUMP_MIXED_FLEET_XS_GATE=1 \
-    python3 "$PICK_SCRIPT" 2>/dev/null || true)"
-rm -f "$tmpf"
-if [[ -z "$sonnet_xs_gated" ]]; then
-    ok "sonnet refuses effort=xs when CHUMP_MIXED_FLEET_XS_GATE=1"
-else
-    fail "sonnet should refuse effort=xs under mixed-fleet gate but picked: '$sonnet_xs_gated'"
-fi
 
 # sonnet accepts m
-GAP_JSON_SM='[{"id":"TEST-SM","domain":"INFRA","priority":"P1","effort":"m","status":"open","created_at":1}]'
+GAP_JSON_SM='[{"id":"TEST-SM","domain":"INFRA","priority":"P1","effort":"m","status":"open","created_at":1,"acceptance_criteria":"has real criteria"}]'
 tmpf="$(mktemp -t routing-test.XXXXXX)"
 printf '%s' "$GAP_JSON_SM" > "$tmpf"
 sonnet_m="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=sonnet FLEET_PRIORITY_FILTER="" \
@@ -151,17 +106,17 @@ resolve() {
 # haiku from the fleet — sonnet is the floor"): haiku stalled ~60% of cycles and
 # saves $0 on a flat subscription. _resolve_model.py now returns sonnet for xs/s.
 m_for_xs="$(resolve TEST-XS xs INFRA)"
-if [[ "$m_for_xs" == "sonnet" ]]; then
-    ok "resolve: effort=xs → sonnet (RESILIENT-154: no haiku)"
+if [[ "$m_for_xs" == "flash" ]]; then
+    ok "resolve: effort=xs → flash (deepseek, RESILIENT-1138)"
 else
-    fail "resolve: effort=xs should → sonnet, got: '$m_for_xs'"
+    fail "resolve: effort=xs should → flash, got: '$m_for_xs'"
 fi
 
 m_for_s="$(resolve TEST-S s INFRA)"
-if [[ "$m_for_s" == "sonnet" ]]; then
-    ok "resolve: effort=s → sonnet (RESILIENT-154: no haiku)"
+if [[ "$m_for_s" == "flash" ]]; then
+    ok "resolve: effort=s → flash (deepseek, RESILIENT-1138)"
 else
-    fail "resolve: effort=s should → sonnet, got: '$m_for_s'"
+    fail "resolve: effort=s should → flash, got: '$m_for_s'"
 fi
 
 m_for_m="$(resolve TEST-M m INFRA)"
@@ -198,15 +153,15 @@ POOL='[
 ]'
 tmpf="$(mktemp -t routing-test.XXXXXX)"
 printf '%s' "$POOL" > "$tmpf"
-haiku_pool="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=haiku FLEET_PRIORITY_FILTER="" \
+flash_pool="$(GAP_JSON_FILE="$tmpf" FLEET_MODEL=flash FLEET_PRIORITY_FILTER="" \
     FLEET_DOMAIN_FILTER="" FLEET_EFFORT_FILTER="" EXCLUDE_RE="^$" \
     ACTIVE_GAPS="" WORKER_INDEX=1 COOLDOWN_DIR="" \
     python3 "$PICK_SCRIPT" 2>/dev/null || true)"
 rm -f "$tmpf"
-if [[ "$haiku_pool" == "POOL-XS" ]] || [[ "$haiku_pool" == "POOL-S" ]]; then
-    ok "mixed pool: haiku picks xs/s (got $haiku_pool)"
+if [[ "$flash_pool" == "POOL-XS" ]] || [[ "$flash_pool" == "POOL-S" ]]; then
+    ok "mixed pool: flash picks xs/s (got $flash_pool)"
 else
-    fail "mixed pool: haiku should pick xs/s, got: '$haiku_pool'"
+    fail "mixed pool: flash should pick xs/s, got: '$flash_pool'"
 fi
 
 tmpf="$(mktemp -t routing-test.XXXXXX)"

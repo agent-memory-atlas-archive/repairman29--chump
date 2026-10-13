@@ -12,11 +12,12 @@
 # selection in worker.sh — FLEET_MODEL is no longer global; it is overridden
 # per gap via _resolve_model.py which walks this table. Also controls which
 # effort levels each model-class worker accepts at pick time:
-#   haiku  — picks xs, s only (refuses m, l, xl)
-#   sonnet — picks s, m, l, xl (refuses xs)
+#   flash  — deepseek tier; picks xs, s only (RESILIENT-1138)
+#   pro    — deepseek tier; picks m only
+#   sonnet — picks any effort (haiku/sonnet gate retired, RESILIENT-1138)
 #   opus   — picks any effort
 #
-# model_class field values: haiku | sonnet | opus
+# model_class field values: flash | pro | sonnet | opus
 #
 # Candidate fields:
 #   backend       — `claude` or `chump-local`
@@ -65,8 +66,8 @@ routes:
       - { backend: chump-local, model: meta-llama/Llama-3.3-70B-Instruct-Turbo-Free, provider_pfx: TOGETHER, why: together-medium-fallback }
 
   - match: { effort: xs }
-    model_class: sonnet
-    why: RESILIENT-154 — sonnet is the floor. Haiku stalled ~60% of cycles (runs cargo check on shell-only gaps, hesitates in --dangerously-skip-permissions) and saves $0 on a flat subscription.
+    model_class: flash
+    why: RESILIENT-1138 — xs/s go to deepseek (flash); haiku/sonnet gate retired.
     candidates:
       - { backend: chump-local, model: openai/gpt-oss-120b, provider_pfx: GROQ, why: groq-fast-cheap }
       - { backend: chump-local, model: meta-llama/Llama-3.3-70B-Instruct-Turbo-Free, provider_pfx: TOGETHER, why: together-free-fallback }
@@ -75,8 +76,8 @@ routes:
   # default_candidates (which mixes free-tier + claude); explicit makes
   # the cascade-first intent visible to operators reading the table.
   - match: { effort: s }
-    model_class: sonnet
-    why: RESILIENT-154 — sonnet is the floor (haiku removed; it stalls and saves nothing on a flat subscription)
+    model_class: flash
+    why: RESILIENT-1138 — xs/s go to deepseek (flash); haiku/sonnet gate retired.
     candidates:
       - { backend: chump-local, model: openai/gpt-oss-120b, provider_pfx: GROQ, why: groq-small }
       - { backend: chump-local, model: meta-llama/Llama-3.3-70B-Instruct-Turbo-Free, provider_pfx: TOGETHER, why: together-small-fallback }
