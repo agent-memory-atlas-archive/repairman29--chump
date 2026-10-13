@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- RESILIENT-1573: static reference copy; substitute your repo path / HOME before loading. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.chump.no-ship-loop-detector</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/jeffadkins/Projects/Chump/scripts/coord/no-ship-loop-detector.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/jeffadkins/Projects/Chump</string>
+    <key>StartInterval</key>
+    <integer>600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/jeffadkins/.chump/logs/no-ship-loop-detector.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jeffadkins/.chump/logs/no-ship-loop-detector.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/jeffadkins</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>CHUMP_AMBIENT_PATH</key>
+        <string>/Users/jeffadkins/Projects/Chump/.chump-locks/ambient.jsonl</string>
+    </dict>
+</dict>
+</plist>

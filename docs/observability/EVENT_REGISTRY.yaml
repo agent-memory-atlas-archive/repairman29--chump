@@ -13859,3 +13859,21 @@ events:
     trigger: a shipping worker had no sub auth (OAuth/API key/oauth-token.json) and no explicit FLEET_BACKEND, so it refused to silently default to the free-tier floor (operator rule — we don't ship with free) and exited 78
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, reason]
+
+  - kind: no_ship_loop_detected
+    status: active
+    effect_metric: resilient
+    emitter: scripts/coord/no-ship-loop-detector.sh (RESILIENT-1573)
+    emitter_paths: [scripts/coord/no-ship-loop-detector.sh]
+    trigger: a gap accrued >=N (default 5) consecutive non-shipping cycle_end events (unverified_ship/failed/timeout/wedge); detector blocks the gap and re-blocks on each later re-pick
+    consumers: [ambient, fleet-brief]
+    fields_required: [ts, kind, gap_id, cycles]
+
+  - kind: service_crash_loop
+    status: active
+    effect_metric: resilient
+    emitter: scripts/coord/no-ship-loop-detector.sh (RESILIENT-1573)
+    emitter_paths: [scripts/coord/no-ship-loop-detector.sh]
+    trigger: a systemd service (user or system scope) has NRestarts above CHUMP_CRASH_LOOP_THRESHOLD (default 50)
+    consumers: [ambient, fleet-brief]
+    fields_required: [ts, kind, unit, scope, nrestarts]

@@ -1,0 +1,12 @@
+# RESILIENT-1573 — pairs with chump-no-ship-loop-detector.service.
+[Unit]
+Description=Run the no-ship loop / crash-loop detector every 10 minutes (RESILIENT-1573)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+OnUnitInactiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

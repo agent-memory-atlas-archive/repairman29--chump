@@ -1,0 +1,12 @@
+# RESILIENT-1573 — external no-ship-loop + systemd crash-loop detector.
+[Unit]
+Description=Chump no-ship loop + service crash-loop detector (RESILIENT-1573)
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStartPre=/bin/mkdir -p /root/.chump/logs
+ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; cd /root/Projects/chump; exec bash scripts/coord/no-ship-loop-detector.sh'
+TimeoutStartSec=300
+StandardOutput=append:/root/.chump/logs/no-ship-loop-detector.out
+StandardError=append:/root/.chump/logs/no-ship-loop-detector.err
