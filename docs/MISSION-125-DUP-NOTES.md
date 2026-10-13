@@ -6,3 +6,6 @@ MISSION-125 (auto-discovery & auto-adopt) was already delivered by #5245:
 Re-verified at HEAD `2989c2447`: `bash scripts/ci/test-auto-adopt.sh` passes
 clean (AC1-AC4: discover subscription, tool fetch, registry integration,
 `auto-consume adopted <capability>` log). No new code needed.
+
+Second re-file re-verified at HEAD `9ca6d26aa`: `scripts/ci/test-auto-adopt.sh`
+still passes clean. Still no new code needed; close as duplicate of #5245.
