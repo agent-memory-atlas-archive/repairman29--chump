@@ -13850,3 +13850,12 @@ events:
     trigger: infra-watcher disk_headroom finding invoked the idle-gated reclaim actuator (deferred, aborted, or reclaimed)
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, detail]
+
+  - kind: worker_refused_free_ship
+    status: active
+    effect_metric: resilient
+    emitter: scripts/dispatch/worker.sh (RESILIENT-1591)
+    emitter_paths: [scripts/dispatch/worker.sh]
+    trigger: a shipping worker had no sub auth (OAuth/API key/oauth-token.json) and no explicit FLEET_BACKEND, so it refused to silently default to the free-tier floor (operator rule — we don't ship with free) and exited 78
+    consumers: [ambient, fleet-brief]
+    fields_required: [ts, kind, reason]

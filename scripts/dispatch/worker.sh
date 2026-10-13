@@ -151,7 +151,24 @@ FLEET_EFFORT_FILTER="${FLEET_EFFORT_FILTER:-xs,s,m,l,xl}"
 if [[ -z "${ANTHROPIC_API_KEY:-}" \
    && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" \
    && ! -s "${HOME}/.chump/oauth-token.json" ]]; then
-    FLEET_BACKEND="${FLEET_BACKEND:-${CHUMP_WORK_BACKEND:-chump-local}}"
+    # WE DON'T SHIP WITH FREE (operator rule). No sub auth is present. Do NOT
+    # silently default a shipping worker onto the free-tier floor (chump-local):
+    # that ships code on free providers (forbidden) and dies the moment they go
+    # 402/credit-dead. The free stack is an explicit opt-in for cheap non-ship
+    # sweeps, never a silent shipping fallback. Honor an EXPLICIT backend choice;
+    # otherwise fail loud (exit 78) so auth gets fixed rather than quietly
+    # degrading the ship path to free.
+    if [[ -n "${FLEET_BACKEND:-}" || -n "${CHUMP_WORK_BACKEND:-}" ]]; then
+        FLEET_BACKEND="${FLEET_BACKEND:-${CHUMP_WORK_BACKEND}}"
+    else
+        _nofree_amb="${CHUMP_AMBIENT_LOG:-${REPO_ROOT:-.}/.chump-locks/ambient.jsonl}"
+        printf '{"ts":"%s","kind":"worker_refused_free_ship","reason":"no_sub_auth_no_explicit_backend","note":"operator rule: we don'"'"'t ship with free — refusing to default to chump-local"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$_nofree_amb" 2>/dev/null || true
+        echo "[worker] FATAL: no sub auth (OAuth token / API key / ~/.chump/oauth-token.json) and no explicit FLEET_BACKEND." >&2
+        echo "[worker] Refusing to ship on the free-tier floor (operator rule: we don't ship with free)." >&2
+        echo "[worker] Fix: restore sub auth ('claude setup-token' → ~/.chump/oauth-token.json), or set FLEET_BACKEND explicitly for a cheap NON-ship sweep." >&2
+        exit 78
+    fi
 else
     FLEET_BACKEND="${FLEET_BACKEND:-${CHUMP_WORK_BACKEND:-claude}}"
 fi
