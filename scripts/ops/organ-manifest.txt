@@ -295,6 +295,8 @@ enabled     chump-gap-closure-reconcile.timer  role=janitor requires=bin:gh
 # chump-gap-close-decomposed.timer: auto-close decomposed umbrella gaps (RESILIENT-1366).
 # Periodically walks the gap store and closes parent umbrellas whose decomposed
 # child slices have all shipped.
+# chump-gap-close-decomposed.timer: auto-close decomposed umbrella gaps when all child slices are done (RESILIENT-1366).
+# Walks the gap store and closes parent umbrellas whose decomposed children have all shipped.
 enabled     chump-gap-close-decomposed.timer  role=janitor requires=bin:chump
 
 # RESILIENT-366: chump-armed-rebaser.timer and chump-board-cycle.timer are both

@@ -1,0 +1,11 @@
+# Pairs with chump-gap-close-decomposed.service. Auto-closes decomposed umbrella gaps when all child slices are done.
+# Run every 10 minutes (RESILIENT-1366).
+[Unit]
+Description=Chump gap close-decomposed — auto-close umbrellas when children are done (RESILIENT-1366)
+[Timer]
+OnBootSec=5min
+OnCalendar=*:0/10
+Persistent=true
+AccuracySec=30s
+[Install]
+WantedBy=timers.target
