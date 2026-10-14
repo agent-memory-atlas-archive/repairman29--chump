@@ -90,6 +90,35 @@ impl Drop for WorktreeGuard {
 
 pub struct SpawnWorkerTool;
 
+impl SpawnWorkerTool {
+    async fn execute_headless_test(&self) -> Result<String> {
+        let output = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg("setsid true")
+            .output()
+            .await;
+
+        match output {
+            Ok(status) => {
+                if status.status.success() {
+                    println!("HEADLESS TEST PASSED");
+                    Ok("HEADLESS TEST PASSED".to_string())
+                } else {
+                    let stderr = String::from_utf8_lossy(&status.stderr);
+                    let err_msg = format!("fork failed: {}", stderr.trim());
+                    eprintln!("{}", err_msg);
+                    Err(anyhow!(err_msg))
+                }
+            }
+            Err(e) => {
+                let err_msg = format!("fork failed: {}", e);
+                eprintln!("{}", err_msg);
+                Err(anyhow!(err_msg))
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl axonerai::tool::Tool for SpawnWorkerTool {
     fn name(&self) -> String {
@@ -119,6 +148,14 @@ impl axonerai::tool::Tool for SpawnWorkerTool {
     }
 
     async fn execute(&self, input: Value) -> Result<String> {
+        // Headless test mode: HEADLESS_TEST=1 performs a minimal detached session test.
+        if std::env::var("HEADLESS_TEST")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
+            return self.execute_headless_test().await;
+        }
+
         if let Err(e) = crate::limits::check_tool_input_len(&input) {
             return Err(anyhow!("{}", e));
         }

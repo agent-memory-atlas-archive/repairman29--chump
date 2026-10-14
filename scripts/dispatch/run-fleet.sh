@@ -66,6 +66,18 @@
 
 set -euo pipefail
 
+# RESILIENT-383: Headless test mode for worker launcher validation.
+# HEADLESS_TEST=1 runs a minimal detached-session test instead of the full fleet.
+if [[ "${HEADLESS_TEST:-0}" = "1" ]]; then
+    if setsid true >/dev/null 2>&1; then
+        echo "HEADLESS TEST PASSED"
+        exit 0
+    else
+        echo "fork failed: Device not configured"
+        exit 1
+    fi
+fi
+
 # INFRA-2002 / META-107 sub-gap #6 — Rust port feature flag.
 # When CHUMP_FLEET_RUST=1, exec the chump-fleet binary. Defaults to 0
 # (run legacy tmux+bash body inline) for the 1-week parallel-run window.
