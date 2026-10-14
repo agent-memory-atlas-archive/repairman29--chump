@@ -249,7 +249,7 @@ log "using cargo: $CARGO"
 # emitted prev_sha==new_sha forever. Operator's installed binary stuck at the
 # stale local sha while origin/main advanced. Wizard-retirement criterion #1
 # was met on paper, broken in production.
-BUILD_WORKTREE="${CHUMP_BINARY_REFRESH_WORKTREE:-/tmp/chump-binary-refresh-$$}"
+BUILD_WORKTREE="${CHUNK_BINARY_REFRESH_WORKTREE:-${CHUMP_BINARY_REFRESH_WORKTREE:-/tmp/chump-binary-refresh-$$}}"
 log "creating detached worktree at origin/main ($MAIN_SHA) → $BUILD_WORKTREE"
 # RESILIENT-348: a prior run killed mid-build (timeout / SIGKILL / systemctl stop)
 # leaves a registered worktree at a FIXED BUILD_WORKTREE path (the EXIT trap below
