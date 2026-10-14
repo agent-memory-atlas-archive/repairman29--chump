@@ -80,6 +80,37 @@ else
     fail "dry-run combined prompt file missing AGENTS.md content"
 fi
 
+# ── 3b. harness → doc selection (RESILIENT-1167): wrong file must fail ──────
+echo "[doc selection: Claude vs NonClaude]"
+both_wt="$(mktemp -d)"
+printf 'CLAUDE_FIXTURE_%s\n' "$$" > "$both_wt/CLAUDE.md"
+printf 'AGENTS_FIXTURE_%s\n' "$$" > "$both_wt/AGENTS.md"
+(
+    set -u
+    # shellcheck source=/dev/null
+    source "$CMD_LIB"
+    [[ "$(hard_rules_doc_name claude-p)" == "CLAUDE.md" ]] && ok "Claude harness -> CLAUDE.md" || fail "Claude harness did not select CLAUDE.md"
+    for m in opencode-prompt codex-prompt; do
+        [[ "$(hard_rules_doc_name "$m")" == "AGENTS.md" ]] && ok "NonClaude ($m) -> AGENTS.md" || fail "NonClaude ($m) did not select AGENTS.md"
+        inj="$(hard_rules_inject "$m" "$both_wt" "$REPO_ROOT")"
+        if grep -q "AGENTS_FIXTURE_$$" <<<"$inj" && ! grep -q "CLAUDE_FIXTURE_$$" <<<"$inj"; then
+            ok "NonClaude ($m) injects AGENTS.md and not CLAUDE.md"
+        else
+            fail "NonClaude ($m) injected the wrong file"
+        fi
+    done
+    inj="$(hard_rules_inject claude-p "$both_wt" "$REPO_ROOT")"
+    if ! grep -q "AGENTS_FIXTURE_$$" <<<"$inj"; then
+        ok "Claude harness does not inject AGENTS.md"
+    else
+        fail "Claude harness wrongly injected AGENTS.md"
+    fi
+) > "$both_wt/out.txt" 2>&1 || true
+cat "$both_wt/out.txt"
+PASS=$((PASS + $(grep -c '^  PASS' "$both_wt/out.txt" || true)))
+FAIL=$((FAIL + $(grep -c '^  FAIL' "$both_wt/out.txt" || true)))
+rm -rf "$both_wt"
+
 # ── 4. wiring: worker.sh actually calls hard_rules_inject ───────────────────
 echo "[wiring]"
 if grep -q 'hard_rules_inject' "$REPO_ROOT/scripts/dispatch/worker.sh"; then
