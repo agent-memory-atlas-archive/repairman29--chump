@@ -1700,6 +1700,30 @@ self_test() {
   ok "canonical store resolved: $resolved_store"
 
   local fail=0
+
+  # INFRA-3706: verify canonical store resolution
+  # Source node.env to resolve the store path, then compare against CHUMP_STATE_DIR
+  local resolved_store="${CHUMP_STATE_DIR:-}"
+  if [ -z "$resolved_store" ]; then
+    no "Error : CHUMP_STATE_DIR not set in node.env or environment"
+    fail=1
+  else
+    info SELF-TEST "resolved canonical store: $resolved_store"
+  fi
+
+  # Detect local .chump/state.db in current directory
+  if [ -f "./.chump/state.db" ]; then
+    no "Error : local .chump/state.db detected; use canonical store"
+    fail=1
+  fi
+
+  # If we have a resolved store, verify there are no mismatches
+  if [ -n "$resolved_store" ] && [ "$fail" = 0 ]; then
+    if ! [ -d "$resolved_store" ]; then
+      no "Error : resolved store path does not exist: $resolved_store"
+      fail=1
+    fi
+  fi
   [ -n "$HOST_KIND" ] && ok "host detected: $HOST_KIND/$ARCH" || { no "host detect"; fail=1; }
   if provider_creds_ready && [ "${CHUMP_NODE_WORK_ENABLED:-1}" = 1 ]; then
     check_creds || fail=1
