@@ -186,6 +186,16 @@ impl GapStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    fn test_store() -> (crate::GapStore, TempDir) {
+        unsafe {
+            std::env::set_var("CHUMP_RESERVE_SCAN_OPEN_PRS", "0");
+        }
+        let dir = TempDir::new().unwrap();
+        let store = crate::GapStore::open(dir.path()).unwrap();
+        (store, dir)
+    }
 
     #[test]
     fn test_is_terminal() {
@@ -195,5 +205,250 @@ mod tests {
         assert!(!is_terminal("open"));
         assert!(!is_terminal("blocked"));
         assert!(!is_terminal("in-progress"));
+    }
+
+    #[test]
+    fn migrate_gap_with_decomposed_note_and_open_child_changes_status_to_decomposed() {
+        let (store, _dir) = test_store();
+
+        // Create a parent gap with "Decomposed into" note and status=open.
+        let parent = store
+            .reserve("RESILIENT", "umbrella parent", "P1", "m")
+            .unwrap();
+        let child = store
+            .reserve("RESILIENT", "child slice", "P2", "s")
+            .unwrap();
+
+        // Set parent to open with "Decomposed into" note.
+        store
+            .set_fields(
+                &parent,
+                crate::GapFieldUpdate {
+                    status: Some("open".into()),
+                    notes: Some(format!("Decomposed into 1 slice: {child}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Run migration.
+        let log = store.migrate_decomposed_umbrellas().unwrap();
+
+        // Verify migration occurred.
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].gap_id, parent);
+        assert_eq!(log[0].migration_status, "MIGRATED");
+        assert_eq!(log[0].status_before, Some("open".into()));
+        assert_eq!(log[0].status_after, Some("decomposed".into()));
+        assert_eq!(log[0].non_terminal_children, 1);
+
+        // Verify status changed in the store.
+        let migrated = store.get(&parent).unwrap().unwrap();
+        assert_eq!(migrated.status, "decomposed");
+        assert!(migrated.notes.contains("[migration]"));
+    }
+
+    #[test]
+    fn migrate_gap_already_decomposed_logs_as_no_change() {
+        let (store, _dir) = test_store();
+
+        // Create a parent gap already with status=decomposed.
+        let parent = store
+            .reserve("RESILIENT", "umbrella parent", "P1", "m")
+            .unwrap();
+        let child = store
+            .reserve("RESILIENT", "child slice", "P2", "s")
+            .unwrap();
+
+        // Set parent to decomposed with "Decomposed into" note.
+        store
+            .set_fields(
+                &parent,
+                crate::GapFieldUpdate {
+                    status: Some("decomposed".into()),
+                    notes: Some(format!("Decomposed into 1 slice: {child}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Run migration.
+        let log = store.migrate_decomposed_umbrellas().unwrap();
+
+        // Verify no migration was attempted.
+        assert_eq!(
+            log.len(),
+            0,
+            "already-decomposed gaps should not appear in migration log"
+        );
+
+        // Verify status remains decomposed.
+        let unchanged = store.get(&parent).unwrap().unwrap();
+        assert_eq!(unchanged.status, "decomposed");
+    }
+
+    #[test]
+    fn migrate_gap_without_decomposed_note_no_change() {
+        let (store, _dir) = test_store();
+
+        // Create a gap with status=open but NO "Decomposed into" note.
+        let parent = store
+            .reserve("RESILIENT", "regular gap", "P1", "m")
+            .unwrap();
+
+        // Explicitly set to open with a different note.
+        store
+            .set_fields(
+                &parent,
+                crate::GapFieldUpdate {
+                    status: Some("open".into()),
+                    notes: Some("Some other note without the marker".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Run migration.
+        let log = store.migrate_decomposed_umbrellas().unwrap();
+
+        // Verify no migration was attempted.
+        assert_eq!(
+            log.len(),
+            0,
+            "gaps without 'Decomposed into' should not be migrated"
+        );
+
+        // Verify status remains open.
+        let unchanged = store.get(&parent).unwrap().unwrap();
+        assert_eq!(unchanged.status, "open");
+    }
+
+    #[test]
+    fn migrate_gap_with_only_terminal_children_no_change() {
+        let (store, _dir) = test_store();
+
+        // Create a parent gap with "Decomposed into" note.
+        let parent = store
+            .reserve("RESILIENT", "umbrella parent", "P1", "m")
+            .unwrap();
+        let child = store
+            .reserve("RESILIENT", "child slice", "P2", "s")
+            .unwrap();
+
+        // Mark child as closed (terminal).
+        store
+            .set_fields(
+                &child,
+                crate::GapFieldUpdate {
+                    status: Some("closed".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Set parent to open with "Decomposed into" note.
+        store
+            .set_fields(
+                &parent,
+                crate::GapFieldUpdate {
+                    status: Some("open".into()),
+                    notes: Some(format!("Decomposed into 1 slice: {child}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Run migration.
+        let log = store.migrate_decomposed_umbrellas().unwrap();
+
+        // Verify no migration was attempted (all children are terminal).
+        assert_eq!(
+            log.len(),
+            0,
+            "gaps with only terminal children should not be migrated"
+        );
+
+        // Verify status remains open.
+        let unchanged = store.get(&parent).unwrap().unwrap();
+        assert_eq!(unchanged.status, "open");
+    }
+
+    #[test]
+    fn migrate_multiple_eligible_gaps_idempotent_on_second_run() {
+        let (store, _dir) = test_store();
+
+        // Create two parent gaps.
+        let parent1 = store.reserve("RESILIENT", "umbrella 1", "P1", "m").unwrap();
+        let parent2 = store.reserve("RESILIENT", "umbrella 2", "P1", "m").unwrap();
+        let child1 = store.reserve("RESILIENT", "child of 1", "P2", "s").unwrap();
+        let child2 = store.reserve("RESILIENT", "child of 2", "P2", "s").unwrap();
+
+        // Set up both parents with decomposed notes.
+        store
+            .set_fields(
+                &parent1,
+                crate::GapFieldUpdate {
+                    status: Some("open".into()),
+                    notes: Some(format!("Decomposed into 1 slice: {child1}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .set_fields(
+                &parent2,
+                crate::GapFieldUpdate {
+                    status: Some("blocked".into()),
+                    notes: Some(format!("Decomposed into 1 slice: {child2}")),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // First run: both should migrate.
+        let log1 = store.migrate_decomposed_umbrellas().unwrap();
+        assert_eq!(log1.len(), 2);
+        assert_eq!(log1[0].migration_status, "MIGRATED");
+        assert_eq!(log1[1].migration_status, "MIGRATED");
+
+        // Second run: should find no gaps to migrate (idempotent).
+        let log2 = store.migrate_decomposed_umbrellas().unwrap();
+        assert_eq!(log2.len(), 0, "second run must be idempotent");
+
+        // Verify both are now decomposed.
+        assert_eq!(store.get(&parent1).unwrap().unwrap().status, "decomposed");
+        assert_eq!(store.get(&parent2).unwrap().unwrap().status, "decomposed");
+    }
+
+    #[test]
+    fn migrate_preserves_existing_notes_and_appends_migration_log_entry() {
+        let (store, _dir) = test_store();
+
+        let parent = store.reserve("RESILIENT", "umbrella", "P1", "m").unwrap();
+        let child = store.reserve("RESILIENT", "child", "P2", "s").unwrap();
+
+        let original_notes = "Some existing documentation\nAbout this gap";
+        store
+            .set_fields(
+                &parent,
+                crate::GapFieldUpdate {
+                    status: Some("open".into()),
+                    notes: Some(format!(
+                        "{}\nDecomposed into 1 slice: {child}",
+                        original_notes
+                    )),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Run migration.
+        store.migrate_decomposed_umbrellas().unwrap();
+
+        // Verify notes were preserved and migration entry appended.
+        let updated = store.get(&parent).unwrap().unwrap();
+        assert!(updated.notes.contains(original_notes));
+        assert!(updated.notes.contains("[migration]"));
+        assert!(updated.notes.contains("decomposed on"));
     }
 }
