@@ -2319,6 +2319,20 @@ events:
       since main_red_span resets to 0 the moment a benign status line lands.
     consumers: [ambient]
     fields_required: [ts, kind, main_red_span_min, threshold_min]
+  - kind: main_red_fix_dispatched
+    effect_metric: self
+    emitter: scripts/coord/lib/board-vitals.sh (RESILIENT-1130, RESILIENT-417 slice)
+    trigger: sustained_main_red fired and board-vitals dispatched a remediation,
+      either running CHUMP_BOARD_VITALS_KNOWN_FIX_CMD (path=known_fix) or filing
+      a remediation gap (path=queued). Idempotent within the dispatch window.
+    consumers: [ambient]
+    fields_required: [ts, kind, path, main_red_span_min]
+  - kind: main_red_fix_dispatch_failed
+    effect_metric: self
+    emitter: scripts/coord/lib/board-vitals.sh (RESILIENT-1130, RESILIENT-417 slice)
+    trigger: the sustained-main-red remediation dispatch exited non-zero.
+    consumers: [ambient]
+    fields_required: [ts, kind, path, exit_code, main_red_span_min]
   - kind: main_sat_sustained_red
     effect_metric: self
     emitter: scripts/coord/lib/board-vitals.sh (RESILIENT-1123, RESILIENT-416 slice)

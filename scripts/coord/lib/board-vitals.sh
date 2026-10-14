@@ -416,6 +416,45 @@ _bv_maybe_page() {
     return 0
 }
 
+# Fix dispatch for sustained main-red (RESILIENT-1130, RESILIENT-417 slice).
+# Path "known_fix": CHUMP_BOARD_VITALS_KNOWN_FIX_CMD is set -> run it (lands a
+# known fix). Path "queued": otherwise file a remediation gap via chump. Idempotent:
+# a state marker suppresses re-dispatch inside CHUMP_BOARD_VITALS_FIX_DISPATCH_WINDOW_S
+# (default 24h). Logs the chosen path; a dispatch failure emits
+# main_red_fix_dispatch_failed. DRY_RUN logs the path without acting. Never fails.
+_bv_dispatch_fix() {  # span_min
+    local span="$1" state_dir window marker now last path rc=0
+    state_dir="${CHUMP_BOARD_VITALS_STATE_DIR:-$(_bv_repo_root)/.chump-locks/board-vitals}"
+    window="${CHUMP_BOARD_VITALS_FIX_DISPATCH_WINDOW_S:-86400}"
+    mkdir -p "$state_dir" 2>/dev/null || true
+    marker="$state_dir/fix_dispatch_main_red.json"
+    now="$(_bv_now)"
+    if [[ -f "$marker" ]]; then
+        last="$(python3 -c "import json;print(json.load(open('$marker')).get('last_epoch',0))" 2>/dev/null || echo 0)"
+        [[ "$last" =~ ^[0-9]+$ ]] || last=0
+        (( now - last < window )) && return 0
+    fi
+    if [[ -n "${CHUMP_BOARD_VITALS_KNOWN_FIX_CMD:-}" ]]; then path="known_fix"; else path="queued"; fi
+    if [[ "${CHUMP_BOARD_VITALS_DRY_RUN:-0}" != "1" ]]; then
+        if [[ "$path" == "known_fix" ]]; then
+            timeout 300 bash -c "$CHUMP_BOARD_VITALS_KNOWN_FIX_CMD" >/dev/null 2>&1 || rc=$?
+        else
+            timeout 60 chump gap reserve --domain RESILIENT \
+                --title "RESILIENT: remediate main red sustained ${span}m (auto-dispatched by board-vitals)" \
+                >/dev/null 2>&1 || rc=$?
+        fi
+    fi
+    if (( rc != 0 )); then
+        # scanner-anchor: "kind":"main_red_fix_dispatch_failed"
+        _bv_emit "main_red_fix_dispatch_failed" "\"path\":\"${path}\",\"exit_code\":${rc},\"main_red_span_min\":${span}"
+        return 0
+    fi
+    # scanner-anchor: "kind":"main_red_fix_dispatched"
+    _bv_emit "main_red_fix_dispatched" "\"path\":\"${path}\",\"main_red_span_min\":${span}"
+    python3 -c "import json;json.dump({'last_epoch':$now,'path':'$path'}, open('$marker','w'))" 2>/dev/null || true
+    return 0
+}
+
 # Bounded LLM diagnosis of a novel/unclassifiable anomaly. Returns the model's
 # one-paragraph diagnosis on stdout (empty on any failure). Never hangs the beat
 # (hard timeout). Skipped in DRY_RUN and when disabled.
@@ -608,6 +647,7 @@ board_vitals_check() {
         # scanner-anchor: "kind":"sustained_main_red"
         _bv_emit "sustained_main_red" \
             "\"main_red_span_min\":${main_red_span},\"threshold_min\":${sustained_main_red_min}"
+        _bv_dispatch_fix "$main_red_span"
     fi
 
     # ── 4c · main-sat gate SUSTAINED red (RESILIENT-1123, RESILIENT-416 slice) ─

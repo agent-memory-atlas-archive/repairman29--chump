@@ -2986,6 +2986,9 @@ CHUMP_CLIPPY_WORKER_ID
 CHUMP_BOARD_VITALS_SUSTAINED_MAIN_RED_MIN
 # RESILIENT-1123: main-sat gate sustained-red threshold (board-vitals.sh)
 CHUMP_BOARD_VITALS_MAIN_SAT_RED_MIN
+# RESILIENT-1130: sustained main-red fix dispatch (board-vitals.sh)
+CHUMP_BOARD_VITALS_KNOWN_FIX_CMD
+CHUMP_BOARD_VITALS_FIX_DISPATCH_WINDOW_S
 
 # AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
 # Replace the AUTO marker with a real description on the next commit.

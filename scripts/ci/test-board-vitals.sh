@@ -540,6 +540,33 @@ hs_pages="$(_count "$HS" '"board_vitals_page_dryrun".*"holler_drain_stale"')"
 [[ "$hs_pages" -eq 1 ]] && _ok "holler drain stale paged exactly once across two runs (dedup)" \
     || _fail "holler drain stale pages != 1 (got $hs_pages)"
 
+# ── RESILIENT-1130 (RESILIENT-417 slice): fix dispatch on sustained main red ──
+echo "[test-board-vitals] RESILIENT-1130: sustained red dispatches fix once (idempotent), failure reported"
+FD="$TMP/fix-dispatch.jsonl"
+{
+  echo '{"ts":"2026-08-25T00:00:00Z","kind":"main_red_detected","status":"red"}'
+  echo '{"ts":"2026-08-27T10:00:00Z","kind":"main_red_detected","status":"red"}'
+} > "$FD"
+run_fd() {  # state_dir known_fix_cmd
+    ( set -a
+      CHUMP_AMBIENT_LOG="$FD"; CHUMP_BOARD_VITALS_STATE_DIR="$1"
+      CHUMP_BOARD_VITALS_DRY_RUN=0; CHUMP_BOARD_VITALS_ESCALATE=0
+      CHUMP_BOARD_VITALS_MAIN_RED_LIVE=0
+      CHUMP_BOARD_VITALS_DISK_PCT=100; CHUMP_BOARD_VITALS_DROUGHT_MIN=999999
+      CHUMP_BOARD_VITALS_MAIN_RED_MIN=999999
+      CHUMP_BOARD_VITALS_MAIN_SAT_RED_MIN=999999
+      CHUMP_BOARD_VITALS_KNOWN_FIX_CMD="$2"
+      set +a
+      source "$LIB"; board_vitals_check ) >/dev/null 2>&1
+}
+run_fd "$TMP/state-fd" "true"
+_emitted "known-fix path dispatched and logged" "$FD" '"kind":"main_red_fix_dispatched","path":"known_fix"'
+run_fd "$TMP/state-fd" "true"
+fd_n="$(_count "$FD" '"kind":"main_red_fix_dispatched"')"
+[[ "$fd_n" -eq 1 ]] && _ok "fix dispatch idempotent across two runs" || _fail "fix dispatch count != 1 (got $fd_n)"
+run_fd "$TMP/state-fd-bad" "exit 3"
+_emitted "failed dispatch reported as error event" "$FD" '"kind":"main_red_fix_dispatch_failed","path":"known_fix","exit_code":3'
+
 echo
 echo "[test-board-vitals] PASS=$PASS FAIL=$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1
