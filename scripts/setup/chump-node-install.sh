@@ -68,6 +68,9 @@ STATE_DIR="${CHUMP_STATE_DIR:-$HOME/.chump}"
 # would silently diverge from the machine's real gap backlog.
 STATE_DB="${CHUMP_STATE_DB:-$STATE_DIR/state.db}"
 export CHUMP_STATE_DB="$STATE_DB"
+# INFRA-3707: export CANONICAL_STORE_PATH for subsequent gap store operations
+CANONICAL_STORE_PATH="${CANONICAL_STORE_PATH:-$STATE_DB}"
+export CANONICAL_STORE_PATH="$CANONICAL_STORE_PATH"
 CREDS="$STATE_DIR/providers.env"
 # INFRA-3634: pin the canonical *shared* gap store (PostgREST-fronted
 # Postgres, currently CJ per docs/strategy/DATA_HOME_PLAN.md's dated note)
