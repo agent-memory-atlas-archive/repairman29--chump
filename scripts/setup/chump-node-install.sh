@@ -1646,29 +1646,30 @@ self_test() {
   fi
 
   # INFRA-3706: resolve and verify canonical store path from node.env
-  local resolved_store_dir="$CHUMP_STATE_DIR"
-  if [ -z "$resolved_store_dir" ]; then
-    no "Error: CHUMP_STATE_DIR not set (node.env may be missing or unreadable)"
+  local resolved_store="${CHUMP_STATE_DIR:-}"
+  if [ -z "$resolved_store" ]; then
+    no "Error : CHUMP_STATE_DIR not set in node.env or environment"
     return 1
   fi
 
-  # Check for local .chump/state.db in current directory
-  if [ -f ".chump/state.db" ]; then
-    no "Error: local .chump/state.db detected; use canonical store"
+  # AC2: Check for local .chump/state.db in current directory
+  if [ -f "./.chump/state.db" ]; then
+    no "Error : local .chump/state.db detected; use canonical store"
     return 1
   fi
 
-  # Verify resolved store path matches the canonical STATE_DIR
-  if [ "$resolved_store_dir" != "$STATE_DIR" ]; then
-    no "Error: resolved store path does not match CHUMP_STATE_DIR"
+  # AC3: Verify resolved store path matches the canonical STATE_DIR
+  if [ "$resolved_store" != "$STATE_DIR" ]; then
+    no "Error : resolved store path does not match CHUMP_STATE_DIR"
     return 1
   fi
 
-  ok "Canonical store verified: $resolved_store_dir"
+  # AC1: Print resolved path
+  ok "canonical store resolved: $resolved_store"
 
-  # INFRA-3706 AC4: invoke chump gap list to complete the test
+  # AC4: invoke chump gap list to complete the test
   if ! "$BIN" gap list --status open --json >/dev/null 2>&1; then
-    no "Error: chump gap list failed"
+    no "Error : chump gap list failed"
     return 1
   fi
   ok "chump gap list executed successfully"
@@ -1678,52 +1679,7 @@ self_test() {
     CHUMP_NODE_MODE="control-plane"
   fi
 
-  # INFRA-3706: canonical store resolution verification
-  local resolved_store="$CHUMP_STATE_DIR"
-  if [ -z "$resolved_store" ]; then
-    resolved_store="$HOME/.chump"
-  fi
-
-  # Check for local .chump/state.db in current directory (AC2)
-  if [ -f ".chump/state.db" ]; then
-    no "Error : local .chump/state.db detected; use canonical store"
-    return 1
-  fi
-
-  # Compare resolved store path against canonical CHUMP_STATE_DIR (AC3)
-  if [ -n "$CHUMP_STATE_DIR" ] && [ "$resolved_store" != "$CHUMP_STATE_DIR" ]; then
-    no "Error : resolved store path does not match CHUMP_STATE_DIR"
-    return 1
-  fi
-
-  # Print resolved path (AC1)
-  ok "canonical store resolved: $resolved_store"
-
   local fail=0
-
-  # INFRA-3706: verify canonical store resolution
-  # Source node.env to resolve the store path, then compare against CHUMP_STATE_DIR
-  local resolved_store="${CHUMP_STATE_DIR:-}"
-  if [ -z "$resolved_store" ]; then
-    no "Error : CHUMP_STATE_DIR not set in node.env or environment"
-    fail=1
-  else
-    info SELF-TEST "resolved canonical store: $resolved_store"
-  fi
-
-  # Detect local .chump/state.db in current directory
-  if [ -f "./.chump/state.db" ]; then
-    no "Error : local .chump/state.db detected; use canonical store"
-    fail=1
-  fi
-
-  # If we have a resolved store, verify there are no mismatches
-  if [ -n "$resolved_store" ] && [ "$fail" = 0 ]; then
-    if ! [ -d "$resolved_store" ]; then
-      no "Error : resolved store path does not exist: $resolved_store"
-      fail=1
-    fi
-  fi
   [ -n "$HOST_KIND" ] && ok "host detected: $HOST_KIND/$ARCH" || { no "host detect"; fail=1; }
   if provider_creds_ready && [ "${CHUMP_NODE_WORK_ENABLED:-1}" = 1 ]; then
     check_creds || fail=1
