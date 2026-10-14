@@ -84,10 +84,31 @@ if [[ ! -f "$REPO_ROOT/scripts/ops/organ-manifest.txt" ]]; then
   done
 fi
 
-# shellcheck source=scripts/ops/lib/merges-24h.sh
-source "$SCRIPT_DIR/lib/merges-24h.sh"
-# shellcheck source=scripts/ops/lib/operator-pages-24h.sh
-source "$SCRIPT_DIR/lib/operator-pages-24h.sh"
+# COLLECTOR-LIB RESOLUTION (INFRA-8097): board-tick.sh runs this script as a
+# RELOCATED COPY — `git show origin/main:scripts/ops/vital-signs.sh > ~/.chump/_vs.sh`
+# — so SCRIPT_DIR resolves to ~/.chump and "$SCRIPT_DIR/lib" does not exist.
+# The three source/call sites below then die with 'No such file' or
+# 'command not found', stderr was discarded, and the board reported
+# merge_throughput=null with the basis "gh pr list returned no parseable count"
+# (false: gh never ran). Resolve the libs against the REPO ROOT first — which is
+# correct both for a normal checkout AND for a relocated copy that knows its
+# root — and if neither location has them, say THAT loudly in the sign basis.
+_LIB_DIR=""
+for _cand in "$SCRIPT_DIR/lib" "$REPO_ROOT/scripts/ops/lib"; do
+  if [[ -f "$_cand/merges-24h.sh" && -f "$_cand/operator-pages-24h.sh" ]]; then
+    _LIB_DIR="$_cand"; break
+  fi
+done
+COLLECTOR_LIB_MISSING=""
+if [[ -z "$_LIB_DIR" ]]; then
+  COLLECTOR_LIB_MISSING="collector lib missing: $SCRIPT_DIR/lib and $REPO_ROOT/scripts/ops/lib"
+  echo "vital-signs: $COLLECTOR_LIB_MISSING" >&2
+else
+  # shellcheck source=scripts/ops/lib/merges-24h.sh
+  source "$_LIB_DIR/merges-24h.sh"
+  # shellcheck source=scripts/ops/lib/operator-pages-24h.sh
+  source "$_LIB_DIR/operator-pages-24h.sh"
+fi
 
 OUT="${CHUMP_VITALS_OUT:-$REAL_HOME/.chump/vital-signs.json}"
 AMBIENT_LOG="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
@@ -168,7 +189,10 @@ jnum() { local n="${1:-}"; [[ "$n" =~ ^-?[0-9]+([.][0-9]+)?$ ]] && printf '%s' "
 # ════════════════════════════════════════════════════════════════════════════
 # 1 · merge_throughput  (flow / lagging)  — merges in the last 24h
 # ════════════════════════════════════════════════════════════════════════════
-merges="$(merges_24h "$REPO_ROOT" "$GH_REPO")"
+merges=""
+if [[ -z "$COLLECTOR_LIB_MISSING" ]] && declare -F merges_24h >/dev/null 2>&1; then
+  merges="$(merges_24h "$REPO_ROOT" "$GH_REPO")"
+fi
 if [[ "$merges" =~ ^[0-9]+$ ]]; then
   s="$(status_hi "$merges" "$CFG_MERGE_GREEN" "$CFG_MERGE_AMBER")"
   SIGNS+=("$(mksign merge_throughput "Merge Throughput" flow lagging \
@@ -177,9 +201,11 @@ if [[ "$merges" =~ ^[0-9]+$ ]]; then
     "$merges PR(s) merged in the 24h to $NOW (gh pr list, mergedAt>cutoff)" \
     "{\"green\":\">$CFG_MERGE_GREEN\",\"amber\":\"$CFG_MERGE_AMBER-$CFG_MERGE_GREEN\",\"red_desc\":\"<$CFG_MERGE_AMBER merges/24h\"}")")
 else
+  # INFRA-8097: when the collector lib could not be loaded, name THAT as the
+  # basis. Never claim "gh pr list returned no parseable count" — gh never ran.
   SIGNS+=("$(mksign merge_throughput "Merge Throughput" flow lagging \
     null "merges/24h" "unknown" "stall — check resolver/CI/queue" \
-    "uninstrumented: gh pr list returned no parseable count" \
+    "${COLLECTOR_LIB_MISSING:-uninstrumented: gh pr list returned no parseable count}" \
     "{\"green\":\">$CFG_MERGE_GREEN\",\"amber\":\"$CFG_MERGE_AMBER-$CFG_MERGE_GREEN\",\"red_desc\":\"<$CFG_MERGE_AMBER merges/24h\"}")")
 fi
 
@@ -317,7 +343,12 @@ fi
 #      top-level REPO_ROOT/MANIFEST/AMBIENT_LOG/OUT globals that would clobber
 #      this script's — --dry-run gives us its JSON without any writes.
 # ════════════════════════════════════════════════════════════════════════════
-CAP_LIFECYCLE_SCRIPT="$SCRIPT_DIR/capability-lifecycle.sh"
+# INFRA-8097: same relocated-copy break as the libs above — resolve against the
+# repo root too, so a ~/.chump/_vs.sh copy finds scripts/ops/capability-lifecycle.sh.
+CAP_LIFECYCLE_SCRIPT=""
+for _cand in "$SCRIPT_DIR/capability-lifecycle.sh" "$REPO_ROOT/scripts/ops/capability-lifecycle.sh"; do
+  [[ -f "$_cand" ]] && CAP_LIFECYCLE_SCRIPT="$_cand" && break
+done
 cap_lifecycle_json="null"
 if [[ -f "$CAP_LIFECYCLE_SCRIPT" && -f "$MANIFEST" ]] && command -v systemctl >/dev/null 2>&1; then
   cap_raw="$(CHUMP_REPO_ROOT="$REPO_ROOT" CHUMP_AMBIENT_LOG="$AMBIENT_LOG" \
@@ -387,7 +418,14 @@ fi
 #     {operator_page, operator_paged, pager_notified}.
 #     A missing organ is whatever keeps paging a human.
 # ════════════════════════════════════════════════════════════════════════════
-if [[ -f "$AMBIENT_LOG" ]]; then
+if [[ -n "$COLLECTOR_LIB_MISSING" ]]; then
+  # INFRA-8097: lib unloadable -> name it, don't blame the ambient log or gh.
+  SIGNS+=("$(mksign human_intervention "Human Intervention" autonomy lagging \
+    null "pages/24h" "unknown" \
+    "a missing organ — find what humans keep doing" \
+    "$COLLECTOR_LIB_MISSING" \
+    "{\"green\":\"<$CFG_PAGES_GREEN\",\"amber\":\"$CFG_PAGES_GREEN-$CFG_PAGES_AMBER\",\"red_desc\":\">$CFG_PAGES_AMBER pages/24h\"}")")
+elif [[ -f "$AMBIENT_LOG" ]] && declare -F operator_pages_24h >/dev/null 2>&1; then
   pages="$(operator_pages_24h "$AMBIENT_LOG" "$CUT_24H")"
   s="$(status_lo "$pages" "$CFG_PAGES_GREEN" "$CFG_PAGES_AMBER")"
   SIGNS+=("$(mksign human_intervention "Human Intervention" autonomy lagging \

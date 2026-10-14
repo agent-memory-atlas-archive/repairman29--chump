@@ -14,11 +14,30 @@ echo "         'does this move the factory toward a HANDS-OFF Trek from a CLEAN 
 # clobbered merged_not_running true value (95.8) to spurious null. main is the source
 # of truth after merge; read it so the board reads TRUE. (honest-instrument fix)
 git fetch origin main -q 2>/dev/null || true
-git show origin/main:scripts/ops/vital-signs.sh > /home/jeff/.chump/_vs.sh 2>/dev/null && chmod +x /home/jeff/.chump/_vs.sh && bash /home/jeff/.chump/_vs.sh >/dev/null 2>&1 || true
+# INFRA-8097: run the collector from an EXTRACTED TREE, not a single relocated
+# copy. Copying only vital-signs.sh to ~/.chump/_vs.sh orphaned it from
+# scripts/ops/lib (merges-24h.sh, operator-pages-24h.sh) and from
+# scripts/ops/capability-lifecycle.sh, so every tick ran a collector that
+# sourced nothing and silently reported merge_throughput=null. Extract the whole
+# scripts/ops subtree so the relative layout is preserved. stderr is LOGGED
+# (it used to be >/dev/null 2>&1, which hid the breakage completely).
+VS_ERR="$HOME/.chump/vital-signs.stderr.log"
+VS_TMP="$(mktemp -d)"
+if git archive origin/main scripts/ops 2>/dev/null | tar -x -C "$VS_TMP" 2>/dev/null; then
+  CHUMP_REPO_ROOT="$HOME/Projects/chump" bash "$VS_TMP/scripts/ops/vital-signs.sh" >>"$VS_ERR" 2>&1 || true
+else
+  echo "board-tick $(date -u +%FT%TZ): git archive origin/main scripts/ops failed" >>"$VS_ERR" 2>&1 || true
+fi
+rm -rf "$VS_TMP"
 echo "ORDER 1 · READ THE BOARD (measure to treat, not admire):"
 jq -r '.signs[]|select(.status=="red" or .status=="unknown")|"         [\(.status|ascii_upcase)] \(.name) = \(.value) \(.unit)"' /home/jeff/.chump/vital-signs.json 2>/dev/null || echo "         (board unreadable — instrument-repair owner must fix)"
 OLD=$(gh pr list --state open --json createdAt --jq 'sort_by(.createdAt)|.[0].createdAt|((now-(fromdate))/60)|floor' 2>/dev/null)
-echo "         oldest-PR=${OLD:-?}m  merges/1h=$(gh pr list --state merged --limit 40 --json mergedAt --jq '[.[].mergedAt]|map(select(.>(now-3600|todate)))|length' 2>/dev/null)  human_intervention(pages/24h)=$(grep -c operator_page "$CHUMP_AMBIENT_LOG" 2>/dev/null)"
+# INFRA-8097: read human_intervention from the SIGN, never re-derive it with a
+# second `grep -c operator_page` over the ambient log. The sign is the canonical
+# number (lib/operator-pages-24h.sh, shared with faculty-collector.sh) and this
+# line was a second, unreconciled computation that could disagree with it.
+HI="$(jq -r '.signs[]|select(.key=="human_intervention")|.value' /home/jeff/.chump/vital-signs.json 2>/dev/null)"
+echo "         oldest-PR=${OLD:-?}m  merges/1h=$(gh pr list --state merged --limit 40 --json mergedAt --jq '[.[].mergedAt]|map(select(.>(now-3600|todate)))|length' 2>/dev/null)  human_intervention(pages/24h)=${HI:-null}"
 # --- MINE BEFORE BUILD: are the EYES (Almanac) up on THIS node? (factory-blind guard — the eyes ran only on the Mac once; a build-node with no eyes builds blind) ---
 ALM=DOWN
 for a in almanac "$HOME/Projects/chump/almanac/target/release/almanac" "$HOME/.almanac/almanac" almanac/target/release/almanac; do
