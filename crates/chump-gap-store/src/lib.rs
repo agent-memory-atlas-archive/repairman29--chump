@@ -4961,6 +4961,18 @@ pub(crate) fn unix_now_pub() -> i64 {
     unix_now()
 }
 
+/// RESILIENT-1592 (R1): build the landing-receipt lookup. When the caller
+/// names a PR, the receipt is that PR's own squash commit `(#N)` — a stale
+/// commit that merely mentions the gap ID (claim, earlier partial PR, a
+/// "close duplicate" commit) must not prove an unrelated or unmerged PR
+/// landed. Only a PR-less ship falls back to the gap-ID mention.
+fn push_receipt_greps(args: &mut Vec<String>, gap_id: &str, closed_pr: Option<i64>) {
+    match closed_pr {
+        Some(n) => args.push(format!("--grep=(#{n})")),
+        None => args.push(format!("--grep={gap_id}")),
+    }
+}
+
 /// INFRA-1392: verify that work for `gap_id` actually landed on local
 /// main. Returns true when EITHER:
 ///   - `closed_pr` is Some AND a recent commit on main carries the
@@ -5026,11 +5038,8 @@ pub fn verify_proof_of_merge(repo_root: &Path, gap_id: &str, closed_pr: Option<i
         "-n".into(),
         "1".into(),
         "--format=%H".into(),
-        format!("--grep={gap_id}"),
     ];
-    if let Some(n) = closed_pr {
-        args.push(format!("--grep=(#{n})"));
-    }
+    push_receipt_greps(&mut args, gap_id, closed_pr);
     let out = std::process::Command::new("git")
         .args(&args)
         .current_dir(repo_root)
@@ -5112,11 +5121,8 @@ pub fn verify_running_and_effective(
         "-n".into(),
         "1".into(),
         "--format=%H".into(),
-        format!("--grep={gap_id}"),
     ];
-    if let Some(n) = closed_pr {
-        args.push(format!("--grep=(#{n})"));
-    }
+    push_receipt_greps(&mut args, gap_id, closed_pr);
     let Ok(log_out) = std::process::Command::new("git")
         .args(&args)
         .current_dir(repo_root)
@@ -7682,6 +7688,39 @@ mod proof_of_merge_tests {
             dir.path(),
             "INFRA-NO-MATCH",
             Some(9999)
+        ));
+    }
+
+    #[test]
+    fn resilient1592_named_pr_must_itself_be_on_main() {
+        let dir = tempdir().unwrap();
+        let init = hermetic_git(dir.path(), &["init", "--initial-branch=main", "--quiet"]);
+        if !init.status.success() {
+            return;
+        }
+        hermetic_git(dir.path(), &["config", "user.email", "test@test.local"]);
+        hermetic_git(dir.path(), &["config", "user.name", "test"]);
+        let c = hermetic_git(
+            dir.path(),
+            &[
+                "commit",
+                "--allow-empty",
+                "-m",
+                "RESILIENT-9592: earlier partial (#100)",
+            ],
+        );
+        assert!(c.status.success());
+        assert!(verify_proof_of_merge(dir.path(), "RESILIENT-9592", None));
+        assert!(verify_proof_of_merge(
+            dir.path(),
+            "RESILIENT-9592",
+            Some(100)
+        ));
+        // A different, unmerged PR must not ride on the stale gap-ID mention.
+        assert!(!verify_proof_of_merge(
+            dir.path(),
+            "RESILIENT-9592",
+            Some(200)
         ));
     }
 
