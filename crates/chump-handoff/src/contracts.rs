@@ -1920,7 +1920,56 @@ mod external_repo_bar_aware_tests {
     }
 }
 
-// ── (g) VisionIntakeContract ───────────────────────────────────────────────
+// ── (g) GateMedicContract ───────────────────────────────────────────────
+//
+// RESILIENT-416: GateMedic internal data structures for diagnostic state,
+// configuration, and results. These types support gate-health monitoring and
+// incident diagnosis workflows.
+
+/// Represents the diagnostic state of a gate that has failed or is degraded.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GateRedState {
+    /// The gate identifier (e.g., `gap-status-guard`, `fast-checks`).
+    pub gate_id: String,
+    /// Time (RFC3339 format) when the gate first entered this state.
+    pub entered_at: String,
+    /// Reason or description for the red state.
+    pub reason: String,
+}
+
+/// Represents a diagnostic finding about a gate or component.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DiagnosticResult {
+    /// Name of the diagnostic check performed.
+    pub check_name: String,
+    /// Outcome: `pass`, `fail`, or `unknown`.
+    pub status: String,
+    /// Detailed finding or error message.
+    pub detail: String,
+}
+
+/// Configuration for the GateMedic diagnostic engine.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GateMedicConfig {
+    /// Maximum number of days to retain diagnostic history.
+    pub history_retention_days: u32,
+    /// Threshold for flagging high-frequency failures (per hour).
+    pub failure_rate_threshold: f64,
+    /// Enable detailed logging of diagnostic runs.
+    pub debug_logging_enabled: bool,
+}
+
+impl Default for GateMedicConfig {
+    fn default() -> Self {
+        Self {
+            history_retention_days: 30,
+            failure_rate_threshold: 0.25,
+            debug_logging_enabled: false,
+        }
+    }
+}
+
+// ── (h) VisionIntakeContract ───────────────────────────────────────────────
 //
 // INFRA-3480: CREATE-mode conversational intake. Sits downstream of the
 // front-door router (src/front_door.rs, EFFECTIVE-330) — that layer decides
@@ -2392,5 +2441,77 @@ mod tests_vision_intake {
         };
         let p = VisionIntakeContract::prompt(&input).to_lowercase();
         assert!(p.contains("pull request") && p.contains("branch") && p.contains("commit"));
+    }
+}
+
+#[cfg(test)]
+mod tests_gate_medic {
+    use super::*;
+
+    #[test]
+    fn test_gate_red_state_serialization() {
+        let state = GateRedState {
+            gate_id: "fast-checks".to_string(),
+            entered_at: "2026-10-14T12:00:00Z".to_string(),
+            reason: "Multiple check-runs failing".to_string(),
+        };
+
+        let json = serde_json::to_string(&state).expect("serialize");
+        let deserialized: GateRedState = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, state);
+    }
+
+    #[test]
+    fn test_diagnostic_result_serialization() {
+        let result = DiagnosticResult {
+            check_name: "ci_health_check".to_string(),
+            status: "fail".to_string(),
+            detail: "One or more check-runs are in FAILURE state".to_string(),
+        };
+
+        let json = serde_json::to_string(&result).expect("serialize");
+        let deserialized: DiagnosticResult = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, result);
+    }
+
+    #[test]
+    fn test_gate_medic_config_default() {
+        let config = GateMedicConfig::default();
+        assert_eq!(config.history_retention_days, 30);
+        assert_eq!(config.failure_rate_threshold, 0.25);
+        assert!(!config.debug_logging_enabled);
+    }
+
+    #[test]
+    fn test_gate_medic_config_serialization() {
+        let config = GateMedicConfig {
+            history_retention_days: 30,
+            failure_rate_threshold: 0.25,
+            debug_logging_enabled: false,
+        };
+
+        let json = serde_json::to_string(&config).expect("serialize");
+        let deserialized: GateMedicConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, config);
+        assert_eq!(deserialized, GateMedicConfig::default());
+    }
+
+    #[test]
+    fn test_gate_medic_config_roundtrip_json() {
+        let original = GateMedicConfig::default();
+        let json = serde_json::to_string_pretty(&original).expect("serialize");
+        let decoded: GateMedicConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            decoded.history_retention_days,
+            original.history_retention_days
+        );
+        assert_eq!(
+            decoded.failure_rate_threshold,
+            original.failure_rate_threshold
+        );
+        assert_eq!(
+            decoded.debug_logging_enabled,
+            original.debug_logging_enabled
+        );
     }
 }
