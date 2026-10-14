@@ -2453,3 +2453,8 @@ jobs:
         env:
           CHUMP_INTEGRATION_TEST: "1"
           CHUMP_BIN: target/debug/chump
+
+      - name: Run gap close-decomposed integration test (RESILIENT-1373)
+        run: bash scripts/ci/test-gap-close-decomposed-integration.sh
+        env:
+          CHUMP_BIN: target/debug/chump
