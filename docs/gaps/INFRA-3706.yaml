@@ -1,0 +1,51 @@
+- id: INFRA-3706
+  domain: INFRA
+  title: "INFRA: Update self_test to verify canonical store resolution (INFRA-3632 slice)"
+  status: done
+  priority: P0
+  effort: xs
+  closed_pr: 5405
+  closed_date: '2026-10-14'
+  description: |
+    Modify the `self_test` function in `scripts/setup/chump-node-install.sh` to source `~/.chump/node.env` (if present), resolve the store path, compare it against the canonical `CHUMP_STATE_DIR`, detect a local `.chump/state.db` in the current directory, emit clear error messages and exit with a non‑zero status on any mismatch, and only then invoke `chump gap list` to complete the test.
+    
+    Target file(s):
+    - scripts/setup/chump-node-install.sh
+    
+    (Spec enriched by chump-gap-enricher — EFFECTIVE-446. Original filer context preserved below.)
+  acceptance_criteria:
+    - Running `scripts/setup/chump-node-install.sh self_test` on a machine where `~/.chump/node.env` exists and the resolved store matches `CHUMP_STATE_DIR` prints the resolved path and exits with status 0.
+    - "? If a file `.chump/state.db` exists in the current working directory, executing the same command exits with a non‑zero status and outputs “Error : local .chump/state.db detected; use canonical store”."
+    - "? When the resolved store path differs from the value of `CHUMP_STATE_DIR`, the command exits with a non‑zero status and outputs “Error : resolved store path does not match CHUMP_STATE_DIR”."
+    - After passing the above checks, the function successfully runs `chump gap list` and the command exits with status 0.
+  depends_on: [INFRA-3703]
+  notes: |
+    [chump harvest check 'MISSION']
+    === primitives_index match for 'MISSION' ===
+    
+    === cluster keyword match for 'MISSION' ===
+      cluster smugglers-rpg (25 repos): ai-gm-service, mythseeker2, MythSeeker, smuggler-discord-bot, smuggler, analytics-platform-service, zendesk-background-agent, services-dashboard, service-frontends, mock-services, bot-simulation-service, commercial-platform, internal-zendesk-tools, auth-platform-service, combat-system-service, character-system-service, mission-engine-service, chat-platform-service, payment-platform-service, economy-system-service, marketplace-system-service, code-generation-service, asset-management-service, audio-generation-service, smugglers
+    
+    === extracted_primitives (per-file, line-refd) match for 'MISSION' ===
+    
+    === repo-description match for 'MISSION' ===
+      mission-engine-service: Dynamic mission and quest generation system
+    
+    === HARVEST_ROADMAP.md mention of 'MISSION' (deep-scan findings) ===
+      19:| **5** | `neural-farm` OpenAI-compat `/v1` proxy + LiteLLM/InferrLM router | Local-LLM offline mission ([CP-001](cross-pollination/CP-001-neural-farm-into-chump.md)) | **Microservice** | Already drafted; just needs the gap filed and the env var wired |
+      187:- `mission-engine-service` — Supabase + Redis + LLM choreographer pattern. **Directly applicable to Chump's gap-decompose pipeline.**
+      217:| `RESILIENT: harvest mission-engine-service Supabase+Redis+LLM choreographer pattern for Chump gap-decompose pipeline (CP-011)` | RESILIENT | P2 |
+    
+    === cross-pollination briefs mentioning 'MISSION' ===
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+  opened_date: '2026-08-24'
+
