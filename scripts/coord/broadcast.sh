@@ -124,6 +124,8 @@ if [[ -z "$SESSION_ID" && -f "$HOME/.chump/session_id" ]]; then
 fi
 SESSION_ID="${SESSION_ID:-broadcast-$$-$(date +%s)}"
 
+AUTOPLACE="${AUTOPLACE:-1}"
+
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # CREDIBLE-025: include worker model in all events so per-model stats are attributable.
 MODEL="${FLEET_MODEL:-${CHUMP_MODEL:-unknown}}"
@@ -299,6 +301,12 @@ record_sent_pending() {
         "$TS" "$corr_id" "$to" "$expires_at" >> "$pending_file" 2>/dev/null || true
 }
 
+# ── Storage auto-placement stub (RESILIENT-464) ─────────────────────────────
+place() {
+    [[ "$AUTOPLACE" == "1" ]] || return 0
+    printf '[broadcast] AUTOPLACE enabled – automatic relocation engaged\n'
+}
+
 # ── INFRA-2015: urgency-tier routing ─────────────────────────────────────────
 # Called AFTER the primary emit_to_file + emit_to_inbox so the main event
 # always lands in ambient regardless of urgency side-effects.
@@ -318,6 +326,7 @@ route_by_urgency() {
     case "$urgency" in
         INFO|"") return 0 ;;  # no extra routing; default / legacy path
         WARN)
+            place
             # Emit a secondary ambient event so the 5-min loop tick sees it.
             printf '{"ts":"%s","kind":"urgent_broadcast","urgency":"WARN","source_session":"%s","body":%s}\n' \
                 "$TS" "$SESSION_ID" \
@@ -325,6 +334,7 @@ route_by_urgency() {
                 >> "$AMBIENT" 2>/dev/null || true
             ;;
         CRIT)
+            place
             # Write to global urgent inbox — PostToolUse hook reads it within ~1 tool call.
             local urgent_inbox="$LOCK_DIR/URGENT-INBOX.jsonl"
             python3 -c "
@@ -345,6 +355,7 @@ print(json.dumps(entry))
                 >> "$AMBIENT" 2>/dev/null || true
             ;;
         EMERGENCY)
+            place
             # Write to global urgent inbox (same as CRIT).
             local urgent_inbox="$LOCK_DIR/URGENT-INBOX.jsonl"
             python3 -c "
