@@ -14802,6 +14802,64 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            "migrate-decomposed" => {
+                if args
+                    .iter()
+                    .skip(2)
+                    .any(|a| matches!(a.as_str(), "--help" | "-h"))
+                {
+                    println!("Usage: chump gap migrate-decomposed");
+                    println!();
+                    println!(
+                        "Migrates legacy decomposed umbrellas from open/blocked/in-progress status"
+                    );
+                    println!("to decomposed status (RESILIENT-1382/RESILIENT-1383).");
+                    println!();
+                    println!("Prints a summary: total gaps inspected, migrated, and skipped.");
+                    println!("Returns non-zero exit code on unexpected errors.");
+                    return Ok(());
+                }
+
+                match store.migrate_decomposed_umbrellas() {
+                    Ok(log_entries) => {
+                        let total = log_entries.len();
+                        let migrated = log_entries
+                            .iter()
+                            .filter(|e| e.migration_status == "MIGRATED")
+                            .count();
+                        let skipped = total - migrated;
+
+                        println!("Migration complete:");
+                        println!("  Total gaps inspected: {}", total);
+                        println!("  Migrated: {}", migrated);
+                        println!(
+                            "  Skipped (already decomposed or no eligible children): {}",
+                            skipped
+                        );
+
+                        if migrated > 0 {
+                            println!("\nDetails:");
+                            for entry in &log_entries {
+                                if entry.migration_status == "MIGRATED" {
+                                    println!(
+                                        "  ✓ {} — {} children ({} terminal, {} non-terminal)",
+                                        entry.gap_id,
+                                        entry.child_count,
+                                        entry.terminal_children,
+                                        entry.non_terminal_children
+                                    );
+                                }
+                            }
+                        }
+
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("chump gap migrate-decomposed: {e:#}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             "decompose" => {
                 // INFRA-1238: trap --help before positional validation.
                 if args
