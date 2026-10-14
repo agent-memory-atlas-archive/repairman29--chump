@@ -49,7 +49,7 @@ MISSION-011: mission-directed picker
                         P1 (1, 1, ...) — mission wins within the band. A mission
                         P1 does NOT override a substrate P0 because prio_rank is
                         compared first (0 < 1 regardless of mission_rank).
-                        Sort tuple: (prio_rank, mission_rank, planner_rank, effort_rank, age, id)
+                        Sort tuple: (prio_rank, mission_rank, planner_rank, age, effort_rank, id)
                         See scripts/ci/test-mission-picker.sh for the invariant.
 """
 
@@ -670,7 +670,7 @@ def main() -> int:
         # the planner has no opinion on. The fix moves prio_rank first so planner
         # only breaks ties within the same priority band.
         # Old sort: (planner_rank, prio_rank, mission_rank, effort_rank, age, id)
-        # New sort: (prio_rank, mission_rank, planner_rank, effort_rank, age, id)
+        # New sort: (prio_rank, mission_rank, planner_rank, age, effort_rank, id)
         planner_rank = planner_ranks.get(gid, 10_000)
 
         # MISSION-011: mission_rank = 0 for gaps linked to the active mission
@@ -679,7 +679,7 @@ def main() -> int:
         # beats a mission P1 (prio_rank=1) because prio_rank is compared first.
         # Within the same priority band (both P1), mission_rank=0 causes the
         # mission gap to sort before the substrate gap (mission_rank=1).
-        # Sort tuple: (prio_rank, mission_rank, planner_rank, effort_rank, age, id)
+        # Sort tuple: (prio_rank, mission_rank, planner_rank, age, effort_rank, id)
         mission_rank = 0 if _is_mission_linked(g, active_mission) else 1
 
         candidates.append(
@@ -687,8 +687,8 @@ def main() -> int:
                 prio_rank,
                 mission_rank,
                 planner_rank,
-                EFFORT_RANK.get(e, 9),
                 g.get("created_at") or 0,
+                EFFORT_RANK.get(e, 9),
                 gid,
             )
         )

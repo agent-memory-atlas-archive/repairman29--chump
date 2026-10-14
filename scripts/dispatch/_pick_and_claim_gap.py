@@ -14,7 +14,7 @@ of yet-another-INFRA-fix.
 MISSION-028 FIX: this file now mirrors the ranking logic from _pick_gap.py
 (the CANONICAL ranking source). When changing ranking behaviour, change
 _pick_gap.py first and mirror here. Key invariants:
-  - Sort tuple: (prio_rank, mission_rank, wedge_rank, effort_rank, age, id)
+  - Sort tuple: (prio_rank, mission_rank, wedge_rank, age, effort_rank, id)
   - prio_rank is the PRIMARY key (P0=0 < P1=1 < P2=2 < P3=3). A P0 ALWAYS
     beats any lower-priority gap — no heuristic may promote a lower-priority
     gap above a higher-priority one.
@@ -38,7 +38,7 @@ beat — a real P0, so operator-marked P0s and the active mission sat unworked
 while the fleet ground low-priority gaps (e.g. P1 MISSION-055 was picked over
 P0 INFRA-3616). Priority is now the pure PRIMARY key; the wedge heuristics are
 demoted to a within-band tiebreaker, matching the CANONICAL _pick_gap.py order
-(prio_rank, mission_rank, planner/wedge, effort, age, id).
+(prio_rank, mission_rank, planner/wedge, age, effort, id).
 
 Reads the open-gap JSON, applies fleet filters, attempts to claim each
 candidate in priority order. Returns the first gap that was successfully
@@ -932,14 +932,14 @@ def main() -> int:
         wedge_rank = -(affinity_score + rebalance_boost)
 
         # Canonical sort order matches _pick_gap.py:
-        #   (prio_rank, mission_rank, wedge_rank, effort_rank, age, id)
+        #   (prio_rank, mission_rank, wedge_rank, age, effort_rank, id)
         candidates.append(
             (
                 prio_rank,
                 mission_rank,
                 wedge_rank,
-                EFFORT_RANK.get(e, 9),
                 g.get("created_at") or 0,
+                EFFORT_RANK.get(e, 9),
                 gid,
             )
         )
