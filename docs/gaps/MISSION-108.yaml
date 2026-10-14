@@ -1,0 +1,49 @@
+- id: MISSION-108
+  domain: MISSION
+  title: "MISSION: Create Posse autonomy audit checklist and run initial audit (MISSION-103 slice)"
+  status: done
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - "A checklist documenting required autonomous behaviours for Posse is stored in the repository"
+    - "The audit is executed and a markdown report is committed, identifying missing schedule triggers or manual steps"
+  notes: |
+    [chump harvest check 'FLEET']
+    === primitives_index match for 'FLEET' ===
+
+    === cluster keyword match for 'FLEET' ===
+
+    === extracted_primitives (per-file, line-refd) match for 'FLEET' ===
+
+    === repo-description match for 'FLEET' ===
+      jeffadkins-dev: Source for jeffadkins.dev — Jeff Adkins' builder portfolio (edge AI, agent fleets, digital-scrapper tools).
+      chump-brain: Knowledge base for the Chump agent fleet — research notes, portfolio/project context, and self-knowledge docs.
+
+    === HARVEST_ROADMAP.md mention of 'FLEET' (deep-scan findings) ===
+      174:| **2** | `bot-simulation-service` (smugglers-rpg) | 11.2 MB REAL synthetic-load generator with 5 bot archetypes, fatigue sim, funnel analytics, Railway-native — not the scaffolded UI test stub the description implied | **HIGH** — Chump's fleet test harness could harvest directly for synthetic worker simulation, regression load gen |
+      183:- `analytics-platform-service` — REAL ML-driven retention scoring (`aiInsightsEngine.js` with weighted models, conversion thresholds, churn risk). Relevant to **fleet telemetry layer (INFRA-721 adjacent)** if Chump grows behavioral analytics.
+      206:Wave 2 sampled 5 of 24 Smugglers services and concluded the cluster was "all dormant, low harvest signal." Wave 3 sampled 14 more and found **6 of them REAL with extractable primitives**. The pre-filter dropped real signal. INFRA-1823's "Coverage push: deep-scan remaining 45 of 76 fleet repos" was exactly the right gap to file; this Wave 3 work executes that AC.
+      214:| `EFFECTIVE: harvest bot-simulation-service synthetic-load generator into Chump fleet test harness (CP-008)` | EFFECTIVE | P2 |
+      238:The fleet grew from 76 to 101 GitHub repos since Wave 4 (`gh repo list` count), leaving 50 repos
+      251:Ran `python3 scripts/arsenal/build.py` to regenerate `GLOBAL_ARSENAL.json`/`.md` — exit 0, fleet
+      258:That's the value proposition for the catalog as ongoing infrastructure — not "Jeff has cool repos to show off," but "Chump's planning loop now has eyes on Jeff's prior work." Worth wiring `python3 scripts/arsenal/build.py` into a weekly cron (or a `chump fleet doctor --harvest-check` subcommand) so the next INFRA-1719-shaped discovery failure gets caught at planning time, not at PR-merge time.
+
+    === cross-pollination briefs mentioning 'FLEET' ===
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-005-echeo-ship-velocity-score.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-007-acp-alignment.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-009-mock-services.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-011-bicameral-mind.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-012-ai-gm-ensemble.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-013-bot-simulation.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-014-analytics-retention.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-017-mission-engine-choreographer.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-018-smugglers-context-pipeline.md
+  closed_date: "2026-10-14"
+  closed_pr: 5395
+  outcome_id: MISSION-103
