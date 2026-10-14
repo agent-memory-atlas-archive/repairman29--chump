@@ -100,3 +100,29 @@ roles:
     skills:
       - git
       - shell
+
+  - name: factory
+    description: >
+      Capacity role (RESILIENT-320) for nodes running the full worker fleet:
+      CJ workers, PR lander, reapers, integrator, orchestrator, disk monitor,
+      and health watchdog. Targets factory/production deployment model.
+    skills:
+      - fleet-orchestration
+      - worker-supervision
+
+  - name: data
+    description: >
+      Capacity role (RESILIENT-320) for data-plane nodes: orchestrator, disk
+      monitor, health watchdog, and PostgREST gateway. Excludes PR lander and
+      reapers. Targets data infrastructure deployment model.
+    skills:
+      - data-infrastructure
+      - gateway-supervision
+
+  - name: embed
+    description: >
+      Capacity role (RESILIENT-320) for embed/inference nodes: orchestrator
+      and disk monitor. Lightweight deployment for embedding infrastructure.
+    skills:
+      - embedding-infrastructure
+      - resource-optimization
