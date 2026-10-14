@@ -77,14 +77,14 @@ converge_mirror_hard_reset() {
         cur="$(git symbolic-ref --short -q HEAD 2>/dev/null || true)"
         if [ "$cur" != "main" ]; then
             printf '[converge-mirror] on %s, not main — switching back to main\n' "${cur:-detached HEAD}" >&2
-            if git checkout -q -f -B main "$ref"; then
-                return 0
+            if ! git checkout -q -f -B main "$ref"; then
+                printf '[converge-mirror] WARN: could not switch to main; resetting in place\n' >&2
             fi
-            printf '[converge-mirror] WARN: could not switch to main; resetting in place\n' >&2
         fi
     fi
 
     # reset --hard converges over untracked collisions a merge would refuse,
-    # and leaves gitignored runtime DBs untouched.
+    # and leaves gitignored runtime DBs untouched. Must always run (even after
+    # checkout -B above) to guarantee untracked collisions are overwritten.
     git reset --hard "$ref"
 }
