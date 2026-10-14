@@ -1,0 +1,15 @@
+# MISSION-111 — holler service for provisioning HOLLER_SERVICE_KEY and emitting alerts.
+# The holler service loads HOLLER_SERVICE_KEY from a secret manager or env file
+# during service start and enables timer-based alert emission. Enable with:
+#   systemctl enable --now holler.timer
+[Unit]
+Description=Holler service — load HOLLER_SERVICE_KEY and initialize alert emission
+After=network-online.target
+ConditionFileNotEmpty=/root/.chump/holler.env
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStart=/bin/bash -c 'set -a; source /root/.chump/holler.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/ops/holler-init.sh'
+TimeoutStartSec=120
+RemainAfterExit=yes

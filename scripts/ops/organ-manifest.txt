@@ -336,6 +336,11 @@ enabled     chump-duty-officer.timer  role=brain
 # Discord DM. role=data (publishes state, no muscle). Deterministic state
 # read, no LLM. Must be manifest-declared or it stays dark after a reset.
 enabled     chump-digest.timer  role=data
+# MISSION-111: the HOLLER service — timer-based alert emission with automated
+# HOLLER_SERVICE_KEY provisioning from secret manager or env file. role=data
+# (publishes alert state). Must be manifest-declared or it stays dark after
+# a reset and key provisioning never runs at boot.
+enabled     holler.timer  role=data requires=file:~/.chump/holler.env
 
 
 # --- Owned-node factory organs (TREK-16 / INFRA-3642, install-a-Trek-from-0) -
