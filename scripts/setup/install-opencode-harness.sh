@@ -73,7 +73,7 @@ fi
 # ── 3. almanac index for this repo ───────────────────────────────────────────
 REPO_NAME_LC="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]')"
 ALMANAC_DB="${CHUMP_ALMANAC_DB:-$ALMANAC_DIR/indexes/${REPO_NAME_LC}-src.db}"
-ALMANAC_EMBED_URL="${CHUMP_ALMANAC_EMBED_URL:-http://100.101.188.30:11434}"
+ALMANAC_EMBED_URL="${CHUMP_ALMANAC_EMBED_URL:-http://localhost:11434}"
 if [[ ! -f "$ALMANAC_DB" ]]; then
     if command -v almanac >/dev/null 2>&1; then
         log "no index at $ALMANAC_DB — building via 'almanac init' (may take a few minutes)…"

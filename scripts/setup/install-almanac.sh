@@ -51,7 +51,7 @@
 #                          chump-mcp.json is wired and whose git hooks are installed)
 #   CHUMP_MCP_CONFIG      path to chump-mcp.json         (default: $CHUMP_REPO_ROOT/chump-mcp.json)
 #   ALMANAC_EMBED_URL     embed/rerank inference host written into the MCP entry
-#                          (default: http://100.101.188.30:11434)
+#                          (default: http://localhost:11434)
 #
 # Emits ambient kinds: almanac_install_completed, almanac_install_failed,
 #   almanac_mcp_wire_failed, almanac_hook_install_failed
@@ -67,7 +67,7 @@ ALMANAC_BUILD_CMD="${ALMANAC_BUILD_CMD:-cargo build --release --manifest-path \"
 ALMANAC_INSTALL_DIR="${ALMANAC_INSTALL_DIR:-/usr/local/bin}"
 CHUMP_ENV_FILE="${CHUMP_ENV_FILE:-$HOME/.chump/env}"
 CHUMP_MCP_CONFIG="${CHUMP_MCP_CONFIG:-$REPO_ROOT/chump-mcp.json}"
-ALMANAC_EMBED_URL="${ALMANAC_EMBED_URL:-http://100.101.188.30:11434}"
+ALMANAC_EMBED_URL="${ALMANAC_EMBED_URL:-http://localhost:11434}"
 
 MODE="install"; DRY=0
 for a in "$@"; do
