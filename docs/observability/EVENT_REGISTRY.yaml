@@ -2321,7 +2321,7 @@ events:
       Never fires on a transient red that clears before the window, since
       main_red_span resets to 0 the moment a benign status line lands.
     consumers: [ambient]
-    fields_required: [ts, kind, main_red_span_min, threshold_min]
+    fields_required: [ts, kind, main_red_span_min, threshold_min, failed_check]
   # NOTE: board_vitals_alert (the notify/page kind set via CHUMP_NOTIFY_KIND) is
   # deliberately NOT registered here — like its sibling board_cycle_alert, it is
   # a notify/page kind whose home is scripts/coord/operator-escalation-registry.txt,

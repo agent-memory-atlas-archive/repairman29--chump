@@ -216,6 +216,35 @@ PY
 # lines at the tail of the stream (0 if the newest such line is not real-red).
 # "real red" = status NOT in the benign set {no_runs, green, clean, passing,
 # none, ok}.
+# Failing required check of the current red streak (RESILIENT-1124): the gate
+# label of the newest real-red main_red_detected line. Prints the gate, or
+# "unknown" when none is recorded. Single bounded tail-scan; read-only.
+_bv_main_red_failed_check() {
+    local log; log="$(_bv_ambient_log)"
+    [[ -f "$log" ]] || { echo unknown; return; }
+    tail -n 5000 "$log" 2>/dev/null | python3 -c '
+import sys, json, re
+BENIGN = {"no_runs","green","clean","passing","none","ok",""}
+gate = "unknown"
+for line in sys.stdin:
+    if "\"main_red_detected\"" not in line:
+        continue
+    try:
+        o = json.loads(line)
+    except Exception:
+        continue
+    if o.get("kind") != "main_red_detected":
+        continue
+    if str(o.get("status","")).lower() in BENIGN:
+        gate = "unknown"
+        continue
+    g = str(o.get("gate","")).strip()
+    if g and g.lower() not in ("none","unknown"):
+        gate = g
+print(re.sub(r"[^A-Za-z0-9 ._/:()-]", "_", gate)[:120])
+' 2>/dev/null || echo unknown
+}
+
 _bv_main_red_span_min() {
     local log; log="$(_bv_ambient_log)"
     [[ -f "$log" ]] || { echo 0; return; }
@@ -597,8 +626,12 @@ board_vitals_check() {
     main_sat_red_min="${CHUMP_BOARD_VITALS_MAIN_SAT_RED_MIN:-2880}"
     if (( main_red_span >= main_sat_red_min )); then
         # scanner-anchor: "kind":"main_sat_sustained_red"
+        local failed_check
+        failed_check="$(_bv_main_red_failed_check)"
+        [[ -n "$failed_check" ]] || failed_check=unknown
         _bv_emit "main_sat_sustained_red" \
-            "\"main_red_span_min\":${main_red_span},\"threshold_min\":${main_sat_red_min}"
+            "\"main_red_span_min\":${main_red_span},\"threshold_min\":${main_sat_red_min},\"failed_check\":\"${failed_check}\""
+        echo "[board-vitals] main-sat sustained red ${main_red_span}m: failed required check = ${failed_check}" >&2
     fi
 
     # ── 5 · FLOOR: credential / credit needs — genuinely Jeff's to fix ───────

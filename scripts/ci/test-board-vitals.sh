@@ -416,7 +416,7 @@ echo "[test-board-vitals] RESILIENT-1123: main_sat_sustained_red fires past the 
 MS="$TMP/main-sat-red.jsonl"
 {
   echo '{"ts":"2026-08-25T00:00:00Z","kind":"main_red_detected","status":"red"}'
-  echo '{"ts":"2026-08-27T10:00:00Z","kind":"main_red_detected","status":"red"}'
+  echo '{"ts":"2026-08-27T10:00:00Z","kind":"main_red_detected","status":"filed","gate":"fast-checks"}'
 } > "$MS"
 ( set -a
   CHUMP_AMBIENT_LOG="$MS"; CHUMP_BOARD_VITALS_STATE_DIR="$TMP/state-ms"
@@ -429,7 +429,7 @@ MS="$TMP/main-sat-red.jsonl"
   set +a
   source "$LIB"; board_vitals_check ) >/dev/null 2>&1
 _emitted "58h consecutive real-red span → main_sat_sustained_red emitted" \
-    "$MS" '"kind":"main_sat_sustained_red".*"main_red_span_min":3480'
+    "$MS" '"kind":"main_sat_sustained_red".*"main_red_span_min":3480.*"failed_check":"fast-checks"'
 
 echo "[test-board-vitals] RESILIENT-1123: no false positive — span under the 48h threshold"
 MS2="$TMP/main-sat-red-short.jsonl"
