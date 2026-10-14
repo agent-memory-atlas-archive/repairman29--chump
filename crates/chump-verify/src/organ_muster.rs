@@ -285,6 +285,29 @@ pub fn muster_verdict(reports: &[OrganReport]) -> OrganStatus {
         .unwrap_or(OrganStatus::Green)
 }
 
+/// Maps a role to its list of required organs (RESILIENT-320).
+pub fn organs_for_role(role: &str) -> Vec<&'static str> {
+    match role {
+        "factory" => vec![
+            "chump-cj-worker",
+            "chump-pr-lander",
+            "chump-stale-worktree-reaper",
+            "chump-cargo-target-reaper",
+            "chump-integrator",
+            "chump-node-orchestrator",
+            "chump-main-health-watchdog",
+        ],
+        "data" => vec![
+            "chump-node-orchestrator",
+            "chump-main-health-watchdog",
+            "chump-fleet-server",
+            "chump-cj-disk-monitor",
+        ],
+        "embed" => vec!["chump-node-orchestrator", "chump-main-health-watchdog"],
+        _ => vec![],
+    }
+}
+
 /// Probe trait so the orchestration loop (`run_muster`) can be driven by
 /// deterministic fakes in tests instead of real `systemctl`/binary calls.
 pub trait OrganProbe {
@@ -628,5 +651,44 @@ name=integrator binary=/usr/bin/integrator heartbeat=- heal=restart-integrator.s
         let mut reports = run_muster(&[good], &probe, &mut streaks);
         reports.extend(run_muster(&[bad], &probe_bad, &mut streaks));
         assert_eq!(muster_verdict(&reports), OrganStatus::Down);
+    }
+
+    #[test]
+    fn resilient320_factory_role_organs() {
+        let organs = organs_for_role("factory");
+        assert_eq!(organs.len(), 7);
+        assert!(organs.contains(&"chump-cj-worker"));
+        assert!(organs.contains(&"chump-pr-lander"));
+        assert!(organs.contains(&"chump-stale-worktree-reaper"));
+        assert!(organs.contains(&"chump-cargo-target-reaper"));
+        assert!(organs.contains(&"chump-integrator"));
+        assert!(organs.contains(&"chump-node-orchestrator"));
+        assert!(organs.contains(&"chump-main-health-watchdog"));
+    }
+
+    #[test]
+    fn resilient320_data_role_organs() {
+        let organs = organs_for_role("data");
+        assert_eq!(organs.len(), 4);
+        assert!(organs.contains(&"chump-node-orchestrator"));
+        assert!(organs.contains(&"chump-main-health-watchdog"));
+        assert!(organs.contains(&"chump-fleet-server"));
+        assert!(organs.contains(&"chump-cj-disk-monitor"));
+        assert!(!organs.contains(&"chump-pr-lander"));
+        assert!(!organs.contains(&"chump-stale-worktree-reaper"));
+    }
+
+    #[test]
+    fn resilient320_embed_role_organs() {
+        let organs = organs_for_role("embed");
+        assert_eq!(organs.len(), 2);
+        assert!(organs.contains(&"chump-node-orchestrator"));
+        assert!(organs.contains(&"chump-main-health-watchdog"));
+    }
+
+    #[test]
+    fn resilient320_unknown_role_returns_empty() {
+        let organs = organs_for_role("unknown");
+        assert_eq!(organs.len(), 0);
     }
 }
