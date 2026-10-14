@@ -3470,3 +3470,5 @@ CHUMP_NOSHIP_LOOP_WINDOW_LINES
 CHUMP_ALMANAC_DB
 # detected in: (standard input)
 CHUMP_ALMANAC_EMBED_URL
+# HEADLESS_TEST — RESILIENT-383 (#5402): minimal detached-session smoke in src/spawn_worker_tool.rs; test-only runtime flag
+HEADLESS_TEST
