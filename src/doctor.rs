@@ -87,6 +87,8 @@ pub struct DoctorReport {
 }
 
 impl DoctorReport {
+    /// RESILIENT-1353: Detects if any health check has failed.
+    /// This is the core FAIL detection for fleet-doctor --json output parsing.
     pub fn any_failed(&self) -> bool {
         self.checks.iter().any(|c| c.status == CheckStatus::Fail)
     }
