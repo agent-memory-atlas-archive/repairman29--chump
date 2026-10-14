@@ -679,3 +679,4 @@ enabled     chump-cargo-sweep-gc.service  role=janitor requires=file:~/.chump/or
 enabled     chump-reviver.service  role=brain requires=file:~/.chump/organs/reviver.sh housekeeping=scripts/coord/post-push-integrity-watch.sh|60|
 enabled     chump-pr-stuck-live-scan.service  role=brain requires=file:~/.chump/organs/pr-stuck-live-scan.sh housekeeping=scripts/ops/stuck-pr-filer.sh|3600|
 enabled     chump-pr-stuck-cluster-detector.service  role=brain requires=file:~/.chump/organs/pr-stuck-cluster-detector.sh housekeeping=scripts/coord/pr-stuck-cluster-detector.sh|1800|--apply
+enabled     chump-armed-pr-rebaser.service  role=brain requires=file:~/.chump/organs/armed-pr-rebaser.sh housekeeping=scripts/coord/armed-pr-rebaser.sh|1200|
