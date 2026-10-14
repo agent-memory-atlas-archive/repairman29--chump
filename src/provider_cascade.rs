@@ -1456,6 +1456,11 @@ impl Provider for ProviderCascade {
                                     record_call(local_slot);
                                     set_last_used_slot(local_slot.name.clone());
                                     set_last_used_model(local_slot.provider.model().to_string());
+                                    tracing::info!(
+                                        slot_id = %local_slot.name,
+                                        model_name = %local_slot.provider.model(),
+                                        "provider_cascade: slot used (local fallback)"
+                                    );
                                     llm_backend_metrics::record_cascade_slot(&local_slot.name);
                                     provider_quality::record_slot_success(&local_slot.name);
                                     provider_quality::record_latency(&local_slot.name, latency_ms);
@@ -1688,6 +1693,11 @@ impl Provider for ProviderCascade {
                     record_call(slot);
                     set_last_used_slot(slot.name.clone());
                     set_last_used_model(slot.provider.model().to_string());
+                    tracing::info!(
+                        slot_id = %slot.name,
+                        model_name = %slot.provider.model(),
+                        "provider_cascade: slot used"
+                    );
                     llm_backend_metrics::record_cascade_slot(&slot.name);
                     provider_quality::record_slot_success(&slot.name);
                     provider_quality::record_latency(&slot.name, latency_ms);

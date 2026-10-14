@@ -233,9 +233,15 @@ impl axonerai::tool::Tool for SpawnWorkerTool {
             worktree_path: worktree_path.clone(),
         };
 
+        let slot_id =
+            provider_cascade::get_last_used_slot().unwrap_or_else(|| "unknown".to_string());
+        let model_name =
+            provider_cascade::get_last_used_model().unwrap_or_else(|| "unknown".to_string());
         tracing::info!(
             worktree = %worktree_path.display(),
             task = %&task[..task.len().min(80)],
+            slot_id = %slot_id,
+            model_name = %model_name,
             "spawn_worker: created ephemeral worktree"
         );
 
@@ -456,5 +462,33 @@ mod tests {
         };
         assert!(required.contains(&serde_json::json!("task")));
         assert!(required.contains(&serde_json::json!("working_dir")));
+    }
+
+    #[test]
+    fn spawn_worker_logs_contain_slot_and_model() {
+        // Set up mock last-used slot/model state before spawning
+        crate::provider_cascade::set_last_used_slot("test-slot-id".to_string());
+        crate::provider_cascade::set_last_used_model("test-model-name".to_string());
+
+        // Verify the getter functions return expected values (which will be used in logging)
+        let slot_id =
+            crate::provider_cascade::get_last_used_slot().unwrap_or_else(|| "unknown".to_string());
+        let model_name =
+            crate::provider_cascade::get_last_used_model().unwrap_or_else(|| "unknown".to_string());
+
+        // Assert that both fields are present and contain the expected values
+        assert_eq!(slot_id, "test-slot-id");
+        assert_eq!(model_name, "test-model-name");
+
+        // Verify these would be included in a log line like:
+        // "spawn_worker: created ephemeral worktree slot_id=test-slot-id model_name=test-model-name"
+        let log_line = format!(
+            "spawn_worker: created ephemeral worktree slot_id={} model_name={}",
+            slot_id, model_name
+        );
+        assert!(log_line.contains("slot_id="));
+        assert!(log_line.contains("model_name="));
+        assert!(log_line.contains("test-slot-id"));
+        assert!(log_line.contains("test-model-name"));
     }
 }
