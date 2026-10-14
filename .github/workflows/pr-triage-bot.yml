@@ -144,7 +144,7 @@ jobs:
         if: >-
           steps.pr.outputs.skip == 'false' &&
           steps.classify.outputs.lint_only == 'true'
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: clippy, rustfmt
 
