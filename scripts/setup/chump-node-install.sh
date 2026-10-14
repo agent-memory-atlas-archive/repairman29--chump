@@ -39,7 +39,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --role) ROLE="$2"; shift 2;;
     --home) NODE_DIR="$2"; shift 2;;
-    --self-test-only|--check) SELF_TEST_ONLY=1; shift;;
+    --self-test-only|--check|self_test) SELF_TEST_ONLY=1; shift;;
     --dry-run) DRY=1; shift;;
     --control-plane-only) CONTROL_PLANE_ONLY=1; shift;;
     --with-fleet-server) WITH_FLEET_SERVER=1; shift;;
