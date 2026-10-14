@@ -703,6 +703,39 @@ fn is_benign_infra_check(name_lower: &str, detail_lower: &str) -> bool {
     name_lower.contains("vercel") && detail_lower.contains("verify an account")
 }
 
+/// Detect whether a check context is advisory (non-required) or required.
+///
+/// A check is advisory if:
+/// - Its name matches an entry in `advisory_substrings` (case-insensitive), OR
+/// - It is a known-benign infrastructure check, OR
+/// - When `required_contexts` is set, the check's name is NOT in that list.
+///
+/// When `required_contexts` is `None`, only the env advisory list and benign
+/// predicate determine advisory status.
+///
+/// Returns `true` if the check is advisory (non-gating), `false` if it is required.
+fn is_advisory_check(
+    check_name: &str,
+    check_detail: &str,
+    advisory_substrings: &[String],
+    required_contexts: Option<&[String]>,
+) -> bool {
+    let name_lower = check_name.to_ascii_lowercase();
+    let detail_lower = check_detail.to_ascii_lowercase();
+
+    let env_advisory = advisory_substrings
+        .iter()
+        .any(|sub| name_lower.contains(sub.as_str()));
+    let benign = is_benign_infra_check(&name_lower, &detail_lower);
+
+    match required_contexts {
+        Some(ctxs) => {
+            env_advisory || benign || !ctxs.iter().any(|c| c.eq_ignore_ascii_case(check_name))
+        }
+        None => env_advisory || benign,
+    }
+}
+
 /// Parse a single check entry from statusCheckRollup JSON.
 ///
 /// `required_contexts` is the base branch's branch-protection required-check
@@ -740,7 +773,6 @@ fn classify_check(
             }
         }
     }
-    let detail_lower = detail.to_ascii_lowercase();
 
     let conclusion = check
         .get("conclusion")
@@ -795,23 +827,7 @@ fn classify_check(
         || state == "failure"
         || state == "error";
 
-    let name_lower = name.to_ascii_lowercase();
-    let env_advisory = advisory_substrings
-        .iter()
-        .any(|sub| name_lower.contains(sub.as_str()));
-    let benign = is_benign_infra_check(&name_lower, &detail_lower);
-    let is_advisory = match required_contexts {
-        // CREDIBLE-228: branch protection is the authority on what blocks a
-        // merge. A check NOT in the required set is advisory regardless of its
-        // conclusion — this is what stops Vercel's benign "couldn't verify an
-        // account" status from self-closing every bot-authored PR. The env
-        // override and benign predicate still force-advisory even a listed
-        // check, so an operator can always widen (never narrow) the set.
-        Some(ctxs) => env_advisory || benign || !ctxs.iter().any(|c| c.eq_ignore_ascii_case(&name)),
-        // No readable branch protection (or none configured): fall back to the
-        // env-configured advisory list PLUS the curated benign-infra predicate.
-        None => env_advisory || benign,
-    };
+    let is_advisory = is_advisory_check(&name, &detail, advisory_substrings, required_contexts);
 
     CheckInfo {
         name,
@@ -2191,7 +2207,155 @@ fn emit_ambient_event(kind: &str, fields: &[(&str, &str)]) {
 
 #[cfg(test)]
 mod tests {
-    use super::select_gate_bullets;
+    use super::{is_advisory_check, select_gate_bullets};
+
+    #[test]
+    fn test_is_advisory_check_required_context() {
+        let required = vec!["CI".to_string(), "tests".to_string()];
+        let advisory_subs = vec![];
+
+        // Check in required list → not advisory
+        assert!(!is_advisory_check(
+            "CI",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+        assert!(!is_advisory_check(
+            "tests",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+
+        // Check NOT in required list → advisory
+        assert!(is_advisory_check(
+            "vercel",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+        assert!(is_advisory_check(
+            "unknown-check",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+
+        // Case-insensitive matching
+        assert!(!is_advisory_check(
+            "ci",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+        assert!(!is_advisory_check(
+            "TESTS",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+    }
+
+    #[test]
+    fn test_is_advisory_check_env_advisory_list() {
+        let required = vec!["CI".to_string()];
+        let advisory_subs = vec!["vercel".to_string(), "lint".to_string()];
+
+        // Check in env advisory list → advisory
+        assert!(is_advisory_check(
+            "vercel-prod",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+        assert!(is_advisory_check(
+            "lint-check",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+
+        // Case-insensitive substring matching
+        assert!(is_advisory_check(
+            "VERCEL-PREVIEW",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+
+        // Check not in either list → depends on required_contexts
+        assert!(!is_advisory_check(
+            "CI",
+            "",
+            &advisory_subs,
+            Some(&required)
+        ));
+    }
+
+    #[test]
+    fn test_is_advisory_check_benign_infra() {
+        let required = vec!["CI".to_string(), "vercel-preview".to_string()];
+        let advisory_subs = vec![];
+
+        // Vercel check with account verification message → advisory (benign)
+        let vercel_detail = "GitHub couldn't verify an account for the commit";
+        assert!(is_advisory_check(
+            "vercel-preview",
+            vercel_detail,
+            &advisory_subs,
+            Some(&required)
+        ));
+
+        // Vercel check without account verification message → required (in required list, not benign)
+        let other_detail = "Deployment failed due to error";
+        assert!(!is_advisory_check(
+            "vercel-preview",
+            other_detail,
+            &advisory_subs,
+            Some(&required)
+        ));
+
+        // Non-Vercel check not in required list → advisory (not in required_contexts)
+        assert!(is_advisory_check(
+            "heroku-deploy",
+            vercel_detail,
+            &advisory_subs,
+            Some(&required)
+        ));
+    }
+
+    #[test]
+    fn test_is_advisory_check_no_required_contexts() {
+        let advisory_subs = vec!["advisory".to_string()];
+
+        // With no required_contexts, only env list and benign predicate apply
+        assert!(!is_advisory_check("CI", "", &advisory_subs, None));
+        assert!(is_advisory_check(
+            "advisory-check",
+            "",
+            &advisory_subs,
+            None
+        ));
+
+        // Benign infra check → advisory
+        let vercel_detail = "GitHub couldn't verify an account for the commit";
+        assert!(is_advisory_check(
+            "vercel-check",
+            vercel_detail,
+            &advisory_subs,
+            None
+        ));
+    }
+
+    #[test]
+    fn test_is_advisory_check_env_overrides_required() {
+        let required = vec!["CI".to_string()];
+        let advisory_subs = vec!["ci".to_string()];
+
+        // Even if check is in required_contexts, env advisory list overrides it
+        assert!(is_advisory_check("CI", "", &advisory_subs, Some(&required)));
+    }
 
     #[test]
     fn effective387_select_gate_bullets_prefers_stored_then_synth_then_none() {
