@@ -42,6 +42,7 @@ pub mod doctor;
 pub mod enricher;
 pub mod gardener;
 pub mod integrity;
+pub mod migrator;
 
 use std::path::{Path, PathBuf};
 
