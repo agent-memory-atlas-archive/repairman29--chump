@@ -312,4 +312,59 @@ mod tests {
         assert!(outcome.success);
         assert!(outcome.message.contains("sent wake signal"));
     }
+
+    /// RESILIENT-1359: Integration test for synthetic FAIL triggering gap filing.
+    /// 1. Use synthetic FAIL generator for `gap-drift` health check
+    /// 2. After fleet-doctor processes the payload, query gap store and assert
+    ///    a new gap with tag `gap-drift` exists
+    /// 3. Running the test a second time does not create a duplicate gap
+    #[test]
+    fn synthetic_fail_triggers_gap_filing_with_dedup() {
+        let dir = tempdir().unwrap();
+        let repo_root = dir.path();
+
+        // First call: dispatch_fail processes a synthetic FAIL for gap-drift
+        let outcome1 = dispatch_fail(repo_root, health_check_routing::check_id::GAP_DRIFT);
+        assert_eq!(outcome1.check_id, "gap-drift");
+        assert_eq!(outcome1.action, FixerAction::GapFile);
+        assert!(outcome1.success);
+
+        // Verify the gap was created by querying the gap store
+        let store = chump_gap_store::GapStore::open(repo_root).expect("gap store should open");
+        let gaps = store.list(Some("open")).expect("should list open gaps");
+
+        // Find the gap with the gap-drift tag
+        let gap_with_drift_tag = gaps
+            .iter()
+            .find(|g| g.notes.contains("health-check:gap-drift"))
+            .expect("gap with gap-drift tag should exist");
+
+        assert!(gap_with_drift_tag.notes.contains("health-check:gap-drift"));
+        let first_gap_id = gap_with_drift_tag.id.clone();
+
+        // Second call: dispatch_fail processes the same synthetic FAIL for gap-drift again
+        let outcome2 = dispatch_fail(repo_root, health_check_routing::check_id::GAP_DRIFT);
+        assert_eq!(outcome2.check_id, "gap-drift");
+        assert_eq!(outcome2.action, FixerAction::GapFile);
+        assert!(outcome2.success);
+
+        // Verify the gap was NOT duplicated — the same gap ID should be returned
+        let gaps = store.list(Some("open")).expect("should list open gaps");
+
+        let gap_drift_gaps = gaps
+            .iter()
+            .filter(|g| g.notes.contains("health-check:gap-drift"))
+            .collect::<Vec<_>>();
+
+        // Should still be exactly one gap with the gap-drift tag (idempotent)
+        assert_eq!(
+            gap_drift_gaps.len(),
+            1,
+            "should not create duplicate gap-drift gaps"
+        );
+        assert_eq!(
+            gap_drift_gaps[0].id, first_gap_id,
+            "second call should return the same gap ID"
+        );
+    }
 }
