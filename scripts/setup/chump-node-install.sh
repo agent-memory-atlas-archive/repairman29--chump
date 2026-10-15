@@ -539,7 +539,7 @@ write_node_env() {
   # consumers treat "" as "unset" but some (curl Authorization headers) treat
   # it as "set to nothing", which is worse than an obviously-fake value.
   team_api_key="${team_api_key:-placeholder-team-api-key}"
-  local store_backend="${CHUMP_STORE_BACKEND:-postgrest}"
+  local store_backend="${CHUMP_STORE_BACKEND:-sqlite}"
   # RESILIENT-1513: resolve CHUMP_GAP_SERVER (src/gap_file.rs's gap-filing
   # endpoint, defaulting to 127.0.0.1:7070 when unset) to the CANONICAL
   # store node, not whatever local fleet-server happens to be running. The
