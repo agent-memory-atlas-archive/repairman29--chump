@@ -175,15 +175,6 @@ fn run_validated(opts: &Opts) -> i32 {
         return run_backlog_import(path, &opts.domain);
     }
 
-    if !opts.confirm_mutations {
-        println!(
-            "chump ingest: {} is a valid git repository (phase 1a — read-only, no mutation performed; budget=${budget_usd:.2})",
-            opts.repo_path
-        );
-        println!("chump ingest: re-run with --confirm-mutations to run the full orchestration (INFRA-1784).");
-        return 0;
-    }
-
     run_orchestration(path, budget_usd)
 }
 
@@ -217,7 +208,7 @@ fn run_backlog_import(target_repo: &Path, domain: &str) -> i32 {
 
 /// `--confirm-mutations` path (INFRA-1784, INFRA-1746 phase 5): runs the
 /// Librarian/Cartographer/Evangelist/Systematizer phases in sequence,
-/// writes the takeover certificate + proposed gaps.
+/// writes the takeover certificate + proposed gaps, and creates fleet gaps.
 fn run_orchestration(target_repo: &Path, budget_usd: f64) -> i32 {
     let chump_repo_root = crate::repo_path::repo_root();
     let cfg = crate::ingest_orchestrate::OrchestrateConfig {
@@ -227,13 +218,15 @@ fn run_orchestration(target_repo: &Path, budget_usd: f64) -> i32 {
     crate::ingest_orchestrate::emit_started(&chump_repo_root, target_repo);
     match crate::ingest_orchestrate::run(&cfg) {
         Ok(report) => {
+            let gaps_created = create_gaps_from_proposal(&report);
+            let gaps_skipped = report.gaps_proposed.len().saturating_sub(gaps_created);
+            let repo_name = target_repo
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("<repo>");
             println!(
-                "chump ingest: orchestration complete for {} — phases: {}, gaps proposed: {}, cost: ${:.2}, certificate: {}",
-                target_repo.display(),
-                report.phases_completed.join(", "),
-                report.gaps_proposed.len(),
-                report.total_cost_usd_cents as f64 / 100.0,
-                report.certificate_path.display(),
+                "Ingested {} gaps from {}; {} duplicates skipped.",
+                gaps_created, repo_name, gaps_skipped
             );
             crate::ingest_orchestrate::emit_completed(&chump_repo_root, &report);
             0
@@ -248,6 +241,46 @@ fn run_orchestration(target_repo: &Path, budget_usd: f64) -> i32 {
             }
         }
     }
+}
+
+/// Create fleet gaps from the proposed gaps via `chump gap reserve`.
+/// Returns the number of gaps successfully created.
+fn create_gaps_from_proposal(report: &crate::ingest_orchestrate::OrchestrateReport) -> usize {
+    let mut created = 0;
+    for gap in &report.gaps_proposed {
+        if let Some(_id) = reserve_ingest_gap(gap) {
+            created += 1;
+        }
+    }
+    created
+}
+
+/// Reserve a single gap via `chump gap reserve` CLI.
+fn reserve_ingest_gap(gap: &crate::ingest_orchestrate::ProposedGap) -> Option<String> {
+    let output = std::process::Command::new("chump")
+        .args([
+            "gap",
+            "reserve",
+            "--domain",
+            "INFRA",
+            "--title",
+            &gap.title,
+            "--priority",
+            gap.priority,
+            "--effort",
+            gap.effort,
+            "--force",
+            "--quiet",
+            "--json",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
+    value.get("id").and_then(|v| v.as_str()).map(str::to_string)
 }
 
 fn emit_ingest_initiated(repo_path: &str, budget_usd_raw: &str) {
