@@ -129,13 +129,18 @@ fn run_inner(args: &[String]) -> anyhow::Result<i32> {
         CiResult::Green {
             check_count,
             checks,
+            red_advisory,
         } => {
-            println!("  PASS: {check_count} check-runs all terminal-green");
+            println!("  PASS: {check_count} check-run(s) all terminal-green");
             for c in checks.iter().take(5) {
                 println!("    ✓ {c}");
             }
             if checks.len() > 5 {
                 println!("    … and {} more", checks.len() - 5);
+            }
+            // RESILIENT-1365: emit signal when advisory checks are red.
+            if !red_advisory.is_empty() {
+                emit_advisory_check_red(&opts, red_advisory);
             }
         }
         CiResult::NoGates => {
@@ -572,6 +577,8 @@ enum CiResult {
     Green {
         check_count: usize,
         checks: Vec<String>,
+        /// Advisory checks that are red but do not gate (RESILIENT-1365).
+        red_advisory: Vec<String>,
     },
     NoGates,
     Red {
@@ -1067,9 +1074,16 @@ fn poll_ci_until_terminal(opts: &Opts) -> anyhow::Result<CiResult> {
 
             if failing.is_empty() {
                 let passing: Vec<String> = required.iter().map(|i| i.name.clone()).collect();
+                // RESILIENT-1365: collect red advisory checks to signal later.
+                let red_advisory: Vec<String> = advisory
+                    .iter()
+                    .filter(|i| i.is_fail)
+                    .map(|i| i.name.clone())
+                    .collect();
                 return Ok(CiResult::Green {
                     check_count: passing.len(),
                     checks: passing,
+                    red_advisory,
                 });
             } else {
                 return Ok(CiResult::Red { failing });
@@ -2135,6 +2149,26 @@ fn emit_held(opts: &Opts, reason: &str) {
     );
 }
 
+/// Emit `kind=advisory_check_red` — advisory check(s) are red but verified is posted.
+/// RESILIENT-1365: loud routed signal when advisory check red would withhold verified.
+/// ambient-kind: advisory_check_red  RESILIENT-1365 emitter: src/external_verify_merge.rs
+fn emit_advisory_check_red(opts: &Opts, red_checks: &[String]) {
+    let context = red_checks.join(", ");
+    let message = format!(
+        "verified withheld on #{}: advisory check {} red -> rerun",
+        opts.pr, context
+    );
+    emit_ambient_event(
+        "advisory_check_red",
+        &[
+            ("pr", &opts.pr.to_string()),
+            ("repo", &opts.repo),
+            ("gap", &opts.gap),
+            ("message", &message),
+        ],
+    );
+}
+
 /// Git command with the hook-exported GIT_* environment scrubbed.
 /// Every git op in this module targets an explicit external clone dir
 /// (via `-C` or `.current_dir`), but GIT_DIR/GIT_WORK_TREE — exported by
@@ -2511,7 +2545,7 @@ fi
                     CiResult::NoGates => "NoGates",
                     CiResult::Red { .. } => "Red",
                     CiResult::TimedOut { .. } => "TimedOut",
-                    CiResult::Green { .. } => unreachable!(),
+                    _ => unreachable!(),
                 }
             ),
         }
@@ -2559,7 +2593,7 @@ fi
                     CiResult::NoGates => "NoGates (CREDIBLE-176 regression)",
                     CiResult::Red { .. } => "Red",
                     CiResult::TimedOut { .. } => "TimedOut",
-                    CiResult::Green { .. } => unreachable!(),
+                    _ => unreachable!(),
                 }
             ),
         }
@@ -2708,6 +2742,7 @@ fi
             CiResult::Green {
                 check_count,
                 checks,
+                ..
             } => {
                 // Only the non-advisory "CI" check should appear in the passing list.
                 assert_eq!(check_count, 1, "expected 1 required check (CI)");
@@ -2723,7 +2758,7 @@ fi
                     CiResult::NoGates => "NoGates",
                     CiResult::Red { .. } => "Red",
                     CiResult::TimedOut { .. } => "TimedOut",
-                    CiResult::Green { .. } => unreachable!(),
+                    _ => unreachable!(),
                 }
             ),
         }
@@ -2804,6 +2839,7 @@ fi
             CiResult::Green {
                 check_count,
                 checks,
+                ..
             } => {
                 assert_eq!(
                     check_count, 1,
@@ -2822,7 +2858,7 @@ fi
                     CiResult::Red { .. } =>
                         "Red (CREDIBLE-228 regression — self-closes autonomous PRs)",
                     CiResult::TimedOut { .. } => "TimedOut",
-                    CiResult::Green { .. } => unreachable!(),
+                    _ => unreachable!(),
                 }
             ),
         }
@@ -2888,6 +2924,7 @@ fi
             CiResult::Green {
                 check_count,
                 checks,
+                red_advisory,
             } => {
                 // Only the required "CI" check should gate; the failing advisory check must not block.
                 assert_eq!(check_count, 1, "expected 1 required check (CI)");
@@ -2895,6 +2932,13 @@ fi
                     checks.iter().any(|c| c == "CI"),
                     "expected 'CI' in passing list, got {:?}",
                     checks
+                );
+                // RESILIENT-1365: red_advisory should be populated with the failing lint check.
+                assert_eq!(red_advisory.len(), 1, "expected 1 red advisory check");
+                assert!(
+                    red_advisory.iter().any(|c| c.contains("lint")),
+                    "expected 'lint' in red_advisory, got {:?}",
+                    red_advisory
                 );
             }
             other => panic!(
@@ -2904,10 +2948,67 @@ fi
                     CiResult::Red { .. } =>
                         "Red (RESILIENT-1399 regression — advisory checks should not block)",
                     CiResult::TimedOut { .. } => "TimedOut",
-                    CiResult::Green { .. } => unreachable!(),
+                    _ => unreachable!(),
                 }
             ),
         }
+    }
+
+    /// RESILIENT-1365: when advisory checks are red and verified is posted,
+    /// emit `kind=advisory_check_red` signal to ambient.jsonl.
+    #[test]
+    #[serial_test::serial]
+    fn test_emit_advisory_check_red_signal_when_advisory_red() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        // required "CI" check SUCCESS, advisory "lint" check FAILED.
+        let mixed_json = r#"{"statusCheckRollup":[
+            {"name":"CI","status":"COMPLETED","conclusion":"SUCCESS"},
+            {"name":"lint-check","status":"COMPLETED","conclusion":"FAILURE"}
+        ]}"#;
+
+        let gh_bin = fake_gh_with_responses(tmp.path(), &[mixed_json]);
+
+        std::env::set_var("CHUMP_VERIFY_CI_POLL_SECS", "0");
+        std::env::set_var("CHUMP_VERIFY_CI_WAIT_SECS", "3600");
+        std::env::set_var("CHUMP_VERIFY_CI_ADVISORY_NAMES", "lint");
+        let ambient_path = tmp.path().join("ambient.jsonl");
+        std::env::set_var(
+            "CHUMP_AMBIENT_IN_PROMPT",
+            ambient_path.to_string_lossy().as_ref(),
+        );
+
+        let opts = make_opts(&gh_bin);
+        let result = poll_ci_until_terminal(&opts).expect("poll_ci");
+
+        // Verify the gate passes and red_advisory is populated.
+        let red_advisory = match result {
+            CiResult::Green { red_advisory, .. } => red_advisory,
+            _ => panic!("expected Green result"),
+        };
+
+        assert!(
+            !red_advisory.is_empty(),
+            "expected red_advisory to be populated"
+        );
+
+        // Emit the signal as the main code would.
+        emit_advisory_check_red(&opts, &red_advisory);
+
+        // Check that the ambient event was written.
+        let ambient_content =
+            std::fs::read_to_string(&ambient_path).expect("ambient.jsonl should be created");
+        assert!(
+            ambient_content.contains("advisory_check_red"),
+            "ambient.jsonl should contain advisory_check_red event, got: {ambient_content}"
+        );
+        assert!(
+            ambient_content.contains(&format!("#{}", opts.pr)),
+            "ambient.jsonl should contain PR number, got: {ambient_content}"
+        );
+        assert!(
+            ambient_content.contains("verified withheld"),
+            "ambient.jsonl should contain 'verified withheld' message, got: {ambient_content}"
+        );
     }
 
     /// Guard: a REAL required check that fails still HELDs — the fix must not
