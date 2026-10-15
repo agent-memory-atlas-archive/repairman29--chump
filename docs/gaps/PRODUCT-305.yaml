@@ -1,9 +1,11 @@
 - id: PRODUCT-305
   domain: PRODUCT
   title: "[smuggler][external_repo:repairman29/smuggler][gcp-exit] Replace firebase-admin sessions/presence + token verify with the cuphead Supabase stack"
-  status: open
+  status: done
   priority: P1
   effort: s
+  closed_pr: 1
+  closed_date: 2026-10-15
   description: |
     playsmuggler.com already hosts on Vercel. server/firebaseConfig.js uses firebase-admin for the sessions and presence collections and ID-token verification (server/routes/apiSubscriptions.js, server/socket/handlers/session.js); service-account creds read in server/config.js and routes/admin.js. Projects playsmuggler-b1cda / smuggler-d1b4a. Target (Jeff 2026-09-26, workspace-docs/GCP_EXIT.md): Vercel for hosting + API routes, and the self-hosted Supabase stack on cuphead (RESILIENT-314) for Postgres (own schema), Auth, Storage. Code talks only to supabase-js / standard Supabase APIs so the app can move to hosted Supabase later by changing URL + keys. Keep Sign in with Google (GoTrue Google provider; OAuth client stays in its GCP project, no billing). Firebase email/password users keep working: import from the PRODUCT-303 auth:export and verify Firebase scrypt hashes on first sign-in, or document why a reset flow was needed. Secrets move from GCP Secret Manager to Vercel env vars.
   acceptance_criteria:
