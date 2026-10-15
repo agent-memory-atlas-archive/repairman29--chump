@@ -9,6 +9,7 @@ mod a2a_tool;
 mod acp;
 mod acp_server;
 mod activation;
+mod admission_check; // RESILIENT-1426: admission check against concurrency ceiling
 mod adversary;
 mod adversary_llm;
 mod agent_factory;
