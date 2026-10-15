@@ -77,11 +77,30 @@ fi
 
 echo "Building (release, --no-default-features: drop web-push so the Android"
 echo "  cross-build does not pull web-push -> ece -> openssl-sys)..."
+
+# RESILIENT-468: Enable sccache for Android builds if available.
+SCCACHE_WRAPPER="${SCCACHE_WRAPPER_LIB:-$(dirname "$0")/../coord/lib/sccache-wrapper.sh}"
+if [ -f "$SCCACHE_WRAPPER" ]; then
+    # shellcheck source=/dev/null
+    source "$SCCACHE_WRAPPER"
+    sccache_maybe_enable
+    echo "sccache: $([ "${RUSTC_WRAPPER:-}" = "sccache" ] && echo "enabled" || echo "not available")"
+fi
+
 # Use a dedicated target dir for Android builds so concurrent Mac builds
 # (e.g. deploy-mac.sh or self-reboot.sh) never hit the cargo lock contention.
 # The intermediate caches are NOT shared (no sysroot overlap) so this is safe.
 ANDROID_TARGET_DIR="${ANDROID_TARGET_DIR:-$PWD/target-android}"
-CARGO_TARGET_DIR="$ANDROID_TARGET_DIR" cargo build --release --target aarch64-linux-android --no-default-features
+CARGO_TARGET_DIR="$ANDROID_TARGET_DIR" \
+    RUSTC_WRAPPER="${RUSTC_WRAPPER:-}" \
+    SCCACHE_DIR="${SCCACHE_DIR:-}" \
+    SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-}" \
+    cargo build --release --target aarch64-linux-android --no-default-features
+
+# RESILIENT-468: Report sccache statistics if caching was active.
+if [ -n "${SCCACHE_WRAPPER:-}" ] && command -v sccache >/dev/null 2>&1; then
+    sccache_maybe_report
+fi
 
 # Binary name comes from Cargo.toml [[bin]] (chump); keep rust-agent symlink for scripts.
 BINARY="$ANDROID_TARGET_DIR/aarch64-linux-android/release/chump"

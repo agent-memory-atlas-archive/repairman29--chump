@@ -13905,3 +13905,30 @@ events:
     trigger: a systemd service (user or system scope) has NRestarts above CHUMP_CRASH_LOOP_THRESHOLD (default 50)
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, unit, scope, nrestarts]
+
+  - kind: sccache_wrapper_enabled
+    status: active
+    effect_metric: resilient
+    emitter: scripts/coord/lib/sccache-wrapper.sh (RESILIENT-468)
+    emitter_paths: [scripts/coord/lib/sccache-wrapper.sh]
+    trigger: sccache_maybe_enable found an sccache binary and exported RUSTC_WRAPPER for a local/node build
+    consumers: [ambient]
+    fields_required: [ts, kind, sccache_bin, cache_dir, cache_size]
+
+  - kind: sccache_daemon_start_failed
+    status: active
+    effect_metric: resilient
+    emitter: scripts/coord/lib/sccache-wrapper.sh (RESILIENT-468)
+    emitter_paths: [scripts/coord/lib/sccache-wrapper.sh]
+    trigger: sccache --start-server failed; wrapper still configured and the build proceeds (non-fatal degrade)
+    consumers: [ambient]
+    fields_required: [ts, kind, sccache_bin]
+
+  - kind: sccache_build_stats
+    status: active
+    effect_metric: resilient
+    emitter: scripts/coord/lib/sccache-wrapper.sh (RESILIENT-468)
+    emitter_paths: [scripts/coord/lib/sccache-wrapper.sh]
+    trigger: post-build sccache stats (compile requests, cache hits/misses) were captured for trending
+    consumers: [ambient]
+    fields_required: [ts, kind, compile_requests, cache_hits, cache_misses]

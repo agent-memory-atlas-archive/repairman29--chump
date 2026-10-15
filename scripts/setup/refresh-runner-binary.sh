@@ -18,6 +18,10 @@
 #   runner_binary_refresh_failed    — build or install error
 #
 # Bypass: CHUMP_SKIP_BINARY_REFRESH=1 short-circuits to exit 0.
+#
+# RESILIENT-468: sccache is automatically enabled when available.
+# Detects the sccache binary, starts the daemon, and configures RUSTC_WRAPPER.
+# Gracefully degrades to standard rustc if sccache is unavailable.
 
 set -uo pipefail
 
@@ -39,6 +43,17 @@ AMBIENT="$REPO_ROOT/.chump-locks/ambient.jsonl"
 LOG_DIR="$REPO_ROOT/.chump-locks/binary-refresh-logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/refresh-$(date -u +%Y%m%dT%H%M%SZ).log"
+
+# RESILIENT-468: Load sccache wrapper for local build caching.
+SCCACHE_WRAPPER="${SCCACHE_WRAPPER_LIB:-$(dirname "$0")/../coord/lib/sccache-wrapper.sh}"
+if [ -f "$SCCACHE_WRAPPER" ]; then
+    # shellcheck source=/dev/null
+    source "$SCCACHE_WRAPPER"
+else
+    # Stub sccache_maybe_enable and sccache_maybe_report if wrapper not found (graceful degradation).
+    sccache_maybe_enable() { return 0; }
+    sccache_maybe_report() { return 0; }
+fi
 
 emit() {
     local kind="$1" extra="${2:-}"
@@ -291,13 +306,23 @@ trap 'git -C "$REPO_ROOT" worktree remove --force "$BUILD_WORKTREE" >>"$LOG" 2>&
 # concurrently with worker cargo builds) can now opt out by pre-setting
 # CARGO_TARGET_DIR before invoking this script.
 SHARED_TARGET="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
+
+# RESILIENT-468: Enable sccache for this build if available.
+sccache_maybe_enable
+
 log "cargo build --release --bin chump (worktree $BUILD_WORKTREE, target dir $SHARED_TARGET) …"
 if ! PATH="$(dirname "$CARGO"):$PATH" CARGO_TARGET_DIR="$SHARED_TARGET" \
+     RUSTC_WRAPPER="${RUSTC_WRAPPER:-}" \
+     SCCACHE_DIR="${SCCACHE_DIR:-}" \
+     SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE:-}" \
      "$CARGO" build --release --bin chump --manifest-path "$BUILD_WORKTREE/Cargo.toml" >>"$LOG" 2>&1; then
     log "FATAL: cargo build failed; see $LOG"
     emit runner_binary_refresh_failed "\"reason\":\"cargo_build_failed\""
     exit 1
 fi
+
+# RESILIENT-468: Report sccache statistics if caching was active.
+sccache_maybe_report >> "$LOG" 2>&1
 
 BUILT_BIN="$SHARED_TARGET/release/chump"
 if [[ ! -x "$BUILT_BIN" ]]; then
