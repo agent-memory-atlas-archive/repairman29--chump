@@ -3480,3 +3480,8 @@ HEADLESS_TEST
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_BINARY_REFRESH_WORKTREE
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_MAX_CONCURRENT_CARGO_JOBS

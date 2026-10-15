@@ -1,9 +1,17 @@
-//! Admission check against the concurrency ceiling (RESILIENT-1426).
+//! Admission check against the concurrency ceiling (RESILIENT-1426, RESILIENT-1427).
 //!
 //! Counts current active cargo/rustc jobs across workers, agents, and installs.
 //! Rejects new job scheduling if the count would exceed max_concurrent_cargo_jobs.
 
 use anyhow::Result;
+
+/// Get the configured max concurrent cargo jobs. Defaults to 4 if not set.
+pub fn get_max_concurrent_cargo_jobs() -> i32 {
+    std::env::var("CHUMP_MAX_CONCURRENT_CARGO_JOBS")
+        .ok()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(4)
+}
 
 /// Count active cargo/rustc jobs (status = 'running' or 'pending').
 pub fn count_active_cargo_jobs() -> Result<i32> {
@@ -38,6 +46,11 @@ pub fn check_admission(max_concurrent_jobs: i32) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Insert a cargo job record into the async jobs log.
+pub fn insert_cargo_job(status: &str, detail: Option<&str>) -> Result<()> {
+    crate::job_log::insert_job("cargo_job", status, None, None, detail, None)
 }
 
 #[cfg(test)]

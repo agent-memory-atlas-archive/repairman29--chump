@@ -322,6 +322,25 @@ impl CliTool {
             }
         }
 
+        // RESILIENT-1427: Check admission for cargo build-related commands (agent builds).
+        // Inspect the command to see if it's a cargo build/check/test/install and enforce
+        // the concurrency ceiling if so.
+        let is_cargo_build = cmd.starts_with("cargo ")
+            && (cmd.contains("build")
+                || cmd.contains("check")
+                || cmd.contains("test")
+                || cmd.contains("install"));
+        if is_cargo_build {
+            let max_concurrent = crate::admission_check::get_max_concurrent_cargo_jobs();
+            if let Err(e) = crate::admission_check::check_admission(max_concurrent) {
+                return Err(anyhow!("cargo job admission check failed: {}", e));
+            }
+            // Insert job entry to track this cargo job (status: pending initially).
+            let _ = crate::admission_check::insert_cargo_job("pending", Some(&cmd));
+            // Mark as running immediately before execution.
+            let _ = crate::job_log::mark_running("cargo_job");
+        }
+
         let (timeout_secs, max_output) = if executive {
             (executive_timeout_secs(), executive_max_output_chars())
         } else {
@@ -436,6 +455,17 @@ impl CliTool {
         }
         let exit_code = output.status.code();
         chump_log::log_cli_with_executive(&cmd, &[], exit_code, out.len(), executive);
+
+        // RESILIENT-1427: Mark cargo job as completed or failed based on exit code.
+        if is_cargo_build {
+            if exit_code == Some(0) {
+                let _ = crate::job_log::mark_completed("cargo_job");
+            } else {
+                let error_msg = format!("exit code: {:?}", exit_code);
+                let _ = crate::job_log::mark_failed("cargo_job", &error_msg);
+            }
+        }
+
         // Exit 127 = command not found; record so assemble_context can warn
         if exit_code == Some(127) && tool_health_db::tool_health_available() {
             let tool_name = cmd.split_whitespace().next().unwrap_or("run_cli");

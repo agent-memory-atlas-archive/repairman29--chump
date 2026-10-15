@@ -471,6 +471,22 @@ fn spawn_background_rebuild(repo_root: &Path, state_file: &Path, now_unix: u64) 
     if let Some(parent) = state_file.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+
+    // RESILIENT-1427: Check admission for install-time cargo builds.
+    let max_concurrent = crate::admission_check::get_max_concurrent_cargo_jobs();
+    if crate::admission_check::check_admission(max_concurrent).is_err() {
+        // Admission rejected; do not spawn. Update marker to indicate rejection.
+        let _ = std::fs::write(
+            state_file,
+            format!(
+                "{{\"status\":\"failed\",\"started_at\":{},\"completed_at\":{},\"reason\":\"admission rejected: at or above concurrency ceiling\"}}",
+                now_unix, now_unix
+            ),
+        );
+        emit_binary_refresh_event(repo_root, "binary_refresh_failed", "admission rejected", 0);
+        return;
+    }
+
     // Write "in_flight" marker BEFORE spawning so concurrent callers see it.
     let _ = std::fs::write(
         state_file,
@@ -479,6 +495,13 @@ fn spawn_background_rebuild(repo_root: &Path, state_file: &Path, now_unix: u64) 
             now_unix
         ),
     );
+
+    // Insert job entry to track this install-time cargo job.
+    let install_cmd = format!(
+        "cargo install --path {} --bin chump --force",
+        repo_root.display()
+    );
+    let _ = crate::admission_check::insert_cargo_job("pending", Some(&install_cmd));
 
     // Emit ambient event.
     // scanner-anchor: "kind":"binary_refresh_started"

@@ -58,3 +58,39 @@ pub fn recent_jobs(limit: usize) -> Result<Vec<Value>> {
     }
     Ok(out)
 }
+
+/// Mark the most recent job of a given type as running (RESILIENT-1427).
+pub fn mark_running(job_type: &str) -> Result<()> {
+    let conn = crate::db_pool::get()?;
+    conn.execute(
+        "UPDATE chump_async_jobs SET status = 'running', updated_at = datetime('now')
+         WHERE job_type = ?1 AND status = 'pending'
+         ORDER BY rowid DESC LIMIT 1",
+        params![job_type],
+    )?;
+    Ok(())
+}
+
+/// Mark the most recent job of a given type as completed (RESILIENT-1427).
+pub fn mark_completed(job_type: &str) -> Result<()> {
+    let conn = crate::db_pool::get()?;
+    conn.execute(
+        "UPDATE chump_async_jobs SET status = 'completed', updated_at = datetime('now')
+         WHERE job_type = ?1 AND (status = 'pending' OR status = 'running')
+         ORDER BY rowid DESC LIMIT 1",
+        params![job_type],
+    )?;
+    Ok(())
+}
+
+/// Mark the most recent job of a given type as failed with error message (RESILIENT-1427).
+pub fn mark_failed(job_type: &str, error: &str) -> Result<()> {
+    let conn = crate::db_pool::get()?;
+    conn.execute(
+        "UPDATE chump_async_jobs SET status = 'failed', last_error = ?2, updated_at = datetime('now')
+         WHERE job_type = ?1 AND (status = 'pending' OR status = 'running')
+         ORDER BY rowid DESC LIMIT 1",
+        params![job_type, error],
+    )?;
+    Ok(())
+}
