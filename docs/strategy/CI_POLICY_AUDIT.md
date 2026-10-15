@@ -10,7 +10,7 @@ last_audited: 2026-05-29
 >
 > **Scope.** Required-status-checks, jobs in `.github/workflows/`, stub jobs, pre-commit / pre-push hooks. Each gets a row + the bug class it was added for + current cost.
 >
-> **Verdict driving META-131.** ~70% of merges this week required `gh pr merge --admin` bypass. The cause is not the gates being wrong — most do catch real bugs. The cause is the **gate-shape**: the required-checks contract on `main` cannot tell "skipped because path-filter said so" from "skipped because the workflow file is broken" from "skipped because of a runner crash." Every one of those reads as "this PR is not verified" -> operator bypasses to ship -> next PR sees no signal from the last bypass and repeats. One `verified` aggregator that explicitly classifies these three would route every current gate without losing coverage.
+> **Verdict driving META-131 (COMPLETED, CREDIBLE-1490).** ~70% of merges that week required `gh pr merge --admin` bypass. The cause was not the gates being wrong — most did catch real bugs. The cause was the **gate-shape**: the required-checks contract on `main` could not tell "skipped because path-filter said so" from "skipped because the workflow file is broken" from "skipped because of a runner crash." Every one of those reads as "this PR is not verified" -> operator bypasses to ship -> next PR sees no signal from the last bypass and repeats. The fix: one `verified` aggregator that explicitly classifies skips (path-filter / workflow-broken / runner-crash) and polls the full-fleet intent (audit + ACP smoke) routes every current gate without losing coverage. Shipped CREDIBLE-269 + CREDIBLE-1490.
 >
 > **Cross-references (do not duplicate — extend).**
 > - [`docs/process/CI_GATES_INVENTORY.md`](../process/CI_GATES_INVENTORY.md) — Tier A/B/C/D taxonomy of mirrored-locally state (INFRA-1762).
@@ -25,13 +25,11 @@ last_audited: 2026-05-29
 
 Source: `gh api repos/repairman29/chump/branches/main/protection` + `gh api repos/repairman29/chump/rulesets/15133729` (both as of 2026-05-30).
 
-Both surfaces — the legacy branch-protection rule and ruleset 15133729 ("Protect main") — agree on **three** required contexts:
+Both surfaces — the legacy branch-protection rule and ruleset 15133729 ("Protect main") — now require **one** aggregated context:
 
 | Context (literal name) | Workflow file | Emitting job | Effective cost (PR-blocking when failing) | Bug class caught |
 |---|---|---|---|---|
-| `test` | `.github/workflows/ci.yml` | `test` (rollup of fast-checks + clippy + cargo-test + pr-hygiene) | Variable: <30s (rollup overhead) but blocks until child shards finish. Children = ~5-8 min cargo-test, 3-5 min clippy, ~5 min fast-checks. | Test/lint/fmt/PR-shape regressions across **944 test-*.sh** scripts + cargo workspace |
-| `audit` | `.github/workflows/ci.yml` | `audit` (or `audit-stub` per INFRA-2191) | Variable: ~15 min when real, <2 min when stub | Smoke + observability + cache + 60+ ambient-touching scripts |
-| `ACP protocol smoke test (Zed / JetBrains compatible)` | `.github/workflows/editor-integration.yml` | `acp-smoke` | ~5-8 min cargo build + JSON-RPC fixture replay | ACP wire-format regressions (Zed / JetBrains real-client compatibility) |
+| `verified` | `.github/workflows/ci.yml` | `verified` (aggregator polling ci.yml lanes + audit + ACP smoke) | Variable: <2 min aggregator overhead + max(ci.yml-local lanes, audit grace 120s, ACP smoke). Ci.yml lanes: ~5-8 min cargo-test, 3-5 min clippy, ~5 min fast-checks. Audit + ACP polled via cross-workflow Checks API (CREDIBLE-269, META-134). | Test/lint/fmt/PR-shape regressions across **944 test-*.sh** scripts + cargo workspace + Smoke + observability + cache + 60+ ambient-touching scripts + ACP wire-format regressions (Zed / JetBrains real-client compatibility) |
 
 **Ruleset bypass actor:** RepositoryRole id=5 (admins), `bypass_mode: always`. This is the mechanism behind `gh pr merge --admin`.
 

@@ -564,10 +564,10 @@ jobs:
           echo "All shards green (or appropriately skipped / cascade-cancelled)."
 
   # ── verified: single legible aggregator (CREDIBLE-269, SHIP-INFRA 1/7) ────
-  # The ONE required check: one job that classifies every ci.yml-local lane's
-  # result via scripts/ci/aggregator-verified.sh, PLUS the two lanes that live
-  # in separate workflows (audit.yml's `audit`, integrations.yml's `ACP
-  # protocol smoke test`) polled cross-workflow via the Checks API
+  # The ONLY required status check: one job that classifies every ci.yml-local
+  # lane's result via scripts/ci/aggregator-verified.sh, PLUS the two lanes
+  # that live in separate workflows (audit.yml's `audit`, integrations.yml's
+  # `ACP protocol smoke test`) polled cross-workflow via the Checks API
   # (scripts/ci/poll-cross-workflow-checks.sh, since GH Actions `needs:` only
   # sees same-workflow jobs) — then prints a single PASS/FAIL verdict + emits
   # kind=verified_aggregator_decision to ambient.jsonl for offline audit.
@@ -575,11 +575,9 @@ jobs:
   # PENDING and .github/workflows/verified-recompute.yml re-runs this job on
   # Audit/integrations workflow_run completion (event-driven, no 600s window).
   #
-  # Not yet required by branch-protection/ruleset 15133729 as of this commit
-  # — flipping happens as an immediate follow-up once this cross-workflow
-  # polling is proven live on a real PR (docs/design/CI_VERIFIED_AGGREGATOR.md,
-  # META-134). Today's required contexts remain `test` / `audit` / `ACP
-  # protocol smoke test` per docs/baselines/branch-protection-main.json.
+  # Branch-protection/ruleset requires ONLY `verified`
+  # (gh api repos/repairman29/chump/branches/main/protection → required_status_checks.contexts).
+  # See docs/design/CI_VERIFIED_AGGREGATOR.md (META-134).
   verified:
     name: verified
     needs: [fast-checks, fast-checks-heavy, clippy, cargo-test, pr-hygiene, test]
