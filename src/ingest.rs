@@ -11,6 +11,7 @@
 //! `--confirm-mutations`, `chump ingest` stays fully read-only (phase 1a
 //! only) — that's the safety contract INFRA-1746 requires.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::Instant;
 
@@ -245,18 +246,59 @@ fn run_orchestration(target_repo: &Path, budget_usd: f64) -> i32 {
 
 /// Create fleet gaps from the proposed gaps via `chump gap reserve`.
 /// Returns the number of gaps successfully created.
+/// Idempotency: gaps with an [ingest:orchestrate:*] marker are skipped if already present.
 fn create_gaps_from_proposal(report: &crate::ingest_orchestrate::OrchestrateReport) -> usize {
+    let chump_repo_root = crate::repo_path::repo_root();
+    let already_imported = existing_orchestrate_markers(&chump_repo_root);
+
     let mut created = 0;
     for gap in &report.gaps_proposed {
-        if let Some(_id) = reserve_ingest_gap(gap) {
+        if let Some(_id) = reserve_ingest_gap(gap, &already_imported) {
             created += 1;
         }
     }
     created
 }
 
+/// Generate a stable marker key from a proposed gap's title.
+/// Uses the title as the key for idempotency tracking.
+fn ingest_marker_for_gap(title: &str) -> String {
+    format!("[ingest:orchestrate:{}]", title)
+}
+
+/// Query the fleet's own `.chump/state.db` for gap titles already carrying
+/// an [ingest:orchestrate:*] marker, so re-running is idempotent.
+fn existing_orchestrate_markers(chump_repo_root: &Path) -> HashSet<String> {
+    let prefix = "[ingest:orchestrate:";
+    let mut found = HashSet::new();
+    if let Ok(store) = chump_gap_store::GapStore::open(chump_repo_root) {
+        if let Ok(rows) = store.list(None) {
+            for row in rows {
+                if let Some(start) = row.title.find(prefix) {
+                    if let Some(end_rel) = row.title[start..].find(']') {
+                        let marker = &row.title[start..start + end_rel + 1];
+                        found.insert(marker.to_string());
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
 /// Reserve a single gap via `chump gap reserve` CLI.
-fn reserve_ingest_gap(gap: &crate::ingest_orchestrate::ProposedGap) -> Option<String> {
+/// Returns Some(id) if created, None if skipped (already exists) or failed.
+/// Idempotency: skips if the gap's marker is already in the fleet.
+fn reserve_ingest_gap(
+    gap: &crate::ingest_orchestrate::ProposedGap,
+    already_imported: &HashSet<String>,
+) -> Option<String> {
+    let marker = ingest_marker_for_gap(&gap.title);
+    if already_imported.contains(&marker) {
+        return None;
+    }
+
+    let full_title = format!("{} {}", gap.title, marker);
     let output = std::process::Command::new("chump")
         .args([
             "gap",
@@ -264,7 +306,7 @@ fn reserve_ingest_gap(gap: &crate::ingest_orchestrate::ProposedGap) -> Option<St
             "--domain",
             "INFRA",
             "--title",
-            &gap.title,
+            &full_title,
             "--priority",
             gap.priority,
             "--effort",
@@ -369,4 +411,30 @@ fn emit_backlog_import_failed(target_repo: &Path, error: &str) {
         ],
         ..Default::default()
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ingest_marker_for_gap_format() {
+        let title = "Fix the crash in auth module";
+        let marker = ingest_marker_for_gap(title);
+        assert_eq!(marker, "[ingest:orchestrate:Fix the crash in auth module]");
+    }
+
+    #[test]
+    fn ingest_marker_different_titles_produce_different_markers() {
+        let marker1 = ingest_marker_for_gap("Title 1");
+        let marker2 = ingest_marker_for_gap("Title 2");
+        assert_ne!(marker1, marker2);
+    }
+
+    #[test]
+    fn existing_orchestrate_markers_empty_when_no_gaps() {
+        let dir = tempfile::tempdir().unwrap();
+        let markers = existing_orchestrate_markers(dir.path());
+        assert!(markers.is_empty());
+    }
 }
