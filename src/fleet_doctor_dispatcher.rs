@@ -13,6 +13,7 @@
 use crate::ambient_emit::{emit, EmitArgs};
 use crate::gap_filer;
 use crate::health_check_routing::{self, FixerAction};
+use anyhow::Result;
 use std::path::Path;
 
 /// Result of dispatching a single health check failure.
@@ -136,6 +137,39 @@ fn handle_gap_file(repo_root: &Path, check_id: &str) -> DispatchOutcome {
     }
 }
 
+/// Send a wake signal to a curator via the existing communication channel.
+///
+/// Sends a wake message to the specified curator identifier via the ambient event
+/// system, logging the wake event at DEBUG level.
+///
+/// # Arguments
+/// * `curator_id` - The curator identifier (e.g., "deliberator", "handoff")
+///
+/// # Returns
+/// A Result confirming delivery via the ambient event system.
+pub fn curator_wake_signal(curator_id: &str) -> Result<()> {
+    tracing::debug!(
+        "curator_wake_signal: sending wake message to curator '{}'",
+        curator_id
+    );
+
+    let _ = emit(&EmitArgs {
+        kind: "curator_wake_signal".to_string(),
+        source: Some("fleet_doctor_dispatcher".to_string()),
+        fields: vec![
+            ("curator_id".to_string(), curator_id.to_string()),
+            ("action".to_string(), "wake".to_string()),
+        ],
+        ..Default::default()
+    })?;
+
+    tracing::debug!(
+        "curator_wake_signal: wake message delivered to curator '{}'",
+        curator_id
+    );
+    Ok(())
+}
+
 /// Handler for `curator_wake` action: trigger restart of silent curator role.
 fn handle_curator_wake(check_id: &str) -> DispatchOutcome {
     let curator_label = match check_id {
@@ -144,10 +178,6 @@ fn handle_curator_wake(check_id: &str) -> DispatchOutcome {
         _ => "unknown-curator",
     };
 
-    let message = format!(
-        "curator_wake handler: would wake curator '{}'",
-        curator_label
-    );
     let _ = emit(&EmitArgs {
         kind: "fleet_doctor_dispatcher_curator_wake".to_string(),
         source: Some("fleet_doctor_dispatcher".to_string()),
@@ -159,14 +189,31 @@ fn handle_curator_wake(check_id: &str) -> DispatchOutcome {
         ..Default::default()
     });
 
-    // TODO(RESILIENT-1356): implement actual curator wake-up logic
-    // For now, just log the intent.
-
-    DispatchOutcome {
-        check_id: check_id.to_string(),
-        action: FixerAction::CuratorWake,
-        success: true,
-        message,
+    match curator_wake_signal(curator_label) {
+        Ok(()) => {
+            let updated_message = format!(
+                "curator_wake handler: sent wake signal to curator '{}'",
+                curator_label
+            );
+            DispatchOutcome {
+                check_id: check_id.to_string(),
+                action: FixerAction::CuratorWake,
+                success: true,
+                message: updated_message,
+            }
+        }
+        Err(e) => {
+            let error_message = format!(
+                "curator_wake handler: failed to wake curator '{}': {}",
+                curator_label, e
+            );
+            DispatchOutcome {
+                check_id: check_id.to_string(),
+                action: FixerAction::CuratorWake,
+                success: false,
+                message: error_message,
+            }
+        }
     }
 }
 
@@ -238,5 +285,31 @@ mod tests {
         assert_eq!(outcomes.len(), 2);
         assert!(outcomes[0].success);
         assert!(outcomes[1].success);
+    }
+
+    #[test]
+    fn curator_wake_signal_sends_wake_message() {
+        let result = curator_wake_signal("test-curator");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn curator_wake_signal_returns_result_on_delivery() {
+        let curator_id = "deliberator";
+        let result = curator_wake_signal(curator_id);
+        assert!(
+            result.is_ok(),
+            "curator_wake_signal should return Ok on successful delivery"
+        );
+    }
+
+    #[test]
+    fn handle_curator_wake_calls_curator_wake_signal() {
+        let dir = tempdir().unwrap();
+        let outcome = dispatch_fail(dir.path(), health_check_routing::check_id::A2A_CONSENSUS);
+        assert_eq!(outcome.check_id, "a2a-consensus");
+        assert_eq!(outcome.action, FixerAction::CuratorWake);
+        assert!(outcome.success);
+        assert!(outcome.message.contains("sent wake signal"));
     }
 }
