@@ -2936,9 +2936,15 @@ events:
 
   - kind: cost_cap_exceeded
     effect_metric: self
-    emitter: scripts/dispatch/cost-cap-monitor.sh
+    emitter: src/operator_presence.rs (AutonomousPolicy::check_cost_cap, RESILIENT-415)
     trigger: daily LLM spend exceeded threshold
-    consumers: [operator-recall]
+    consumers: [operator-recall, board-vitals, cost-cap-watch]
+    fields_required: [ts, kind, daily_usd]
+    docs: |
+      SOURCE EVENT — emitted when the autonomous-mode daily cost cap ($CHUMP_DAILY_COST_CAP_USD, default $2.00) is reached.
+      daily_usd field records the current spend. This is the ground-truth signal for cost-cap halt conditions.
+      Derivations: board-vitals.sh computes cost_hits as a windowed count of this event (INFRA-3851);
+      cost-cap-watch.sh uses it as a park trigger (RESILIENT-415).
 
   - kind: cascade_decision
     effect_metric: self

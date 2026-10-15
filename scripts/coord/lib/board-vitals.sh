@@ -701,6 +701,8 @@ board_vitals_check() {
     fi
     #   (b) Spend/credit cap hit: any cost_cap_exceeded in-window — sub cap
     #       exhausted / OpenRouter credit needed, the floor can't ship.
+    #   DERIVED: cost_hits is a windowed count of source events (kind=cost_cap_exceeded)
+    #   emitted by src/operator_presence.rs; see EVENT_REGISTRY.yaml (INFRA-3851).
     cost_hits="$(_bv_count_kind_since "cost_cap_exceeded" "$floor_window")"
     [[ "$cost_hits" =~ ^[0-9]+$ ]] || cost_hits=0
     if (( cost_hits >= 1 )); then
