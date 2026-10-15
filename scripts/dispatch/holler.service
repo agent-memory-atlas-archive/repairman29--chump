@@ -13,3 +13,5 @@ Environment=HOME=/root
 ExecStart=/bin/bash -c 'set -a; source /root/.chump/holler.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/ops/holler-init.sh'
 TimeoutStartSec=120
 RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5s
