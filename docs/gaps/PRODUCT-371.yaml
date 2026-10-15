@@ -1,0 +1,33 @@
+id: PRODUCT-371
+domain: PRODUCT
+title: "[olive] PKCE code verifier not found in auth callback"
+status: done
+priority: P1
+effort: s
+opened_date: '2026-10-15'
+closed_date: '2026-10-15'
+closed_pr: 5465
+description: |
+  AC source: template (live-site default)
+
+  Confidence: mechanical -- a deterministic check, not a judgment call -- high confidence, but some "dead" mechanical findings are an intentional no-op (e.g. an already-active tab); verify it is actually meant to work.
+
+  PKCE code verifier not found in storage. This can happen if the auth flow was initiated in a different browser or device, or if the storage was cleared. For SSR frameworks (Next.js, SvelteKit, etc.), use @supabase/ssr on both the server and client to store the code verifier in cookies.
+
+  context: {"repo":"repairman29/olive","status":400,"surface":"headless","error_code":"pkce_code_verifier_not_found"}
+  source: holler feedback_events, dedupe 6b29e4088eac8ed4
+acceptance_criteria:
+  1. The specific issue described above is verifiably fixed on the LIVE site (re-check the real URL after deploy, not just the diff)
+  2. No regression -- the rest of the page/flow that already worked still works
+  3. If this was a "claims a capability that doesn't work" finding (a live CTA/flow promising something broken), the fix either makes it true or removes the claim -- never ship with both the break and the promise still in place
+notes: |
+  operator 2026-10-12: outward/user-facing (Olive/prod), prioritized.
+
+  Root cause: PKCE verifier cookie was lost when the browser visited a different origin (www.shopolive.xyz vs shopolive.xyz). The canonical host redirect was implemented in src/proxy.ts but wasn't executing because Next.js middleware.ts file was missing.
+
+  Fix: Created middleware.ts entry point that exports the proxy function. This ensures Next.js executes the canonical host redirect on every request, preventing split-origin cookie loss.
+
+  See: https://github.com/repairman29/olive/pull/123
+skills_required: "external_repo:repairman29/olive"
+closed_pr: 123
+closed_pr_repo: "repairman29/olive"
