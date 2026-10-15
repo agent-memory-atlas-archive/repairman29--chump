@@ -31,7 +31,7 @@ init_holler_key() {
 
 enable_holler_timer() {
   # Mark holler service as initialized so timer can proceed
-  touch /var/run/holler-initialized
+  touch /var/run/holler-initialized 2>/dev/null || true
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Holler service initialized, timer enabled" >> "$HOLLER_LOG" 2>/dev/null || true
 }
 

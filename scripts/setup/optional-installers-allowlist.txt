@@ -202,3 +202,8 @@ install-state-db-yaml-sync-launchd.sh
 # organ like the other curator loops, not a fresh-bootstrap requirement: a
 # checkout without it still functions, the pickable queue just goes untended.
 install-queue-tender.sh
+
+# MISSION-111 — holler service provisioning and timer installation. Situational
+# opt-in for fleet alerts, not a fresh-bootstrap requirement. Manually invoked
+# per docs/process/HOLLER_SERVICE_SETUP.md when enabling alert emission.
+install-holler-systemd.sh

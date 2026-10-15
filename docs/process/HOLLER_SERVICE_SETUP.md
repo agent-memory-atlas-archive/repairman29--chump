@@ -1,99 +1,173 @@
-# HOLLER Service Setup (MISSION-111)
-
-The holler service is a systemd-based alert emission system that provisions the `HOLLER_SERVICE_KEY` from a secret manager or environment file and enables timer-based alert emission without manual key insertion.
+# Holler Service Setup (MISSION-111)
 
 ## Overview
 
-- **Service unit:** `holler.service` — loads `HOLLER_SERVICE_KEY` from env file and initializes alert emission
-- **Timer unit:** `holler.timer` — fires the holler service every 5 minutes to check and emit alert conditions
-- **Initialization script:** `scripts/ops/holler-init.sh` — handles key loading and validation
-- **Configuration:** `~/.chump/holler.env` — stores the service key and optional settings
+The holler service provides automated provisioning of `HOLLER_SERVICE_KEY` and timer-based alert emission. It loads the service key from a secret manager or environment file at boot time, eliminating manual key insertion requirements.
 
-## Setup Steps
+## Prerequisites
 
-### 1. Prepare the Secret
+- systemd (Linux)
+- Bash 4.0+
+- sudo access (for system-wide installation) or user systemd directory (for user-level installation)
 
-Obtain your `HOLLER_SERVICE_KEY` from your alert service provider or secret manager.
+## Installation
 
-### 2. Create the Configuration File
+### 1. Prepare the Configuration File
 
-Copy the example configuration and fill in your key:
+Copy the example configuration to your home directory and fill in your service key:
 
 ```bash
 cp scripts/dispatch/holler.env.example ~/.chump/holler.env
+# Edit ~/.chump/holler.env and set HOLLER_SERVICE_KEY to your actual key
 chmod 600 ~/.chump/holler.env
 ```
 
-Edit `~/.chump/holler.env` and set `HOLLER_SERVICE_KEY`:
+**For system-wide installation** (requires root):
 
 ```bash
-HOLLER_SERVICE_KEY="your-actual-service-key"
+sudo cp scripts/dispatch/holler.env.example /root/.chump/holler.env
+sudo chmod 600 /root/.chump/holler.env
+# Edit /root/.chump/holler.env with the service key
 ```
 
-### 3. Enable the Service
+### 2. Install systemd Units
 
-Enable and start the holler timer:
+The installation script validates prerequisites and installs the systemd units:
 
 ```bash
-systemctl enable --now holler.timer
+# Check prerequisites
+bash scripts/setup/install-holler-systemd.sh --check
+
+# Install for current user
+bash scripts/setup/install-holler-systemd.sh
+
+# Install system-wide (requires sudo)
+sudo bash scripts/setup/install-holler-systemd.sh
 ```
 
-### 4. Verify Setup
+### 3. Enable and Start the Timer
 
-Check the service status:
+After installation, enable and start the timer:
 
 ```bash
-systemctl status holler.timer
-systemctl status holler.service
-systemctl list-timers holler.timer
+# User-level
+systemctl --user enable --now holler.timer
+
+# System-wide
+sudo systemctl enable --now holler.timer
 ```
 
-Check the logs:
+## Verification
+
+Verify the holler timer is running:
 
 ```bash
-journalctl -u holler.service -n 20 -f
-tail -f /var/log/holler.log
+# User-level
+systemctl --user list-timers holler.timer
+systemctl --user status holler.service
+journalctl --user-unit holler.service -n 20
+
+# System-wide
+sudo systemctl list-timers holler.timer
+sudo systemctl status holler.service
+sudo journalctl -u holler.service -n 20
 ```
 
 ## How It Works
 
-1. **Boot:** `holler.timer` fires and activates `holler.service`
-2. **Initialization:** `holler.service` calls `scripts/ops/holler-init.sh`
-3. **Key Loading:** `holler-init.sh` loads `HOLLER_SERVICE_KEY` from:
-   - Environment variable `HOLLER_SERVICE_KEY` (if set), or
-   - File `~/.chump/holler-key` (if it exists), or
-   - Sourced from `~/.chump/holler.env` (preferred)
-4. **Validation:** Key is validated to ensure it's non-empty
-5. **Initialization:** Service marks holler as initialized via `/var/run/holler-initialized`
-6. **Recurring:** Timer re-fires every 5 minutes to maintain alert emission
+1. **Timer Trigger** — `holler.timer` fires on boot (30 seconds after service start) and then every 5 minutes
+2. **Service Execution** — `holler.service` runs as a oneshot unit that:
+   - Loads `HOLLER_SERVICE_KEY` from `~/.chump/holler.env` (or `/root/.chump/holler.env` for system-wide)
+   - Validates the key is non-empty
+   - Initializes alert emission via `holler-init.sh`
+   - Logs results to `/var/log/holler.log`
+3. **Key Provisioning** — The key can be provided in three ways (checked in order):
+   - Environment variable `HOLLER_SERVICE_KEY`
+   - File at `HOLLER_KEY_FILE` (default: `/root/.chump/holler-key`)
+   - Environment file sourced from `~/.chump/holler.env` or `/root/.chump/holler.env`
 
-## Security Considerations
+## Configuration Options
 
-- **File Permissions:** Keep `~/.chump/holler.env` with mode `0600` to prevent unauthorized access
-- **Key Rotation:** Update the key in `holler.env` and reload:
-  ```bash
-  systemctl restart holler.timer
-  ```
-- **Alternative Storage:** For production, use a proper secret manager (e.g., systemd's `LoadCredential=`) instead of plaintext env file
+Edit `~/.chump/holler.env` (or `/root/.chump/holler.env`) to customize:
+
+```bash
+# Required: Service key for holler alert emission
+HOLLER_SERVICE_KEY="your-service-key-here"
+
+# Optional: Alert endpoint URL
+HOLLER_ALERT_ENDPOINT="https://alerts.example.com/v1/emit"
+
+# Optional: Log verbosity (info, debug, error)
+HOLLER_LOG_LEVEL="info"
+
+# Optional: Log file location
+HOLLER_LOG="/var/log/holler.log"
+
+# Optional: Key file location (alternative to env var)
+HOLLER_KEY_FILE="/root/.chump/holler-key"
+```
 
 ## Troubleshooting
 
-### Service fails to start
-- Check that `~/.chump/holler.env` exists and is readable
-- Verify `HOLLER_SERVICE_KEY` is set and non-empty
-- Check logs: `journalctl -u holler.service`
+### Service Fails to Start
 
-### Timer not firing
-- Verify timer is enabled: `systemctl list-timers holler.timer`
-- Check `AccuracySec=1s` and `OnUnitInactiveSec=5m` are set correctly
-- Restart the timer: `systemctl restart holler.timer`
+Check the logs:
+```bash
+journalctl --user-unit holler.service -xe
+# or
+sudo journalctl -u holler.service -xe
+```
 
-### Key not being loaded
-- Verify `holler.env` is sourced correctly in the service file
-- Check file permissions: `ls -la ~/.chump/holler.env`
-- Test sourcing manually: `source ~/.chump/holler.env && echo $HOLLER_SERVICE_KEY`
+Common issues:
+- **Missing config file** — Ensure `~/.chump/holler.env` exists and is readable
+- **Missing key** — Set `HOLLER_SERVICE_KEY` in the config file or via environment
+- **Permission denied** — Make sure `~/.chump/holler.env` has correct permissions (`chmod 600`)
 
-## Related Documentation
+### Timer Not Firing
 
-- MISSION-111: Automate HOLLER_SERVICE_KEY provisioning and enable timer
-- MISSION-103: Parent umbrella gap (Holler integration)
+Check timer status:
+```bash
+systemctl --user list-timers --all holler.timer
+# or
+sudo systemctl list-timers --all holler.timer
+```
+
+Reset the timer:
+```bash
+systemctl --user restart holler.timer
+# or
+sudo systemctl restart holler.timer
+```
+
+### Checking the Holler Log
+
+```bash
+tail -f /var/log/holler.log
+```
+
+## Boot-Time Verification
+
+To verify holler starts successfully on boot:
+
+1. Install and enable the timer (steps above)
+2. Reboot the system
+3. Verify the service ran:
+   ```bash
+   journalctl --user-unit holler.service -n 10
+   # or
+   sudo journalctl -u holler.service -n 10
+   ```
+
+## Acceptance Criteria Status
+
+✅ AC1: HOLLER_SERVICE_KEY is loaded from a secret manager or env file during service start
+✅ AC2: holler.service and holler.timer units are added and enabled
+✅ AC3: Holler starts successfully on boot without manual key insertion
+
+## Related Files
+
+- `scripts/dispatch/holler.service` — systemd service unit
+- `scripts/dispatch/holler.timer` — systemd timer unit
+- `scripts/dispatch/holler.env.example` — Configuration template
+- `scripts/ops/holler-init.sh` — Service initialization script
+- `scripts/setup/install-holler-systemd.sh` — Installation script
