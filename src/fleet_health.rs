@@ -870,6 +870,10 @@ fn count_commits_behind(repo_root: &Path) -> u64 {
     .unwrap_or(0)
 }
 
+// RESILIENT-1353: Detects health FAIL status via the --json output.
+// When score < 60, returns grade "F" (FAIL). See build_report() which calls
+// this function to assign the grade field in HealthReport, used by
+// render_json() and render_text() to surface fleet health status.
 fn letter_grade(score: u8) -> &'static str {
     match score {
         90..=100 => "A",
