@@ -522,12 +522,20 @@ _detect_ship_evidence() {
     if [ -f "$_cache_db" ]; then
         _ev="$(sqlite3 "$_cache_db" \
             "SELECT number FROM pr_state WHERE head_ref='${_branch}' LIMIT 1" 2>/dev/null || true)"
-        if [ -z "$_ev" ]; then
-            # RESILIENT-1451: branch may be gone (merged + deleted) — fall
-            # back to a title match keyed on GAP ID, not the live head ref.
-            _ev="$(sqlite3 "$_cache_db" \
-                "SELECT number FROM pr_state WHERE title LIKE '${_gap_id}:%' AND number > ${_min_pr} ORDER BY number DESC LIMIT 1" 2>/dev/null || true)"
-        fi
+    fi
+    if [ -z "$_ev" ]; then
+        # RESILIENT-1592 (R2): the typed gap->PR FK (closed_pr, written at ship
+        # time) is authoritative; prefer it over regex-parsing PR titles.
+        local _fk
+        _fk="$(CHUMP_REPO="$REPO_ROOT" chump gap show "$_gap_id" 2>/dev/null \
+            | grep -m1 -oE 'closed_pr: *[0-9]+' | grep -oE '[0-9]+$' || true)"
+        [ -n "$_fk" ] && [ "$_fk" -gt "$_min_pr" ] 2>/dev/null && _ev="$_fk"
+    fi
+    if [ -z "$_ev" ] && [ -f "$_cache_db" ]; then
+        # RESILIENT-1451: branch may be gone (merged + deleted) — last-resort
+        # title match keyed on GAP ID, only when no typed FK exists.
+        _ev="$(sqlite3 "$_cache_db" \
+            "SELECT number FROM pr_state WHERE title LIKE '${_gap_id}:%' AND number > ${_min_pr} ORDER BY number DESC LIMIT 1" 2>/dev/null || true)"
     fi
     if [ -z "$_ev" ]; then
         local _gap_now
