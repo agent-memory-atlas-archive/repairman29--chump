@@ -2515,3 +2515,214 @@ mod tests_gate_medic {
         );
     }
 }
+
+// ── (i) Organ registry data model ──────────────────────────────────────────
+//
+// RESILIENT-395: Define the organ registry data model and parser for
+// organ-manifest.txt format. Organs are self-healing distributed processes
+// that monitor and manage systemd units or background supervisors.
+
+/// Represents a single organ entry from organ-manifest.txt.
+///
+/// An organ is a monitored entity (systemd unit or background process) with
+/// associated healing metadata and operational parameters.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Organ {
+    /// State of the organ — "enabled" means it must be running.
+    pub state: String,
+    /// Short identifier for the organ (e.g., "disk-monitor", "pr-lander").
+    pub name: String,
+    /// Path to the binary or launcher script that runs this organ.
+    pub binary: String,
+    /// Action to take when the organ is unhealthy (e.g., "restart", "respawn").
+    pub heal_action: String,
+    /// Node applicability — which node(s) this organ applies to
+    /// (e.g., "all", "owner-machine", "cj-node").
+    pub node_applicability: String,
+    /// Page after N failures — how many consecutive failures before alerting.
+    pub page_after_n: u32,
+}
+
+impl Organ {
+    /// Parse a single line of organ-manifest.txt format.
+    ///
+    /// Expected format:
+    /// `<state>  <name>  <key>=<value>  <key>=<value>  ...  # comment`
+    ///
+    /// Mandatory fields: state, name, binary, heal_action.
+    /// Optional fields default to sensible values:
+    ///   - node_applicability defaults to "all"
+    ///   - page_after_n defaults to 3
+    pub fn parse(line: &str) -> Result<Self, String> {
+        // Strip comments
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            return Err("empty line".to_string());
+        }
+
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.len() < 2 {
+            return Err("must have at least state and name".to_string());
+        }
+
+        let state = tokens[0].to_string();
+        let name = tokens[1].to_string();
+        let mut binary = String::new();
+        let mut heal_action = String::new();
+        let mut node_applicability = "all".to_string();
+        let mut page_after_n = 3u32;
+
+        // Parse key=value pairs
+        for token in &tokens[2..] {
+            if let Some((key, value)) = token.split_once('=') {
+                match key {
+                    "binary" => binary = value.to_string(),
+                    "heal_action" => heal_action = value.to_string(),
+                    "node_applicability" => node_applicability = value.to_string(),
+                    "page_after_n" => {
+                        page_after_n = value
+                            .parse()
+                            .map_err(|_| format!("page_after_n must be a number: {}", value))?
+                    }
+                    _ => {} // ignore unknown keys
+                }
+            }
+        }
+
+        // Validate mandatory fields
+        if binary.is_empty() {
+            return Err("binary field is mandatory".to_string());
+        }
+        if heal_action.is_empty() {
+            return Err("heal_action field is mandatory".to_string());
+        }
+
+        Ok(Organ {
+            state,
+            name,
+            binary,
+            heal_action,
+            node_applicability,
+            page_after_n,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests_organ_registry {
+    use super::*;
+
+    #[test]
+    fn parse_valid_organ_minimal() {
+        let line = "enabled  disk-monitor  binary=/path/to/monitor  heal_action=restart";
+        let organ = Organ::parse(line).expect("parse");
+        assert_eq!(organ.state, "enabled");
+        assert_eq!(organ.name, "disk-monitor");
+        assert_eq!(organ.binary, "/path/to/monitor");
+        assert_eq!(organ.heal_action, "restart");
+        assert_eq!(organ.node_applicability, "all");
+        assert_eq!(organ.page_after_n, 3);
+    }
+
+    #[test]
+    fn parse_valid_organ_all_fields() {
+        let line = "enabled  pr-lander  binary=/home/user/pr-lander.sh  heal_action=respawn  node_applicability=owner-machine  page_after_n=5";
+        let organ = Organ::parse(line).expect("parse");
+        assert_eq!(organ.state, "enabled");
+        assert_eq!(organ.name, "pr-lander");
+        assert_eq!(organ.binary, "/home/user/pr-lander.sh");
+        assert_eq!(organ.heal_action, "respawn");
+        assert_eq!(organ.node_applicability, "owner-machine");
+        assert_eq!(organ.page_after_n, 5);
+    }
+
+    #[test]
+    fn parse_with_comment() {
+        let line = "enabled  worktree-reaper  binary=/path/reaper  heal_action=restart  # cleanup stale worktrees";
+        let organ = Organ::parse(line).expect("parse");
+        assert_eq!(organ.name, "worktree-reaper");
+        assert_eq!(organ.heal_action, "restart");
+    }
+
+    #[test]
+    fn parse_empty_line_fails() {
+        let result = Organ::parse("   ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_comment_only_fails() {
+        let result = Organ::parse("# just a comment");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_missing_binary_fails() {
+        let line = "enabled  organ-name  heal_action=restart";
+        let result = Organ::parse(line);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("binary"));
+    }
+
+    #[test]
+    fn parse_missing_heal_action_fails() {
+        let line = "enabled  organ-name  binary=/path/to/binary";
+        let result = Organ::parse(line);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("heal_action"));
+    }
+
+    #[test]
+    fn parse_invalid_page_after_n_fails() {
+        let line = "enabled  organ-name  binary=/path  heal_action=restart  page_after_n=invalid";
+        let result = Organ::parse(line);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("page_after_n"));
+    }
+
+    #[test]
+    fn parse_two_organs_same_manifest() {
+        let lines = vec![
+            "enabled  organ-1  binary=/path/1  heal_action=restart",
+            "enabled  organ-2  binary=/path/2  heal_action=respawn  page_after_n=7",
+        ];
+        let organs: Vec<_> = lines
+            .iter()
+            .map(|l| Organ::parse(l).expect("parse"))
+            .collect();
+        assert_eq!(organs.len(), 2);
+        assert_eq!(organs[0].name, "organ-1");
+        assert_eq!(organs[0].page_after_n, 3); // default
+        assert_eq!(organs[1].name, "organ-2");
+        assert_eq!(organs[1].page_after_n, 7); // explicit
+    }
+
+    #[test]
+    fn parse_list_of_organs() {
+        let manifest = vec![
+            "enabled  disk-monitor           binary=/path/disk-monitor     heal_action=restart",
+            "enabled  main-health-watchdog   binary=/path/watchdog         heal_action=restart  page_after_n=2",
+            "enabled  pr-lander              binary=/path/pr-lander        heal_action=respawn  node_applicability=owner-machine",
+        ];
+        let organs: Result<Vec<_>, _> = manifest.iter().map(|l| Organ::parse(l)).collect();
+        let organs = organs.expect("parse all");
+        assert_eq!(organs.len(), 3);
+        assert_eq!(organs[1].page_after_n, 2);
+        assert_eq!(organs[2].node_applicability, "owner-machine");
+    }
+
+    #[test]
+    fn organ_serialization_roundtrip() {
+        let original = Organ {
+            state: "enabled".to_string(),
+            name: "test-organ".to_string(),
+            binary: "/path/to/organ".to_string(),
+            heal_action: "restart".to_string(),
+            node_applicability: "all".to_string(),
+            page_after_n: 5,
+        };
+        let json = serde_json::to_string(&original).expect("serialize");
+        let deserialized: Organ = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized, original);
+    }
+}
