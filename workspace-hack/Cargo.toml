@@ -113,7 +113,7 @@ typenum = { version = "1", default-features = false, features = ["const-generics
 ureq = { version = "3", features = ["json", "native-tls", "socks-proxy"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
-wasm-encoder = { version = "0.260", features = ["wasmparser"] }
+wasm-encoder = { version = "0.261", features = ["wasmparser"] }
 wasmparser-392e55d8254dfa46 = { package = "wasmparser", version = "0.258", default-features = false, features = ["component-model", "features", "hash-collections", "serde", "simd", "std", "validate"] }
 wasmparser-90bcb329d096495 = { package = "wasmparser", version = "0.251", default-features = false, features = ["component-model", "features", "serde", "simd", "std", "validate"] }
 wasmtime-environ-250b128af4f17eb8 = { package = "wasmtime-environ", version = "49", default-features = false, features = ["anyhow", "backtrace", "compile", "component-model", "demangle", "gc-copying", "gc-drc", "gc-null", "stack-switching", "threads"] }
@@ -229,7 +229,7 @@ typenum = { version = "1", default-features = false, features = ["const-generics
 ureq = { version = "3", features = ["json", "native-tls", "socks-proxy"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
-wasm-encoder = { version = "0.260", features = ["wasmparser"] }
+wasm-encoder = { version = "0.261", features = ["wasmparser"] }
 wasmparser-392e55d8254dfa46 = { package = "wasmparser", version = "0.258", default-features = false, features = ["component-model", "features", "hash-collections", "serde", "simd", "std", "validate"] }
 wasmparser-90bcb329d096495 = { package = "wasmparser", version = "0.251", default-features = false, features = ["component-model", "features", "serde", "simd", "std", "validate"] }
 wasmtime-environ-250b128af4f17eb8 = { package = "wasmtime-environ", version = "49", default-features = false, features = ["anyhow", "backtrace", "compile", "component-model", "demangle", "gc-copying", "gc-drc", "gc-null", "stack-switching", "threads"] }
