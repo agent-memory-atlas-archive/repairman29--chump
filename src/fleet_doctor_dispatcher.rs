@@ -11,7 +11,9 @@
 //! Each dispatch logs the chosen action at INFO level via ambient events for audit trail visibility.
 
 use crate::ambient_emit::{emit, EmitArgs};
+use crate::gap_filer;
 use crate::health_check_routing::{self, FixerAction};
+use std::path::Path;
 
 /// Result of dispatching a single health check failure.
 #[derive(Debug, Clone)]
@@ -28,8 +30,12 @@ pub struct DispatchOutcome {
 /// action (gap_file or curator_wake), then invokes the handler.
 /// Logs the chosen action at INFO level via ambient events.
 ///
+/// # Arguments
+/// * `repo_root` - Path to the chump repository root (used for gap store access)
+/// * `check_id` - The health check identifier (e.g., "gap-drift")
+///
 /// Returns a DispatchOutcome documenting what was attempted and whether it succeeded.
-pub fn dispatch_fail(check_id: &str) -> DispatchOutcome {
+pub fn dispatch_fail(repo_root: &Path, check_id: &str) -> DispatchOutcome {
     match health_check_routing::fixer_for_check(check_id) {
         Some(action) => {
             let _ = emit(&EmitArgs {
@@ -42,7 +48,7 @@ pub fn dispatch_fail(check_id: &str) -> DispatchOutcome {
                 ..Default::default()
             });
             match action {
-                FixerAction::GapFile => handle_gap_file(check_id),
+                FixerAction::GapFile => handle_gap_file(repo_root, check_id),
                 FixerAction::CuratorWake => handle_curator_wake(check_id),
             }
         }
@@ -65,7 +71,7 @@ pub fn dispatch_fail(check_id: &str) -> DispatchOutcome {
 }
 
 /// Handler for `gap_file` action: file a new gap documenting the health issue.
-fn handle_gap_file(check_id: &str) -> DispatchOutcome {
+fn handle_gap_file(repo_root: &Path, check_id: &str) -> DispatchOutcome {
     let title = match check_id {
         health_check_routing::check_id::GAP_DRIFT => {
             "INFRA: Fleet doctor detected gap registry drift — investigate orphaned or stale gaps"
@@ -76,26 +82,57 @@ fn handle_gap_file(check_id: &str) -> DispatchOutcome {
         _ => "INFRA: Fleet doctor health check failed — investigate and remediate",
     };
 
-    let message = format!("gap_file handler: would file gap with title '{}'", title);
-    let _ = emit(&EmitArgs {
-        kind: "fleet_doctor_dispatcher_gap_file".to_string(),
-        source: Some("fleet_doctor_dispatcher".to_string()),
-        fields: vec![
-            ("check_id".to_string(), check_id.to_string()),
-            ("action".to_string(), "gap_file".to_string()),
-            ("title".to_string(), title.to_string()),
-        ],
-        ..Default::default()
-    });
+    // Attempt to file the gap with deduplication
+    match gap_filer::file_gap_with_dedup(repo_root, check_id, title, "INFRA", "P1", "s") {
+        Ok(outcome) => {
+            let (message, gap_id) = match outcome {
+                gap_filer::FileGapOutcome::Created(id) => {
+                    (format!("gap_file handler: created new gap {}", id), id)
+                }
+                gap_filer::FileGapOutcome::AlreadyOpen(id) => (
+                    format!("gap_file handler: gap {} already exists (idempotent)", id),
+                    id,
+                ),
+            };
 
-    // TODO(RESILIENT-1356): implement actual gap filing via chump gap reserve
-    // For now, just log the intent.
+            let _ = emit(&EmitArgs {
+                kind: "fleet_doctor_dispatcher_gap_file".to_string(),
+                source: Some("fleet_doctor_dispatcher".to_string()),
+                fields: vec![
+                    ("check_id".to_string(), check_id.to_string()),
+                    ("action".to_string(), "gap_file".to_string()),
+                    ("gap_id".to_string(), gap_id.clone()),
+                    ("title".to_string(), title.to_string()),
+                ],
+                ..Default::default()
+            });
 
-    DispatchOutcome {
-        check_id: check_id.to_string(),
-        action: FixerAction::GapFile,
-        success: true,
-        message,
+            DispatchOutcome {
+                check_id: check_id.to_string(),
+                action: FixerAction::GapFile,
+                success: true,
+                message,
+            }
+        }
+        Err(e) => {
+            let message = format!("gap_file handler: error filing gap: {}", e);
+            let _ = emit(&EmitArgs {
+                kind: "fleet_doctor_dispatcher_gap_file_error".to_string(),
+                source: Some("fleet_doctor_dispatcher".to_string()),
+                fields: vec![
+                    ("check_id".to_string(), check_id.to_string()),
+                    ("error".to_string(), e.to_string()),
+                ],
+                ..Default::default()
+            });
+
+            DispatchOutcome {
+                check_id: check_id.to_string(),
+                action: FixerAction::GapFile,
+                success: false,
+                message,
+            }
+        }
     }
 }
 
@@ -134,17 +171,22 @@ fn handle_curator_wake(check_id: &str) -> DispatchOutcome {
 }
 
 /// Dispatch all failures from a health report.
-pub fn dispatch_all_failures(check_ids: &[&str]) -> Vec<DispatchOutcome> {
-    check_ids.iter().map(|id| dispatch_fail(id)).collect()
+pub fn dispatch_all_failures(repo_root: &Path, check_ids: &[&str]) -> Vec<DispatchOutcome> {
+    check_ids
+        .iter()
+        .map(|id| dispatch_fail(repo_root, id))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn gap_drift_routes_to_gap_file() {
-        let outcome = dispatch_fail(health_check_routing::check_id::GAP_DRIFT);
+        let dir = tempdir().unwrap();
+        let outcome = dispatch_fail(dir.path(), health_check_routing::check_id::GAP_DRIFT);
         assert_eq!(outcome.check_id, "gap-drift");
         assert_eq!(outcome.action, FixerAction::GapFile);
         assert!(outcome.success);
@@ -152,7 +194,8 @@ mod tests {
 
     #[test]
     fn p0_budget_routes_to_gap_file() {
-        let outcome = dispatch_fail(health_check_routing::check_id::P0_BUDGET);
+        let dir = tempdir().unwrap();
+        let outcome = dispatch_fail(dir.path(), health_check_routing::check_id::P0_BUDGET);
         assert_eq!(outcome.check_id, "p0-budget");
         assert_eq!(outcome.action, FixerAction::GapFile);
         assert!(outcome.success);
@@ -160,7 +203,8 @@ mod tests {
 
     #[test]
     fn a2a_consensus_routes_to_curator_wake() {
-        let outcome = dispatch_fail(health_check_routing::check_id::A2A_CONSENSUS);
+        let dir = tempdir().unwrap();
+        let outcome = dispatch_fail(dir.path(), health_check_routing::check_id::A2A_CONSENSUS);
         assert_eq!(outcome.check_id, "a2a-consensus");
         assert_eq!(outcome.action, FixerAction::CuratorWake);
         assert!(outcome.success);
@@ -168,7 +212,8 @@ mod tests {
 
     #[test]
     fn curator_silent_routes_to_curator_wake() {
-        let outcome = dispatch_fail(health_check_routing::check_id::CURATOR_SILENT);
+        let dir = tempdir().unwrap();
+        let outcome = dispatch_fail(dir.path(), health_check_routing::check_id::CURATOR_SILENT);
         assert_eq!(outcome.check_id, "curator-silent");
         assert_eq!(outcome.action, FixerAction::CuratorWake);
         assert!(outcome.success);
@@ -176,18 +221,20 @@ mod tests {
 
     #[test]
     fn unknown_check_fails_gracefully() {
-        let outcome = dispatch_fail("unknown-check-id");
+        let dir = tempdir().unwrap();
+        let outcome = dispatch_fail(dir.path(), "unknown-check-id");
         assert_eq!(outcome.check_id, "unknown-check-id");
         assert!(!outcome.success);
     }
 
     #[test]
     fn dispatch_all_failures_processes_multiple_checks() {
+        let dir = tempdir().unwrap();
         let checks = vec![
             health_check_routing::check_id::GAP_DRIFT,
             health_check_routing::check_id::P0_BUDGET,
         ];
-        let outcomes = dispatch_all_failures(&checks);
+        let outcomes = dispatch_all_failures(dir.path(), &checks);
         assert_eq!(outcomes.len(), 2);
         assert!(outcomes[0].success);
         assert!(outcomes[1].success);

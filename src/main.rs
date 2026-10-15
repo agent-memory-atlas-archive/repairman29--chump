@@ -120,6 +120,7 @@ mod fleet_tool;
 mod fleet_velocity;
 mod floor_temp; // INFRA-1992: THE FLOOR Phase 1 — floor-temperature signal
 mod ftue_tool;
+mod gap_filer; // RESILIENT-1356: gap filing and deduplication
 mod rebase_queue; // INFRA-2225: fleet rebase-queue — auto-rebase daemon backlog surface
                   // INFRA-693: gap_store moved to its own crate (crates/chump-gap-store/).
                   // The rename keeps every `gap_store::*` call site compiling unchanged.
