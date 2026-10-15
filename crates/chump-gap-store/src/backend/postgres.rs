@@ -123,6 +123,7 @@ impl PostgresBackend {
                 backend            TEXT NOT NULL DEFAULT 'claude'
                     CHECK (backend IN ('claude', 'opencode', 'codex', 'manual')),
                 max_concurrent_gaps INT NOT NULL DEFAULT 2,
+                max_concurrent_cargo_jobs INT NOT NULL DEFAULT 4,
                 last_heartbeat_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (team_id, user_id, machine)
             );

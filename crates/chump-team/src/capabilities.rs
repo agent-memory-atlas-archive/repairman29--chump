@@ -40,6 +40,7 @@ pub struct WorkerCapability {
     pub skills: Vec<String>,
     pub backend: Backend,
     pub max_concurrent_gaps: i32,
+    pub max_concurrent_cargo_jobs: i32,
     pub last_heartbeat_at: DateTime<Utc>,
 }
 
@@ -56,6 +57,7 @@ impl ChumpTeam {
             "skills": cap.skills,
             "backend": cap.backend.as_db_str(),
             "max_concurrent_gaps": cap.max_concurrent_gaps,
+            "max_concurrent_cargo_jobs": cap.max_concurrent_cargo_jobs,
             "last_heartbeat_at": cap.last_heartbeat_at.to_rfc3339(),
         });
         // PostgREST upsert via header on insert. The postgrest 1.6 crate
@@ -74,6 +76,7 @@ impl ChumpTeam {
                     "skills": cap.skills,
                     "backend": cap.backend.as_db_str(),
                     "max_concurrent_gaps": cap.max_concurrent_gaps,
+                    "max_concurrent_cargo_jobs": cap.max_concurrent_cargo_jobs,
                     "last_heartbeat_at": cap.last_heartbeat_at.to_rfc3339(),
                 });
                 let q = self
