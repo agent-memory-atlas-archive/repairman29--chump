@@ -2458,3 +2458,6 @@ jobs:
         run: bash scripts/ci/test-gap-close-decomposed-integration.sh
         env:
           CHUMP_BIN: target/debug/chump
+
+      - name: Run advisory-merge integration test (RESILIENT-1402)
+        run: bash scripts/ci/test-advisory-merge.sh
