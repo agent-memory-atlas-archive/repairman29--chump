@@ -1,0 +1,12 @@
+[Unit]
+Description=Schedule Posse portfolio scan (MISSION-109)
+Documentation=https://github.com/repairman29/posse#portfolio-scan
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=3600
+OnUnitInactiveSec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
