@@ -367,4 +367,56 @@ mod tests {
             "second call should return the same gap ID"
         );
     }
+
+    /// RESILIENT-1360: Integration test for synthetic FAIL triggering curator wake.
+    /// 1. Test uses synthetic FAIL generator for `a2a-consensus` health check
+    /// 2. After processing, verify that the `deliberator` curator received a wake signal
+    ///    by inspecting the ambient event stream for `curator_wake_signal` event
+    /// 3. The test fails if no wake signal is observed
+    #[test]
+    fn synthetic_fail_triggers_curator_wake_signal() {
+        let dir = tempdir().unwrap();
+        let repo_root = dir.path();
+        let ambient_log = repo_root.join(".chump-locks/ambient.jsonl");
+
+        // Create the .chump-locks directory to allow emit to write ambient events
+        std::fs::create_dir_all(repo_root.join(".chump-locks")).expect("should create directory");
+
+        // Set up ambient_override so emit writes to our test location
+        // We capture the wake signal by inspecting what gets written
+        std::env::set_var("CHUMP_REPO", repo_root.to_str().unwrap());
+
+        // Dispatch a synthetic FAIL for a2a-consensus health check
+        let outcome = dispatch_fail(repo_root, health_check_routing::check_id::A2A_CONSENSUS);
+
+        // Verify the dispatch was successful and routed to curator_wake action
+        assert_eq!(outcome.check_id, "a2a-consensus");
+        assert_eq!(outcome.action, FixerAction::CuratorWake);
+        assert!(outcome.success);
+        assert!(outcome.message.contains("sent wake signal"));
+
+        // Read the ambient log and verify that a curator_wake_signal event was emitted
+        let ambient_content = std::fs::read_to_string(&ambient_log)
+            .expect("ambient log should exist and be readable");
+
+        // Look for the curator_wake_signal event with curator_id="deliberator"
+        let wake_signal_found = ambient_content.lines().any(|line| {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line) {
+                parsed["event"] == "curator_wake_signal"
+                    && parsed["curator_id"] == "deliberator"
+                    && parsed["action"] == "wake"
+                    && parsed["source"] == "fleet_doctor_dispatcher"
+            } else {
+                false
+            }
+        });
+
+        assert!(
+            wake_signal_found,
+            "curator_wake_signal event with curator_id='deliberator' should be present in ambient.jsonl"
+        );
+
+        // Clean up
+        std::env::remove_var("CHUMP_REPO");
+    }
 }
