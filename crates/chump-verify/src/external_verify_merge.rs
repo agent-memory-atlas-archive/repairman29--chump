@@ -2857,6 +2857,59 @@ fi
         );
     }
 
+    /// RESILIENT-1399: required SUCCESS + advisory FAILING: Gate 1 PASS.
+    /// Advisory checks that are red must NOT prevent posting verified when
+    /// all required checks are green.
+    #[test]
+    #[serial_test::serial]
+    fn test_ci_advisory_red_does_not_gate() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        // required "CI" check SUCCESS, advisory "lint" check FAILED.
+        let mixed_json = r#"{"statusCheckRollup":[
+            {"name":"CI","status":"COMPLETED","conclusion":"SUCCESS"},
+            {"name":"lint-check","status":"COMPLETED","conclusion":"FAILURE"}
+        ]}"#;
+
+        let gh_bin = fake_gh_with_responses(tmp.path(), &[mixed_json]);
+
+        std::env::set_var("CHUMP_VERIFY_CI_POLL_SECS", "0");
+        std::env::set_var("CHUMP_VERIFY_CI_WAIT_SECS", "3600");
+        // Mark "lint" as advisory (case-insensitive substring match).
+        std::env::set_var("CHUMP_VERIFY_CI_ADVISORY_NAMES", "lint");
+        std::env::set_var(
+            "CHUMP_AMBIENT_IN_PROMPT",
+            tmp.path().join("ambient.jsonl").to_string_lossy().as_ref(),
+        );
+
+        let opts = make_opts(&gh_bin);
+        let result = poll_ci_until_terminal(&opts).expect("poll_ci");
+
+        match result {
+            CiResult::Green {
+                check_count,
+                checks,
+            } => {
+                // Only the required "CI" check should gate; the failing advisory check must not block.
+                assert_eq!(check_count, 1, "expected 1 required check (CI)");
+                assert!(
+                    checks.iter().any(|c| c == "CI"),
+                    "expected 'CI' in passing list, got {:?}",
+                    checks
+                );
+            }
+            other => panic!(
+                "expected CiResult::Green (advisory red should not gate), got: {}",
+                match other {
+                    CiResult::NoGates => "NoGates",
+                    CiResult::Red { .. } =>
+                        "Red (RESILIENT-1399 regression — advisory checks should not block)",
+                    CiResult::TimedOut { .. } => "TimedOut",
+                    CiResult::Green { .. } => unreachable!(),
+                }
+            ),
+        }
+    }
+
     /// Guard: a REAL required check that fails still HELDs — the fix must not
     /// turn Gate 1 into a rubber stamp.
     #[test]
