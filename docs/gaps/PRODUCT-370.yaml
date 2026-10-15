@@ -1,0 +1,30 @@
+- id: PRODUCT-370
+  domain: PRODUCT
+  title: "[olive] auth exchange-code failed"
+  status: open
+  priority: P1
+  effort: s
+  skills_required: "external_repo:repairman29/olive"
+  description: |
+    AC source: template (live-site default)
+
+    Confidence: mechanical -- a deterministic check, not a judgment call -- high confidence, but some "dead" mechanical findings are an intentional no-op (e.g. an already-active tab); verify it is actually meant to work.
+
+    invalid flow state, no valid flow state found
+
+    context: {"repo":"repairman29/olive","status":404,"surface":"headless","error_code":"flow_state_not_found"}
+    source: holler feedback_events, dedupe daf8818d2c76bc61
+  acceptance_criteria:
+    - The specific issue described above is verifiably fixed on the LIVE site (re-check the real URL after deploy, not just the diff)
+    - No regression -- the rest of the page/flow that already worked still works
+    - If this was a "claims a capability that doesn't work" finding (a live CTA/flow promising something broken), the fix either makes it true or removes the claim -- never ship with both the break and the promise still in place
+  closed_pr: null
+  notes: |
+    operator 2026-10-12: outward/user-facing (Olive/prod), prioritized.
+
+    2026-10-15: This gap references an external repo (repairman29/olive) with a live auth flow bug. The error "flow_state_not_found" (404) during exchange-code suggests the OAuth flow state isn't being preserved or validated correctly between the auth initiation and callback. This requires either:
+    (a) Verification that the issue is still present on the live site, or
+    (b) Coordination with the Olive team to apply a fix if one exists.
+
+    Typical causes of flow_state_not_found: state parameter not stored before redirect, state mismatch on callback, or premature state cache clearing. See Olive auth flow implementation (likely in an auth middleware or OAuth callback handler) for the specific cause.
+
