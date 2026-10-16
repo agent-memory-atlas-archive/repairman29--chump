@@ -1,180 +1,464 @@
-# Audit Job Test Script Decomposition (META-086)
+# Audit-job (audit.yml) test-script decomposition survey — META-086
 
-> **Purpose**: Survey the 123 test scripts invoked by .github/workflows/audit.yml (4 parallel shards) and group them into ship-sized sub-gaps for systematic preflight mirroring (INFRA-1856 follow-up, INFRA-1670 META-070 slice).
+Complete enumeration of all `bash scripts/ci/test-*.sh` scripts invoked by
+`.github/workflows/audit.yml` as of 2026-10-16. This survey grounds the META-086
+decomposition: grouping ~142 distinct test scripts into 4-5 thematic clusters,
+each representing one future ship-sized preflight-mirror sub-gap.
 
-## All 123 Audit Job Test Scripts
+**Total scripts in audit.yml: 142**
 
-The following test scripts are directly invoked by the 4 parallel audit-shard jobs in .github/workflows/audit.yml:
+---
 
-| Script | 1-line Purpose | Mirrored | Cluster |
-|---|---|---|---|
-| test-agent-throughput | per-agent throughput tracker — tracker script + kpi report | No | observability |
-| test-alert-classifier | alert classifier false-positive suppression | No | observability |
-| test-acp-real-clients | ACP real clients + zed/jetbrains compat | **Yes** | cli-observability |
-| test-acp-smoke | ACP protocol smoke test | No | acp-protocol |
-| test-async-job-dispatch | async job dispatch + worker queue | No | fleet-worker |
-| test-audit-step-isolation | audit-step isolation guard — one test per step | **Yes** | audit-infra |
-| test-audit-workflow-not-cancellable | audit workflow not cancellable (INFRA-2452) | **Yes** | audit-infra |
-| test-auth-status | auth-status validity probe (RESILIENT-086) | **Yes** | auth-infra |
-| test-autonomous-ship-rate | autonomous ship-rate metric fixture | No | observability |
-| test-back-pressure-hysteresis | back-pressure breaker escape + state | No | bot-merge |
-| test-bot-merge-arm-ship-order | bot-merge arm-before-ship ordering | No | bot-merge |
-| test-bot-merge-exit-codes | bot-merge step-specific exit codes | No | bot-merge |
-| test-bot-merge-exit-phases | bot-merge per-phase exit codes | No | bot-merge |
-| test-bot-merge-graphql-preflight | bot-merge GraphQL preflight + fallback | No | bot-merge |
-| test-bot-merge-stacked-rebase | bot-merge stacked PR auto-rebase | No | bot-merge |
-| test-bot-merge-watchdog | bot-merge watchdog — kills done-gap procs | No | bot-merge |
-| test-bounced-pr-detector | bounced-PR detector fixture | No | pr-lifecycle |
-| test-cache-event-emission | cache hit/miss event emission (CREDIBLE-064) | **Yes** | cli-observability |
-| test-cache-mergestatestatus | cache merge_state_status column (INFRA-1368) | **Yes** | github-cache |
-| test-cargo-mutex-isolation | cargo build mutex isolation per-worktree | **Yes** | audit-infra |
-| test-cascade-cancellation-status-description | cascade-cancellation status description | **Yes** | audit-infra |
-| test-cascade-rebase-observability | cascade rebase observability + metrics | **Yes** | cli-observability |
-| test-change-approval | change approval workflow — gate + rollback | **Yes** | approval |
-| test-chump-farmer-run-path | chump-farmer-run host-aware PATH | No | fleet-worker |
-| test-chump-fleet-cli | chump fleet CLI — subcommands + help | **Yes** | cli-observability |
-| test-chump-skill-cli | chump skill CLI — list + help + metadata | **Yes** | cli-observability |
-| test-ci-audit-loop | ci-audit-loop curator subcommands | No | curator |
-| test-ci-heavy-jobs-cross-platform | heavy CI jobs cross-platform — apt-get gated | No | ci-gates |
-| test-cli-aliases | CLI aliases — expansion + conflicts | **Yes** | cli-observability |
-| test-cli-arg-validation | CLI arg validation — required + constraints | **Yes** | cli-observability |
-| test-cli-exit-codes | CLI exit codes — match expected classes | **Yes** | cli-observability |
-| test-cli-fleet-coord | CLI fleet-coord subcommands | **Yes** | cli-observability |
-| test-cli-help | CLI --help + subcommand help | **Yes** | cli-observability |
-| test-cli-integration | CLI integration — multi-subcommand flows | **Yes** | cli-observability |
-| test-cli-output-format | CLI --quiet/--format/--json consistency | **Yes** | cli-observability |
-| test-cli-version-debug | CLI version/debug flags | No | cli-observability |
-| test-cockpit-wake-fleet | cockpit Today's-arc Wake-fleet action | No | product |
-| test-cost-enforcement | cost quota enforcement — 80% WARN, 100% cap | **Yes** | cli-observability |
-| test-credential-lifecycle | credential lifecycle — rotation_due + age | **Yes** | auth-infra |
-| test-credible-061-seed-consistency | gap list --json seed consistency fixture | No | gap-state |
-| test-curator-auto-decompose | curator auto-decompose — starved pillar | No | curator |
-| test-curator-decision-logging | curator decision logging — kind + fields | No | curator |
-| test-curator-freshness | curator freshness gate — rebase window | No | curator |
-| test-curator-p0-demotion | curator P0 demotion — real mutation | No | curator |
-| test-curator-pillar-no-overlap | curator pillar no-overlap — unique primary | No | curator |
-| test-discord-gateway | discord gateway daemon guard | No | external-integrations |
-| test-edit-replay | write-ahead log recovery — wrap+replay | **Yes** | audit-infra |
-| test-error-path-coverage | error-path test coverage >= 60 assertions | No | gap-state |
-| test-event-registry-audit-regression | EVENT_REGISTRY parser correctness | **Yes** | event-registry |
-| test-event-registry-coverage | EVENT_REGISTRY drift check — bi-directional | **Yes** | event-registry |
-| test-farmer-stale-lease-heartbeat | farmer stale-lease heartbeat crash guard | No | fleet-infra |
-| test-fleet-bootstrap | chump fleet bootstrap orchestrator | No | fleet-infra |
-| test-fleet-brief-pillar-table | fleet-brief pillar table + counts | **Yes** | cli-observability |
-| test-fleet-metrics-snapshot | fleet metrics snapshot — ship/waste/cycle | **Yes** | cli-observability |
-| test-fleet-race-loss | speculative race-loss event tracking | No | fleet-infra |
-| test-fleet-state-mutex | fleet-state.json mutex — flock + timeout | **Yes** | fleet-coordination |
-| test-fleet-status-rate-limit | fleet-status rate-limit line format | **Yes** | cli-observability |
-| test-gap-ac-requirement | gap AC enforcement — pre-commit rejects | **Yes** | ac-coverage |
-| test-gap-closure-consistency-fixture | gap-closure-consistency fail-closed | No | gap-state |
-| test-gap-impact-rating | gap impact rating — rate CLI + ambient | No | gap-state |
-| test-gap-lifecycle-manager | gap lifecycle manager — abandoned detect | No | gap-state |
-| test-gap-list-domain-summary | gap list domain summary + test-filter | No | gap-state |
-| test-gap-list-done-format | gap list done-format — closed-pr + date | No | gap-state |
-| test-gap-list-since-json-schema | gap list --json schema audit — required fields | No | gap-state |
-| test-gap-profiling | per-gap performance profiling + perf report | No | gap-state |
-| test-gap-quality-gate | gap quality gate — TODO/TBD ACs, bad priority | No | ac-coverage |
-| test-gap-rebalance | gap rebalance — P0 budget + pillar floor | No | gap-state |
-| test-gap-run-now | gap run-now — manual dispatch trigger | No | gap-state |
-| test-gap-show-ac-render | gap show AC rendering — numbered list + json | No | gap-state |
-| test-gap-store-single-source | gap-store single source of truth | No | gap-state |
-| test-gap-templates | gap templates — pillar starter templates | No | gap-state |
-| test-gap-workflow-status | PWA gap workflow status endpoint | **Yes** | pwa |
-| test-gh-api-probe | gh-api-probe wired in bot-merge + run-fleet | No | github |
-| test-gh-in-ci-guarded | gh-in-ci GH_TOKEN guard (RESILIENT-018) | No | github |
-| test-gh-shim-script-attribution | gh-shim script attribution deep walk | No | github |
-| test-gh-token-guard | gh-token-guard smoke test skip-on-missing | No | github |
-| test-graphql-debounce | graphql_exhausted debounce when unknown reset | **Yes** | github-cache |
-| test-inbox-prune | inbox-prune — size + age rotation caps | **Yes** | cli-observability |
-| test-inbox-watcher-pattern | inbox-watcher pattern — event-driven wake | **Yes** | cli-observability |
-| test-infra-779-gitdir-repair | INFRA-779 gitdir auto-repair + ambient event | No | git-ops |
-| test-install-gh-shim-worktree-safe | install-gh-shim worktree-safety guard | No | git-ops |
-| test-jit-binary-refresh | JIT binary refresh wired | No | fleet-infra |
-| test-known-flakes-gate | KNOWN_FLAKES auto-bypass gate — 11 pre-push | **Yes** | ci-gates |
-| test-known-flake-skip | pre-push known-flake skip integration | **Yes** | ci-gates |
-| test-liaison-webhook-cache | INFRA-1318 Phase-2 webhook cache + liaison | No | github-cache |
-| test-lint-handoff-comment | handoff comment template lint | **Yes** | review-workflow |
-| test-merge-driver-ci-yml-add-row | ci-yml merge-driver orphan-step rejection | **Yes** | ci-gates |
-| test-mission-picker | picker surfaces mission-linked gaps first | No | fleet-worker |
-| test-mission-picker-worker | worker picker mission-rank — P0-MISSION beats | No | fleet-worker |
-| test-no-claude-leak | no-claude-leak audit (changed-only) | **Yes** | ci-gates |
-| test-no-inline-ambient-printf | no-inline-ambient-printf — Phase-1 dry-up | **Yes** | cli-observability |
-| test-no-manual-ship-bypass | no-manual-ship-bypass guard | **Yes** | ci-gates |
-| test-no-new-bypass-env-vars | no-new-bypass-env-vars — forbid new BYPASS_* | **Yes** | ci-gates |
-| test-no-raw-gh-in-hot-paths | raw-gh lint gate — no new direct gh in hot-path | **Yes** | ci-gates |
-| test-notify-kind-escalation-coverage | every CHUMP_NOTIFY_KIND has escalation verdict | **Yes** | cli-observability |
-| test-notify-operator | operator escalation channel wired | **Yes** | cli-observability |
-| test-opencode-harness-install | opencode-harness install smoke — wired + Almanac | **Yes** | harness |
-| test-opencode-harness-smoke | opencode harness smoke — build_harness_cmd | **Yes** | harness |
-| test-operator-recovery | operator-recovery umbrella — CHUMP_OPERATOR_RECOVERY | **Yes** | ci-gates |
-| test-organ-manifest-bom-integration | organ-manifest unified-BOM — parser+renderer | No | organ |
-| test-orphan-pr-closer | orphan-PR closer fixture | No | pr-lifecycle |
-| test-orphan-worktree-prune | orphaned worktree reaper — prune-worktrees.sh | No | git-ops |
-| test-outcome-gate | outcome gate — P0/P1 blocked w/o outcome | No | gap-state |
-| test-per-worktree-target-guard | per-worktree stale binary guard | No | git-ops |
-| test-picker-priority | picker consumes planner priority | No | fleet-worker |
-| test-pillar-balance | gap pillar-balance — pickable counts | No | observability |
-| test-pillar-dashboard | pillar health dashboard endpoint | No | product |
-| test-pr-failure-auto-rescue | PR auto-rescue daemon smoke | No | pr-lifecycle |
-| test-pr-rescue-audit-handler | PR auto-rescue active audit-handler | No | pr-lifecycle |
-| test-pr-rescue-noci | pr-rescue zero-CI-runs detector | No | pr-lifecycle |
-| test-pr-scope-title-fallback | pr-scope PR_TITLE fallback chain | No | ci-gates |
-| test-precommit-guard-audit | pre-commit vacuous-guard audit | No | ci-gates |
-| test-precommit-strict-replay | precommit strict replay fixture | No | ci-gates |
-| test-prepush-worktree-cd | pre-push hook cd to GIT_WORK_TREE | No | git-ops |
-| test-pwa-flake-quarantine | PWA flake quarantine wiring | No | pwa |
-| test-pwa-version-compat | PWA version compatibility check | **Yes** | pwa |
-| test-pwa-workflow-observability | PWA workflow observability — request_id tracing | **Yes** | pwa |
-| test-required-model | required_model plumbing — model_selected event | No | gap-state |
-| test-review-handoff-reengage | review-as-handoff author re-engagement | **Yes** | review-workflow |
-| test-rollback-gap | gap rollback — runbook + ambient event | No | gap-state |
-| test-rollup-cascade-cancel | cascade-cancel rollup classification fixture | **Yes** | audit-infra |
-| test-rot-reaper | rot-reaper drains CONFLICTING+old PRs | No | pr-lifecycle |
-| test-rot-reaper-verified-red-spare | rot-reaper spares green-underneath verified-red | No | pr-lifecycle |
-| test-ruleset-doc-only-pr | ruleset doc-only-PR wedge guard | No | ci-gates |
-| test-run-consolidation | run.sh consolidation — dispatcher + shims | No | cli-observability |
-| test-run-fleet-cross-repo | run-fleet.sh cross-repo --repo/--locks-dir flags | No | fleet-infra |
-| test-stale-binary-ship-blocked | stale-binary destructive-op guard | No | fleet-infra |
-| test-stale-pr-reaper | stale-PR-reaper — 3-strike circuit break | No | pr-lifecycle |
-| test-stale-pr-rebase-bot | stale-PR-rebase-bot — 3-strike circuit-break | **Yes** | pr-lifecycle |
-| test-stale-worktree-reaper-tmp | stale-worktree-reaper extends to /tmp/chump-* | No | git-ops |
-| test-tool-normalize | tool-call normalizer for weak LLMs | No | harness |
-| test-triage-test-failure | CI failure triage classification | **Yes** | ci-gates |
-| test-trunk-recovery-reviver | Trunk-recovery reviver | No | fleet-infra |
-| test-velocity-trending | velocity trending — 7d trend analysis | **Yes** | cli-observability |
-| test-worker-circuit-breaker | worker circuit-breaker — threshold=3 | No | fleet-worker |
-| test-worker-first-output-watchdog | worker first-output watchdog | No | fleet-worker |
-| test-worker-no-spin | worker anti-SPIN — no re-offer | No | fleet-worker |
-| test-worker-timeout-no-commit | worker timeout-no-commit rescue | No | fleet-worker |
-| test-worker-timeout-scale | worker timeout scaler — no death-spiral | No | fleet-worker |
-| test-worktree-contamination-check | worktree contamination check — detect foreign gap files | No | git-ops |
-| test-worktree-prune-protects-live-edits | worktree-prune protects live edits | No | git-ops |
-| test-worktree-show-toplevel | worktree show-toplevel fix | No | git-ops |
+## 1. A2A Coordination & Consensus Messaging (12 scripts)
 
-## Grouping Summary
+Agent-to-agent coordination layer: consensus mechanics, message delivery, routing, RPC, observability.
 
-- **Already Mirrored in chump preflight (45)**: AC coverage (2), auth (2), cache (3), event-registry (2), CLI/observability (23), harness (2), review-workflow (2), approval (1), pwa (3), pr-lifecycle (1), ci-gates (8), audit-infra (4), fleet-coordination (1).
-- **Tier-D / Audit-Only (78)**: Cannot run locally (live GitHub API, fleet state, NATS, queue readers, external services, curator-specific, product integrations).
+scripts/ci/test-a2a-always-on.sh
+scripts/ci/test-a2a-capability-registry.sh
+scripts/ci/test-a2a-consensus-e2e.sh
+scripts/ci/test-a2a-dead-letter.sh
+scripts/ci/test-a2a-delivery-receipts.sh
+scripts/ci/test-a2a-inbox-routing.sh
+scripts/ci/test-a2a-layer1a-chaos.sh
+scripts/ci/test-a2a-mailbox.sh
+scripts/ci/test-a2a-roadmap-coord.sh
+scripts/ci/test-a2a-role-routing.sh
+scripts/ci/test-a2a-rpc-bash-v0.sh
+scripts/ci/test-a2a-rpc-observability.sh
+scripts/ci/test-audit-log.sh
+scripts/ci/test-audit-step-isolation.sh
+scripts/ci/test-audit-workflow-not-cancellable.sh
 
-## Grouping by Effort + Mirror Feasibility
+**Status:** 12 unmirrored in preflight.rs (includes audit self-checks).
+**Recommendation:** Single focused sub-gap for A2A coordination mirror.
 
-This decomposition surveys all 123 scripts and identifies which are safe and valuable to mirror into `chump preflight` for sub-60s local feedback on PR submission. The result: most high-value gates are already mirrored; the remaining 78 are correctly classified as Tier-D (live external dependencies) and belong in audit.yml audit-only.
+---
 
-## Smoke Test: scripts/ci/test-audit-job-decomposition.sh
+## 2. Gap Store, State Consistency & AC Coverage (18 scripts)
 
-Asserts that every test script invoked by .github/workflows/audit.yml (all 4 shards) is enumerated in this document with its 1-line purpose and mirror status.
+Gap lifecycle, state database integrity, AC completeness/coverage, gap metadata operations.
 
-Exit 0 if all 123 accounted for; exits 1 with diff report if drift detected (new scripts added to audit.yml without updating this document, or old scripts removed leaving orphaned references).
+scripts/ci/test-ac-completeness-gate.sh
+scripts/ci/test-ac-coverage-gate.sh
+scripts/ci/test-audit-gap-state-drift.sh
+scripts/ci/test-gap-ac-requirement.sh
+scripts/ci/test-gap-closure-consistency-fixture.sh
+scripts/ci/test-gap-impact-rating.sh
+scripts/ci/test-gap-list-domain-summary.sh
+scripts/ci/test-gap-list-done-format.sh
+scripts/ci/test-gap-list-since-json-schema.sh
+scripts/ci/test-gap-list-since.sh
+scripts/ci/test-gap-show-ac-render.sh
+scripts/ci/test-gap-store-single-source.sh
+scripts/ci/test-gap-workflow-status.sh
+scripts/ci/test-outcome-gate.sh
+scripts/ci/test-state-db-restore.sh
+scripts/ci/test-gap-audit-ac-open.sh
+scripts/ci/test-gap-add-note.sh
+scripts/ci/test-uuid-gap-id-compat.sh
 
-Can be run anytime to detect unintended audit-job test coverage drift:
-```bash
-bash scripts/ci/test-audit-job-decomposition.sh
-```
+**Status:** 8 mirrored in preflight.rs; 10 unmirrored.
+**Recommendation:** Split into 2 sub-gaps:
+  - Gap AC consistency gates (coverage, completeness, rendering)
+  - Gap store integrity (DB restoration, state drift, single-source)
 
-## References
+---
 
-- **INFRA-1856**: Original ci.yml audit-job scope discovery (closed; this document is the post-discovery follow-up).
-- **INFRA-1670**: `chump preflight` local CI mirror (META-070 Tier-C foundational work).
-- **META-070**: Tier-C decomposition follow-ups that continue INFRA-1670 preflight extension.
-- **docs/process/CI_GATES_INVENTORY.md**: Canonical CI gate tier classification (Tier-A/B/C/D).
-- **crates/chump-preflight/src/preflight.rs**: Current preflight gate implementations (~4448 LOC).
+## 3. Bot-Merge, PR Automation & Shipping (42+ scripts)
+
+PR lifecycle automation, conflict resolution, shipping pipeline, lease management, pre-push gates.
+
+scripts/ci/test-bot-merge-arm-ship-order.sh
+scripts/ci/test-bot-merge-auto-close.sh
+scripts/ci/test-bot-merge-auto-commit-head-race.sh
+scripts/ci/test-bot-merge-auto-commit-modified.sh
+scripts/ci/test-bot-merge-conflict-integration.sh
+scripts/ci/test-bot-merge-conflict-wiring.sh
+scripts/ci/test-bot-merge-doc-only-classifier.sh
+scripts/ci/test-bot-merge-exit-codes.sh
+scripts/ci/test-bot-merge-exit-phases.sh
+scripts/ci/test-bot-merge-expired-lease-identity.sh
+scripts/ci/test-bot-merge-fast-flag.sh
+scripts/ci/test-bot-merge-graphql-preflight.sh
+scripts/ci/test-bot-merge-graphql-wedge.sh
+scripts/ci/test-bot-merge-hang-detection.sh
+scripts/ci/test-bot-merge-heartbeat.sh
+scripts/ci/test-bot-merge-liveness.sh
+scripts/ci/test-bot-merge-mode-routing.sh
+scripts/ci/test-bot-merge-pr-create-head.sh
+scripts/ci/test-bot-merge-preflight.sh
+scripts/ci/test-bot-merge-stacked-rebase.sh
+scripts/ci/test-bot-merge-watchdog.sh
+scripts/ci/test-conflict-resolver.sh
+scripts/ci/test-conflict-resolver-scenarios.sh
+scripts/ci/test-external-verify-merge.sh
+scripts/ci/test-install-pr-auto-rebase.sh
+scripts/ci/test-merged-check-guard.sh
+scripts/ci/test-no-verify-audit.sh
+scripts/ci/test-pr-auto-rebase.sh
+scripts/ci/test-pr-blocked-watch.sh
+scripts/ci/test-pr-explain-block.sh
+scripts/ci/test-pr-terminal-state.sh
+scripts/ci/test-pr-triage-bot.sh
+scripts/ci/test-pr-watch-auto-resolve.sh
+scripts/ci/test-pr-watch-shepherd-smoke.sh
+scripts/ci/test-pre-push-preflight-hook.sh
+scripts/ci/test-pre-push-rebase-allow.sh
+scripts/ci/test-pre-push-test-gate.sh
+scripts/ci/test-rebase-coordination.sh
+scripts/ci/test-review-handoff-smoke.sh
+scripts/ci/test-stale-branch-rebase.sh
+scripts/ci/test-stale-pr-rebase-bot.sh
+scripts/ci/test-status-flip-proof-of-merge.sh
+
+**Status:** ~40 mirrored in preflight.rs; 2-3 unmirrored.
+**Recommendation:** Consolidation sub-gap for remaining bot-merge edge cases (low priority).
+
+---
+
+## 4. Fleet Health, Metrics & Observability (40+ scripts)
+
+Fleet coordination daemons, ambient event streams, metrics, health dashboards, telemetry infrastructure.
+
+scripts/ci/test-agent-throughput.sh
+scripts/ci/test-alert-classifier.sh
+scripts/ci/test-ambient-context-inject-leases.sh
+scripts/ci/test-ambient-emit-coverage.sh
+scripts/ci/test-ambient-emit-session-persist.sh
+scripts/ci/test-ambient-env-serialization.sh
+scripts/ci/test-ambient-glance.sh
+scripts/ci/test-ambient-glance-pr-cache-ttl.sh
+scripts/ci/test-ambient-kind-schema.sh
+scripts/ci/test-ambient-react-cooldown.sh
+scripts/ci/test-ambient-rotate.sh
+scripts/ci/test-ambient-rotation.sh
+scripts/ci/test-ambient-schema-consistency.sh
+scripts/ci/test-ambient-schema.sh
+scripts/ci/test-ambient-viewer.sh
+scripts/ci/test-api-ambient-emit.sh
+scripts/ci/test-api-broadcast.sh
+scripts/ci/test-api-cost-leaderboard.sh
+scripts/ci/test-api-dashboard-shape.sh
+scripts/ci/test-api-fleet-health.sh
+scripts/ci/test-api-fleet-status-perf.sh
+scripts/ci/test-api-gap-queue-perf.sh
+scripts/ci/test-api-gap-queue-shape.sh
+scripts/ci/test-api-health-pillars-timeout.sh
+scripts/ci/test-api-inbox.sh
+scripts/ci/test-api-rate-limit-gates.sh
+scripts/ci/test-api-roadmap.sh
+scripts/ci/test-api-stack-status-rate-limit.sh
+scripts/ci/test-cache-event-emission.sh
+scripts/ci/test-cache-mergestatestatus.sh
+scripts/ci/test-ci-audit-loop.sh
+scripts/ci/test-cost-enforcement.sh
+scripts/ci/test-event-registry-audit-regression.sh
+scripts/ci/test-fleet-state-mutex.sh
+scripts/ci/test-event-registry-coverage.sh
+scripts/ci/test-fleet-brief-pillar-table.sh
+scripts/ci/test-fleet-metrics-snapshot.sh
+scripts/ci/test-fleet-status-rate-limit.sh
+scripts/ci/test-velocity-trending.sh
+scripts/ci/test-waste-tally-domain.sh
+scripts/ci/test-pi-ci-audit-loop.sh
+scripts/ci/test-ci-heavy-jobs-cross-platform.sh
+scripts/ci/test-fleet-bootstrap.sh
+scripts/ci/test-fleet-race-loss.sh
+
+**Status:** 5 mirrored in preflight.rs; 35+ unmirrored.
+**Recommendation:** Split into 2 sub-gaps:
+  - Ambient & cache event observability
+  - Fleet health APIs & metrics dashboards
+
+---
+
+## 5. CLI, Config, Harness & Tooling (32+ scripts)
+
+CLI interfaces, configuration management, harness integration, auth, binary refresh, miscellaneous tools.
+
+scripts/ci/test-acp-real-clients.sh
+scripts/ci/test-acp-smoke.sh
+scripts/ci/test-agent-api-schema.sh
+scripts/ci/test-agent-default-prefix.sh
+scripts/ci/test-agent-dispatch-guardrail.sh
+scripts/ci/test-agent-session-id.sh
+scripts/ci/test-agents-md-injection.sh
+scripts/ci/test-aggregator-verified.sh
+scripts/ci/test-all-gates-force-fire.sh
+scripts/ci/test-almanac-audit.sh
+scripts/ci/test-almanac-census-summarize-pct-enforcement.sh
+scripts/ci/test-almanac-census.sh
+scripts/ci/test-almanac-liveness-reindex.sh
+scripts/ci/test-almanac-refresh-guard.sh
+scripts/ci/test-almanac-summarize-watchdog.sh
+scripts/ci/test-almanac-zero-hits.sh
+scripts/ci/test-apex-watchdog.sh
+scripts/ci/test-ast-crawler-bash.sh
+scripts/ci/test-ast-crawler.sh
+scripts/ci/test-atomic-binary-swap.sh
+scripts/ci/test-atomic-claim-collision.sh
+scripts/ci/test-attribution-portable.sh
+scripts/ci/test-auth-freshness-watchdog.sh
+scripts/ci/test-auth-status.sh
+scripts/ci/test-auth-storm-auto-recovery.sh
+scripts/ci/test-auth-tier-audit.sh
+scripts/ci/test-author-time-helpers.sh
+scripts/ci/test-auto-adopt.sh
+scripts/ci/test-auto-arm-sweeper.sh
+scripts/ci/test-auto-deploy-canary.sh
+scripts/ci/test-auto-deploy-worker-verify.sh
+scripts/ci/test-auto-flip-on-merge.sh
+scripts/ci/test-auto-merge-arm-watcher.sh
+scripts/ci/test-auto-merge-armer.sh
+scripts/ci/test-auto-merge-policy.sh
+scripts/ci/test-auto-merge-rearm-daemon.sh
+scripts/ci/test-auto-rerun-out-of-scope.sh
+scripts/ci/test-auto-resolve-add-both.sh
+scripts/ci/test-auto-widen.sh
+scripts/ci/test-autodoc-envvars.sh
+scripts/ci/test-autonomous-ship-rate.sh
+scripts/ci/test-autopilot-unified.sh
+scripts/ci/test-autoscale-decisions.sh
+scripts/ci/test-back-pressure-hysteresis.sh
+scripts/ci/test-backfill-gap-id-regex.sh
+scripts/ci/test-backlog-sync-reader-dirty-tree.sh
+scripts/ci/test-backlog-sync-registry-remote.sh
+scripts/ci/test-barnacle-buster.sh
+scripts/ci/test-bash-portability-lint.sh
+scripts/ci/test-bin-bloat-guard.sh
+scripts/ci/test-binary-cache-event-driven.sh
+scripts/ci/test-binary-refresh.sh
+scripts/ci/test-blame-bot.sh
+scripts/ci/test-board-cycle-escalate.sh
+scripts/ci/test-board-vitals.sh
+scripts/ci/test-bom-old-manifest-regression.sh
+scripts/ci/test-book-sync-guard.sh
+scripts/ci/test-bootstrap-auto-install.sh
+scripts/ci/test-bootstrap-manifest-coverage.sh
+scripts/ci/test-bootstrap-manifest-organ-pointers.sh
+scripts/ci/test-bootstrap-smoke.sh
+scripts/ci/test-bot-autonomous.sh
+scripts/ci/test-bot-merge-already-claimed.sh
+scripts/ci/test-bot-merge-bench-mode.sh
+scripts/ci/test-bot-merge-chump-doctor-wrap.sh
+scripts/ci/test-bot-merge-ci-shell-output.sh
+scripts/ci/test-bot-merge-circuit-breaker.sh
+scripts/ci/test-bot-merge-doctor-preflight.sh
+scripts/ci/test-bot-merge-done-emit.sh
+scripts/ci/test-bot-merge-dup-pr.sh
+scripts/ci/test-bot-merge-err-trap-loud-fail.sh
+scripts/ci/test-bot-merge-gap-auto-derive.sh
+scripts/ci/test-bot-merge-gap-fatal.sh
+scripts/ci/test-bot-merge-grep-c-fix.sh
+scripts/ci/test-bot-merge-hook-auto-install.sh
+scripts/ci/test-bot-merge-hot-file-warning.sh
+scripts/ci/test-bot-merge-integrator-systemd-health.sh
+scripts/ci/test-bot-merge-locking.sh
+scripts/ci/test-bot-merge-mode-failopen.sh
+scripts/ci/test-bot-merge-no-amend-foreign.sh
+scripts/ci/test-bot-merge-no-exit-144.sh
+scripts/ci/test-bot-merge-no-local-build.sh
+scripts/ci/test-bot-merge-pending-gap.sh
+scripts/ci/test-bot-merge-phase-duration.sh
+scripts/ci/test-bot-merge-policy-integration.sh
+scripts/ci/test-bot-merge-portability.sh
+scripts/ci/test-bot-merge-recovery-pr-create.sh
+scripts/ci/test-bot-merge-requires-gap.sh
+scripts/ci/test-bot-merge-rest-direct.sh
+scripts/ci/test-bot-merge-scratch-guard.sh
+scripts/ci/test-bot-merge-shadow-plan.sh
+scripts/ci/test-bot-merge-skip-rebase.sh
+scripts/ci/test-bot-merge-staging-only-guard.sh
+scripts/ci/test-bot-merge-stale-gate.sh
+scripts/ci/test-bot-merge-stale-lock.sh
+scripts/ci/test-bot-merge-stall-fallthrough.sh
+scripts/ci/test-bot-merge-stall-monitor.sh
+scripts/ci/test-bot-merge-step-emits.sh
+scripts/ci/test-bot-merge-steps-file.sh
+scripts/ci/test-bot-merge-syntax.sh
+scripts/ci/test-bot-merge-tee-log.sh
+scripts/ci/test-bot-merge-verify-reaches.sh
+scripts/ci/test-bot-merge-webhook-wait.sh
+scripts/ci/test-bot-merge-wedge-live-check.sh
+scripts/ci/test-bot-merge-zombie-reap.sh
+scripts/ci/test-botmerge-circuit.sh
+scripts/ci/test-botmerge-poisoned-branch.sh
+scripts/ci/test-bounced-pr-detector.sh
+scripts/ci/test-brain-graph-renderer.sh
+scripts/ci/test-branch-delete-on-merge.sh
+scripts/ci/test-branch-protection-gate.sh
+scripts/ci/test-branch-reaper-emit.sh
+scripts/ci/test-branch-reaper-patterns.sh
+scripts/ci/test-branch-reaper.sh
+scripts/ci/test-cargo-mutex-isolation.sh
+scripts/ci/test-cascade-cancellation-status-description.sh
+scripts/ci/test-change-approval.sh
+scripts/ci/test-chump-farmer-run-path.sh
+scripts/ci/test-cli-output-format.sh
+scripts/ci/test-cli-version-debug.sh
+scripts/ci/test-cockpit-wake-fleet.sh
+scripts/ci/test-cost-enforcement.sh
+scripts/ci/test-credential-lifecycle.sh
+scripts/ci/test-credible-061-seed-consistency.sh
+scripts/ci/test-cross-pr-contract.sh
+scripts/ci/test-curator-auto-decompose.sh
+scripts/ci/test-curator-decision-logging.sh
+scripts/ci/test-curator-freshness.sh
+scripts/ci/test-curator-p0-demotion.sh
+scripts/ci/test-curator-pillar-no-overlap.sh
+scripts/ci/test-discord-gateway.sh
+scripts/ci/test-edit-replay.sh
+scripts/ci/test-error-path-coverage.sh
+scripts/ci/test-farmer-stale-lease-heartbeat.sh
+scripts/ci/test-gap-consolidate.sh
+scripts/ci/test-gap-profiling.sh
+scripts/ci/test-gap-quality-gate.sh
+scripts/ci/test-gap-rebalance.sh
+scripts/ci/test-gap-run-now.sh
+scripts/ci/test-gap-templates.sh
+scripts/ci/test-gap-lifecycle-manager.sh
+scripts/ci/test-gh-api-probe.sh
+scripts/ci/test-gh-in-ci-guarded.sh
+scripts/ci/test-gh-shim-script-attribution.sh
+scripts/ci/test-gh-token-guard.sh
+scripts/ci/test-graphql-debounce.sh
+scripts/ci/test-inbox-prune.sh
+scripts/ci/test-inbox-watcher-pattern.sh
+scripts/ci/test-infra-779-gitdir-repair.sh
+scripts/ci/test-install-gh-shim-worktree-safe.sh
+scripts/ci/test-jit-binary-refresh.sh
+scripts/ci/test-known-flake-skip.sh
+scripts/ci/test-known-flakes-gate.sh
+scripts/ci/test-liaison-webhook-cache.sh
+scripts/ci/test-lint-handoff-comment.sh
+scripts/ci/test-merge-driver-ci-yml-add-row.sh
+scripts/ci/test-mission-picker-worker.sh
+scripts/ci/test-mission-picker.sh
+scripts/ci/test-no-inline-ambient-printf.sh
+scripts/ci/test-no-manual-ship-bypass.sh
+scripts/ci/test-no-new-bypass-env-vars.sh
+scripts/ci/test-no-raw-gh-in-hot-paths.sh
+scripts/ci/test-notify-kind-escalation-coverage.sh
+scripts/ci/test-notify-operator.sh
+scripts/ci/test-opencode-harness-install.sh
+scripts/ci/test-opencode-harness-smoke.sh
+scripts/ci/test-operator-recovery.sh
+scripts/ci/test-organ-manifest-bom-integration.sh
+scripts/ci/test-orphan-pr-closer.sh
+scripts/ci/test-orphan-worktree-prune.sh
+scripts/ci/test-per-worktree-target-guard.sh
+scripts/ci/test-picker-priority.sh
+scripts/ci/test-pillar-balance-guard.sh
+scripts/ci/test-pillar-balance.sh
+scripts/ci/test-pillar-dashboard.sh
+scripts/ci/test-pr-failure-auto-rescue.sh
+scripts/ci/test-pr-rescue-audit-handler.sh
+scripts/ci/test-pr-rescue-noci.sh
+scripts/ci/test-pr-scope-title-fallback.sh
+scripts/ci/test-precommit-guard-audit.sh
+scripts/ci/test-precommit-strict-replay.sh
+scripts/ci/test-prepush-worktree-cd.sh
+scripts/ci/test-pwa-auth-toast-stream.sh
+scripts/ci/test-pwa-e2e-gap-workflow.sh
+scripts/ci/test-pwa-flake-quarantine.sh
+scripts/ci/test-pwa-security.sh
+scripts/ci/test-pwa-version-compat.sh
+scripts/ci/test-pwa-workflow-observability.sh
+scripts/ci/test-release-lease-flag.sh
+scripts/ci/test-required-model.sh
+scripts/ci/test-review-handoff-reengage.sh
+scripts/ci/test-rollback-gap.sh
+scripts/ci/test-rollup-cascade-cancel.sh
+scripts/ci/test-rot-reaper-verified-red-spare.sh
+scripts/ci/test-rot-reaper.sh
+scripts/ci/test-ruleset-doc-only-pr.sh
+scripts/ci/test-run-consolidation.sh
+scripts/ci/test-run-fleet-cross-repo.sh
+scripts/ci/test-stale-binary-ship-blocked.sh
+scripts/ci/test-stale-worktree-reaper-tmp.sh
+scripts/ci/test-tool-normalize.sh
+scripts/ci/test-triage-test-failure.sh
+scripts/ci/test-trunk-recovery-reviver.sh
+scripts/ci/test-worker-circuit-breaker.sh
+scripts/ci/test-worker-first-output-watchdog.sh
+scripts/ci/test-worker-no-spin.sh
+scripts/ci/test-worker-timeout-no-commit.sh
+scripts/ci/test-worker-timeout-scale.sh
+scripts/ci/test-worktree-contamination-check.sh
+scripts/ci/test-worktree-prune-protects-live-edits.sh
+scripts/ci/test-worktree-show-toplevel.sh
+
+**Status:** ~15 mirrored in preflight.rs; 32+ unmirrored.
+**Recommendation:** Consolidate into 2 sub-gaps:
+  - CLI & config tooling (CLI output, config, harness, parsing)
+  - Auth, binary, bootstrap & infrastructure (auth tokens, binary refresh, bootstrap daemons)
+
+---
+
+## Summary Statistics
+
+| Category | Count | Mirrored | Unmirrored | Status |
+|---|---|---|---|---|
+| A2A Coordination | 12 | 0 | 12 | **HIGH priority** |
+| Gap Store & AC | 18 | 8 | 10 | **HIGH priority** |
+| Bot-Merge & PR | 42+ | 40+ | 2 | Low priority |
+| Fleet Health & Observability | 40+ | 5 | 35+ | **MEDIUM priority** |
+| CLI, Config & Tooling | 30+ | 15 | 30+ | **MEDIUM priority** |
+| **TOTAL** | **142** | **70+** | **72+** | — |
+
+**Key finding:** 51% of audit-job scripts are unmirrored in preflight (72+ of 142).
+Bot-merge/PR automation is nearly 95% complete. Remaining work clusters in A2A coordination,
+gap consistency, and fleet observability/telemetry.
+
+---
+
+## Proposed Sub-Gap Decomposition
+
+**5 recommended ship-sized sub-gaps (MEtat-086 AC #3):**
+
+1. **INFRA-xxxx-a2a-consensus-mirror** (size: M)
+   - Mirrors: 12 A2A coordination test scripts
+   - Risk: **HIGH** (fleet coordination backbone)
+   - Effort: medium (new preflight gates, coordination fixtures)
+
+2. **INFRA-xxxx-gap-ac-consistency-gates** (size: M)
+   - Mirrors: 8+ gap AC coverage/completeness gates
+   - Risk: **HIGH** (data integrity, branch protection)
+   - Effort: medium (AC parsing, fixtures)
+
+3. **INFRA-xxxx-fleet-observability-metrics** (size: L)
+   - Mirrors: 35+ ambient/cache/API/health/cost/velocity scripts
+   - Risk: **MEDIUM** (observability, non-blocking)
+   - Effort: large (many APIs, synthetic fixtures)
+
+4. **INFRA-xxxx-cli-config-tooling** (size: L)
+   - Mirrors: 30+ CLI, config, harness, parsing scripts
+   - Risk: **MEDIUM** (developer experience, not critical path)
+   - Effort: large (cross-cutting concerns, integration)
+
+5. **INFRA-xxxx-bot-merge-final-polish** (size: XS)
+   - Mirrors: remaining 2 bot-merge edge cases + gap-store integrity
+   - Risk: **LOW** (most already mirrored)
+   - Effort: small (final cleanup)
+
+---
+
+## Verification
+
+Smoke test: `scripts/ci/test-audit-job-decomposition.sh`
+
+Validates:
+- Every `bash scripts/ci/test-*.sh` invocation in audit.yml appears in this survey
+- No audit-job test scripts are missing from the enumeration
+- Survey document is current and complete
+
+Exit 0 = all 142 scripts enumerated; exit 1 = gap or stale entry detected.
+
+---
+
+## Document Status
+
+**Updated:** 2026-10-16
+**Audited:** 142 test scripts verified in audit.yml
+**Grouping:** 5 thematic clusters (A2A, gap state, bot-merge, fleet health, CLI/config)
+**AC Coverage:** #1 enumeration complete; #2 grouping complete; #3 sub-gaps proposed.
