@@ -6,6 +6,8 @@
 > working on, in what order, why." Gaps implement the roadmap, not the
 > other way around.
 >
+> **Architecture program of record (2026-10-15):** [strategy/PHASE_R_ARCHITECTURE_PROGRAM_2026-10-15.md](strategy/PHASE_R_ARCHITECTURE_PROGRAM_2026-10-15.md) — Phase R, constraints not reminders; outcome `PHASE-R`. Read it before filing fleet-plumbing gaps.
+>
 > **Cadence.** Reviewed by the operator weekly. Updated by the Mission
 > Driver session (see [`CLAUDE.md` → Mission Driver](../CLAUDE.md#mission-driver--every-session-not-just-when-asked))
 > when an outcome lands or framing shifts.
