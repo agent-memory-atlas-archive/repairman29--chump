@@ -10455,6 +10455,10 @@ async fn main() -> Result<()> {
                 // EFFECTIVE-023: --domain <D> filters to a single domain;
                 // --domain all shows per-domain summary footer.
                 let domain_filter = flag("--domain");
+                // INFRA-8124: --priority <P> filters to a single priority (P0, P1, P2, P3).
+                let priority_filter = flag("--priority");
+                // INFRA-8124: --effort <E> filters to a single effort (xs, s, m, l).
+                let effort_filter = flag("--effort");
                 // EFFECTIVE-008: --quiet suppresses all output (exit 0 on success).
                 let quiet = args.iter().any(|a| a == "--quiet");
                 // EFFECTIVE-008: --format <human|json|csv> — explicit format
@@ -10510,21 +10514,33 @@ async fn main() -> Result<()> {
                 }
                 match store.list(status_filter.as_deref()) {
                     Ok(all_gaps) => {
-                        // Apply --since filter before any output path.
-                        // Date strings are YYYY-MM-DD, so lexicographic >= works.
-                        let gaps: Vec<_> = if let Some(ref cutoff) = since_cutoff {
-                            all_gaps
-                                .into_iter()
-                                .filter(|g| {
+                        // Apply filters before any output path.
+                        // INFRA-8124: filter by priority and effort if specified.
+                        let gaps: Vec<_> = all_gaps
+                            .into_iter()
+                            .filter(|g| {
+                                if let Some(ref pf) = priority_filter {
+                                    if g.priority != *pf {
+                                        return false;
+                                    }
+                                }
+                                if let Some(ref ef) = effort_filter {
+                                    if g.effort != *ef {
+                                        return false;
+                                    }
+                                }
+                                // Apply --since filter.
+                                // Date strings are YYYY-MM-DD, so lexicographic >= works.
+                                if let Some(ref cutoff) = since_cutoff {
                                     (!g.opened_date.is_empty()
                                         && g.opened_date.as_str() >= cutoff.as_str())
                                         || (!g.closed_date.is_empty()
                                             && g.closed_date.as_str() >= cutoff.as_str())
-                                })
-                                .collect()
-                        } else {
-                            all_gaps
-                        };
+                                } else {
+                                    true
+                                }
+                            })
+                            .collect();
                         if quiet {
                             // --quiet: no output, just verify the query ran (exit 0).
                             return Ok(());
