@@ -31,7 +31,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
-use super::{load_yaml_status_map, yaml_closed_date, yaml_closed_pr, yaml_status};
+use super::{load_yaml_status_map, yaml_status};
 
 /// Mode controlling how aggressively `doctor` mutates state.
 ///
@@ -221,11 +221,13 @@ impl GapDoctor {
     /// Run one detection-and-(optional)-heal pass.
     ///
     /// In [`HealMode::ScanOnly`] this is purely read-only. In
-    /// [`HealMode::FixSafe`] this mutates `state.db` for Bucket 2 (DB
-    /// open / YAML done) and rewrites the per-file YAMLs for Bucket 1
-    /// (DB done / YAML open). Buckets 3 + 4 are always read-only —
-    /// emitting ambient ALERTs for those is the Python safe-sweep's job
-    /// and isn't replicated here (Phase 1 has no ambient writes).
+    /// [`HealMode::FixSafe`] and [`HealMode::FixDestructive`], this detects
+    /// drift but does NOT mutate the database. Callers that need to reconcile
+    /// Bucket 2 (DB open / YAML done) must use the public `ship()` method on
+    /// `GapStore` to respect the receipt gate (INFRA-1392). Buckets 3 + 4 are
+    /// always read-only — emitting ambient ALERTs for those is the Python
+    /// safe-sweep's job and isn't replicated here (Phase 1 has no ambient
+    /// writes).
     pub fn heal(&self, mode: HealMode) -> Result<HealReport> {
         let db_path = self.db_path();
         let yaml_view =
@@ -268,34 +270,13 @@ impl GapDoctor {
         // Auxiliary integrity findings — match audit-priorities classes.
         report.integrity = compute_integrity_findings(&db_path, &all_ids)?;
 
-        // Heal Bucket 2 (DB open / YAML done -> set DB status=done).
+        // CREDIBLE-1501: Bucket 2 reconciliation (DB open / YAML done) is
+        // now read-only. The HealMode flags are retained for API compatibility
+        // but do not trigger direct UPDATE statements. Callers that need to
+        // flip status=done must use GapStore::ship() which is gated on receipt
+        // (INFRA-1392 proof-of-merge).
         if matches!(mode, HealMode::FixSafe | HealMode::FixDestructive) {
-            let mut conn = Connection::open(&db_path)
-                .with_context(|| format!("open state.db: {}", db_path.display()))?;
-            let tx = conn.transaction()?;
-            let mut updated = 0usize;
-            for gid in &report.buckets.db_open_yaml_done {
-                let yrow = match yaml_view.get(gid) {
-                    Some(v) => v,
-                    None => continue,
-                };
-                let closed_date = yaml_closed_date(yrow);
-                let closed_pr = yaml_closed_pr(yrow);
-                let closed_at = parse_iso_to_unix(&closed_date);
-                let n = tx.execute(
-                    "UPDATE gaps SET status='done', closed_at=?, closed_date=?, closed_pr=? \
-                     WHERE id=? AND status='open'",
-                    rusqlite::params![
-                        if closed_at > 0 { Some(closed_at) } else { None },
-                        closed_date,
-                        closed_pr,
-                        gid,
-                    ],
-                )?;
-                updated += n;
-            }
-            tx.commit()?;
-            report.rows_updated = updated;
+            report.rows_updated = 0;
         }
 
         Ok(report)
