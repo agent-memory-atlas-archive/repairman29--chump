@@ -292,6 +292,7 @@ _bm_steps_append() {
 }
 
 _bm_cleanup() {
+    local _bm_exit_code=$?
     [[ "$_BM_CLEANUP_DONE" == "1" ]] && return
     _BM_CLEANUP_DONE=1
     # META-156 AC#7: emit bot_merge_completed roll-up on any exit path.
@@ -341,6 +342,30 @@ _bm_cleanup() {
             sqlite3 "$_db" \
                 "DELETE FROM leases WHERE session_id='${CHUMP_SESSION_ID}' AND gap_id='${_vg}'" \
                 2>/dev/null || true
+        fi
+    fi
+    # INFRA-8201: if bot-merge's OWN `chump claim` wrote the gap-claim marker
+    # (recorded as _BM_CLAIM_MARKER_FILE right after that claim succeeded) and
+    # this run is failing/being killed, remove it — otherwise it sits past its
+    # TTL as an expired marker that a later bot-merge run's session-auto-detect
+    # scan can still match by gap_id, adopting a dead identity. Only remove it
+    # when the session_id still matches the one we recorded: another live
+    # session may have re-claimed the gap in the meantime.
+    local _bm_is_failure=0
+    if [[ "$_bm_exit_code" != "0" || "${_BM_LEASE_VACUUM_OK:-0}" == "1" || "${_BM_TIMEOUT_EXIT:-0}" == "1" ]]; then
+        _bm_is_failure=1
+    fi
+    if [[ "$_bm_is_failure" -eq 1 && -n "${_BM_CLAIM_MARKER_FILE:-}" && -f "${_BM_CLAIM_MARKER_FILE:-}" ]] \
+       && command -v lease_session_id >/dev/null 2>&1; then
+        local _bm_marker_now_session
+        _bm_marker_now_session="$(lease_session_id "$_BM_CLAIM_MARKER_FILE" 2>/dev/null || true)"
+        if [[ -n "${_BM_CLAIM_MARKER_SESSION:-}" && "$_bm_marker_now_session" == "${_BM_CLAIM_MARKER_SESSION:-}" ]]; then
+            rm -f "$_BM_CLAIM_MARKER_FILE" 2>/dev/null || true
+            local _bm_marker_ambient=".chump-locks/ambient.jsonl"
+            [[ -n "${CHUMP_AMBIENT_LOG:-}" ]] && _bm_marker_ambient="$CHUMP_AMBIENT_LOG"
+            printf '{"ts":"%s","kind":"lease_released","gap_id":"%s","session":"%s","note":"INFRA-8201: bot-merge removed the gap-claim marker it created on a non-zero exit"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${_BM_CLAIM_MARKER_GAP:-unknown}" "$_BM_CLAIM_MARKER_SESSION" \
+                >> "$_bm_marker_ambient" 2>/dev/null || true
         fi
     fi
 }
@@ -1772,29 +1797,17 @@ if [[ -z "${CHUMP_SESSION_ID:-}" && ${#GAP_IDS[@]} -gt 0 ]]; then
 fi
 if [[ -z "${CHUMP_SESSION_ID:-}" && ${#GAP_IDS[@]} -gt 0 ]]; then
     # LOCK_DIR is set by repo-paths.sh (sourced above) — main-repo path.
+    # INFRA-8201: bm_pick_session_from_lockdir (scripts/lib/lease.sh) skips
+    # any expired lease file — a dead claim's TTL-passed marker must never
+    # be adopted as bot-merge's own identity ahead of a live session.
     for _gid in "${GAP_IDS[@]}"; do
-        for _lf in "$LOCK_DIR"/*.json; do
-            [[ -f "$_lf" ]] || continue
-            _match=$(python3 -c "
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-    if d.get('gap_id', '') == sys.argv[2]:
-        print(d.get('session_id', ''))
-    else:
-        p = d.get('pending_new_gap')
-        if isinstance(p, dict) and p.get('id', '') == sys.argv[2]:
-            print(d.get('session_id', ''))
-except Exception:
-    pass
-" "$_lf" "$_gid" 2>/dev/null || true)
-            if [[ -n "$_match" ]]; then
-                export CHUMP_SESSION_ID="$_match"
-                _bm_session_src="$_lf"
-                info "Auto-detected session ID from gap lease: $CHUMP_SESSION_ID"
-                break 2
-            fi
-        done
+        _match="$(bm_pick_session_from_lockdir "$LOCK_DIR" "$_gid" || true)"
+        if [[ -n "$_match" ]]; then
+            export CHUMP_SESSION_ID="$_match"
+            _bm_session_src="$LOCK_DIR (gap=$_gid)"
+            info "Auto-detected session ID from gap lease: $CHUMP_SESSION_ID"
+            break
+        fi
     done
     # INFRA-2744: JSON lock files are legacy — interactive `chump claim` writes
     # the lease to state.db only. Fall back to the canonical leases table so we
@@ -2556,6 +2569,10 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                 if [[ -z "$_lease_wt" ]]; then
                     for _lf in "$LOCK_DIR"/*.json; do
                         [[ -f "$_lf" ]] || continue
+                        if lease_is_expired "$_lf"; then
+                            info "INFRA-8201: ignoring expired lease $_lf (expires_at=$(lease_field "$_lf" expires_at))"
+                            continue
+                        fi
                         if [[ "$(lease_gap_id "$_lf")" == "$gid" ]]; then
                             # EFFECTIVE-312: lockfiles without a worktree field
                             # make lease_worktree's grep pipeline fail — under
@@ -2642,6 +2659,10 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                     if [[ -z "$_existing_claim_session" ]]; then
                         for _lf in "$LOCK_DIR"/*.json; do
                             [[ -f "$_lf" ]] || continue
+                            if lease_is_expired "$_lf"; then
+                                info "INFRA-8201: ignoring expired lease $_lf (expires_at=$(lease_field "$_lf" expires_at))"
+                                continue
+                            fi
                             _lf_gid="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('gap_id',''))" "$_lf" 2>/dev/null || true)"
                             if [[ "$_lf_gid" == "$gid" ]]; then
                                 _existing_claim_session="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('session_id',''))" "$_lf" 2>/dev/null || true)"
@@ -2692,7 +2713,17 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                     exit "$_claim_rc"
                 fi
             fi
-            [[ "$_claim_rc" -eq 0 ]] && _BM_OWN_CLAIM=1
+            if [[ "$_claim_rc" -eq 0 ]]; then
+                _BM_OWN_CLAIM=1
+                # INFRA-8201: record the gap-claim marker `chump claim` just
+                # wrote so _bm_cleanup can remove it on a non-zero exit —
+                # otherwise it survives as an expired marker that a LATER
+                # bot-merge run's session-auto-detect scan can still match by
+                # gap_id, adopting a dead identity (see gap text).
+                _BM_CLAIM_MARKER_FILE="$LOCK_DIR/gap-claim-$gid.json"
+                _BM_CLAIM_MARKER_GAP="$gid"
+                _BM_CLAIM_MARKER_SESSION="$(lease_session_id "$_BM_CLAIM_MARKER_FILE" 2>/dev/null || true)"
+            fi
             # INFRA-492: emit session_start so INFRA-477's cost ledger
             # gets data. Best-effort — silent on chump fail.
             chump session-track --start "$gid" >/dev/null 2>&1 || true

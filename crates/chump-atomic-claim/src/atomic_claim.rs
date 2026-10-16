@@ -1344,6 +1344,11 @@ pub fn run_claim(mut args: ClaimArgs) -> Result<ClaimReport> {
         if let Err(e) = check_intent_overlap(&lock_dir, &args.gap_id, claim_paths, &session_id) {
             // Exit 14 by convention (matching intent-overlap-check.sh).
             eprintln!("[intent-gate] INFRA-1116: {:#}", e);
+            // INFRA-8201: std::process::exit skips Drop — release the
+            // just-reserved gap-claim marker explicitly here, else it
+            // survives until its own TTL and a later bot-merge session-id
+            // scan can still match it by gap_id.
+            drop(marker_guard);
             std::process::exit(14);
         }
     } else if !claim_paths.is_empty() {
@@ -1396,6 +1401,8 @@ pub fn run_claim(mut args: ClaimArgs) -> Result<ClaimReport> {
                     eprintln!(
                         "[claim]   Re-run with --force-overlap to proceed anyway (event still emitted)."
                     );
+                    // INFRA-8201: see comment at the INFRA-1116 exit(14) above.
+                    drop(marker_guard);
                     std::process::exit(15);
                 } else {
                     eprintln!(
@@ -1449,6 +1456,8 @@ pub fn run_claim(mut args: ClaimArgs) -> Result<ClaimReport> {
                     eprintln!(
                         "[claim]   Re-run with --force-overlap to proceed anyway (event still emitted)."
                     );
+                    // INFRA-8201: see comment at the INFRA-1116 exit(14) above.
+                    drop(marker_guard);
                     std::process::exit(15);
                 } else {
                     eprintln!(

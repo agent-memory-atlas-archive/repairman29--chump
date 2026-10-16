@@ -1841,6 +1841,20 @@ events:
       Root cause + investigation: docs/audits/lease-collision-2026-05-17.md.
       Regression test: scripts/ci/test-atomic-claim-collision.sh.
 
+  - kind: lease_released
+    effect_metric: self
+    emitter: scripts/coord/bot-merge.sh::_bm_cleanup
+    emitter_paths: [scripts/coord/bot-merge.sh]
+    trigger: bot-merge's own EXIT/SIGTERM/INT cleanup removes the
+      gap-claim marker (.chump-locks/gap-claim-<gap>.json) its own `chump
+      claim` created, because the run is failing or being killed — only
+      when the marker's current session_id still matches the one bot-merge
+      recorded right after the claim succeeded (INFRA-8201). Prevents a
+      dead run's marker from surviving past its TTL and being matched by a
+      later bot-merge run's session-auto-detect scan.
+    consumers: [fleet-brief]
+    fields_required: [ts, kind, gap_id, session, note]
+
   - kind: fixture_commit_dropped
     effect_metric: self
     emitter: scripts/git-hooks/pre-push (INFRA-1408, Guard 0d)

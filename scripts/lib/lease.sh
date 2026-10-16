@@ -198,6 +198,45 @@ lease_file_for_gap_in_dir() {
     return 1
 }
 
+# ── bot-merge session-auto-detect selection (INFRA-8201) ─────────────────────
+# bm_pick_session_from_lockdir <lockdir> <gap_id>
+#   Scans every lease file in <lockdir> for one whose gap_id (or
+#   pending_new_gap.id) equals <gap_id>, SKIPPING any lease whose
+#   expires_at has passed (lease_is_expired). Echoes the first live match's
+#   session_id and returns 0; prints nothing and returns 1 on no live match.
+#   Extracted from bot-merge.sh's "Session-ID auto-detection" block so an
+#   expired marker (TTL passed, writer dead) can never be adopted as bot-
+#   merge's own identity ahead of a live session's lease for the same gap.
+bm_pick_session_from_lockdir() {
+    local dir="$1" gap_id="$2"
+    local f gid sess
+    [[ -d "$dir" ]] || return 1
+    for f in "$dir"/*.json; do
+        [[ -f "$f" ]] || continue
+        [[ "$(basename "$f")" == "ambient.jsonl" ]] && continue
+        if lease_is_expired "$f"; then
+            continue
+        fi
+        gid="$(lease_field "$f" gap_id)"
+        if [[ -z "$gid" ]]; then
+            if command -v jq >/dev/null 2>&1; then
+                gid="$(jq -r '.pending_new_gap.id // empty' "$f" 2>/dev/null)"
+            else
+                gid="$(grep -oE '"pending_new_gap"[[:space:]]*:[[:space:]]*\{[^}]*"id"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null \
+                    | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+            fi
+        fi
+        if [[ "$gid" == "$gap_id" ]]; then
+            sess="$(lease_session_id "$f")"
+            if [[ -n "$sess" ]]; then
+                printf '%s\n' "$sess"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
 # lease_worktree_from_statedb <gap_id> [<state_db_path>]
 #   Echoes the worktree path holding <gap_id>'s lease (empty if none / no
 #   sqlite3). INFRA-1901: lets a caller detect "am I already sitting inside

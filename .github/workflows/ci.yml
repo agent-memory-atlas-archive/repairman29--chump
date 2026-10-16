@@ -1187,6 +1187,9 @@ jobs:
       - name: pre-commit merge driver smoke (INFRA-310)
         run: bash scripts/ci/test-merge-driver-pre-commit.sh
 
+      - name: bot-merge expired-lease identity (INFRA-8201)
+        run: bash scripts/ci/test-bot-merge-expired-lease-identity.sh
+
       - name: pr-terminal-state helper — mergedAt-validated (INFRA-1981)
         run: bash scripts/ci/test-pr-terminal-state.sh
 

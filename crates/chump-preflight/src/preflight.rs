@@ -2617,6 +2617,14 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "bot-merge-expired-lease-identity",
+            &[
+                "bash",
+                "scripts/ci/test-bot-merge-expired-lease-identity.sh",
+            ],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-250-v1-retirement",
             &["bash", "scripts/ci/test-infra-250-v1-retirement.sh"],
             GateKind::Scripts,

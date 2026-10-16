@@ -196,6 +196,7 @@ if [ "${CHUMP_LEASE_CHECK:-1}" != "0" ]; then
                     fi
                 fi
                 if [ -n "$exp_epoch" ] && [ "$exp_epoch" -le "$now_epoch" ]; then
+                    echo "[pre-commit] lease held by expired session $holder treated as free ($lease_file)" >&2
                     continue  # expired
                 fi
 
