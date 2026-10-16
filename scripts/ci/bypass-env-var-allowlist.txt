@@ -85,3 +85,11 @@ CHUMP_SKIP_AUTO_DEPLOY
 # above; every skip is a no-op (exit 0 before any ambient emission). Deletion
 # path: when the daemon gains an explicit pause/resume CLI we remove this var.
 CHUMP_SKIP_ALMANAC_REFRESH
+
+# ── Integration test isolation bypasses (scripts/ci/test-system-integration.sh) ──
+# Used in Assertions 4-5 to isolate gap ship tests from global state constraints.
+# These are test-only and have no production read-sites. Deletion path: when the
+# integration test matures, these bypasses should be removed and replaced with
+# proper test fixtures (CREDIBLE-1500 addendum).
+CHUMP_SKIP_SUPERSEDED_CLOSE        # Bypass-Justification: integration-test isolation  gap: CREDIBLE-1500
+CHUMP_GAP_SHIP_SKIP_STALE_CHECK    # Bypass-Justification: integration-test isolation  gap: CREDIBLE-1500
