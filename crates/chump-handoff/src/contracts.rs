@@ -2682,7 +2682,7 @@ mod tests_organ_registry {
 
     #[test]
     fn parse_two_organs_same_manifest() {
-        let lines = vec![
+        let lines = [
             "enabled  organ-1  binary=/path/1  heal_action=restart",
             "enabled  organ-2  binary=/path/2  heal_action=respawn  page_after_n=7",
         ];
@@ -2699,7 +2699,7 @@ mod tests_organ_registry {
 
     #[test]
     fn parse_list_of_organs() {
-        let manifest = vec![
+        let manifest = [
             "enabled  disk-monitor           binary=/path/disk-monitor     heal_action=restart",
             "enabled  main-health-watchdog   binary=/path/watchdog         heal_action=restart  page_after_n=2",
             "enabled  pr-lander              binary=/path/pr-lander        heal_action=respawn  node_applicability=owner-machine",

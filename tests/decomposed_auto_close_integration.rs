@@ -11,6 +11,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 
+fn get_chump_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_chump")
+}
+
 const TIMER_UNIT: &str = "chump-gap-close-decomposed.timer";
 const SERVICE_UNIT: &str = "chump-gap-close-decomposed.service";
 
@@ -25,6 +29,17 @@ impl TestFixture {
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let temp_dir = TempDir::new().expect("Failed to create temp directory");
 
+        // INFRA-8183: give this fixture its own git tree so chump's repo-root
+        // discovery (CHUMP_REPO takes precedence, but worktree_root() still
+        // shells out to `git rev-parse --show-toplevel`) resolves inside
+        // temp_dir rather than falling through to the real checkout.
+        Command::new("git")
+            .arg("init")
+            .arg("--quiet")
+            .current_dir(temp_dir.path())
+            .status()
+            .expect("Failed to git init fixture temp dir");
+
         Self {
             repo_root,
             temp_dir,
@@ -33,6 +48,25 @@ impl TestFixture {
 
     fn repo_root(&self) -> &PathBuf {
         &self.repo_root
+    }
+
+    /// A `chump` Command scoped entirely to this fixture's isolated temp
+    /// state: CHUMP_REPO/CHUMP_HOME/CHUMP_WORKTREE_ROOT all point inside
+    /// temp_dir, and cwd is temp_dir too. This is what makes `chump gap
+    /// reserve` etc. create their own `.chump/state.db` instead of opening
+    /// the real checkout's shared, concurrently-locked registry (INFRA-8183:
+    /// "database is locked" when test shards ran in parallel against the
+    /// live .chump/state.db).
+    fn chump_cmd(&self) -> Command {
+        let mut cmd = Command::new(get_chump_bin());
+        cmd.current_dir(self.temp_dir.path())
+            .env("CHUMP_REPO", self.temp_dir.path())
+            .env("CHUMP_HOME", self.temp_dir.path())
+            .env("CHUMP_WORKTREE_ROOT", self.temp_dir.path())
+            // CI has no Almanac and no gh; the reserve-time similarity/Almanac
+            // dedupe gate (ZERO-WASTE-045) is policy, not what this test proves.
+            .env("CHUMP_GAP_RESERVE_NO_SIMILARITY", "1");
+        cmd
     }
 
     fn timer_service_path(&self) -> PathBuf {
@@ -63,16 +97,9 @@ impl TestFixture {
 #[test]
 fn ac1_create_decomposed_parent_with_children() {
     let fixture = TestFixture::new();
-    let repo_root = fixture.repo_root();
-
-    // Verify chump binary exists
-    let chump_bin = which::which("chump")
-        .expect("chump binary not found in PATH")
-        .to_string_lossy()
-        .to_string();
-
     // Create a parent gap
-    let parent_output = Command::new(&chump_bin)
+    let parent_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("reserve")
         .arg("--domain")
@@ -84,7 +111,6 @@ fn ac1_create_decomposed_parent_with_children() {
         .arg("--effort")
         .arg("m")
         .arg("--force")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to reserve parent gap");
 
@@ -104,7 +130,8 @@ fn ac1_create_decomposed_parent_with_children() {
     assert!(!parent_id.is_empty(), "Parent gap ID is empty");
 
     // Create two child gaps
-    let child1_output = Command::new(&chump_bin)
+    let child1_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("reserve")
         .arg("--domain")
@@ -116,7 +143,6 @@ fn ac1_create_decomposed_parent_with_children() {
         .arg("--effort")
         .arg("s")
         .arg("--force")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to reserve child 1");
 
@@ -133,7 +159,8 @@ fn ac1_create_decomposed_parent_with_children() {
         .trim()
         .to_string();
 
-    let child2_output = Command::new(&chump_bin)
+    let child2_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("reserve")
         .arg("--domain")
@@ -145,7 +172,6 @@ fn ac1_create_decomposed_parent_with_children() {
         .arg("--effort")
         .arg("s")
         .arg("--force")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to reserve child 2");
 
@@ -163,7 +189,8 @@ fn ac1_create_decomposed_parent_with_children() {
         .to_string();
 
     // Mark parent as decomposed
-    let decompose_output = Command::new(&chump_bin)
+    let decompose_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("set")
         .arg(&parent_id)
@@ -174,7 +201,6 @@ fn ac1_create_decomposed_parent_with_children() {
             "Decomposed into 2 slices: {}, {}",
             child1_id, child2_id
         ))
-        .current_dir(repo_root)
         .output()
         .expect("Failed to set parent decomposed");
 
@@ -246,15 +272,9 @@ fn ac2_timer_service_and_unit_exist() {
 #[test]
 fn ac3_auto_close_closes_parent_when_all_children_done() {
     let fixture = TestFixture::new();
-    let repo_root = fixture.repo_root();
-
-    let chump_bin = which::which("chump")
-        .expect("chump binary not found in PATH")
-        .to_string_lossy()
-        .to_string();
-
     // Create parent and children
-    let parent_output = Command::new(&chump_bin)
+    let parent_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("reserve")
         .arg("--domain")
@@ -266,7 +286,6 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
         .arg("--effort")
         .arg("m")
         .arg("--force")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to reserve parent");
 
@@ -278,7 +297,8 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
         .to_string();
 
     // Create children
-    let child1_output = Command::new(&chump_bin)
+    let child1_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("reserve")
         .arg("--domain")
@@ -290,7 +310,6 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
         .arg("--effort")
         .arg("s")
         .arg("--force")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to reserve child 1");
 
@@ -301,7 +320,8 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
         .trim()
         .to_string();
 
-    let child2_output = Command::new(&chump_bin)
+    let child2_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("reserve")
         .arg("--domain")
@@ -313,7 +333,6 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
         .arg("--effort")
         .arg("s")
         .arg("--force")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to reserve child 2");
 
@@ -325,7 +344,8 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
         .to_string();
 
     // Mark parent as decomposed
-    Command::new(&chump_bin)
+    fixture
+        .chump_cmd()
         .arg("gap")
         .arg("set")
         .arg(&parent_id)
@@ -336,16 +356,15 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
             "Decomposed into 2 slices: {}, {}",
             child1_id, child2_id
         ))
-        .current_dir(repo_root)
         .output()
         .expect("Failed to set parent decomposed");
 
     // Verify parent is decomposed
-    let parent_show = Command::new(&chump_bin)
+    let parent_show = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("show")
         .arg(&parent_id)
-        .current_dir(repo_root)
         .output()
         .expect("Failed to show parent");
 
@@ -356,7 +375,8 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
     );
 
     // Mark both children as done (with PR numbers)
-    Command::new(&chump_bin)
+    fixture
+        .chump_cmd()
         .arg("gap")
         .arg("set")
         .arg(&child1_id)
@@ -364,11 +384,11 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
         .arg("done")
         .arg("--closed-pr")
         .arg("99991")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to mark child 1 done");
 
-    Command::new(&chump_bin)
+    fixture
+        .chump_cmd()
         .arg("gap")
         .arg("set")
         .arg(&child2_id)
@@ -376,15 +396,14 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
         .arg("done")
         .arg("--closed-pr")
         .arg("99992")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to mark child 2 done");
 
     // Run the close-decomposed command directly (simulating timer execution)
-    let close_output = Command::new(&chump_bin)
+    let close_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("close-decomposed")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to run gap close-decomposed");
 
@@ -402,11 +421,11 @@ fn ac3_auto_close_closes_parent_when_all_children_done() {
     );
 
     // Verify parent is now done
-    let final_show = Command::new(&chump_bin)
+    let final_show = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("show")
         .arg(&parent_id)
-        .current_dir(repo_root)
         .output()
         .expect("Failed to show parent after close");
 
@@ -470,15 +489,9 @@ fn ac4_fail_when_files_missing() {
 #[test]
 fn integration_decomposed_parent_auto_close_workflow() {
     let fixture = TestFixture::new();
-    let repo_root = fixture.repo_root();
-
-    let chump_bin = which::which("chump")
-        .expect("chump binary not found in PATH")
-        .to_string_lossy()
-        .to_string();
-
     // Step 1: Create decomposed parent with children
-    let parent_output = Command::new(&chump_bin)
+    let parent_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("reserve")
         .arg("--domain")
@@ -490,7 +503,6 @@ fn integration_decomposed_parent_auto_close_workflow() {
         .arg("--effort")
         .arg("m")
         .arg("--force")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to reserve parent");
 
@@ -502,7 +514,8 @@ fn integration_decomposed_parent_auto_close_workflow() {
         .to_string();
 
     // Create a single child for simplicity
-    let child_output = Command::new(&chump_bin)
+    let child_output = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("reserve")
         .arg("--domain")
@@ -517,7 +530,6 @@ fn integration_decomposed_parent_auto_close_workflow() {
         .arg("--effort")
         .arg("s")
         .arg("--force")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to reserve child");
 
@@ -529,7 +541,8 @@ fn integration_decomposed_parent_auto_close_workflow() {
         .to_string();
 
     // Step 2: Mark parent as decomposed
-    Command::new(&chump_bin)
+    fixture
+        .chump_cmd()
         .arg("gap")
         .arg("set")
         .arg(&parent_id)
@@ -537,12 +550,12 @@ fn integration_decomposed_parent_auto_close_workflow() {
         .arg("decomposed")
         .arg("--notes")
         .arg(format!("Decomposed into 1 slice: {}", child_id))
-        .current_dir(repo_root)
         .output()
         .expect("Failed to decompose parent");
 
     // Step 3: Mark child as done
-    Command::new(&chump_bin)
+    fixture
+        .chump_cmd()
         .arg("gap")
         .arg("set")
         .arg(&child_id)
@@ -550,15 +563,14 @@ fn integration_decomposed_parent_auto_close_workflow() {
         .arg("done")
         .arg("--closed-pr")
         .arg("99993")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to mark child done");
 
     // Step 4: Run close-decomposed
-    let close_result = Command::new(&chump_bin)
+    let close_result = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("close-decomposed")
-        .current_dir(repo_root)
         .output()
         .expect("Failed to run close-decomposed");
 
@@ -568,11 +580,11 @@ fn integration_decomposed_parent_auto_close_workflow() {
     );
 
     // Step 5: Verify parent is now done
-    let final_show = Command::new(&chump_bin)
+    let final_show = fixture
+        .chump_cmd()
         .arg("gap")
         .arg("show")
         .arg(&parent_id)
-        .current_dir(repo_root)
         .output()
         .expect("Failed to show final parent state");
 

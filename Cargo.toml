@@ -270,7 +270,6 @@ lto = "thin"
 wiremock = "0.6"
 serial_test = "4"
 tempfile = "3"
-which = "6"
 # INFRA-693: enable the `test-helpers` feature so briefing/kpi_report tests
 # can keep calling `store.conn_for_test()` to seed synthetic gaps.
 chump-gap-store = { path = "crates/chump-gap-store", version = "0.2.0", features = ["test-helpers"] }
