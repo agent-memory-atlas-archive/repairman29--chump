@@ -16,7 +16,7 @@
 #
 # Usage:
 #   install.sh [--role brain|muscle|all] [--home DIR] [--creds-file PATH]
-#              [--repo-url URL] [--check] [--dry-run]
+#              [--repo-url URL] [--check] [--dry-run] [--user]
 #
 # All creds/role/home flags pass straight through to chump-node-install.sh —
 # see that script's own header for the zero-touch creds contract
@@ -27,11 +27,16 @@
 # (repo clone, creds, binary, seed, organs, substrate, eyes, supervise) is
 # incomplete. Safe to run repeatedly (e.g. from a monitor loop) — never
 # mutates state, only reports.
+#
+# --user: skip system package installation (apt/dnf) steps; assume node/npm
+# are already present or will be installed by the user separately. Allows
+# installation without root privileges. Installation succeeds only if node/npm
+# are already available in PATH.
 set -uo pipefail
 
 ROLE="brain"; NODE_DIR="${CHUMP_NODE_DIR:-$HOME/.chumpnode}"; CREDS_FILE=""
 REPO_URL="${CHUMP_NODE_REPO_URL:-https://github.com/repairman29/chump.git}"
-CHECK=0; DRY=0
+CHECK=0; DRY=0; USER_MODE=0
 FORWARD_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -41,6 +46,7 @@ while [ $# -gt 0 ]; do
     --repo-url) REPO_URL="$2"; shift 2;;
     --check) CHECK=1; shift;;
     --dry-run) DRY=1; FORWARD_ARGS+=(--dry-run); shift;;
+    --user) USER_MODE=1; shift;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
@@ -104,10 +110,15 @@ ok "git present ($(git --version))"
 # ---------- 0.5 TOOLCHAIN (node, npm, etc.) ----------
 # Install node and npm if missing.
 # Use host-specific package managers.
+# If USER_MODE=1, skip system package installation and fail if not found.
 install_node_npm() {
   if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
     ok "node and npm present ($(node --version))"
     return 0
+  fi
+  if [ "$USER_MODE" = 1 ]; then
+    no "node/npm not found in PATH — install via: npm install -g node or use a package manager with user privileges"
+    return 1
   fi
   info TOOLCHAIN "node/npm missing — installing for host=$(uname -s)"
   case "$(uname -s)" in
