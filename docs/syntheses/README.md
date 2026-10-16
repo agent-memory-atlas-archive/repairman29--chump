@@ -20,6 +20,7 @@ If you cannot answer all five, the synthesis isn't done.
 
 | Date | What happened |
 |------|--------------|
+| [2026-10-16](phase-r-ship-path-measurement-2026-10-16.md) | Phase R ship-path measurement of record — five ship-path gaps (INFRA-8204/8207/8202/8201/8198) landed through the fleet on cuphead, nineteen failure classes with receipts, proof run CREDIBLE-301 → PR #5500 merged with zero manual steps |
 | [2026-04-18](../SESSION_2026-04-18_SYNTHESIS.md) | 36-hour autonomous loop — cognitive A/B science landed publishable result (+0.14 hallucination effect, 10.7× A/A noise floor), 9 crates extracted, 5 operational guards shipped, 24 PRs |
 
 ## How new syntheses get created
