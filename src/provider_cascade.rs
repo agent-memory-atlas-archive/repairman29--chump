@@ -602,7 +602,7 @@ fn parse_retry_after_secs(err: &str) -> Option<u64> {
     None
 }
 
-/// Default cooldown when a 429 doesn't include a Retry-After hint.
+/// Default cooldown, in seconds, when a 429 does not include a Retry-After hint.
 const DEFAULT_429_COOLDOWN_S: u64 = 30;
 /// Max cooldown we'll wait for a single slot before cascading.
 const MAX_WAIT_FOR_PREFERRED_S: u64 = 60;
