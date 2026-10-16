@@ -9,5 +9,6 @@
 //! `crate::calc_tool` call sites elsewhere in the binary keep resolving
 //! unchanged. Future slices move more modules here the same way.
 
+pub mod auto_consume;
 pub mod calc_tool;
 pub mod subcommand_registry;
