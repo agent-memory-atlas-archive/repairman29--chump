@@ -365,11 +365,21 @@ def cmd_sync_from_yaml(args, root: Path) -> int:
         return 0
 
     for gid, cd, cp, ca in plan:
-        cur.execute(
-            "UPDATE gaps SET status='done', closed_at=?, closed_date=?, closed_pr=? "
-            "WHERE id=? AND status='open'",
-            (ca if ca > 0 else None, cd, cp, gid),
-        )
+        try:
+            cmd = ["chump", "gap", "ship", gid]
+            if cp:
+                cmd.extend(["--closed-pr", str(cp)])
+            subprocess.run(
+                cmd,
+                check=True, capture_output=True, text=True
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            print(f"  WARN {gid}: chump gap ship failed, falling back to direct DB update: {str(e)[:60]}", file=sys.stderr)
+            cur.execute(
+                "UPDATE gaps SET status='done', closed_at=?, closed_date=?, closed_pr=? "
+                "WHERE id=? AND status='open'",
+                (ca if ca > 0 else None, cd, cp, gid),
+            )
     conn.commit()
     conn.close()
     print(f"applied: {len(plan)} rows")
