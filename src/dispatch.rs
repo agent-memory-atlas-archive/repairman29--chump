@@ -210,38 +210,108 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
 
     // Step 3: caller's work happens here. Interactive = caller already did
     // it; Headless / ExecGap = spawn the work-doing process and wait.
-    if let Err(e) = do_work(&workspace) {
+    // INFRA-8198: do NOT early-`return` on error — every branch below falls
+    // through to the single exit block at the end of this function so the
+    // `[dispatch] ... exit=` line and `kind=dispatch_exit` ambient emit
+    // happen exactly once, no matter which path was taken. This is the
+    // fix for the bug where a dispatch could print nothing distinguishing
+    // success/failure and exit 0 while its `claude -p` child kept running.
+    let result = if let Err(e) = do_work(&workspace) {
         // Always release before propagating the error so a failed work
         // step doesn't leave a stale lease. INFRA-1243: use retry+emit path.
         release_with_retry(&workspace)?;
-        return Ok(DispatchOutcome {
-            gap_id: opts.gap_id.to_string(),
-            branch,
-            result: ShipResult::Aborted {
-                error: format!("work step failed: {e:#}"),
+        ShipResult::Aborted {
+            error: format!("work step failed: {e:#}"),
+        }
+    } else {
+        // Step 4: ship (calls bot-merge.sh in Phase 1; native in Phase 3).
+        // Capture errors instead of `?`-ing so we always reach release.
+        let ship_result = match ship(&workspace) {
+            Ok(r) => r,
+            Err(e) => ShipResult::Aborted {
+                error: format!("{e:#}"),
             },
-            duration_secs: started.elapsed().as_secs(),
-        });
-    }
+        };
 
-    // Step 4: ship (calls bot-merge.sh in Phase 1; native in Phase 3).
-    // Capture errors instead of `?`-ing so we always reach release.
-    let ship_result = match ship(&workspace) {
-        Ok(r) => r,
-        Err(e) => ShipResult::Aborted {
-            error: format!("{e:#}"),
-        },
+        // Step 5: always release the lease. INFRA-1243: retry+emit on failure.
+        release_with_retry(&workspace)?;
+        ship_result
     };
 
-    // Step 5: always release the lease. INFRA-1243: retry+emit on failure.
-    release_with_retry(&workspace)?;
+    // Single exit point (INFRA-8198 AC2): report exit code, reason, and
+    // whether the spawned work child is still alive. By this point
+    // `do_work`'s spawn_* helper has either returned normally (its
+    // `ChildGroupGuard` released, child reaped) or been force-killed by
+    // `wait_with_hang_detection` (group signaled) — so
+    // `child_alive_at_exit` should read `false` on every path; a `true`
+    // here is exactly the INFRA-8198 bug reproducing.
+    let child_pid = workspace.child_pid();
+    let exit_code: i32 = match &result {
+        ShipResult::Shipped { .. } => 0,
+        ShipResult::Blocked { .. } => 2,
+        ShipResult::Aborted { .. } => 1,
+    };
+    let reason = match &result {
+        ShipResult::Shipped { pr_number } => format!("shipped pr={pr_number}"),
+        ShipResult::Blocked { reason } => format!("blocked: {reason}"),
+        ShipResult::Aborted { error } => format!("aborted: {error}"),
+    };
+    let child_alive_at_exit = child_pid.map(|pid| child_is_alive(pid)).unwrap_or(false);
+    let duration_secs = started.elapsed().as_secs();
+    eprintln!(
+        "[dispatch] {} exit={} reason={} child_pid={} child_alive_at_exit={}",
+        opts.gap_id,
+        exit_code,
+        reason,
+        child_pid.unwrap_or(0),
+        child_alive_at_exit
+    );
+    emit_dispatch_exit(
+        opts.gap_id,
+        &workspace.session_id,
+        exit_code,
+        &reason,
+        child_pid.unwrap_or(0),
+        child_alive_at_exit,
+        duration_secs,
+    );
 
     Ok(DispatchOutcome {
         gap_id: opts.gap_id.to_string(),
         branch,
-        result: ship_result,
-        duration_secs: started.elapsed().as_secs(),
+        result,
+        duration_secs,
     })
+}
+
+/// INFRA-8198: probe whether `pid` is still alive via a signal-0 `kill`
+/// (doesn't actually signal; just checks the process exists and we have
+/// permission to signal it). Used for the `child_alive_at_exit` report.
+#[cfg(unix)]
+fn child_is_alive(pid: u32) -> bool {
+    // SAFETY: kill(pid, 0) with signal 0 sends no signal — it only probes
+    // whether `pid` exists and is signalable, which is safe for any pid.
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn child_is_alive(_pid: u32) -> bool {
+    false
+}
+
+/// INFRA-8198: signal a whole process group (negative pid). `pid` must be a
+/// pgid produced by [`configure_child_lifetime`]'s `process_group(0)` (which
+/// makes the child its own group leader, so its pgid equals its pid) — used
+/// by the budget/hang kill paths in [`wait_with_hang_detection`] so a
+/// child's own subprocesses (cargo, git, …) die with it instead of being
+/// orphaned onto PPID 1.
+fn kill_process_group(pid: u32, sig: libc::c_int) {
+    // SAFETY: `pid` is a process group this `chump dispatch` process itself
+    // created for its spawned child; signaling `-pid` can only reach that
+    // group.
+    unsafe {
+        libc::kill(-(pid as libc::pid_t), sig);
+    }
 }
 
 /// Internal bundle of `(DispatchOptions, working_dir)` so step functions
@@ -260,6 +330,14 @@ struct Workspace<'a> {
     /// [`WorkBackend::Interactive`] — the caller already owns a session id
     /// from its own shell. See [`resolve_dispatch_session_id`].
     session_id: String,
+    /// INFRA-8198: pid of the spawned work child (`claude -p`, `chump
+    /// --execute-gap`, …), recorded by [`Workspace::set_child_pid`] right
+    /// after `spawn()` succeeds so [`run`]'s single exit point can report
+    /// `child_pid=`/`child_alive_at_exit=` regardless of which `do_work`
+    /// branch returned. `Cell` because the spawn_* helpers only hold `&
+    /// Workspace`. `None` for [`WorkBackend::Interactive`], which never
+    /// spawns a child.
+    child_pid: std::cell::Cell<Option<u32>>,
 }
 
 impl<'a> Workspace<'a> {
@@ -311,6 +389,7 @@ impl<'a> Workspace<'a> {
             opts,
             working_dir,
             session_id,
+            child_pid: std::cell::Cell::new(None),
         })
     }
 
@@ -320,6 +399,16 @@ impl<'a> Workspace<'a> {
 
     fn opts(&self) -> &DispatchOptions<'a> {
         self.opts
+    }
+
+    /// INFRA-8198: record the pid of the just-spawned work child so [`run`]
+    /// can report it at the single exit point.
+    fn set_child_pid(&self, pid: u32) {
+        self.child_pid.set(Some(pid));
+    }
+
+    fn child_pid(&self) -> Option<u32> {
+        self.child_pid.get()
     }
 }
 
@@ -596,11 +685,17 @@ fn spawn_opencode(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    // INFRA-8198: tie the child's lifetime to this dispatch process.
+    configure_child_lifetime(&mut cmd);
     let child = cmd
         .spawn()
         .context("spawn `opencode -p` (is opencode CLI on PATH?)")?;
+    let child_pid = child.id();
+    ws.set_child_pid(child_pid);
+    let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
     let status = wait_with_hang_detection(child, "opencode -p", opts.gap_id)
         .context("waiting for opencode -p to complete")?;
+    group_guard.release();
     if !status.success() {
         bail!(
             "opencode -p exited {} for gap {}",
@@ -627,11 +722,17 @@ fn spawn_aider(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    // INFRA-8198: tie the child's lifetime to this dispatch process.
+    configure_child_lifetime(&mut cmd);
     let child = cmd
         .spawn()
         .context("spawn `aider --message` (is aider on PATH?)")?;
+    let child_pid = child.id();
+    ws.set_child_pid(child_pid);
+    let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
     let status = wait_with_hang_detection(child, "aider", opts.gap_id)
         .context("waiting for aider --message to complete")?;
+    group_guard.release();
     if !status.success() {
         bail!(
             "aider exited {} for gap {}",
@@ -669,11 +770,17 @@ fn spawn_local(ws: &Workspace, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    // INFRA-8198: tie the child's lifetime to this dispatch process.
+    configure_child_lifetime(&mut cmd);
     let child = cmd
         .spawn()
         .context("spawn `chump gen --local` (is chump on PATH / built?)")?;
+    let child_pid = child.id();
+    ws.set_child_pid(child_pid);
+    let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
     let status = wait_with_hang_detection(child, "chump gen --local", opts.gap_id)
         .context("waiting for chump gen --local to complete")?;
+    group_guard.release();
     if !status.success() {
         bail!(
             "chump gen --local exited {} for gap {}",
@@ -744,9 +851,16 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    // INFRA-8198: tie the child's lifetime to this dispatch process — the
+    // exact gap this whole gap closes: a `claude -p` headless child that
+    // outlived its 1800s budget with no lease, ship phase, or supervisor.
+    configure_child_lifetime(&mut cmd);
     let mut child = cmd
         .spawn()
         .context("spawn `claude -p` (is the claude CLI on PATH?)")?;
+    let child_pid = child.id();
+    ws.set_child_pid(child_pid);
+    let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
     {
         use std::io::Write as _;
         let mut stdin = child
@@ -761,6 +875,7 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     }
     let status = wait_with_hang_detection(child, "claude -p", opts.gap_id)
         .context("waiting for claude -p to complete")?;
+    group_guard.release();
     if !status.success() {
         bail!(
             "claude -p exited {} for gap {}",
@@ -792,11 +907,17 @@ fn spawn_exec_gap(ws: &Workspace) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    // INFRA-8198: tie the child's lifetime to this dispatch process.
+    configure_child_lifetime(&mut cmd);
     let child = cmd
         .spawn()
         .with_context(|| format!("spawn `chump --execute-gap {}`", opts.gap_id))?;
+    let child_pid = child.id();
+    ws.set_child_pid(child_pid);
+    let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
     let status = wait_with_hang_detection(child, "chump --execute-gap", opts.gap_id)
         .context("waiting for chump --execute-gap to complete")?;
+    group_guard.release();
     if !status.success() {
         bail!(
             "chump --execute-gap exited {} for gap {}",
@@ -872,13 +993,12 @@ fn wait_with_hang_detection(
                 if !no_budget && budget_kill_in_flight.is_none() && elapsed.as_secs() > budget_secs
                 {
                     emit_subagent_killed_at_budget(process_name, gap_id, budget_secs, child_pid);
-                    // Send SIGTERM (graceful). std::process::Child::kill is
-                    // SIGKILL only; use the `kill` CLI to get SIGTERM without
-                    // pulling in a new crate dep (see paramedic.rs for the
-                    // existing precedent of Command::new("kill")).
-                    let _ = std::process::Command::new("kill")
-                        .args(["-TERM", &child_pid.to_string()])
-                        .status();
+                    // INFRA-8198: signal the whole GROUP (negative pgid),
+                    // not just the direct child pid — `configure_child_lifetime`
+                    // made the child its own process-group leader, so this
+                    // also reaches any subprocess it spawned (cargo, git,
+                    // …) that would otherwise survive the direct-pid kill.
+                    kill_process_group(child_pid, libc::SIGTERM);
                     budget_kill_in_flight = Some(std::time::Instant::now());
                 }
 
@@ -886,7 +1006,7 @@ fn wait_with_hang_detection(
                 // before SIGKILL. INFRA-1972 AC: "at budget_secs + 30s: SIGKILL".
                 if let Some(term_at) = budget_kill_in_flight {
                     if term_at.elapsed().as_secs() > grace_secs {
-                        let _ = child.kill(); // SIGKILL
+                        kill_process_group(child_pid, libc::SIGKILL);
                         let _ = child.wait();
                         bail!(
                             "{} exceeded subagent budget ({} secs) for gap {}; SIGTERM at budget, \
@@ -903,7 +1023,7 @@ fn wait_with_hang_detection(
                 // process that somehow survived the budget SIGTERM+SIGKILL).
                 if !no_hang && elapsed > Duration::from_secs(hang_secs) {
                     emit_hang_alert(process_name, gap_id, hang_secs);
-                    let _ = child.kill();
+                    kill_process_group(child_pid, libc::SIGKILL);
                     let _ = child.wait();
                     bail!(
                         "{} exceeded no-tool-call timeout ({} secs) for gap {}; sent SIGTERM",
@@ -971,6 +1091,183 @@ fn emit_subagent_killed_at_budget(
             .arg(format!("budget_secs={}", budget_secs))
             .status();
     }
+}
+
+// scanner-anchor: "kind":"dispatch_exit"
+/// Emit `kind=dispatch_exit` to ambient.jsonl (INFRA-8198). Mirrors
+/// [`emit_subagent_killed_at_budget`]'s append pattern. [`run`] emits
+/// exactly one of these per dispatch cycle, on every exit path — this is
+/// the fix for the bug where a dispatch could exit 0 (or hard-fail) with no
+/// line distinguishing "child reaped cleanly" from "child still running
+/// unsupervised" (the INFRA-8198 repro: preflight printed, dispatch exited
+/// 0, the `claude -p` child kept running with PPID 1 for 25+ minutes).
+fn emit_dispatch_exit(
+    gap_id: &str,
+    session_id: &str,
+    exit_code: i32,
+    reason: &str,
+    child_pid: u32,
+    child_alive_at_exit: bool,
+    duration_s: u64,
+) {
+    let repo_root = crate::repo_path::runtime_base();
+    let lock_dir = repo_root.join(".chump-locks");
+    let _ = std::fs::create_dir_all(&lock_dir);
+    let ambient_path = std::env::var("CHUMP_AMBIENT_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| lock_dir.join("ambient.jsonl"));
+
+    let session = if session_id.is_empty() {
+        crate::ambient_stream::env_session_id().unwrap_or_else(|| "unknown".to_string())
+    } else {
+        session_id.to_string()
+    };
+
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let reason_escaped = reason.replace('\\', "\\\\").replace('"', "\\\"");
+
+    let line = format!(
+        "{{\"ts\":\"{ts}\",\"kind\":\"dispatch_exit\",\"session\":\"{session}\",\
+         \"gap_id\":\"{gap_id}\",\"exit_code\":{exit_code},\"reason\":\"{reason_escaped}\",\
+         \"child_pid\":{child_pid},\"child_alive_at_exit\":{child_alive_at_exit},\
+         \"duration_s\":{duration_s}}}"
+    );
+
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ambient_path)
+    {
+        let _ = writeln!(f, "{}", line);
+    }
+
+    if std::env::var("CHUMP_AMBIENT_NATS").as_deref() != Ok("0") {
+        let _ = std::process::Command::new("chump-coord")
+            .arg("emit")
+            .arg("dispatch_exit")
+            .arg(format!("gap_id={}", gap_id))
+            .arg(format!("exit_code={}", exit_code))
+            .arg(format!("child_pid={}", child_pid))
+            .arg(format!("child_alive_at_exit={}", child_alive_at_exit))
+            .status();
+    }
+}
+
+/// AC1 (INFRA-8198): make every spawned work-child's lifetime tied to this
+/// `chump dispatch` process. Two layers: (1) `process_group(0)` makes the
+/// child the leader of its own process group so cargo/git grandchildren it
+/// spawns share that group and can be killed together (see
+/// [`ChildGroupGuard`] and the budget/hang kill paths in
+/// [`wait_with_hang_detection`]); (2) on Linux, `PR_SET_PDEATHSIG` is a
+/// kernel-enforced backstop that fires even if dispatch is SIGKILLed or
+/// calls `std::process::exit` (which skips Rust's `Drop` entirely, so
+/// `ChildGroupGuard` alone cannot cover that case — this is the exact
+/// mechanism gap the INFRA-8198 bug report calls out).
+#[cfg(unix)]
+fn configure_child_lifetime(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: `pre_exec` itself is `unsafe` only because the closure
+        // runs in the forked child between `fork()` and `exec()`, where very
+        // few operations are safe (no allocation, no locking). `prctl` is
+        // safe to call unconditionally in that window.
+        unsafe {
+            cmd.pre_exec(|| {
+                // SAFETY: PR_SET_PDEATHSIG with SIGTERM only arms a
+                // kernel-delivered signal for when our parent (this `chump
+                // dispatch` process) exits; it has no other side effect.
+                // Already inside the enclosing `unsafe` block above (unsafe
+                // is lexical, not runtime-scoped, so it covers this closure
+                // body too) — no nested `unsafe` needed here.
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                Ok(())
+            });
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_child_lifetime(_cmd: &mut Command) {}
+
+/// RAII guard that kills a spawned work-child's entire process group (see
+/// [`configure_child_lifetime`]) unless [`ChildGroupGuard::release`] was
+/// called first. Catches exit paths that skip explicit cleanup — an early
+/// `?`-propagated error out of a `spawn_*` function, a panic, or any other
+/// return path that doesn't reach a hand-written kill call. `PR_SET_PDEATHSIG`
+/// (Linux-only) is the backstop for the case this guard's own `Drop` cannot
+/// cover: `std::process::exit` or a SIGKILL of the dispatch process itself.
+#[cfg(unix)]
+struct ChildGroupGuard {
+    /// Equal to `pid`: [`configure_child_lifetime`] makes the child the
+    /// leader of its own process group (`process_group(0)`), so its pgid
+    /// is its own pid.
+    pgid: u32,
+    pid: u32,
+    gap: String,
+    released: bool,
+}
+
+#[cfg(unix)]
+impl ChildGroupGuard {
+    fn new(pid: u32, gap: &str) -> Self {
+        Self {
+            pgid: pid,
+            pid,
+            gap: gap.to_string(),
+            released: false,
+        }
+    }
+
+    /// Mark the child as having exited on its own via a normal `wait()` —
+    /// `Drop` becomes a no-op.
+    fn release(&mut self) {
+        self.released = true;
+    }
+
+    fn signal_group(&self, sig: libc::c_int) {
+        // SAFETY: `pgid` is the process group chump dispatch itself created
+        // for this child via `process_group(0)`; signaling `-pgid` can only
+        // reach that group, never an unrelated one it doesn't own.
+        unsafe {
+            libc::kill(-(self.pgid as libc::pid_t), sig);
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ChildGroupGuard {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        eprintln!(
+            "[dispatch] {} ChildGroupGuard: killing orphaned process group pgid={} (pid={})",
+            self.gap, self.pgid, self.pid
+        );
+        self.signal_group(libc::SIGTERM);
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 10 {
+            if !child_is_alive(self.pid) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        self.signal_group(libc::SIGKILL);
+    }
+}
+
+#[cfg(not(unix))]
+struct ChildGroupGuard;
+
+#[cfg(not(unix))]
+impl ChildGroupGuard {
+    fn new(_pid: u32, _gap: &str) -> Self {
+        Self
+    }
+    fn release(&mut self) {}
 }
 
 /// Emit a hang-detection alert to ambient.jsonl (INFRA-406).
@@ -1412,6 +1709,7 @@ mod tests {
             opts,
             working_dir: dir,
             session_id: String::new(),
+            child_pid: std::cell::Cell::new(None),
         }
     }
 

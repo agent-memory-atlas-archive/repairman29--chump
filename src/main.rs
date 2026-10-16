@@ -6391,6 +6391,15 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 eprintln!("[dispatch] failed: {e:#}");
+                // INFRA-8198: print a matching "exit=" line on this path too
+                // (previously only the Ok(outcome) branch's single-exit-point
+                // print in dispatch::run() did) — a run() failure before that
+                // point (preflight/claim/worktree setup) spawned no work
+                // child, so child_pid=0/child_alive_at_exit=false here is
+                // always correct, not just "happens to be false".
+                eprintln!(
+                    "[dispatch] {gap_id} exit=1 reason=early-failure:{e:#} child_pid=0 child_alive_at_exit=false"
+                );
                 std::process::exit(1);
             }
         }

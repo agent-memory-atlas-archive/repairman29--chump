@@ -32,6 +32,7 @@
 # scanner-anchor: "kind":"farmer_auth_halt"
 # scanner-anchor: "kind":"farmer_silent_worker"
 # scanner-anchor: "kind":"farmer_escalated"
+# scanner-anchor: "kind":"dispatch_orphan_reaped"
 #
 # Usage:
 #   bash scripts/coord/farmer.sh         # run one tick (launchd calls this)
@@ -54,6 +55,10 @@ REPO_ROOT="${CHUMP_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)}"
 LOCK_DIR="$REPO_ROOT/.chump-locks"
 CHUMP_DIR="$REPO_ROOT/.chump"
 mkdir -p "$LOCK_DIR" "$CHUMP_DIR"
+
+# INFRA-8198: reap_dispatch_orphans — see scripts/coord/lib/dispatch-orphan-reaper.sh.
+# shellcheck source=scripts/coord/lib/dispatch-orphan-reaper.sh
+source "$SCRIPT_DIR/lib/dispatch-orphan-reaper.sh"
 
 # ── Knobs ─────────────────────────────────────────────────────────────────────
 DRY_RUN="${FARMER_DRY_RUN:-0}"
@@ -628,6 +633,11 @@ check_silent_workers
 
 # Mode 6: dead supervisors (always run, not only during revive)
 check_dead_supervisors
+
+# INFRA-8198: reap `claude -p` dispatch children whose `chump dispatch`
+# parent is gone (the exact orphan class this gap closes). One sweep per
+# tick; see scripts/coord/lib/dispatch-orphan-reaper.sh.
+reap_dispatch_orphans
 
 # Heartbeat — written AFTER all checks on the normal path. A crash BEFORE here is
 # now caught by the EXIT trap above (RESILIENT-313) so the fleet never darks out.

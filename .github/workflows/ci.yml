@@ -1199,6 +1199,12 @@ jobs:
       - name: subagent budget kill — parent-enforced SIGTERM+grace+SIGKILL (INFRA-1972)
         run: bash scripts/ci/test-subagent-budget-kill.sh
 
+      - name: dispatch child lifetime (INFRA-8198)
+        run: bash scripts/ci/test-dispatch-child-lifetime.sh
+
+      - name: farmer dispatch orphan reaper (INFRA-8198)
+        run: bash scripts/ci/test-farmer-dispatch-orphan-reaper.sh
+
       - name: commit-msg docs-delta trailer check (INFRA-1969)
         run: bash scripts/ci/test-docs-delta-commit-msg.sh
 

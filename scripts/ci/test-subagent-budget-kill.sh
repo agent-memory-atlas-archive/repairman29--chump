@@ -43,9 +43,11 @@ else
     fail "src/dispatch.rs missing subagent_killed_at_budget emit"
 fi
 
-# ---- 3. Source has the SIGTERM call (Command::new("kill") with -TERM) ----
-if grep -q '"-TERM"' "$SRC" && grep -q 'Command::new("kill")' "$SRC"; then
-    pass "src/dispatch.rs sends SIGTERM via Command::new(\"kill\") with -TERM arg"
+# ---- 3. Source has the SIGTERM call (Command::new("kill") with -TERM,
+#      OR the INFRA-8198 process-group form: kill_process_group with libc::SIGTERM) ----
+if { grep -q '"-TERM"' "$SRC" && grep -q 'Command::new("kill")' "$SRC"; } || \
+   { grep -q 'kill_process_group' "$SRC" && grep -q 'libc::SIGTERM' "$SRC"; }; then
+    pass "src/dispatch.rs sends SIGTERM via Command::new(\"kill\") with -TERM arg, or kill_process_group with libc::SIGTERM"
 else
     fail "src/dispatch.rs missing graceful SIGTERM call"
 fi

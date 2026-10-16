@@ -3499,3 +3499,8 @@ CHUMP_OLIVE_FB_WATCH_END
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_BOT_MERGE_AUTO_COMMIT_M
+# INFRA-8198: farmer.sh reap_dispatch_orphans knobs (scripts/coord/lib/dispatch-orphan-reaper.sh)
+CHUMP_DISPATCH_ORPHAN_REAP
+CHUMP_DISPATCH_ORPHAN_DRY_RUN
+CHUMP_DISPATCH_ORPHAN_MIN_AGE_S
+CHUMP_DISPATCH_ORPHAN_GRACE_S
