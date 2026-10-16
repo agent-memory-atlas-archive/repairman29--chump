@@ -1172,6 +1172,9 @@ jobs:
       - name: state.sql merge driver smoke (INFRA-310)
         run: bash scripts/ci/test-merge-driver-state-sql.sh
 
+      - name: branch-protection gate (CREDIBLE-1502)
+        run: bash scripts/ci/test-branch-protection-gate.sh
+
       - name: ci.yml merge driver smoke (INFRA-310)
         run: bash scripts/ci/test-merge-driver-ci-yml.sh
 

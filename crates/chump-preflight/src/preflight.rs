@@ -2589,6 +2589,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "branch-protection-gate",
+            &["bash", "scripts/ci/test-branch-protection-gate.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-1025-atomic-claim",
             &["bash", "scripts/ci/test-infra-1025-atomic-claim.sh"],
             GateKind::Scripts,

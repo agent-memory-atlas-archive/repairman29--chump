@@ -12,7 +12,7 @@
     "enabled": false
   },
   "enforce_admins": {
-    "enabled": false
+    "enabled": true
   },
   "lock_branch": {
     "enabled": false
@@ -36,6 +36,6 @@
     "contexts": [
       "verified"
     ],
-    "strict": false
+    "strict": true
   }
 }
