@@ -1,0 +1,36 @@
+- id: MISSION-120
+  domain: MISSION
+  title: "MISSION: Create unit test for one‑command install on a fresh box (MISSION-105 slice)"
+  status: done
+  priority: P1
+  effort: xs
+  acceptance_criteria:
+    - Test spins up a temporary directory simulating a fresh box
+    - Runs the install command with `--user` flag
+    - Asserts that all expected binaries and config files are present
+    - Test passes locally
+  depends_on: [MISSION-119]
+  notes: |
+    [chump harvest check 'prove']
+    === primitives_index match for 'prove' ===
+    
+    === cluster keyword match for 'prove' ===
+    
+    === extracted_primitives (per-file, line-refd) match for 'prove' ===
+    
+    === repo-description match for 'prove' ===
+    
+    === HARVEST_ROADMAP.md mention of 'prove' (deep-scan findings) ===
+      15:| **1** | `BEAST-MODE` HITL approval flow (Approve/Reject endpoints + `requiresHumanApproval` flag + `executionMode: DRAFT\|SOVEREIGN`) | [INFRA-1486](../gaps/INFRA-1486.yaml) Marcus trust gate (P0, open, next pickup) | **Vendor** the endpoint shape & state machine | Direct, production-ready, near-perfect fit for per-gap budgets |
+      182:- `character-system-service`, `combat-system-service` — REAL multi-file domain logic with persistent state (data/ dirs). Not Chump-engine-relevant but proves the cluster has real code under the boilerplate descriptions.
+    
+    === cross-pollination briefs mentioning 'prove' ===
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-001-neural-farm-into-chump.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-003-beast-mode-hitl.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-006-openclaw-memory-pattern.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-008-chump-coord-mesh.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-010-beast-mode-audit-logger.md
+      $HOME/Projects/chump/docs/arsenal/cross-pollination/CP-016-project-forge-okr.md
+  closed_date: '2026-10-16'
+  closed_pr: 5503
+
