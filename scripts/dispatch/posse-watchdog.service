@@ -1,0 +1,18 @@
+[Unit]
+Description=Posse portfolio discovery watchdog
+Documentation=https://github.com/repairman29/posse#watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/root
+StandardOutput=journal
+StandardError=journal
+ExecStart=/bin/bash /opt/posse-watchdog.sh
+Restart=always
+RestartSec=5
+SyslogIdentifier=posse-watchdog
+
+[Install]
+WantedBy=multi-user.target
