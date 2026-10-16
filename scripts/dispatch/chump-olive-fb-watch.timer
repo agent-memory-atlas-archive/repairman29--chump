@@ -1,0 +1,17 @@
+# PRODUCT-382 — post-launch watch for the 2026-10-10 Facebook ask.
+# Runs daily at 9am UTC for 14 days (2026-10-11 through 2026-10-24).
+# Reports deltas in sign-ups, stores, cart pushes, and feedback to the board channel.
+# After 2026-10-24, this timer becomes inactive (the script exits cleanly).
+#
+# Enable: systemctl enable --now chump-olive-fb-watch.timer
+
+[Unit]
+Description=Chump Olive post-launch watch — daily report on FB ask metrics (PRODUCT-382)
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*-*-* 09:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

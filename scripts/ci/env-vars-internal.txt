@@ -3485,3 +3485,12 @@ CHUMP_BINARY_REFRESH_WORKTREE
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_MAX_CONCURRENT_CARGO_JOBS
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_OLIVE_FB_BASELINE
+# detected in: (standard input)
+CHUMP_OLIVE_FB_JEFF_USER_ID
+# detected in: (standard input)
+CHUMP_OLIVE_FB_WATCH_END
