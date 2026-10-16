@@ -2604,6 +2604,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "bot-merge-pr-create-head",
+            &["bash", "scripts/ci/test-bot-merge-pr-create-head.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-3002-claim-import-similarity-nonfatal",
             &[
                 "bash",

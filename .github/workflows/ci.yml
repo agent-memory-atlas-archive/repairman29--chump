@@ -1181,6 +1181,9 @@ jobs:
       - name: ci.yml merge driver smoke (INFRA-310)
         run: bash scripts/ci/test-merge-driver-ci-yml.sh
 
+      - name: bot-merge pr-create --head (INFRA-8207)
+        run: bash scripts/ci/test-bot-merge-pr-create-head.sh
+
       - name: pre-commit merge driver smoke (INFRA-310)
         run: bash scripts/ci/test-merge-driver-pre-commit.sh
 

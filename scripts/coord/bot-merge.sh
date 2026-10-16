@@ -3687,7 +3687,7 @@ fi
 
 _bm_push_exit=0
 run_timed_hb "git push" "$_BM_PUSH_TIMEOUT_S" \
-    git push "$REMOTE" "$BRANCH" --force-with-lease $_bm_no_verify_arg || _bm_push_exit=$?
+    git push -u "$REMOTE" "$BRANCH" --force-with-lease $_bm_no_verify_arg || _bm_push_exit=$?
 
 if [[ "$_bm_push_exit" -eq 124 ]]; then
     # Timeout — the pre-push hook (fmt or other gate) stalled longer than
@@ -3937,7 +3937,7 @@ EOF
     fi
 
     if [[ $DRY_RUN -eq 1 ]]; then
-        info "[dry-run] gh pr create --base $BASE_BRANCH --title \"$PR_TITLE\" …"
+        info "[dry-run] gh pr create --base $BASE_BRANCH --head $BRANCH --title \"$PR_TITLE\" …"
     else
         # INFRA-1031 + INFRA-1055: GraphQL preflight — gh pr create uses GraphQL;
         # if quota is 0 (or low per circuit-breaker gate) fall back to REST.
@@ -3972,6 +3972,7 @@ EOF
             fi
         elif ! gh_with_backoff "gh pr create" 120 pr create \
             --base "$BASE_BRANCH" \
+            --head "$BRANCH" \
             --title "$PR_TITLE" \
             --body "$_pr_body"; then
             red "gh pr create failed or timed out."

@@ -423,6 +423,16 @@ fn create_dispatch_worktree(repo_root: &Path, gap_id: &str) -> Result<PathBuf> {
         );
     }
 
+    // INFRA-8207: `git worktree add -b <branch> origin/main` sets <branch>'s
+    // upstream to origin/main (git prints "set up to track remote branch
+    // 'main' from 'origin'"). `gh pr create` without --head infers the head
+    // branch from the current branch's upstream, so a dispatch-created
+    // branch would otherwise point `gh pr create` at main's PR, not its own
+    // — forcing a manual `--head` rescue. Re-point the upstream at the
+    // branch itself so `gh pr create` (and `git push` without `-u`) resolve
+    // correctly from here on.
+    set_dispatch_branch_upstream(&worktree_path, &branch_name);
+
     // RESILIENT-555: symlink the fresh worktree's .chump/state.db to the
     // main checkout's copy, same as `chump claim` already does (INFRA-3834
     // 6c-pre4). Without this, the worktree gets its own empty state.db that
@@ -432,6 +442,33 @@ fn create_dispatch_worktree(repo_root: &Path, gap_id: &str) -> Result<PathBuf> {
     chump_atomic_claim::atomic_claim::nugget_prefetch::link_state_db(repo_root, &worktree_path);
 
     Ok(worktree_path)
+}
+
+/// Point `branch`'s upstream at `origin/<branch>` instead of whatever
+/// `git worktree add -b <branch> origin/main` left it tracking (origin/main).
+/// Best-effort: a failure here doesn't block dispatch, it just means the
+/// INFRA-8207 `--head`-inference convenience won't apply for this branch.
+fn set_dispatch_branch_upstream(worktree: &Path, branch: &str) {
+    let remote_status = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["config", &format!("branch.{branch}.remote"), "origin"])
+        .status();
+    let merge_status = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args([
+            "config",
+            &format!("branch.{branch}.merge"),
+            &format!("refs/heads/{branch}"),
+        ])
+        .status();
+
+    let failed = !matches!(remote_status, Ok(s) if s.success())
+        || !matches!(merge_status, Ok(s) if s.success());
+    if failed {
+        eprintln!("[dispatch] warn: could not set upstream for {branch}");
+    }
 }
 
 // ── Internals (each one independently portable in Phase 3) ───────────────────
@@ -1764,6 +1801,63 @@ mod tests {
             .args(["worktree", "remove", "--force"])
             .arg(&worktree_path)
             .status();
+    }
+
+    /// INFRA-8207 regression: `set_dispatch_branch_upstream` must point a
+    /// branch's upstream at itself (origin/<branch>), not leave it tracking
+    /// whatever `git worktree add -b <branch> origin/main` set up (origin/main) —
+    /// that mistracking is exactly what made `gh pr create` (no --head) fail
+    /// with "aborted: you must first push the current branch to a remote,
+    /// or use the --head flag" on dispatch-created branches.
+    #[test]
+    fn set_dispatch_branch_upstream_points_at_own_branch() {
+        let tmp = tempfile::TempDir::new().expect("create tempdir");
+        let repo_root = tmp.path().to_path_buf();
+
+        let run_git = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(&repo_root)
+                    .status()
+                    .expect("spawn git")
+                    .success(),
+                "git {args:?} failed"
+            );
+        };
+        run_git(&["init", "--quiet", "-b", "main"]);
+        run_git(&["config", "user.email", "test@example.com"]);
+        run_git(&["config", "user.name", "Test"]);
+        std::fs::write(repo_root.join("f.txt"), "x").expect("write file");
+        run_git(&["add", "."]);
+        run_git(&["commit", "-m", "init", "--quiet"]);
+        run_git(&["branch", "claude/infra-8207-test"]);
+
+        set_dispatch_branch_upstream(&repo_root, "claude/infra-8207-test");
+
+        let remote_out = Command::new("git")
+            .arg("-C")
+            .arg(&repo_root)
+            .args(["config", "branch.claude/infra-8207-test.remote"])
+            .output()
+            .expect("spawn git config remote");
+        assert_eq!(
+            String::from_utf8_lossy(&remote_out.stdout).trim(),
+            "origin",
+            "branch.<name>.remote must be origin"
+        );
+
+        let merge_out = Command::new("git")
+            .arg("-C")
+            .arg(&repo_root)
+            .args(["config", "branch.claude/infra-8207-test.merge"])
+            .output()
+            .expect("spawn git config merge");
+        assert_eq!(
+            String::from_utf8_lossy(&merge_out.stdout).trim(),
+            "refs/heads/claude/infra-8207-test",
+            "branch.<name>.merge must be refs/heads/<name>, not refs/heads/main"
+        );
     }
 
     #[test]
