@@ -7713,7 +7713,27 @@ mod tests {
             nats_dual_write_with_bin(&shim, "INFRA-986", "test-sess", Some(&amb)).unwrap();
         assert_eq!(outcome, NatsClaimOutcome::Conflict);
 
-        let body = std::fs::read_to_string(&amb).expect("ambient must exist after conflict");
+        // Spin-poll to ensure OS flushes write buffer before parent reads.
+        let mut body = String::new();
+        for attempt in 0..20 {
+            match std::fs::read_to_string(&amb) {
+                Ok(content) if content.contains("\"kind\":\"gap_claim_nats_conflict\"") => {
+                    body = content;
+                    break;
+                }
+                _ => {
+                    if attempt < 19 {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            !body.is_empty(),
+            "ambient file content not observed within 2 seconds; ambient exists: {}",
+            amb.exists()
+        );
         assert!(
             body.contains("\"kind\":\"gap_claim_nats_conflict\""),
             "missing kind in: {body}"
