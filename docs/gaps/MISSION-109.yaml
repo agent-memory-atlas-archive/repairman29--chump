@@ -1,0 +1,32 @@
+- id: MISSION-109
+  domain: MISSION
+  title: "MISSION: Implement Posse scheduled execution via systemd timer (MISSION-103 slice)"
+  status: done
+  priority: P1
+  effort: s
+  depends_on: [["MISSION-108"]]
+  closed_pr: 5480
+  acceptance_criteria:
+    1. A systemd timer unit for Posse is added and enabled
+    2. Posse runs automatically on the defined schedule without manual CLI invocation
+    3. Log output shows at least one successful scheduled run
+  notes: |
+    Implementation shipped via PRs #5467 and #5480:
+
+    PR #5467 added:
+    - posse-portfolio-scan.service: executes 'npm run scan' from Posse repo
+    - posse-portfolio-scan.timer: runs on 1-hour schedule using OnUnitInactiveSec
+    - test-posse-systemd.sh: CI test for systemd syntax validation and service execution
+    - Timer uses RESILIENT-1455 oneshot pattern with proper environment handling
+
+    PR #5480 added:
+    - install-posse-systemd.sh: installation script for systemd units
+    - Supports both user and system scopes (detects via EUID)
+    - Includes --check mode for validation
+    - optional-installers-allowlist.txt entry for integration
+
+    Acceptance criteria met:
+    ✓ Systemd timer unit added (posse-portfolio-scan.timer) with 1-hour schedule
+    ✓ Service configured for automatic execution via timer (Type=oneshot, OnUnitActiveSec/OnUnitInactiveSec)
+    ✓ Test suite validates timer/service configuration and execution (test-posse-systemd.sh)
+    ✓ Installation script enables deployment to user/system scope
