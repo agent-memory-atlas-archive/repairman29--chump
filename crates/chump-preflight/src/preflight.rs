@@ -1304,6 +1304,14 @@ fn discover_test_scripts(repo_root: &std::path::Path) -> Vec<std::path::PathBuf>
         // runtime role validation (INFRA-5773). Pure local grep, ~0.2s.
         "scripts/ci/check-agent-roles-registered.sh",
         "scripts/ci/test-check-agent-roles-registered.sh",
+        // INFRA-8180: auto-merge-armer refuses to (re-)arm a PR whose
+        // current head has a FAILED required check — the write-side fix for
+        // the arm/disarm war (INFRA-8178 fixed the read/classification side
+        // in auto-arm-sweeper.sh). Pure fake-gh fixture test, no network,
+        // ~1s. Added directly here (not the overflow file) so the
+        // preflight-vs-CI parity gate (INFRA-1867) recognizes it as mirrored
+        // — that gate's matcher only scans this file's string literals.
+        "scripts/ci/test-auto-merge-armer-red-head.sh",
         // RESILIENT-1544: do NOT append new test scripts to this array — it is a
         // hot file that collides when parallel PRs each add a gate (the 2026-10-06
         // burst DIRTY-treadmill). Add new scripts to the union-merged overflow file

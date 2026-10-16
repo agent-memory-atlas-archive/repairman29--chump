@@ -3509,3 +3509,4 @@ CHUMP_DISPATCH_ORPHAN_GRACE_S
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_FLEET_DOCTOR_MIN_RUNNERS
+CHUMP_AUTO_MERGE_REST_DIRECT

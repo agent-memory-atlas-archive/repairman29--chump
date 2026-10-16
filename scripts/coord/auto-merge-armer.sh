@@ -265,6 +265,63 @@ verify_arm() {
     return 1
 }
 
+# INFRA-8180: refuse to (re-)arm a PR whose current head already has a FAILED
+# required check. Arming such a PR is a guaranteed no-op: GitHub disables
+# auto-merge again within seconds and attributes the disable to the enabling
+# token, which is exactly the signal INFRA-8178's human-vs-bot disarm
+# classifier misread as a "bot disarm" and re-armed again — manufacturing a
+# 5-minute arm/disarm loop (PR #5414, 2026-10-15T11:25Z-16:20Z, 9 cycles).
+# Reads `gh pr view --json statusCheckRollup` for the PR's CURRENT head (not
+# a cached/prior sha) so a push that fixes the red check is picked up on the
+# next tick. Any check with conclusion FAILURE blocks the arm; PENDING,
+# QUEUED, NEUTRAL, and SUCCESS checks do not. Fails OPEN (returns 1, i.e. "no
+# failing check detected") on any gh/parse error so a transient API hiccup
+# never blocks a legitimate arm — the existing retry/backoff machinery in
+# arm_with_retry already covers transient failure.
+#
+# head_has_failing_required_check <pr_num>
+head_has_failing_required_check() {
+    local pr_num="$1"
+    local rollup_json
+    rollup_json="$(chump_gh pr view "${pr_num}" --repo "${REPO}" \
+        --json statusCheckRollup 2>/dev/null || true)"
+    [[ -z "${rollup_json}" ]] && return 1
+
+    python3 -c '
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(1)
+for c in (data.get("statusCheckRollup") or []):
+    if (c.get("conclusion") or "").upper() == "FAILURE":
+        sys.exit(0)
+sys.exit(1)
+' "${rollup_json}"
+}
+
+# INFRA-8180: emit auto_merge_arm_skipped(reason=required_check_failed) at
+# most once per (pr, head_sha) pair — not once per tick — by remembering the
+# last sha we logged for this PR in a small marker file. A head that stays
+# red across many armer invocations (every farmer/bot-merge tick) would
+# otherwise spam ambient.jsonl and burn the same API budget INFRA-8178 was
+# trying to protect.
+#
+# log_red_head_once <pr_num> <head_sha>
+log_red_head_once() {
+    local pr_num="$1" head_sha="$2"
+    local marker="${LOCKS_DIR}/auto-merge-armer-red-head-${pr_num}.last"
+    local last_logged
+    last_logged="$(cat "${marker}" 2>/dev/null || true)"
+    if [[ "${last_logged}" == "${head_sha}" ]]; then
+        return 0
+    fi
+    printf '%s' "${head_sha}" > "${marker}" 2>/dev/null || true
+    emit_ambient "auto_merge_arm_skipped" "${pr_num}" \
+        "reason=required_check_failed sha=${head_sha:0:12} script=auto-merge-armer.sh"
+    echo "[auto-merge-armer] PR #${pr_num}: head ${head_sha:0:12} has a FAILED required check — refusing to arm." >&2
+}
+
 # INFRA-1377: detect whether GitHub Merge Queue is active for main.
 # Cached in $MERGE_QUEUE_ACTIVE after first call — one API round-trip per
 # armer invocation. Returns "true" or "false".
@@ -423,6 +480,19 @@ for PR_NUM in "${PR_NUMS[@]}"; do
         echo "[auto-merge-armer] PR #${PR_NUM} in backoff until ${_bo_until_human} (${_remaining}s remaining) — skipping."
         emit_ambient "bot_merge_backoff_skipped" "${PR_NUM}" \
             "remaining_s=${_remaining} until=${_bo_until_human} script=auto-merge-armer.sh"
+        LAST_ARM_TS="$(date -u +%s)"
+        continue
+    fi
+
+    # INFRA-8180: refuse to arm a PR whose CURRENT head has a FAILED required
+    # check. GitHub would disable auto-merge again within seconds and blame
+    # the enabling token, which is exactly the false "bot disarm" signal
+    # INFRA-8178's classifier used to re-arm on — manufacturing the
+    # 5-minute arm/disarm war. Pending/queued/neutral/success heads still arm.
+    if head_has_failing_required_check "${PR_NUM}"; then
+        _red_head_sha="$(chump_gh api "repos/${REPO}/pulls/${PR_NUM}" \
+            --jq '.head.sha' 2>/dev/null || echo 'unknown')"
+        log_red_head_once "${PR_NUM}" "${_red_head_sha}"
         LAST_ARM_TS="$(date -u +%s)"
         continue
     fi

@@ -1496,6 +1496,9 @@ jobs:
       - name: auto-arm sweeper smoke + bypass (INFRA-382 / INFRA-374)
         run: bash scripts/ci/test-auto-arm-sweeper.sh
 
+      - name: auto-merge-armer refuses to arm a red head (INFRA-8180)
+        run: bash scripts/ci/test-auto-merge-armer-red-head.sh
+
       - name: CI-flake auto-rerun smoke — bypass + empty + flake match + cooldown (INFRA-375)
         run: bash scripts/ci/test-ci-flake-rerun.sh
 
