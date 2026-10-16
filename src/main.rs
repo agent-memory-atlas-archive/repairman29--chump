@@ -256,6 +256,7 @@ mod schedule_db;
 mod schedule_tool;
 mod scrap_cmd; // INFRA-1456: chump scrap <gap-id> — clean teardown
 mod screen_vision_tool;
+mod self_hosted_runner_check; // INFRA-1544: self-hosted runner liveness check for fleet doctor
 mod session;
 pub mod session_compact;
 mod session_export;
@@ -9367,6 +9368,27 @@ async fn main() -> Result<()> {
                     Some(report)
                 };
 
+                // INFRA-1544: self-hosted runner liveness check — AC #2
+                // Query gh api to ensure at least 1 runner is online before
+                // refusing to start the fleet.
+                let mut runner_check_result: Option<self_hosted_runner_check::RunnerCheckResult> =
+                    None;
+                match self_hosted_runner_check::check_runner_health() {
+                    Ok(result) => {
+                        self_hosted_runner_check::emit_runner_status(&result);
+                        runner_check_result = Some(result);
+                    }
+                    Err(e) => {
+                        // Runner check failed (e.g., gh api unreachable).
+                        // Fail open (allow fleet doctor to continue) since
+                        // connectivity issues are transient. Operator will
+                        // see the error in the output.
+                        if !want_json {
+                            eprintln!("self-hosted runner check error: {}", e);
+                        }
+                    }
+                };
+
                 // INFRA-2364: default mode now shells out to the strict
                 // health aggregator (INFRA-1427,
                 // scripts/coord/fleet-doctor-strict.sh) instead of only
@@ -9460,6 +9482,14 @@ async fn main() -> Result<()> {
                                 "any_unhealthy": r.any_unhealthy,
                                 "checks": r.checks,
                             })),
+                            "self_hosted_runner": runner_check_result.as_ref().map(|r| serde_json::json!({
+                                "online_count": r.online_count,
+                                "offline_count": r.offline_count,
+                                "busy_count": r.busy_count,
+                                "total_count": r.total_count,
+                                "healthy": r.healthy,
+                                "detail": r.detail,
+                            })),
                             "strict": strict_outcome.map(|(code, duration_ms, failure_class, status)| serde_json::json!({
                                 "exit_code": code,
                                 "duration_ms": duration_ms,
@@ -9478,6 +9508,13 @@ async fn main() -> Result<()> {
                             println!("  required-check health: {} checks OK", r.checks.len());
                         }
                     }
+                    if let Some(r) = &runner_check_result {
+                        let status_str = if r.healthy { "✓" } else { "✗" };
+                        println!(
+                            "  self-hosted runners: {} {} (online={}, offline={}, total={})",
+                            status_str, r.detail, r.online_count, r.offline_count, r.total_count
+                        );
+                    }
                     if let Some((code, duration_ms, failure_class, status)) = strict_outcome {
                         println!(
                             "  strict health ({}): exit={} duration_ms={} failure_class={}",
@@ -9493,6 +9530,7 @@ async fn main() -> Result<()> {
 
                 let exit_code = if health_report.as_ref().is_some_and(|r| r.any_unhealthy)
                     || strict_outcome.is_some_and(|(code, ..)| code != 0)
+                    || runner_check_result.as_ref().is_some_and(|r| !r.healthy)
                 {
                     1
                 } else {
