@@ -9741,6 +9741,12 @@ fn build_api_router() -> Router {
             "/api/settings/secret/{name}",
             get(handle_secret_get).post(handle_secret_post),
         )
+        // INFRA-1570: per-repo settings backend (sibling to INFRA-1563 /api/decisions).
+        .route(
+            "/api/settings/repo",
+            get(routes::settings_repo::handle_settings_repo_get)
+                .put(routes::settings_repo::handle_settings_repo_put),
+        )
         .route(
             "/api/ingest",
             post(handle_ingest_json).layer(RequestBodyLimitLayer::new(
