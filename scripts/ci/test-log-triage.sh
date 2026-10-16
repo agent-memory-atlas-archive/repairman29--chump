@@ -17,7 +17,13 @@ FAIL=0
 ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 
+# Source the gap test helpers
+REPO_ROOT_TMP="$(git rev-parse --show-toplevel)"
+source "$REPO_ROOT_TMP/scripts/ci/test-gap-lib.sh"
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+# Re-source REPO_ROOT for use in rest of script
+unset REPO_ROOT_TMP
 
 echo "=== INFRA-1891 chump fleet log-triage test ==="
 echo
@@ -92,7 +98,7 @@ if [[ -z "$GAP_ID" ]]; then
     fail "could not resolve fixture gap id — skipping cross-ref assertions"
 else
     ok "fixture gap $GAP_ID reserved"
-    sqlite3 "$TMP/.chump/state.db" "UPDATE gaps SET status='done' WHERE id='$GAP_ID';"
+    ship_gap_for_test "$TMP/.chump/state.db" "$GAP_ID"
 fi
 
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -2656,13 +2656,9 @@ mod tests {
         let store = chump_gap_store::GapStore::open(dir).unwrap();
         for (title, closed_ts) in entries {
             let reserved = store.reserve("INFRA", title, "P1", "s").unwrap();
-            let iso = unix_to_iso_date(*closed_ts);
-            let conn = store.conn_for_test();
-            conn.execute(
-                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2, closed_pr=999 WHERE id=?3",
-                rusqlite::params![closed_ts, iso, reserved],
-            )
-            .unwrap();
+            store
+                .ship_for_test_with_opts(&reserved, Some(*closed_ts), Some(999))
+                .unwrap();
         }
     }
 
@@ -2678,13 +2674,9 @@ mod tests {
         let store = chump_gap_store::GapStore::open(dir).unwrap();
         for (domain, title, closed_ts) in entries {
             let reserved = store.reserve(domain, title, "P1", "s").unwrap();
-            let iso = unix_to_iso_date(*closed_ts);
-            let conn = store.conn_for_test();
-            conn.execute(
-                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2, closed_pr=999 WHERE id=?3",
-                rusqlite::params![closed_ts, iso, reserved],
-            )
-            .unwrap();
+            store
+                .ship_for_test_with_opts(&reserved, Some(*closed_ts), Some(999))
+                .unwrap();
         }
     }
 
@@ -2946,12 +2938,9 @@ mod tests {
                 .reserve("INFRA", "closed_date only", "P1", "s")
                 .unwrap();
             let today = unix_to_iso_date(current_unix() as i64);
-            let conn = store.conn_for_test();
-            conn.execute(
-                "UPDATE gaps SET status='done', closed_at=NULL, closed_date=?1, closed_pr=999 WHERE id=?2",
-                rusqlite::params![today, id],
-            )
-            .unwrap();
+            store
+                .ship_for_test_null_closed_at(&id, &today, 999)
+                .unwrap();
             id
         };
         let _ = reserved;
@@ -3198,15 +3187,10 @@ mod tests {
             .reserve("INFRA", "RESILIENT: also depends on X", "P1", "s")
             .unwrap();
 
-        // Mark all three done (raw SQL to set both closed_at and closed_date).
-        let iso = unix_to_iso_date(now);
+        // Mark all three done
         for id in &[&id_x, &id_y, &id_z] {
             store
-                .conn_for_test()
-                .execute(
-                    "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2, closed_pr=999 WHERE id=?3",
-                    rusqlite::params![now, iso, id],
-                )
+                .ship_for_test_with_opts(id, Some(now), Some(999))
                 .unwrap();
         }
 

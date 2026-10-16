@@ -668,13 +668,7 @@ mod tests {
         let gap_id = store
             .reserve("INFRA", "fixture done gap for log-triage test", "P2", "xs")
             .unwrap();
-        store
-            .conn_for_test()
-            .execute(
-                "UPDATE gaps SET status='done' WHERE id=?1",
-                rusqlite::params![gap_id],
-            )
-            .unwrap();
+        store.ship_for_test(&gap_id).unwrap();
 
         let ts = now_ts();
         write_ambient(

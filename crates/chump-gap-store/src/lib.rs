@@ -206,6 +206,49 @@ impl GapStore {
         &self.conn
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn ship_for_test(&self, gap_id: &str) -> Result<()> {
+        self.ship_for_test_with_opts(gap_id, None, None)
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn ship_for_test_with_opts(
+        &self,
+        gap_id: &str,
+        closed_at: Option<i64>,
+        closed_pr: Option<i64>,
+    ) -> Result<()> {
+        let now = unix_now();
+        let closed_at = closed_at.unwrap_or(now);
+        let iso = unix_to_iso_date(closed_at);
+        if let Some(pr) = closed_pr {
+            self.conn.execute(
+                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2, closed_pr=?3 WHERE id=?4",
+                rusqlite::params![closed_at, iso, pr, gap_id],
+            )?;
+        } else {
+            self.conn.execute(
+                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2 WHERE id=?3",
+                rusqlite::params![closed_at, iso, gap_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn ship_for_test_null_closed_at(
+        &self,
+        gap_id: &str,
+        iso_date: &str,
+        closed_pr: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE gaps SET status='done', closed_at=NULL, closed_date=?1, closed_pr=?2 WHERE id=?3",
+            rusqlite::params![iso_date, closed_pr, gap_id],
+        )?;
+        Ok(())
+    }
+
     /// INFRA-2053 sync-module accessor — direct connection reference so
     /// `sync_pull` can issue INSERT/UPDATE that bypass the integrity
     /// guards (recycled-ID, title-hijack) in `set_fields`. Those guards

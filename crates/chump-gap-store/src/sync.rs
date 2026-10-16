@@ -923,10 +923,7 @@ mod tests {
         let store = fresh_store(root.path());
         insert_minimal(&store, "INFRA-9010", "Shipped gap", "[\"do thing\"]");
         // Simulate `chump gap ship`: flip status to done directly in state.db.
-        store
-            .conn_for_sync()
-            .execute("UPDATE gaps SET status='done' WHERE id='INFRA-9010'", [])
-            .unwrap();
+        store.ship_for_test("INFRA-9010").unwrap();
         // Stale YAML mirror still says open (never rewritten post-ship).
         let gaps_dir = root.path().join("docs/gaps");
         write_yaml(
