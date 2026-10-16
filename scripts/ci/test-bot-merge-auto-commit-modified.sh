@@ -67,6 +67,10 @@ HARNESS="$TMPDIR_BASE/harness.sh"
     echo 'red()    { printf "[red] %s\n" "$*"; }'
     echo 'yellow() { printf "[yellow] %s\n" "$*"; }'
     echo 'info()   { printf "[info] %s\n" "$*"; }'
+    # INFRA-8202: the 0b block now calls _bm_substep / _bm_resolve_lease_file /
+    # _bm_stray_staged_paths / _bm_auto_commit_with_retry — source the real
+    # implementations so this harness exercises the actual retry/refusal logic.
+    printf 'source %q\n' "$REPO_ROOT/scripts/coord/lib/bot-merge-autocommit.sh"
     cat "$BLOCKS"
 } > "$HARNESS"
 

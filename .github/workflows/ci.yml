@@ -1187,6 +1187,9 @@ jobs:
       - name: pr-terminal-state helper — mergedAt-validated (INFRA-1981)
         run: bash scripts/ci/test-pr-terminal-state.sh
 
+      - name: bot-merge auto-commit HEAD race (INFRA-8202)
+        run: bash scripts/ci/test-bot-merge-auto-commit-head-race.sh
+
       - name: subagent budget kill — parent-enforced SIGTERM+grace+SIGKILL (INFRA-1972)
         run: bash scripts/ci/test-subagent-budget-kill.sh
 

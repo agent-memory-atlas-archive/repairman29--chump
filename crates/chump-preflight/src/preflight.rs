@@ -2617,6 +2617,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "bot-merge-auto-commit-head-race",
+            &["bash", "scripts/ci/test-bot-merge-auto-commit-head-race.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-257-doc-only-guards",
             &["bash", "scripts/ci/test-infra-257-doc-only-guards.sh"],
             GateKind::Scripts,

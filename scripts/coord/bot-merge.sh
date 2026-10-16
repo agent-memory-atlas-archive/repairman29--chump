@@ -460,6 +460,10 @@ _bm_step_start() {
     # stages) kept showing the previous stage (e.g. "cargo fmt"). Named steps
     # now update it too.
     [[ -n "${_BM_STEP_FILE:-}" ]] && printf '%s' "$step" > "$_BM_STEP_FILE" 2>/dev/null || true
+    # INFRA-8202: refresh the stall-detection timestamp on every named-step
+    # transition too, so moving from "init" to "preflight" doesn't look like
+    # 1000s+ of no-progress the instant preflight itself takes a while.
+    [[ -n "${_BM_STEP_FILE:-}" ]] && date +%s > "${_BM_STEP_FILE}.changed_at" 2>/dev/null || true
     local ts gap_label ambient
     ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     gap_label="${GAP_IDS[0]:-${GAP_ID:-unknown}}"
@@ -1482,6 +1486,9 @@ _bm_health_init() {
     _BM_STEP_FILE="${lock_dir}/bot-merge-${_BM_PID}.step"
     _BM_STEPS_FILE="${lock_dir}/bot-merge-${_BM_PID}.steps"  # INFRA-1035
     printf 'init' > "$_BM_STEP_FILE" 2>/dev/null || true
+    # INFRA-8202: seed the stall-detection timestamp so the heartbeat's first
+    # tick doesn't compute a bogus (since-epoch) elapsed-since-change value.
+    date +%s > "${_BM_STEP_FILE}.changed_at" 2>/dev/null || true
     # INFRA-1035: seed the steps log with a session-start entry
     printf '{"ts":"%s","step":"session","transition":"start","elapsed_s":0,"pid":%d}\n' \
         "$_BM_STARTED_AT" "$_BM_PID" > "$_BM_STEPS_FILE" 2>/dev/null || true
@@ -1508,6 +1515,9 @@ _bm_health_init() {
     local gap_str="${GAP_IDS[*]:-}"
     local _hb_interval="${CHUMP_BOT_MERGE_HEARTBEAT_S:-30}"
     [[ "$_hb_interval" -lt 5 ]] 2>/dev/null && _hb_interval=5  # floor: don't spam
+    # INFRA-8202: sub-step stall detection — ambient path resolved here so the
+    # background subshell doesn't need the rest of bot-merge.sh's environment.
+    local _hb_ambient="${CHUMP_AMBIENT_LOG:-${lock_dir}/ambient.jsonl}"
     (
         local _hb_elapsed=0
         # Immediate first line so life is visible before the first sleep.
@@ -1525,6 +1535,24 @@ _bm_health_init() {
             # INFRA-2455: same liveness, surfaced to stderr so it's visible live.
             printf '\033[0;36m[bot-merge %s] ⏳ alive — step=%s (~%ds elapsed)\033[0m\n' \
                 "$(date +%H:%M:%S)" "$step" "$_hb_elapsed" >&2
+            # INFRA-8202: if no step/sub-step change in >120s, the heartbeat's
+            # bare "alive — step=init" is undiagnosable — say so loudly and
+            # leave a trail in ambient.jsonl (reuses bot_merge_budget_warn,
+            # no new kind per META-063).
+            local _changed_at _since_change
+            _changed_at="$(cat "${sf}.changed_at" 2>/dev/null || echo 0)"
+            [[ "$_changed_at" =~ ^[0-9]+$ ]] || _changed_at=0
+            if [[ "$_changed_at" -gt 0 ]]; then
+                _since_change=$(( $(date +%s) - _changed_at ))
+            else
+                _since_change=0
+            fi
+            if [[ "$_since_change" -gt 120 ]]; then
+                printf '\033[0;31m[bot-merge %s] INFRA-8202: no sub-step progress for %ds in step=%s — init is stuck or a sub-step is unlabelled\033[0m\n' \
+                    "$(date +%H:%M:%S)" "$_since_change" "$step" >&2
+                printf '{"ts":"%s","kind":"bot_merge_budget_warn","current_step":"%s","elapsed_s":%d,"note":"INFRA-8202: >120s without a sub-step change"}\n' \
+                    "$now" "$step" "$_since_change" >> "$_hb_ambient" 2>/dev/null || true
+            fi
         done
     ) &
     _BM_HEALTH_PID=$!
@@ -1607,6 +1635,10 @@ export CHUMP_REPO="${CHUMP_REPO:-$MAIN_REPO}"
 # canonical state.db leases table (interactive `chump claim` writes no JSON sidecar).
 # shellcheck source=../lib/lease.sh
 source "$(dirname "$0")/../lib/lease.sh"
+# INFRA-8202: HEAD-race auto-commit retry, stray-staged-path refusal, and
+# the _bm_substep init-phase labelling helper.
+# shellcheck source=lib/bot-merge-autocommit.sh
+source "$(dirname "$0")/lib/bot-merge-autocommit.sh"
 # shellcheck source=lib/github.sh
 # INFRA-999: chump_gh + chump_gh_record for API cost telemetry.
 source "$(dirname "$0")/lib/github.sh"
@@ -2113,6 +2145,7 @@ _bm_step_done "init" 0
 # caught upfront, not midstream.
 #
 # Bypass: CHUMP_DOCTOR_SKIP=1 (cron-side, or for the chump-doctor PR itself).
+_bm_substep "binary-wedge-self-heal"
 if [[ "${CHUMP_DOCTOR_SKIP:-0}" != "1" ]] \
         && [[ -x "$REPO_ROOT/scripts/dev/chump-binary-unwedge.sh" ]]; then
     if ! bash "$REPO_ROOT/scripts/dev/chump-binary-unwedge.sh" >/dev/null 2>&1; then
@@ -2124,6 +2157,7 @@ fi
 # INFRA-061 (M3): if --stack-on <PREV-GAP> was passed, look up the open PR for
 # that gap and use its head branch as our base. Falls back to main with a
 # warning if the prev gap has no open PR (already landed → just stack on main).
+_bm_substep "stack-on-resolution"
 if [[ -n "$STACK_ON_GAP" ]]; then
     info "Resolving --stack-on $STACK_ON_GAP via gh pr list …"
     _stack_branch=$(gh pr list --state open --search "$STACK_ON_GAP in:title,body" \
@@ -2150,6 +2184,7 @@ green "=== bot-merge: $BRANCH → $BASE_BRANCH ==="
 # Bypass:  --legacy flag or BM_LEGACY_MODE=1 forces Mode B unconditionally.
 #
 # Detection uses the first gap ID only (same as existing preflight logic).
+_bm_substep "routing-mode-resolution"
 _BM_MODE="A"   # default: batched integration queue
 _BM_MODE_REASON=""
 
@@ -2261,6 +2296,7 @@ _bm_emit_mode_failopen() {
     echo "[bot-merge] INFRA-2523: integrator daemon unhealthy — failing open to per-PR auto-merge (Mode B) so ${_gap} can't land in limbo." >&2
 }
 
+_bm_substep "mode-a-integrator-health"
 if [[ "$_BM_MODE" == "A" ]] && ! _bm_integrator_healthy; then
     _BM_MODE="B"
     _BM_MODE_REASON="integrator daemon unhealthy — fail-open to per-PR (INFRA-2523)"
@@ -2378,6 +2414,7 @@ except: print(json.dumps({'raw':raw[:500]}))" \
     info "[INFRA-1346] ship_plan_advisory emitted (action=${_action} gap=${_gap:-none})"
 }
 
+_bm_substep "shadow-plan"
 if [[ "${CHUMP_BOT_MERGE_SHADOW_PLAN:-1}" == "1" ]]; then
     _bm_shadow_plan || true   # best-effort: never block main flow
 fi
@@ -2386,6 +2423,7 @@ fi
 # Instead of aborting when untracked files exist, auto-add them with an
 # explicit warning. This closes the "partial-ship hazard" where bot-merge
 # aborts before pushing, leaving the PR incomplete. Bypass: CHUMP_BOT_MERGE_ALLOW_UNTRACKED=0
+_bm_substep "untracked-auto-add"
 if [[ "${CHUMP_BOT_MERGE_ALLOW_UNTRACKED:-1}" != "0" ]]; then
     untracked=$(git ls-files --others --exclude-standard src/ crates/ scripts/ docs/ 2>/dev/null)
     if [[ -n "$untracked" ]]; then
@@ -2413,6 +2451,7 @@ fi
 # Bypass: CHUMP_BOT_MERGE_AUTO_COMMIT_M=0 (operator wants to handle staging
 # manually — useful for partial-stage scenarios where M files are
 # intentionally not part of this PR).
+_bm_substep "auto-commit"
 if [[ "${CHUMP_BOT_MERGE_AUTO_COMMIT_M:-1}" != "0" ]]; then
     modified=$(git diff --name-only -- src/ crates/ scripts/ docs/ 2>/dev/null)
     if [[ -n "$modified" ]]; then
@@ -2431,7 +2470,22 @@ commit needs a different message, amend after ship lands or split
 the PR.
 
 Bypass: CHUMP_BOT_MERGE_AUTO_COMMIT_M=0 to opt out (handles staging manually)."
-        if git commit -m "$_autostage_msg"; then
+        # INFRA-8202 AC3: refuse to auto-commit any staged path the dispatch
+        # lease didn't scope us to — closes the MISSION-111.yaml collateral-
+        # deletion class (a sibling organ's edit landing in OUR commit).
+        _bm_staged_for_commit="$(git diff --cached --name-only 2>/dev/null)"
+        _bm_lease_file="$(_bm_resolve_lease_file)"
+        _bm_stray="$(_bm_stray_staged_paths "$_bm_lease_file" "$_bm_staged_for_commit")"
+        if [[ -n "$_bm_stray" ]]; then
+            red "INFRA-8202: refusing auto-commit — staged paths outside the dispatch lease: $(printf '%s' "$_bm_stray" | tr '\n' ' ')"
+            exit 4
+        elif [[ -z "$_bm_lease_file" ]]; then
+            info "INFRA-8202: no dispatch lease found — staged for auto-commit: $(printf '%s' "$_bm_staged_for_commit" | tr '\n' ' ')"
+        fi
+        # INFRA-8202 AC1: a sibling organ (pr-auto-rebase / merge-serializer)
+        # can move HEAD out from under this commit mid-hook-run — retry once
+        # with the same staged-path list instead of stranding the work.
+        if _bm_auto_commit_with_retry "$_autostage_msg" "$_bm_staged_for_commit"; then
             green "INFRA-472: auto-committed pre-rebase changes"
         else
             red "INFRA-472: auto-commit failed — pre-commit hook rejected the changes."
