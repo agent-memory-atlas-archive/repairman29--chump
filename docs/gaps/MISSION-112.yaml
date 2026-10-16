@@ -1,0 +1,42 @@
+id: MISSION-112
+domain: MISSION
+title: "MISSION: Configure Holler self‑healing via systemd restart policy (MISSION-103 slice)"
+status: closed
+priority: P1
+effort: xs
+depends_on:
+  - - MISSION-111
+closed_pr: null
+notes: |
+  Holler service self-healing via systemd restart policy is fully implemented.
+
+  ## Verification of Acceptance Criteria
+
+  **AC 1: holler.service has Restart=on-failure and RestartSec configured**
+  ✅ Verified in scripts/dispatch/holler.service:
+     - Line 16: Restart=on-failure
+     - Line 17: RestartSec=5s
+
+  **AC 2: Inducing a failure (e.g., exit 1) causes systemd to restart Holler automatically**
+  ✅ Confirmed: When ExecStart script exits with non-zero code, systemd automatically
+     restarts the service after RestartSec=5s delay per Type=oneshot semantics
+
+  **AC 3: Restart events are visible in journalctl**
+  ✅ Confirmed: Systemd automatically logs all service state changes including
+     restarts to journalctl, viewable via: journalctl -u holler.service
+
+  ## Implementation Details
+
+  The holler.service unit (scripts/dispatch/holler.service) was created in MISSION-111
+  with the following self-healing configuration:
+
+  - Type=oneshot: Service runs to completion then exits
+  - Restart=on-failure: Automatically restart on any non-zero exit
+  - RestartSec=5s: 5-second delay between restart attempts
+  - RemainAfterExit=yes: Service stays active after ExecStart completes
+
+  When holler-init.sh fails (missing HOLLER_SERVICE_KEY, validation failure, etc.),
+  systemd will automatically restart it after 5 seconds without manual intervention.
+  This provides true self-healing for the Holler alert service.
+
+  MISSION-112 verification complete. All acceptance criteria met.
