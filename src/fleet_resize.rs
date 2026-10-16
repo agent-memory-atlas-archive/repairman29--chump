@@ -21,6 +21,12 @@ pub enum ResizeTrigger {
     OperatorAbsent,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ShedAction {
+    Remove(String), // build ID to remove (lowest-priority)
+    None,
+}
+
 #[derive(Debug)]
 pub struct ResizeDecision {
     pub trigger: ResizeTrigger,
@@ -243,6 +249,29 @@ pub fn check_operator_absent(repo_root: &Path, current_size: u32) -> Option<Resi
     })
 }
 
+/// MISSION-123: Node capacity planner for shedding on limit breach.
+///
+/// Evaluates if current load exceeds the hard limit and returns a shed action
+/// if needed. Returns `Some(ShedAction::Remove(build_id))` to remove the
+/// lowest-priority build, or `Some(ShedAction::None)` if no shedding needed.
+///
+/// Hard limit enforcement: if `current_load > hard_limit`, trigger shedding
+/// to free up capacity for critical work.
+pub fn evaluate_capacity_planner(current_load: f64, hard_limit: f64) -> ShedAction {
+    if current_load <= hard_limit {
+        return ShedAction::None;
+    }
+
+    eprintln!(
+        "[capacity-planner] auto-size shed triggered: load {:.2} exceeds hard limit {:.2}",
+        current_load, hard_limit
+    );
+
+    // Placeholder: in production, this would identify the actual lowest-priority
+    // build ID from the queue. For now, return a generic shed action.
+    ShedAction::Remove("lowest_priority_build_id".to_string())
+}
+
 /// Run all 4 checks; return the first triggered decision (lowest recommended_size wins on tie).
 pub fn evaluate(repo_root: &Path, current_size: u32) -> Option<ResizeDecision> {
     let mut decisions: Vec<ResizeDecision> = Vec::new();
@@ -442,5 +471,41 @@ mod tests {
     #[test]
     fn test_worker_scaling_max_load() {
         assert_eq!(calculate_worker_target(100.0, 100.0, 1, 10), 10);
+    }
+
+    #[test]
+    fn test_capacity_planner_below_limit() {
+        // Load below hard limit → no shedding
+        let action = evaluate_capacity_planner(50.0, 100.0);
+        assert_eq!(action, ShedAction::None);
+    }
+
+    #[test]
+    fn test_capacity_planner_at_limit() {
+        // Load at hard limit → no shedding
+        let action = evaluate_capacity_planner(100.0, 100.0);
+        assert_eq!(action, ShedAction::None);
+    }
+
+    #[test]
+    fn test_capacity_planner_exceeds_limit() {
+        // Load exceeds hard limit → trigger shed
+        let action = evaluate_capacity_planner(150.0, 100.0);
+        assert!(matches!(action, ShedAction::Remove(_)));
+    }
+
+    #[test]
+    fn test_capacity_planner_existing_calculations_remain_correct() {
+        // Verify that normal capacity calculations still work correctly
+        let normal_load = 75.0;
+        let hard_limit = 100.0;
+
+        // Normal load below limit should not trigger shedding
+        let action = evaluate_capacity_planner(normal_load, hard_limit);
+        assert_eq!(action, ShedAction::None);
+
+        // Calculate worker target should work independently
+        let workers = calculate_worker_target(normal_load, hard_limit, 1, 10);
+        assert!(workers >= 1 && workers <= 10);
     }
 }
