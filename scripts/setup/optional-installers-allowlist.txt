@@ -207,3 +207,9 @@ install-queue-tender.sh
 # opt-in for fleet alerts, not a fresh-bootstrap requirement. Manually invoked
 # per docs/process/HOLLER_SERVICE_SETUP.md when enabling alert emission.
 install-holler-systemd.sh
+
+# MISSION-109 — Posse portfolio scan systemd timer and service installation.
+# Situational opt-in for autonomous portfolio scanning, not a fresh-bootstrap
+# requirement. Manually invoked per docs/process/POSSE_TIMER_SETUP.md when
+# enabling scheduled portfolio scans.
+install-posse-systemd.sh
