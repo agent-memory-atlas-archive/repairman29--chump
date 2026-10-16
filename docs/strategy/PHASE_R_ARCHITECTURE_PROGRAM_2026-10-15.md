@@ -1,7 +1,7 @@
 ---
 doc_tag: decision-record
 owner_gap: PHASE-R
-last_audited: 2026-10-15
+last_audited: 2026-10-16
 ---
 
 # Phase R: the architecture program of record (adopted 2026-10-15)
@@ -44,16 +44,26 @@ to live.
 | **R1** | Ship is one state transition gated on a landing receipt: a merge SHA reachable from `origin/main` whose PR row links the gap. One function writes `done`/`shipped`. Idempotent. | The re-ship loop (RESILIENT-1562 shipped 87 times in 2h, landing nothing); the false-close class | CREDIBLE-1491 | P1 |
 | **R2** | The gap-to-PR link is a typed FK written when the PR opens, read at ship. No title regex anywhere. | `fix(X:)` closing gap X (#5317); three regex readers drifting | INFRA-8192 | P1 |
 | **R3** | Honest ship gate: every check is required-and-green or deleted; admin bypass needs a PASSED consensus; `enforce_admins` and `strict` on; admin merges counted. | Red checks carrying no information; invisible `--admin` merges | CREDIBLE-1492 | P1 |
+| **R6** | Shell absorption. `worker.sh` moves into `chumpd`; `chump claim` is the only lease writer; no new shell organ; shell LOC is a gauge that must fall. | Picker sprawl (MISSION-028); a 3,332-line control plane nothing can type-check | INFRA-8195 | P2 |
 | **R4** | One canonical store. `state.sql` and `gap_store.db` leave git; the YAML mirror is export-only; the swamp is archived, never deleted. | Split-brain drift; the 9,223-file swamp; `sync --push` blast radius | INFRA-8193 | P2 |
 | **R5** | Host provisioning is a typed enum; units are rendered from it; no `User=`, `/home`, `/root`, `/opt/homebrew` literals ship. | 217/USER failures, HOME=/root, the abandoned second install, brew-only bootstrap | INFRA-8194 | P2 |
-| **R6** | Shell absorption. `worker.sh` moves into `chumpd`; `chump claim` is the only lease writer; no new shell organ; shell LOC is a gauge that must fall. | Picker sprawl (MISSION-028); a 3,332-line control plane nothing can type-check | INFRA-8195 | P2 |
 | **R7** | The eval harness points inward. Every self-report has a ground-truth probe and a calibration score; chronic liars auto-file a gap. | Dashboards off by 6x to 100x; "healthy" while organs fail for days | CREDIBLE-1493 | P2 |
 
-**Why this order.** R1 and R3 first because until a merge means "tested and landed,"
-nothing else the fleet reports can be trusted, and nothing it builds can be proven to
-have shipped. R2 is R1's precondition for the receipt. R4 and R5 remove the two sources
-of recurring drift (the store and the host). R6 is where the invariants get to live.
-R7 is how we know the first six are true without a human reading logs.
+**Why this order (revised 2026-10-16).** R1 and R3 first because until a merge means
+"tested and landed," nothing else the fleet reports can be trusted, and nothing it builds can
+be proven to have shipped. R2 is R1's precondition for the receipt. **R6 moved to third** after
+the night of 2026-10-15/16: the fleet wrote correct fixes for every gap it was given and lost the
+finished work ten different ways in the bash ship path (orphaned child, expired lease taken as
+identity, HEAD lock race, pre-push kill, budget kill, lost session id, `gh pr create` without
+`--head`, uncommitted work left behind, a vacuous-guard line cap, and a picker that re-opened the
+same slice four times because it bypasses `chump claim`). Four of those are already fixed as
+fleet-authored PRs (INFRA-8204, 8207, 8202, 8201); the class only ends when the ship path lives
+in types. R4 and R5 follow: they remove the two sources of recurring drift (the store and the
+host). R7 is how we know the first six are true without a human reading logs.
+
+**Receipts from the first night.** Trunk unwedged through `verified` (#5476), `enforce_admins`
+and `strict` on with a baseline and drift gate (#5479), and at 06:20Z the first gap filed, built,
+merged and closed by the fleet with no human terminal (INFRA-8204, #5481). Zero admin merges.
 
 **The honest metric for the whole program.** One gap filed, dispatched, built, merged
 and flipped to shipped by the fleet with zero admin merges and zero human terminal.
