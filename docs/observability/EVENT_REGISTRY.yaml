@@ -6300,6 +6300,16 @@ events:
     consumers: [fleet-brief, curator, operator]
     effect_metric: self
     fields_required: [ts, kind, source, branch, gap, plan_action, plan_json_truncated_to_2kb]
+  # ── CREDIBLE-1495 R4: ship() landing receipt ──────────────────────────────
+  - kind: ship_landed
+    effect_metric: self
+    emitter: crates/chump-gap-store/src/lib.rs ship() (CREDIBLE-1495 R4)
+    trigger: emitted exactly once when a gap's landing receipt validates and
+      the gap row transitions to done in the same call — one line per landed
+      PR, never retried on subsequent ship() calls for the same gap.
+    consumers: [fleet-brief, dispatch-hygiene, phase-r-measurement]
+    fields_required: [ts, kind, gap_id, closed_pr]
+
   # ── INFRA-1033: worktree gitdir auto-repair (INFRA-779 family) ────────────
   - kind: worktree_gitdir_repaired
     effect_metric: self

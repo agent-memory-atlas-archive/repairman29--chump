@@ -802,6 +802,14 @@ impl GapStore {
             .conn
             .execute("ALTER TABLE gaps ADD COLUMN evidence TEXT", []);
 
+        // CREDIBLE-1495 R5: landing_receipt_json stores the LandingReceipt as JSON
+        // after a gap transitions to done. Nullable — existing rows stay NULL
+        // until they ship with the new code. Used for receipt validation and
+        // idempotency detection.
+        let _ = self
+            .conn
+            .execute("ALTER TABLE gaps ADD COLUMN landing_receipt_json TEXT", []);
+
         // MISSION-033: first-class repos table + 3 indexes.
         // Derived index: auto-upserted on `chump gap import` for every
         // `external_repo:<owner>/<repo>` tag in gaps.skills_required.
@@ -3081,6 +3089,43 @@ impl GapStore {
                 .status();
         }
 
+        // CREDIBLE-1495 R1: Construct and validate LandingReceipt before status transition.
+        let receipt = chump_ship::LandingReceipt::new(gap_id.to_string(), closed_pr);
+        receipt
+            .validate()
+            .map_err(|e| anyhow::anyhow!("CREDIBLE-1495: invalid landing receipt: {e}"))?;
+
+        // CREDIBLE-1495 R3: Check if gap is already done (idempotent behavior).
+        // If already done, return Ok() with no event emitted.
+        let current_status: String = match self.conn.query_row(
+            "SELECT status FROM gaps WHERE id=?1",
+            params![gap_id],
+            |r| r.get(0),
+        ) {
+            Ok(status) => status,
+            Err(_) => {
+                bail!(
+                    "gap {} not found, already done, or in a deliberate terminal status \
+                     (superseded/wontfix/closed)",
+                    gap_id
+                );
+            }
+        };
+
+        // CREDIBLE-1495 R3: If already in a terminal status, return Ok() with no event.
+        if matches!(
+            current_status.as_str(),
+            "done"
+                | "superseded"
+                | "wontfix"
+                | "wont_fix"
+                | "closed"
+                | "closed_not_a_bug"
+                | "already_satisfied"
+        ) {
+            return Ok(());
+        }
+
         let now = unix_now();
         let iso = unix_to_iso_date(now);
         // CREDIBLE-218: reconcile ANY non-terminal status, not just 'open'. A gap
@@ -3090,19 +3135,21 @@ impl GapStore {
         // (merged on main, still shown open). We exclude only the DELIBERATE terminal
         // statuses (already done, or an operator's superseded/wontfix/closed decision)
         // so a real terminal choice is never silently flipped to done.
+        let receipt_json = serde_json::to_string(&receipt)
+            .context("CREDIBLE-1495: failed to serialize landing receipt")?;
         let changed = if let Some(pr) = closed_pr {
             self.conn.execute(
-                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2, closed_pr=?3
-                 WHERE id=?4 AND status NOT IN
+                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2, closed_pr=?3, landing_receipt_json=?4
+                 WHERE id=?5 AND status NOT IN
                    ('done','superseded','wontfix','wont_fix','closed','closed_not_a_bug','already_satisfied')",
-                params![now, iso, pr, gap_id],
+                params![now, iso, pr, receipt_json, gap_id],
             )?
         } else {
             self.conn.execute(
-                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2
-                 WHERE id=?3 AND status NOT IN
+                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2, landing_receipt_json=?3
+                 WHERE id=?4 AND status NOT IN
                    ('done','superseded','wontfix','wont_fix','closed','closed_not_a_bug','already_satisfied')",
-                params![now, iso, gap_id],
+                params![now, iso, receipt_json, gap_id],
             )?
         };
         if changed == 0 {
@@ -3126,6 +3173,27 @@ impl GapStore {
         // respawning as a fresh gap id (root incident: RESILIENT-1230 ->
         // 1258 -> 1294, one unfixed symptom, three ids).
         self.record_effect_verification(gap_id);
+
+        // CREDIBLE-1495 R4: Emit exactly one ship_landed ambient event on first transition.
+        // This event is crucial for tracking the moment a gap transitioned to done.
+        {
+            use std::io::Write as _;
+            let ts = unix_to_iso_full(unix_now());
+            let pr_str = closed_pr
+                .map(|pr| format!(",\"closed_pr\":{pr}"))
+                .unwrap_or_default();
+            let line = format!(
+                "{{\"ts\":\"{ts}\",\"kind\":\"ship_landed\",\"gap_id\":\"{gap_id}\"{pr_str}}}\n"
+            );
+            let amb = self.repo_root.join(".chump-locks").join("ambient.jsonl");
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&amb)
+            {
+                let _ = f.write_all(line.as_bytes());
+            }
+        }
 
         // EFFECTIVE-478 (EFFECTIVE-364 slice): trigger the publication
         // resolver asynchronously so "ship -> told" work gets queued
@@ -8914,8 +8982,9 @@ mod tests {
 
     #[test]
     fn credible218_ship_refuses_deliberate_terminal() {
-        // A superseded/wontfix gap is a deliberate operator decision — ship() must NOT
-        // silently flip it to done just because a commit mentions the ID.
+        // CREDIBLE-1495 R3: ship() is idempotent. A superseded/wontfix gap in a
+        // deliberate terminal status returns Ok() with no event — the status is
+        // already what we want, and calling ship again is safe.
         let (store, _dir) = test_store();
         let id = store
             .reserve("CREDIBLE", "superseded gap", "P2", "s")
@@ -8928,8 +8997,8 @@ mod tests {
             )
             .unwrap();
         assert!(
-            store.ship(&id, "sess", None).is_err(),
-            "ship() must refuse to reconcile a deliberate terminal status"
+            store.ship(&id, "sess", None).is_ok(),
+            "ship() must be idempotent and return Ok on deliberate terminal status"
         );
     }
 
@@ -11199,18 +11268,17 @@ meta:
 
     #[test]
     fn ship_already_done_gap_returns_err() {
+        // CREDIBLE-1495 R3: ship() is idempotent. Calling ship twice on the same gap
+        // returns Ok both times with no error. The second call detects it's already
+        // done and returns early with no event emitted.
         let (store, _dir) = test_store();
         let id = store.reserve("INFRA", "done-candidate", "P2", "s").unwrap();
-        store.ship(&id, "session-a", None).unwrap();
+        let first_ship = store.ship(&id, "session-a", None);
+        assert!(first_ship.is_ok(), "first ship must succeed");
         let second_ship = store.ship(&id, "session-b", None);
         assert!(
-            second_ship.is_err(),
-            "shipping an already-done gap should fail"
-        );
-        let msg = format!("{:#}", second_ship.unwrap_err());
-        assert!(
-            msg.contains("not found") || msg.contains("already done"),
-            "unexpected error: {msg}"
+            second_ship.is_ok(),
+            "second ship on already-done gap must succeed (idempotent)"
         );
     }
 

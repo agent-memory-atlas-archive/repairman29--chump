@@ -45,7 +45,8 @@ pub mod manual_ship;
 pub mod ship;
 
 pub use ship::{
-    PreflightGate, PreflightReport, Ship, ShipError, ShipIntent, ShipMode, ShipReceipt,
+    LandingReceipt, PreflightGate, PreflightReport, Ship, ShipError, ShipIntent, ShipMode,
+    ShipReceipt,
 };
 
 use serde::{Deserialize, Serialize};

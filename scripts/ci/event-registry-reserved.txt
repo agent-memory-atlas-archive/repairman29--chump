@@ -910,3 +910,6 @@ worker_restarted_on_code_change  # reason: RESILIENT-1453 — emitted by scripts
 
 # ── INFRA-1563: /api/decisions operator-decision queue — consumer ships before emitters ──
 operator_decision_needed  # reason: INFRA-1563 — GET /api/decisions (src/routes/decisions.rs) is a real, tested consumer of this kind (scans ambient.jsonl, drives the PWA decisions queue). No emitter ships in this PR: wiring orchestrator/picker/bot-merge to actually raise operator_decision_needed is follow-up work tracked in INFRA-7896. Remove this line once that gap lands an emit site.
+
+# ── CREDIBLE-1495 R4 / CREDIBLE-1505 repair ───────────────────────────────
+ship_landed  # reason: CREDIBLE-1495 R4 — emitted by crates/chump-gap-store/src/lib.rs ship() via a format! string using Rust-escaped \"kind\":\"ship_landed\" quoting, which the `chump verify` event-registry rule's unescaped-quote needle (src/verify/rules/event_registry.rs) cannot see even though the CI coverage gate (scripts/ci/test-event-registry-coverage.sh Pattern 3) does. Reserved here to satisfy the register-without-emit direction; drop this line if the rule's needle gains escaped-quote support.

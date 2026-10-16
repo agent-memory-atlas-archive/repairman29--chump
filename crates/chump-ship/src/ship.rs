@@ -46,6 +46,45 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Receipt documenting a landing event: gap shipped with PR info.
+/// Constructed from gap_id and closed_pr, then validated before
+/// status transitions. CREDIBLE-1495: enforces idempotency + single
+/// event emission on first transition.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LandingReceipt {
+    /// Gap ID (e.g. `INFRA-2001`).
+    pub gap_id: String,
+    /// GitHub PR number that closed/merged this gap (if available).
+    pub closed_pr: Option<i64>,
+    /// UTC timestamp of receipt creation.
+    pub created_at: DateTime<Utc>,
+}
+
+impl LandingReceipt {
+    /// Construct a receipt from gap_id and optional closed_pr.
+    pub fn new(gap_id: impl Into<String>, closed_pr: Option<i64>) -> Self {
+        LandingReceipt {
+            gap_id: gap_id.into(),
+            closed_pr,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Validate this receipt: check gap_id is non-empty, closed_pr (if present) is positive.
+    /// Returns Ok(()) if valid, Err(reason) if not.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.gap_id.is_empty() {
+            return Err("gap_id cannot be empty".to_string());
+        }
+        if let Some(pr) = self.closed_pr {
+            if pr <= 0 {
+                return Err(format!("closed_pr must be positive, got {pr}"));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Selection of which executor path runs the ship.
 ///
 /// Mirrors the three flavours of `scripts/coord/bot-merge.sh` today:
@@ -303,6 +342,61 @@ pub trait Ship: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn landing_receipt_new() {
+        let r = LandingReceipt::new("INFRA-2001", Some(42));
+        assert_eq!(r.gap_id, "INFRA-2001");
+        assert_eq!(r.closed_pr, Some(42));
+    }
+
+    #[test]
+    fn landing_receipt_new_no_pr() {
+        let r = LandingReceipt::new("INFRA-2001", None);
+        assert_eq!(r.gap_id, "INFRA-2001");
+        assert_eq!(r.closed_pr, None);
+    }
+
+    #[test]
+    fn landing_receipt_validate_ok() {
+        let r = LandingReceipt::new("INFRA-2001", Some(42));
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn landing_receipt_validate_ok_no_pr() {
+        let r = LandingReceipt::new("INFRA-2001", None);
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn landing_receipt_validate_empty_gap_id() {
+        let r = LandingReceipt::new("", Some(42));
+        assert!(r.validate().is_err());
+        assert!(r.validate().unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn landing_receipt_validate_negative_pr() {
+        let r = LandingReceipt::new("INFRA-2001", Some(-1));
+        assert!(r.validate().is_err());
+        assert!(r.validate().unwrap_err().contains("positive"));
+    }
+
+    #[test]
+    fn landing_receipt_validate_zero_pr() {
+        let r = LandingReceipt::new("INFRA-2001", Some(0));
+        assert!(r.validate().is_err());
+        assert!(r.validate().unwrap_err().contains("positive"));
+    }
+
+    #[test]
+    fn landing_receipt_serialize_to_json() {
+        let r = LandingReceipt::new("INFRA-2001", Some(42));
+        let j = serde_json::to_string(&r).expect("serialize");
+        assert!(j.contains("\"gap_id\":\"INFRA-2001\""));
+        assert!(j.contains("\"closed_pr\":42"));
+    }
 
     #[test]
     fn ship_mode_name_manual() {
