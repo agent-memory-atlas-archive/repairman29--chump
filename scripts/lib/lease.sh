@@ -160,6 +160,44 @@ lease_session_from_statedb() {
     sqlite3 "$db" "SELECT session_id FROM leases WHERE gap_id='$gap_id' LIMIT 1;" 2>/dev/null || true
 }
 
+# ── dispatch-worktree lease lookup (INFRA-8204) ──────────────────────────────
+# `chump dispatch --backend headless` writes its lease under
+# `<worktree>/.chump-locks/<session_id>.json` (see src/dispatch.rs
+# resolve_dispatch_session_id / claim()). bot-merge.sh's session-ID
+# auto-detection only ever scanned `$LOCK_DIR/*.json` (the MAIN checkout) and
+# state.db — never `$PWD/.chump-locks` when `$PWD` IS the dispatch worktree —
+# so it could never find this lease. This helper closes that gap.
+#
+# lease_file_for_gap_in_dir <dir> <gap-id>
+#   Echoes the path of the first <dir>/*.json lease whose gap_id (or
+#   pending_new_gap.id) equals <gap-id>. Prints nothing and returns 1 when no
+#   match is found (or <dir> doesn't exist). Read-only.
+lease_file_for_gap_in_dir() {
+    local dir="$1" gap_id="$2"
+    [[ -d "$dir" ]] || return 1
+    local f gid
+    for f in "$dir"/*.json; do
+        [[ -f "$f" ]] || continue
+        gid="$(lease_field "$f" gap_id)"
+        if [[ -z "$gid" ]]; then
+            if command -v jq >/dev/null 2>&1; then
+                gid="$(jq -r '.pending_new_gap.id // empty' "$f" 2>/dev/null)"
+            else
+                # Lease JSON is written compact (single-line, see
+                # chump-agent-lease::claim_gap) so a window-free regex over
+                # the whole file is safe here.
+                gid="$(grep -oE '"pending_new_gap"[[:space:]]*:[[:space:]]*\{[^}]*"id"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null \
+                    | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+            fi
+        fi
+        if [[ "$gid" == "$gap_id" ]]; then
+            printf '%s\n' "$f"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # lease_worktree_from_statedb <gap_id> [<state_db_path>]
 #   Echoes the worktree path holding <gap_id>'s lease (empty if none / no
 #   sqlite3). INFRA-1901: lets a caller detect "am I already sitting inside

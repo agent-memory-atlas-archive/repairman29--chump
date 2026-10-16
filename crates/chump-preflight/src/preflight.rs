@@ -2594,6 +2594,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "dispatch-ship-session-id",
+            &["bash", "scripts/ci/test-dispatch-ship-session-id.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-1025-atomic-claim",
             &["bash", "scripts/ci/test-infra-1025-atomic-claim.sh"],
             GateKind::Scripts,

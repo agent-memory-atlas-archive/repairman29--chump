@@ -191,6 +191,17 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
         .context("resolving workspace (worktree creation for ExecGap/Headless)")?;
     let branch = current_branch(workspace.working_dir())?;
 
+    // INFRA-8204: one session id for the whole dispatch cycle, printed once
+    // so the ship-phase log and the "released session_id=" line (src/main.rs)
+    // are visibly the same id — see [`Workspace::new`] for where it's
+    // resolved/exported/persisted.
+    if !workspace.session_id.is_empty() {
+        eprintln!(
+            "[dispatch] {} session_id={}",
+            opts.gap_id, workspace.session_id
+        );
+    }
+
     // Step 1: preflight (read-only check).
     preflight(&workspace).context("preflight")?;
 
@@ -244,17 +255,22 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
 struct Workspace<'a> {
     opts: &'a DispatchOptions<'a>,
     working_dir: PathBuf,
+    /// INFRA-8204: the single session id used for the entire dispatch cycle
+    /// (claim, work child, ship, release, every ambient emit). Empty for
+    /// [`WorkBackend::Interactive`] — the caller already owns a session id
+    /// from its own shell. See [`resolve_dispatch_session_id`].
+    session_id: String,
 }
 
 impl<'a> Workspace<'a> {
     fn new(opts: &'a DispatchOptions) -> Result<Self> {
-        let working_dir = match opts.work {
+        let (working_dir, session_id) = match opts.work {
             WorkBackend::Interactive => {
                 // Caller is already in their worktree (per CLAUDE.md +
                 // gap-claim.sh enforcement). No worktree creation needed;
                 // matches the pre-INFRA-302 behavior so the Interactive
                 // ledger-flip flow doesn't regress.
-                opts.repo_root.clone()
+                (opts.repo_root.clone(), String::new())
             }
             WorkBackend::Headless { .. }
             | WorkBackend::ExecGap
@@ -269,11 +285,33 @@ impl<'a> Workspace<'a> {
                 // stale-worktree-reaper sweeps it up later (see CLAUDE.md
                 // "Worktree disk hygiene"). On hard failure we also leave
                 // it in place so the operator can inspect.
-                create_dispatch_worktree(&opts.repo_root, opts.gap_id)
-                    .with_context(|| format!("creating worktree for {}", opts.gap_id))?
+                let working_dir = create_dispatch_worktree(&opts.repo_root, opts.gap_id)
+                    .with_context(|| format!("creating worktree for {}", opts.gap_id))?;
+
+                // INFRA-8204: resolve ONE session id for the whole dispatch
+                // cycle and export it into THIS process's env so every
+                // subsequent step (claim(), release(), the spawned work
+                // child, every ambient emit) inherits it by default — the
+                // explicit `cmd.env(...)` calls in ship()/spawn_* are
+                // belt-and-suspenders on top of that inheritance. Without
+                // this, claim() writes the lease under a node-wide session
+                // id that ship()'s `bot-merge.sh` (run without
+                // CHUMP_SESSION_ID exported) can never find in the
+                // worktree's own `.chump-locks/`, so bot-merge re-invokes
+                // `chump claim` and either spawns a stray second worktree
+                // or fails outright (INFRA-8204).
+                let session_id = resolve_dispatch_session_id(opts.gap_id);
+                std::env::set_var("CHUMP_SESSION_ID", &session_id);
+                write_wt_session_id_file(&working_dir, &session_id);
+
+                (working_dir, session_id)
             }
         };
-        Ok(Self { opts, working_dir })
+        Ok(Self {
+            opts,
+            working_dir,
+            session_id,
+        })
     }
 
     fn working_dir(&self) -> &Path {
@@ -282,6 +320,42 @@ impl<'a> Workspace<'a> {
 
     fn opts(&self) -> &DispatchOptions<'a> {
         self.opts
+    }
+}
+
+/// INFRA-8204: resolve the single session id to use for an entire dispatch
+/// cycle on a worktree-creating backend. `CHUMP_SESSION_ID` wins if already
+/// set (trimmed, non-empty) — e.g. an orchestrator that already assigned one
+/// — otherwise derive `dispatch-<slug>-<pid>-<unix_ts>`, where `slug` is the
+/// same lowercase gap slug [`create_dispatch_worktree`] uses for the worktree
+/// directory (via [`chump_orchestrator::dispatch::dispatch_paths`]).
+fn resolve_dispatch_session_id(gap_id: &str) -> String {
+    if let Ok(v) = std::env::var("CHUMP_SESSION_ID") {
+        let v = v.trim();
+        if !v.is_empty() {
+            return v.to_string();
+        }
+    }
+    let slug = gap_id.to_ascii_lowercase().replace('_', "-");
+    let pid = std::process::id();
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format!("dispatch-{slug}-{pid}-{ts}")
+}
+
+/// INFRA-8204: persist the resolved session id to
+/// `<working_dir>/.chump-locks/.wt-session-id`, the same file
+/// `ambient_emit.rs::resolve_session_id` already reads as a fallback when
+/// `CHUMP_SESSION_ID`/`CLAUDE_SESSION_ID` are unset — so a child process that
+/// somehow drops the env var still resolves the same id. Best-effort: a
+/// write failure here doesn't abort the dispatch (the env var export is the
+/// primary path).
+fn write_wt_session_id_file(working_dir: &Path, session_id: &str) {
+    let lock_dir = working_dir.join(".chump-locks");
+    if std::fs::create_dir_all(&lock_dir).is_ok() {
+        let _ = std::fs::write(lock_dir.join(".wt-session-id"), session_id);
     }
 }
 
@@ -481,6 +555,10 @@ fn spawn_opencode(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
         cmd.args(["--model", model]);
     }
     cmd.current_dir(ws.working_dir());
+    // INFRA-8204: explicit, not merely inherited — see ship()'s comment.
+    if !ws.session_id.is_empty() {
+        cmd.env("CHUMP_SESSION_ID", &ws.session_id);
+    }
     let child = cmd
         .spawn()
         .context("spawn `opencode -p` (is opencode CLI on PATH?)")?;
@@ -508,6 +586,10 @@ fn spawn_aider(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
         cmd.args(["--model", model]);
     }
     cmd.current_dir(ws.working_dir());
+    // INFRA-8204: explicit, not merely inherited — see ship()'s comment.
+    if !ws.session_id.is_empty() {
+        cmd.env("CHUMP_SESSION_ID", &ws.session_id);
+    }
     let child = cmd
         .spawn()
         .context("spawn `aider --message` (is aider on PATH?)")?;
@@ -546,6 +628,10 @@ fn spawn_local(ws: &Workspace, prompt: &str) -> Result<()> {
         // as the other backends, even though `gen` also takes --work-dir
         // explicitly (gen resolves relative paths off cwd otherwise).
         .current_dir(ws.working_dir());
+    // INFRA-8204: explicit, not merely inherited — see ship()'s comment.
+    if !ws.session_id.is_empty() {
+        cmd.env("CHUMP_SESSION_ID", &ws.session_id);
+    }
     let child = cmd
         .spawn()
         .context("spawn `chump gen --local` (is chump on PATH / built?)")?;
@@ -617,6 +703,10 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     for (k, v) in active_auth.env_pairs() {
         cmd.env(k, v);
     }
+    // INFRA-8204: explicit, not merely inherited — see ship()'s comment.
+    if !ws.session_id.is_empty() {
+        cmd.env("CHUMP_SESSION_ID", &ws.session_id);
+    }
     let mut child = cmd
         .spawn()
         .context("spawn `claude -p` (is the claude CLI on PATH?)")?;
@@ -661,6 +751,10 @@ fn spawn_exec_gap(ws: &Workspace) -> Result<()> {
         // not from whatever was checked out in the main repo when the
         // operator typed `chump dispatch …`.
         .current_dir(ws.working_dir());
+    // INFRA-8204: explicit, not merely inherited — see ship()'s comment.
+    if !ws.session_id.is_empty() {
+        cmd.env("CHUMP_SESSION_ID", &ws.session_id);
+    }
     let child = cmd
         .spawn()
         .with_context(|| format!("spawn `chump --execute-gap {}`", opts.gap_id))?;
@@ -1011,6 +1105,14 @@ fn ship(ws: &Workspace) -> Result<ShipResult> {
     if opts.skip_tests {
         cmd.arg("--skip-tests");
     }
+    // INFRA-8204: explicit, not merely inherited — bot-merge.sh's own
+    // session-ID auto-detection only scans $LOCK_DIR/*.json + state.db, never
+    // the dispatch worktree's own .chump-locks/, so without this the ship
+    // phase can't see the lease claim() just wrote and re-invokes
+    // `chump claim`, stranding the agent's commits.
+    if !ws.session_id.is_empty() {
+        cmd.env("CHUMP_SESSION_ID", &ws.session_id);
+    }
     // INFRA-302 blocker (3): bot-merge.sh derives the branch via
     // `git rev-parse --abbrev-ref HEAD` — it MUST run inside the
     // dispatch's fresh worktree, not the main checkout, or it pushes
@@ -1272,6 +1374,7 @@ mod tests {
         Workspace {
             opts,
             working_dir: dir,
+            session_id: String::new(),
         }
     }
 
@@ -1472,6 +1575,55 @@ mod tests {
             branch, "claude/infra-302",
             "branch convention drifted — bot-merge.sh's gap-from-branch \
              auto-derive (INFRA-237) parses this prefix"
+        );
+    }
+
+    // ── INFRA-8204: one session id for the whole dispatch cycle ──────────────
+
+    /// With no `CHUMP_SESSION_ID` set, the derived id must start with
+    /// `dispatch-<slug>-` (slug = the same lowercase gap slug used for the
+    /// worktree dir) and must never be empty — this is the id claim(),
+    /// ship(), and every spawned work child share so bot-merge.sh's
+    /// session-ID auto-detection can actually find the lease claim() wrote.
+    #[test]
+    #[serial_test::serial(dispatch_session_id_env)]
+    fn resolve_dispatch_session_id_derives_from_slug_when_unset() {
+        std::env::remove_var("CHUMP_SESSION_ID");
+        let id = resolve_dispatch_session_id("INFRA_8204");
+        assert!(!id.is_empty(), "derived session id must not be empty");
+        assert!(
+            id.starts_with("dispatch-infra-8204-"),
+            "expected id to start with 'dispatch-infra-8204-' (slug lowercased, \
+             underscores replaced with hyphens, matching dispatch_paths), got: {id}"
+        );
+    }
+
+    /// An explicit, non-empty `CHUMP_SESSION_ID` set before dispatch (e.g. by
+    /// an orchestrator that already assigned one) must win over the derived
+    /// id — [`Workspace::new`] relies on this so it doesn't clobber an
+    /// intentionally-assigned id.
+    #[test]
+    #[serial_test::serial(dispatch_session_id_env)]
+    fn resolve_dispatch_session_id_prefers_explicit_env_var() {
+        std::env::set_var("CHUMP_SESSION_ID", "explicit-session-xyz");
+        let id = resolve_dispatch_session_id("INFRA-8204");
+        std::env::remove_var("CHUMP_SESSION_ID");
+        assert_eq!(id, "explicit-session-xyz");
+    }
+
+    /// A whitespace-only `CHUMP_SESSION_ID` must be treated as unset (same
+    /// trim-and-check-non-empty contract as
+    /// `chump_agent_lease::current_session_id`), falling through to the
+    /// derived id rather than returning blank/whitespace.
+    #[test]
+    #[serial_test::serial(dispatch_session_id_env)]
+    fn resolve_dispatch_session_id_treats_blank_env_as_unset() {
+        std::env::set_var("CHUMP_SESSION_ID", "   ");
+        let id = resolve_dispatch_session_id("INFRA-8204");
+        std::env::remove_var("CHUMP_SESSION_ID");
+        assert!(
+            id.starts_with("dispatch-infra-8204-"),
+            "blank CHUMP_SESSION_ID should fall through to the derived id, got: {id}"
         );
     }
 

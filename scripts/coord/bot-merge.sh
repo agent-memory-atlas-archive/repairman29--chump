@@ -1716,6 +1716,28 @@ export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-chump-dispatch@chump.bot}"
 # post-rebase preflight ran under that new session (no pending_new_gap),
 # and failed with "not found in docs/gaps.yaml" — forcing the INFRA-028
 # manual path. Surfaced by PR #476 (PRODUCT-015).
+#
+# INFRA-8204: `chump dispatch --backend headless` runs THIS script with
+# $PWD = the dispatch worktree (<repo>/.claude/worktrees/<slug>), not the
+# main checkout, and its own lease lands under `$PWD/.chump-locks/`, which
+# the scans below never looked at (they only ever checked `$LOCK_DIR`, the
+# MAIN checkout's lock dir, and state.db). So this block must try the
+# dispatch worktree's own lease dir FIRST.
+_bm_session_src=""
+if [[ -n "${CHUMP_SESSION_ID:-}" ]]; then
+    _bm_session_src="env CHUMP_SESSION_ID"
+fi
+if [[ -z "${CHUMP_SESSION_ID:-}" && ${#GAP_IDS[@]} -gt 0 ]]; then
+    for _gid in "${GAP_IDS[@]}"; do
+        _wt_lf="$(lease_file_for_gap_in_dir "$PWD/.chump-locks" "$_gid" || true)"
+        if [[ -n "$_wt_lf" ]]; then
+            export CHUMP_SESSION_ID="$(lease_session_id "$_wt_lf")"
+            _bm_session_src="$_wt_lf"
+            info "INFRA-8204: session ID from dispatch worktree lease $_wt_lf: $CHUMP_SESSION_ID"
+            break
+        fi
+    done
+fi
 if [[ -z "${CHUMP_SESSION_ID:-}" && ${#GAP_IDS[@]} -gt 0 ]]; then
     # LOCK_DIR is set by repo-paths.sh (sourced above) — main-repo path.
     for _gid in "${GAP_IDS[@]}"; do
@@ -1736,6 +1758,7 @@ except Exception:
 " "$_lf" "$_gid" 2>/dev/null || true)
             if [[ -n "$_match" ]]; then
                 export CHUMP_SESSION_ID="$_match"
+                _bm_session_src="$_lf"
                 info "Auto-detected session ID from gap lease: $CHUMP_SESSION_ID"
                 break 2
             fi
@@ -1749,11 +1772,20 @@ except Exception:
             _sess="$(lease_session_from_statedb "$_gid" "${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db")"
             if [[ -n "$_sess" ]]; then
                 export CHUMP_SESSION_ID="$_sess"
+                _bm_session_src="state.db:${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db (gap=$_gid)"
                 info "INFRA-2744: resolved session ID from state.db lease: $CHUMP_SESSION_ID"
                 break
             fi
         done
     fi
+fi
+# INFRA-8204: last-resort fallback — the `.wt-session-id` cache file dispatch
+# writes alongside the worktree's lease (same convention
+# ambient_emit.rs::resolve_session_id already reads).
+if [[ -z "${CHUMP_SESSION_ID:-}" && -s "$PWD/.chump-locks/.wt-session-id" ]]; then
+    export CHUMP_SESSION_ID="$(cat "$PWD/.chump-locks/.wt-session-id")"
+    _bm_session_src="$PWD/.chump-locks/.wt-session-id"
+    info "INFRA-8204: session ID from $PWD/.chump-locks/.wt-session-id: $CHUMP_SESSION_ID"
 fi
 
 # INFRA-3455: RECONCILE (not just fill). The block above only resolves when
@@ -2449,9 +2481,24 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                 # scanner-anchor: "kind":"bot_merge_skip_claim_lax"
                 chump ambient emit bot_merge_skip_claim_lax "gap=$gid" >/dev/null 2>&1 || true
             else
+                _lease_wt=""
+                _lease_src=""
+                # INFRA-8204: check the CURRENT worktree's own `.chump-locks/`
+                # first — this is where `chump dispatch`'s lease-only claim()
+                # writes, and it's exactly the case the scans below (main
+                # checkout's $LOCK_DIR + state.db) can never see, since a
+                # dispatch worktree's lease never lands in either place.
+                _wt_lf="$(lease_file_for_gap_in_dir "$PWD/.chump-locks" "$gid" || true)"
+                if [[ -n "$_wt_lf" ]]; then
+                    _lease_wt="$PWD"
+                    _lease_src="$_wt_lf"
+                fi
                 # AC#3: prefer the canonical state.db lease; fall back to a
                 # legacy JSON sidecar (multi-session-claim files) on miss.
-                _lease_wt="$(lease_worktree_from_statedb "$gid" "${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db" 2>/dev/null || true)"
+                if [[ -z "$_lease_wt" ]]; then
+                    _lease_wt="$(lease_worktree_from_statedb "$gid" "${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db" 2>/dev/null || true)"
+                    [[ -n "$_lease_wt" ]] && _lease_src="state.db:${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db (gap=$gid)"
+                fi
                 if [[ -z "$_lease_wt" ]]; then
                     for _lf in "$LOCK_DIR"/*.json; do
                         [[ -f "$_lf" ]] || continue
@@ -2464,7 +2511,10 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                             # body's last statement leaks rc=1 into the for
                             # loop under set -e — the silent claim-step killer
                             # (proven by cycle-7 xtrace on chumpd-eu).
-                            if [[ -n "$_lease_wt" ]]; then break; fi
+                            if [[ -n "$_lease_wt" ]]; then
+                                _lease_src="$_lf"
+                                break
+                            fi
                         fi
                     done
                 fi
@@ -2482,7 +2532,7 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
             fi
 
             if [[ "$_already_in_lease_wt" -eq 1 ]]; then
-                info "INFRA-1901: already inside claimed worktree for $gid (lease=$_lease_wt) — skipping chump claim re-invocation"
+                info "INFRA-1901: already inside claimed worktree for $gid (lease=$_lease_wt, source=${_lease_src:-unknown}) — skipping chump claim re-invocation"
                 _BM_OWN_CLAIM=1
                 chump session-track --start "$gid" >/dev/null 2>&1 || true
                 continue
@@ -2513,7 +2563,7 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                         chump session-track --start "$gid" >/dev/null 2>&1 || true
                         continue
                     fi
-                    red "CREDIBLE-160: gap $gid lease held by DIFFERENT session (${_claim_lease_session:-unknown}, ours: ${CHUMP_SESSION_ID:-<unset>})"
+                    red "CREDIBLE-160: gap $gid lease held by DIFFERENT session (${_claim_lease_session:-none found}, ours: ${CHUMP_SESSION_ID:-none} (source: ${_bm_session_src:-not set: searched env, \$PWD/.chump-locks/*.json, \$LOCK_DIR/*.json, ${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db}))"
                     printf '%s\n' "$_claim_out" >&2
                     _bm_step_done "claim" "$_claim_rc"
                     _BM_TERMINAL_STATE="claim_failed_session_mismatch"
@@ -2525,20 +2575,33 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                 fi
                 if [[ "$_claim_worktree_exists" -eq 1 ]]; then
                     # Check existing claim's session_id via the lease file.
+                    # INFRA-8204: also check the CURRENT worktree's own
+                    # .chump-locks/ first (dispatch's lease-only claim lands
+                    # there, invisible to the LOCK_DIR/state.db scans below).
                     _existing_claim_session=""
-                    for _lf in "$LOCK_DIR"/*.json; do
-                        [[ -f "$_lf" ]] || continue
-                        _lf_gid="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('gap_id',''))" "$_lf" 2>/dev/null || true)"
-                        if [[ "$_lf_gid" == "$gid" ]]; then
-                            _existing_claim_session="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('session_id',''))" "$_lf" 2>/dev/null || true)"
-                            break
-                        fi
-                    done
+                    _existing_claim_src=""
+                    _wt_lf="$(lease_file_for_gap_in_dir "$PWD/.chump-locks" "$gid" || true)"
+                    if [[ -n "$_wt_lf" ]]; then
+                        _existing_claim_session="$(lease_session_id "$_wt_lf")"
+                        _existing_claim_src="$_wt_lf"
+                    fi
+                    if [[ -z "$_existing_claim_session" ]]; then
+                        for _lf in "$LOCK_DIR"/*.json; do
+                            [[ -f "$_lf" ]] || continue
+                            _lf_gid="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('gap_id',''))" "$_lf" 2>/dev/null || true)"
+                            if [[ "$_lf_gid" == "$gid" ]]; then
+                                _existing_claim_session="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('session_id',''))" "$_lf" 2>/dev/null || true)"
+                                _existing_claim_src="$_lf"
+                                break
+                            fi
+                        done
+                    fi
                     # INFRA-2744: JSON lock files are legacy; interactive `chump
                     # claim` writes the lease to the canonical state.db only. Fall
                     # back to it so we recognize the operator's own claim.
                     if [[ -z "$_existing_claim_session" ]]; then
                         _existing_claim_session="$(lease_session_from_statedb "$gid" "${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db")"
+                        [[ -n "$_existing_claim_session" ]] && _existing_claim_src="state.db row for $gid"
                     fi
                     if [[ -n "${CHUMP_SESSION_ID:-}" && "$_existing_claim_session" == "$CHUMP_SESSION_ID" ]]; then
                         # Same session — the existing worktree + (committed,
@@ -2551,8 +2614,16 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                         _BM_OWN_CLAIM=1
                     else
                         red "META-156 AC#2: re-claim failure — worktree already exists and is owned by a DIFFERENT session."
-                        red "  Our session: ${CHUMP_SESSION_ID:-<unset>}"
-                        red "  Existing claim session: ${_existing_claim_session:-<unknown>}"
+                        if [[ -n "${CHUMP_SESSION_ID:-}" ]]; then
+                            red "  Our session: $CHUMP_SESSION_ID (source: ${_bm_session_src:-env CHUMP_SESSION_ID})"
+                        else
+                            red "  Our session: none (source: not set: searched env, \$PWD/.chump-locks/*.json, \$LOCK_DIR/*.json, ${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db)"
+                        fi
+                        if [[ -n "$_existing_claim_session" ]]; then
+                            red "  Existing claim session: $_existing_claim_session (source: ${_existing_claim_src:-unknown})"
+                        else
+                            red "  Existing claim session: none found (source: searched: \$LOCK_DIR/*.json, \$PWD/.chump-locks/*.json, ${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db)"
+                        fi
                         red "  Resolution: wait for that session to finish, or release it with:"
                         red "    chump --release --session ${_existing_claim_session:-<session-id>}"
                         _bm_step_done "claim" "$_claim_rc"
