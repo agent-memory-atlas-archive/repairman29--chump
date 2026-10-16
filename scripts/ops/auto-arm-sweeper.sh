@@ -20,6 +20,14 @@
 #     the same head SHA, someone disabled auto-merge: record who, and do not
 #     re-arm until the head SHA changes (a new push = a new green event) and
 #     no hold label is present.
+#   - INFRA-8178: a disarm is only treated as human if the timeline actor is
+#     NOT the automation login AND the disarm didn't land within
+#     CHUMP_AUTOARM_DISARM_WINDOW_S seconds of a failed required check on
+#     the same head — GitHub attributes auto_merge_disabled to whoever
+#     ENABLED auto-merge (almost always the automation login) whenever a
+#     required check fails after arming, which the sweeper was previously
+#     misreading as a permanent human hold (see scripts/ops/lib/
+#     disarm-classify.sh). A gate-triggered disarm re-arms once green.
 #   - Logs every arm action so it's auditable
 #
 # Recommended cron: every 10 min via launchd. Idempotent — already-armed
@@ -41,6 +49,11 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 # shellcheck source=/dev/null
 source "${REPO_ROOT}/scripts/coord/lib/github.sh" 2>/dev/null || true
 command -v chump_gh >/dev/null 2>&1 || chump_gh() { gh "$@"; }
+
+# INFRA-8178: pure human-vs-gate disarm classification (unit-tested
+# separately in scripts/ci/test-auto-arm-sweeper.sh).
+# shellcheck source=lib/disarm-classify.sh
+source "${REPO_ROOT}/scripts/ops/lib/disarm-classify.sh"
 
 DRY=0
 [[ "${1:-}" == "--dry-run" ]] && DRY=1
@@ -76,10 +89,15 @@ state_set() { # <num> <sha> <status> [who]
       printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${4:-}" "$(ts)"; } > "$tmp" 2>/dev/null \
         && mv "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
 }
-disarmer_of() { # <num> -> login of the last auto_merge_disabled actor (best effort)
+disarm_event_info() { # <num> -> "actor<TAB>created_at" of the last auto_merge_disabled event (best effort)
     chump_gh api "repos/{owner}/{repo}/issues/$1/timeline" --paginate \
-        --jq '[.[] | select(.event=="auto_merge_disabled")] | last | .actor.login // empty' \
+        --jq '[.[] | select(.event=="auto_merge_disabled")] | last | ((.actor.login // "") + "\t" + (.created_at // ""))' \
         2>/dev/null | tail -1
+}
+failing_check_timestamps() { # <sha> -> one completed_at per failed/timed-out check run
+    chump_gh api "repos/{owner}/{repo}/commits/$1/check-runs" --paginate \
+        --jq '.check_runs[]? | select(.conclusion=="failure" or .conclusion=="timed_out") | .completed_at // empty' \
+        2>/dev/null
 }
 
 log "scanning open PRs authored by $ME"
@@ -115,17 +133,27 @@ while IFS=$'\t' read -r num title is_draft merge_st has_auto labels sha; do
         log "  PR#$num held (hold label) — not arming"
         continue
     fi
-    # INFRA-8047: respect a human disarm until the head moves.
+    # INFRA-8047/INFRA-8178: respect a HUMAN disarm until the head moves —
+    # but a disarm attributed to the automation login itself, or one that
+    # landed within the window right after a failed required check on this
+    # same head, is GitHub's own auto_merge_disabled-on-failed-check
+    # behavior, not a human hold. Fall through (no `continue`) so the normal
+    # eligibility checks below re-arm it once the head is actually green.
     prev="$(state_get "$num")"
     if [[ -n "$prev" ]]; then
         IFS=$'\t' read -r p_sha p_status p_who <<<"$prev"
         if [[ "$p_sha" == "$sha" ]]; then
             if [[ "$p_status" == "armed" ]]; then
-                who="$(disarmer_of "$num")"
-                state_set "$num" "$sha" disarmed "${who:-unknown}"
-                log "  PR#$num was disarmed by ${who:-unknown} — respecting it until a new push"
-                skipped_disarmed=$((skipped_disarmed + 1))
-                continue
+                IFS=$'\t' read -r who disarm_ts <<<"$(disarm_event_info "$num")"
+                failed_ts="$(failing_check_timestamps "$sha")"
+                if printf '%s' "$failed_ts" | is_human_disarm "$who" "$ME" "$disarm_ts"; then
+                    state_set "$num" "$sha" disarmed "${who:-unknown}"
+                    log "  PR#$num was disarmed by ${who:-unknown} — respecting it until a new push"
+                    skipped_disarmed=$((skipped_disarmed + 1))
+                    continue
+                else
+                    log "  PR#$num disarmed by ${who:-$ME} — gate behaviour (automation login or post-failed-check), not a human hold; will re-arm if green"
+                fi
             elif [[ "$p_status" == "disarmed" ]]; then
                 skipped_disarmed=$((skipped_disarmed + 1))
                 continue

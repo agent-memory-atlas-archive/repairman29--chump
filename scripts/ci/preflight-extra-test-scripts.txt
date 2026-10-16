@@ -10,3 +10,7 @@
 # Format: one repo-relative path per line. Blank lines and lines starting with
 # `#` are ignored. A path that is not a file on disk is skipped. Entries are
 # deduped against the hardcoded `candidates` array.
+
+# INFRA-8178: auto-arm-sweeper human-vs-gate disarm classification. Pure
+# fake-gh fixture test, no network, ~1s.
+scripts/ci/test-auto-arm-sweeper.sh
