@@ -333,6 +333,39 @@ gh pr edit <N> --add-label no-auto-merge && gh pr merge <N> --disable-auto
 **Release.** Remove the label (`gh pr edit <N> --remove-label no-auto-merge`) or edit the marker line out; the next armer tick re-arms.
 **How it is enforced.** `scripts/coord/lib/arm-policy.sh` `arm_policy_allows <pr> [armer] [repo]` is called by every shell armer (gate: `scripts/ci/test-arm-policy.sh`, allowlist `scripts/ci/arm-policy-allowlist.txt`, shrink-only). Legacy labels `hold`, `do-not-merge` and `CHUMP_HOLD` are honored too. A blocked arm emits `kind=pr_arm_skipped_hold`; an arm that undoes a disarm emits `kind=pr_rearmed` naming the armer (`auto-merge-armer.sh<-<caller>`), so `grep pr_rearmed .chump-locks/ambient.jsonl` names the next re-arm war's source.
 
+## Running scripts/ci tests from a Mac lane (CREDIBLE-1511)
+
+The Mac implementation lane runs `scripts/ci/test-*.sh` locally before pushing. Notes from
+auditing the six tests that were red on an untouched `origin/main` here:
+
+**Which bash.** Scripts start with `#!/usr/bin/env bash`, which resolves to `/opt/homebrew/bin/bash`
+(bash 5) only if Homebrew's bin dir comes before `/bin` in `PATH`; otherwise you get the system
+bash 3.2 (no associative arrays, no `mapfile`, no `${var,,}`). Check with `bash --version`. When a
+test fails, re-run it under both (`/bin/bash scripts/ci/test-X.sh` and
+`/opt/homebrew/bin/bash scripts/ci/test-X.sh`); a result that differs between them is a bash-version
+problem, a result that does not is a real failure.
+
+**GNU tools.** Linux CI has GNU coreutils/sed/grep; macOS ships BSD. `brew install coreutils gnu-sed`
+and, for a one-off run, put `/opt/homebrew/opt/coreutils/libexec/gnubin:/opt/homebrew/opt/gnu-sed/libexec/gnubin`
+at the front of `PATH`. Do this before concluding a test is "macOS-only red". Prefer making a script
+portable (`date -u -j -f` / `date -d` fallbacks, as `scripts/lib/lease.sh` does) over a macOS skip.
+
+**Tests that skip on macOS: none.** On 2026-10-17 all six were audited and none is a macOS
+incompatibility; every one fails identically under bash 3.2, bash 5, and (by reading the code) on
+Linux. None is wired into `ci.yml`, which is why they stayed red unnoticed. Do not add a macOS skip
+to hide them. Real reds as of `origin/main` eef8a96c3:
+
+| Test | Cause (platform-independent) |
+|---|---|
+| `test-auto-merge-armer.sh` | `scripts/coord/pr-rescue.sh:328` still has a raw `chump_gh pr merge --auto`; the test (line 113-116) wants it routed through `auto-merge-armer.sh` (the RESILIENT-1613 arm-policy gate was added in front of the raw call instead). |
+| `test-bot-merge-rest-direct.sh` | `scripts/coord/bot-merge.sh` no longer emits `"kind":"bot_merge_auto_armed"` (test line 83) or passes `$REQUIRED_CHECKS` to a python3 check (test lines 96-104); the test predates the arming move to `auto-merge-armer.sh`. |
+| `test-bot-merge-portability.sh` | The test extracts a block of `bot-merge.sh` by awk (test line ~50, from `scripts/coord/bot-merge.sh:817` to the next `^SCRIPT_DIR=` at :1022). That range now includes the AUTONOMY_LEVEL kill switch (:1005-1017), which `exit`s whenever `~/.chump/AUTONOMY_LEVEL` is missing or 0 (and appends a `fleet_stopped_kill_switch` event to `.chump-locks/ambient.jsonl`). Passes 14/14 with `HOME` pointing at a dir holding `.chump/AUTONOMY_LEVEL` = 5. |
+| `test-event-registry-effect-metric.sh` | `docs/observability/EVENT_REGISTRY.yaml` has 8 kinds with no `effect_metric` (`prepush_head_drift`, `bot_merge_bypassed`, `pwa_brief_loaded`, `pwa_impact_viewed`, `pr_auto_rescue_invoked`, `ci_yml_row_add_merged`, `pre_commit_ac_test_missing`, `pwa_gap_list_filtered`): 1325 kind entries vs 1317 effect_metric entries. |
+| `test-lease-lib.sh` | Race: `scripts/lib/lease.sh:114` (`[[ "$age" -gt 0 ]] || return 1`) treats a heartbeat written in the current second (age 0) as "no heartbeat", so `lease_is_fresh` on a just-created lease fails. Passes only when the second ticks between fixture creation and the check. |
+| `test-stale-worktree-reaper-stash.sh` | `run_reaper` (test lines ~126-139) does not set `CHUMP_REAPER_NEW_WORKTREE_GRACE_MIN=0`, so the reaper's 240-minute new-worktree grace (`scripts/ops/stale-worktree-reaper.sh:103`, applied at :619) skips every fixture. With that env var set the suite is 24/24. |
+
+Treat these as known-red until their owning lane fixes them; do not let them gate a Mac push.
+
 ## Maintenance
 
 This playbook should be **updated whenever a new wedge class is discovered** (new entry in §1), a **new ship-assist tool ships** (entry added to §2), or a **lesson-learning gap closes** (move from §4/§5 in-flight to §6 shipped + cross-link the doc to the fix's PR).
