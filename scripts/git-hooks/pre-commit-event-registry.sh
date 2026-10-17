@@ -37,6 +37,46 @@ if [[ ! -f "$REGISTRY" ]]; then
     exit 0
 fi
 
+# CREDIBLE-1516: YAML-parse gate. The rest of this hook (and every other
+# registry gate) only greps `kind:` lines and never parses the document, so an
+# illegal scalar — e.g. a backtick-led plain scalar — sailed through for months
+# and broke the INFRA-8223 union merge driver. Parse the STAGED content of each
+# observability registry with yaml.safe_load when PyYAML is available. Skips
+# silently when PyYAML is absent (the authoritative gate is the CI/preflight
+# step scripts/ci/test-event-registry-yaml-parse.sh, which installs PyYAML).
+if python3 -c 'import yaml' >/dev/null 2>&1; then
+    for rel in docs/observability/EVENT_REGISTRY.yaml docs/observability/SELF_REPORTS.yaml; do
+        # Only check files actually staged in this commit. Capture-then-test
+        # rather than piping into `grep -q` (SIGPIPE under `set -o pipefail`).
+        staged_names="$(git diff --cached --name-only --diff-filter=ACM -- "$rel")"
+        if [[ -z "$staged_names" ]]; then
+            continue
+        fi
+        parse_err=""
+        if ! parse_err="$(git show ":$rel" 2>/dev/null | python3 -c '
+import sys, yaml
+try:
+    yaml.safe_load(sys.stdin)
+except yaml.YAMLError as e:
+    sys.stderr.write(str(e))
+    sys.exit(1)
+' 2>&1)"; then
+            echo "──────────────────────────────────────────────────────────────────────" >&2
+            echo "❌ CREDIBLE-1516 registry YAML-parse guard blocked this commit." >&2
+            echo "" >&2
+            echo "$rel does not parse as YAML:" >&2
+            printf '%s\n' "$parse_err" | sed 's/^/    /' >&2
+            echo "" >&2
+            echo "Fix the offending scalar. A plain scalar may not start with a" >&2
+            echo "backtick/@/%/etc. and may not contain ': ' — convert multi-line" >&2
+            echo "plain scalars to a '>-' folded block (content unchanged)." >&2
+            echo "Bypass once (sparingly): CHUMP_EVENT_REGISTRY_CHECK=0 git commit ..." >&2
+            echo "──────────────────────────────────────────────────────────────────────" >&2
+            exit 1
+        fi
+    done
+fi
+
 # Collect staged additions (we only care about added lines — removing a
 # kind never breaks the consumer contract that this guard enforces).
 STAGED_DIFF="$(git diff --cached --no-color --diff-filter=ACM -U0 -- \

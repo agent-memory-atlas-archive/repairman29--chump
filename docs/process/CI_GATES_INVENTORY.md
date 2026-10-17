@@ -64,6 +64,7 @@
 | `scripts/ci/test-*.sh` (changed-only) | `fast-checks` + `audit` jobs | `chump preflight --with-tests` (scoped to diff) | Opt-in flag |
 | **event-registry-audit** | `audit` job | `chump preflight` (auto-gated on diff) | **INFRA-1731 shipped #2377** |
 | `test-fleet-pause-autolift.sh` | `test` job shard | pure shell sandbox, no GitHub API | **RESILIENT-066** |
+| `test-event-registry-yaml-parse.sh` | `fast-checks` job | `chump preflight` (discover_test_scripts) + `pre-commit-event-registry.sh` | **CREDIBLE-1516** — yaml.safe_load on EVENT_REGISTRY.yaml + SELF_REPORTS.yaml; loud-skips if PyYAML absent locally |
 
 ## Tier B — hook-mirrored, not in preflight
 

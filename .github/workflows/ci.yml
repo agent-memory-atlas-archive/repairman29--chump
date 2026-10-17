@@ -1118,6 +1118,15 @@ jobs:
         # in the tree, or a missing receipt pair. Pure local, ~1s.
         run: bash scripts/ci/test-self-reports-registry.sh
 
+      - name: observability registry YAML-parse gate (CREDIBLE-1516)
+        # Parses EVENT_REGISTRY.yaml + SELF_REPORTS.yaml with yaml.safe_load so
+        # an illegal scalar (e.g. the backtick-led scalar that sat on main from
+        # #3472 and broke the INFRA-8223 union merge driver) fails fast instead
+        # of only the grep-by-`kind:` gates passing it. The script installs
+        # PyYAML if the runner lacks it; mirrored in `chump preflight`
+        # (discover_test_scripts) and the pre-commit registry hook.
+        run: bash scripts/ci/test-event-registry-yaml-parse.sh
+
       - name: capabilities registry gate (CREDIBLE-240)
         # docs/CAPABILITIES_REGISTRY.json is indexed by almanac, so a stale or
         # broken catalog gets served to agents with a file:line receipt. This
