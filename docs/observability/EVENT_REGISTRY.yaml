@@ -3668,15 +3668,18 @@ events:
     effect_metric: self
     emitter: src/dispatch.rs (chump dispatch — run(), INFRA-8198)
     trigger: every `chump dispatch` cycle emits exactly one of these at its
-      single exit point (Shipped/Blocked/Aborted, or an early preflight/claim
-      failure), reporting whether the spawned work child (claude -p, chump
-      --execute-gap, …) is still alive. Closes the INFRA-8198 bug where a
-      dispatch printed preflight lines, exited 0 with no distinguishing line,
-      and left its claude -p child running unsupervised with PPID 1 past the
-      budget deadline.
+      single exit point (Shipped/Armed/Blocked/Aborted, or an early
+      preflight/claim failure), reporting whether the spawned work child
+      (claude -p, chump --execute-gap, …) is still alive. Closes the INFRA-8198
+      bug where a dispatch printed preflight lines, exited 0 with no
+      distinguishing line, and left its claude -p child running unsupervised
+      with PPID 1 past the budget deadline. CREDIBLE-1506 added the `status`
+      field (shipped | armed | blocked | failed) so consumers distinguish an
+      armed+pending PR (exit 0, success) from a genuine failure — an armed PR
+      that later auto-merges must never be counted as failed.
     consumers: [fleet-brief, dispatch-hygiene]
-    fields_required: [ts, kind, session, gap_id, exit_code, reason, child_pid,
-      child_alive_at_exit, duration_s]
+    fields_required: [ts, kind, session, gap_id, exit_code, status, reason,
+      child_pid, child_alive_at_exit, duration_s]
 
   - kind: dispatch_model_selected
     effect_metric: self

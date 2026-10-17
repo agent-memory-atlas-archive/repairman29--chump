@@ -6614,6 +6614,15 @@ async fn main() -> Result<()> {
                         println!("[dispatch] shipped PR #{pr_number}");
                         return Ok(());
                     }
+                    // CREDIBLE-1506: an armed+pending PR is a success (exit 0).
+                    // The merge lands on green CI; the gap's auto-close belongs
+                    // to the reconciler after ship_landed, not to dispatch.
+                    dispatch::ShipResult::Armed { pr_number } => {
+                        println!(
+                            "[dispatch] armed PR #{pr_number} — auto-merge pending, will land on green CI"
+                        );
+                        return Ok(());
+                    }
                     dispatch::ShipResult::Blocked { reason } => {
                         eprintln!("[dispatch] blocked: {reason}");
                         std::process::exit(1);

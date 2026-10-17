@@ -298,6 +298,11 @@ pub fn run(args: &[String]) -> i32 {
                 println!("[swe] shipped PR #{pr_number} for {gap_id} (auto-merge armed)");
                 ("success".to_string(), format!("pr={pr_number}"), 0)
             }
+            // CREDIBLE-1506: armed+pending is a success — the PR lands on green CI.
+            ShipResult::Armed { pr_number } => {
+                println!("[swe] armed PR #{pr_number} for {gap_id} — auto-merge pending");
+                ("success".to_string(), format!("pr={pr_number}"), 0)
+            }
             ShipResult::Blocked { reason } => {
                 eprintln!("[swe] blocked: {reason}");
                 let kind = if reason.contains("budget") || reason.contains("killed") {

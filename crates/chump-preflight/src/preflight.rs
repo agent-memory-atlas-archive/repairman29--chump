@@ -2771,6 +2771,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "dispatch-armed-exit-zero",
+            &["bash", "scripts/ci/test-dispatch-armed-exit-zero.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-1025-atomic-claim",
             &["bash", "scripts/ci/test-infra-1025-atomic-claim.sh"],
             GateKind::Scripts,

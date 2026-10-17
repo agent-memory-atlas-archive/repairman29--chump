@@ -1270,6 +1270,9 @@ jobs:
       - name: dispatch ship-phase session id (INFRA-8204)
         run: bash scripts/ci/test-dispatch-ship-session-id.sh
 
+      - name: dispatch armed-ship exit 0 (CREDIBLE-1506)
+        run: bash scripts/ci/test-dispatch-armed-exit-zero.sh
+
       - name: ci.yml merge driver smoke (INFRA-310)
         run: bash scripts/ci/test-merge-driver-ci-yml.sh
 

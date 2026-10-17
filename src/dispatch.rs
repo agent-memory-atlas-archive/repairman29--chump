@@ -157,9 +157,18 @@ pub struct DispatchOptions<'a> {
 /// What happened to the PR after [`ship`] finished.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShipResult {
-    /// PR opened (and possibly merge-queued via auto-merge); caller can poll
-    /// the merge queue from here.
+    /// PR opened and already landed on main (merged), or opened without
+    /// auto-merge — either way the ship produced a real PR. Caller can poll
+    /// the merge queue from here. A **success** (exit 0).
     Shipped { pr_number: u64 },
+    /// CREDIBLE-1506: PR opened and GitHub auto-merge is armed, but the merge
+    /// hasn't landed yet — it will when CI greens. This is the normal zero-touch
+    /// steady state right after `chump dispatch --auto-merge`, and it is a
+    /// **success** (exit 0): the OS did its whole job. Previously this path
+    /// (when a post-arm step bubbled a non-zero bot-merge exit) was reported as
+    /// [`ShipResult::Aborted`], so the 2026-10-16 CREDIBLE-301 proof run armed
+    /// PR #5500 and auto-merged it with zero manual steps yet dispatch exited 1.
+    Armed { pr_number: u64 },
     /// Ship pipeline ran but couldn't queue the PR (CI red, branch
     /// protection failure, etc.).
     Blocked { reason: String },
@@ -274,35 +283,28 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
     // `child_alive_at_exit` should read `false` on every path; a `true`
     // here is exactly the INFRA-8198 bug reproducing.
     let child_pid = workspace.child_pid();
-    let exit_code: i32 = match &result {
-        ShipResult::Shipped { .. } => 0,
-        ShipResult::Blocked { .. } => 2,
-        ShipResult::Aborted { .. } => 1,
-    };
-    let reason = match &result {
-        ShipResult::Shipped { pr_number } => format!("shipped pr={pr_number}"),
-        ShipResult::Blocked { reason } => format!("blocked: {reason}"),
-        ShipResult::Aborted { error } => format!("aborted: {error}"),
-    };
+    let (exit_code, reason, status) = classify_exit(&result);
     let child_alive_at_exit = child_pid.map(|pid| child_is_alive(pid)).unwrap_or(false);
     let duration_secs = started.elapsed().as_secs();
     eprintln!(
-        "[dispatch] {} exit={} reason={} child_pid={} child_alive_at_exit={}",
+        "[dispatch] {} exit={} status={} reason={} child_pid={} child_alive_at_exit={}",
         opts.gap_id,
         exit_code,
+        status,
         reason,
         child_pid.unwrap_or(0),
         child_alive_at_exit
     );
-    emit_dispatch_exit(
-        opts.gap_id,
-        &workspace.session_id,
+    emit_dispatch_exit(DispatchExitEvent {
+        gap_id: opts.gap_id,
+        session_id: &workspace.session_id,
         exit_code,
-        &reason,
-        child_pid.unwrap_or(0),
+        status,
+        reason: &reason,
+        child_pid: child_pid.unwrap_or(0),
         child_alive_at_exit,
-        duration_secs,
-    );
+        duration_s: duration_secs,
+    });
 
     Ok(DispatchOutcome {
         gap_id: opts.gap_id.to_string(),
@@ -310,6 +312,31 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
         result,
         duration_secs,
     })
+}
+
+/// CREDIBLE-1506: map a terminal [`ShipResult`] to the process exit code, the
+/// human-facing final line (which always names the PR), and a stable status
+/// token for the `kind=dispatch_exit` ambient event. Pure + total so the
+/// decision is unit-tested directly (89-self-audit keeps logic out of
+/// `src/main.rs`, and the exit-code contract is the credible/ground-truth
+/// surface this gap is about).
+///
+/// Success vs. failure, honestly:
+/// - [`ShipResult::Shipped`] → a landed (or opened) PR, exit 0.
+/// - [`ShipResult::Armed`] → auto-merge armed and pending, exit 0. This is the
+///   case CREDIBLE-301 (#5500) regressed on: an armed PR that later merged with
+///   zero manual steps must NOT read as `aborted`.
+/// - [`ShipResult::Blocked`] → ran but couldn't queue the PR, exit 2.
+/// - [`ShipResult::Aborted`] → never produced/armed a PR, exit 1 (genuine fail).
+fn classify_exit(result: &ShipResult) -> (i32, String, &'static str) {
+    match result {
+        ShipResult::Shipped { pr_number } => (0, format!("shipped pr=#{pr_number}"), "shipped"),
+        ShipResult::Armed { pr_number } => {
+            (0, format!("armed pr=#{pr_number} awaiting merge"), "armed")
+        }
+        ShipResult::Blocked { reason } => (2, format!("blocked: {reason}"), "blocked"),
+        ShipResult::Aborted { error } => (1, format!("aborted: {error}"), "failed"),
+    }
 }
 
 /// INFRA-8198: probe whether `pid` is still alive via a signal-0 `kill`
@@ -1533,6 +1560,21 @@ fn emit_subagent_killed_at_budget(
     }
 }
 
+/// CREDIBLE-1506: fields of one `kind=dispatch_exit` emit, bundled so the
+/// emitter stays under clippy's argument ceiling (the `status` field added
+/// here pushed the old positional signature to 8 args).
+struct DispatchExitEvent<'a> {
+    gap_id: &'a str,
+    session_id: &'a str,
+    exit_code: i32,
+    /// Stable outcome token: shipped | armed | blocked | failed.
+    status: &'a str,
+    reason: &'a str,
+    child_pid: u32,
+    child_alive_at_exit: bool,
+    duration_s: u64,
+}
+
 // scanner-anchor: "kind":"dispatch_exit"
 /// Emit `kind=dispatch_exit` to ambient.jsonl (INFRA-8198). Mirrors
 /// [`emit_subagent_killed_at_budget`]'s append pattern. [`run`] emits
@@ -1541,15 +1583,17 @@ fn emit_subagent_killed_at_budget(
 /// line distinguishing "child reaped cleanly" from "child still running
 /// unsupervised" (the INFRA-8198 repro: preflight printed, dispatch exited
 /// 0, the `claude -p` child kept running with PPID 1 for 25+ minutes).
-fn emit_dispatch_exit(
-    gap_id: &str,
-    session_id: &str,
-    exit_code: i32,
-    reason: &str,
-    child_pid: u32,
-    child_alive_at_exit: bool,
-    duration_s: u64,
-) {
+fn emit_dispatch_exit(ev: DispatchExitEvent) {
+    let DispatchExitEvent {
+        gap_id,
+        session_id,
+        exit_code,
+        status,
+        reason,
+        child_pid,
+        child_alive_at_exit,
+        duration_s,
+    } = ev;
     let repo_root = crate::repo_path::runtime_base();
     let lock_dir = repo_root.join(".chump-locks");
     let _ = std::fs::create_dir_all(&lock_dir);
@@ -1568,7 +1612,8 @@ fn emit_dispatch_exit(
 
     let line = format!(
         "{{\"ts\":\"{ts}\",\"kind\":\"dispatch_exit\",\"session\":\"{session}\",\
-         \"gap_id\":\"{gap_id}\",\"exit_code\":{exit_code},\"reason\":\"{reason_escaped}\",\
+         \"gap_id\":\"{gap_id}\",\"exit_code\":{exit_code},\"status\":\"{status}\",\
+         \"reason\":\"{reason_escaped}\",\
          \"child_pid\":{child_pid},\"child_alive_at_exit\":{child_alive_at_exit},\
          \"duration_s\":{duration_s}}}"
     );
@@ -1588,6 +1633,7 @@ fn emit_dispatch_exit(
             .arg("dispatch_exit")
             .arg(format!("gap_id={}", gap_id))
             .arg(format!("exit_code={}", exit_code))
+            .arg(format!("status={}", status))
             .arg(format!("child_pid={}", child_pid))
             .arg(format!("child_alive_at_exit={}", child_alive_at_exit))
             .status();
@@ -1934,36 +1980,83 @@ fn ship(ws: &Workspace) -> Result<ShipResult> {
         .current_dir(ws.working_dir())
         .status()
         .context("invoke bot-merge.sh")?;
-    if !status.success() {
-        let exit_code = status.code().unwrap_or(-1);
-        // CREDIBLE-297: exit 13 is bot-merge.sh's clippy-fail code, raised by
-        // a full-workspace local clippy stage that runs BEFORE this
-        // invocation's push. A *prior* invocation may already have pushed
-        // and armed auto-merge on a PR whose own (scoped) CI clippy already
-        // passed and merged — this run's local clippy noise on unrelated
-        // pre-existing lint must not overwrite that landed outcome. Trust
-        // the actual PR merge state over the local exit code.
-        if is_locally_recoverable_exit_code(exit_code) {
-            if let Ok(pr) = current_pr_number(ws.working_dir()) {
-                if pr_is_merged(ws.working_dir(), pr) {
-                    return Ok(ShipResult::Shipped { pr_number: pr });
-                }
-            }
-        }
-        return Ok(ShipResult::Aborted {
-            error: format!("bot-merge.sh exited {exit_code}"),
-        });
-    }
 
-    // bot-merge.sh has already opened/updated the PR. Read the PR number off
-    // the current branch via gh — also from the worktree, since we want the
-    // PR that bot-merge.sh just opened (which corresponds to the worktree's
-    // branch, not main).
-    match current_pr_number(ws.working_dir()) {
-        Ok(pr) => Ok(ShipResult::Shipped { pr_number: pr }),
-        Err(e) => Ok(ShipResult::Blocked {
-            reason: format!("ship succeeded but PR# unresolvable: {e:#}"),
-        }),
+    // CREDIBLE-1506: bot-merge.sh's exit code is advisory, not authoritative.
+    // bot-merge arms GitHub auto-merge and THEN runs the INFRA-154 post-arm
+    // auto-close; that tail (or any post-arm step) can bubble a non-zero exit
+    // even though the PR has already landed or is armed and pending — exactly
+    // the CREDIBLE-301 (#5500) regression where a fully successful zero-touch
+    // ship reported `aborted` / exit 1. Trust the PR's real state on GitHub
+    // over the local exit code: a merged (landed) PR, or an armed+pending PR
+    // when auto-merge was requested, is a success; only a run that never got
+    // a PR opened/armed is a genuine failure. (Generalizes CREDIBLE-297, which
+    // only recovered exit 13 + merged — any exit code is now recoverable when
+    // the ground-truth PR state proves the ship succeeded.)
+    let pr = current_pr_number(ws.working_dir()).ok();
+    let pr_state = pr
+        .map(|n| probe_pr_state(ws.working_dir(), n))
+        .unwrap_or(PrState::Unknown);
+    let exit_code = status.code().unwrap_or(-1);
+    Ok(classify_ship(
+        status.success(),
+        exit_code,
+        opts.auto_merge,
+        pr,
+        pr_state,
+    ))
+}
+
+/// CREDIBLE-1506: ground-truth state of the branch's PR on GitHub, used to
+/// decide the real ship outcome independent of bot-merge.sh's exit code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrState {
+    /// PR has merged (landed on main).
+    Merged,
+    /// PR is open and GitHub auto-merge is enabled — lands when CI greens.
+    Armed,
+    /// PR is open but auto-merge is not enabled (e.g. a plain `dispatch`
+    /// without `--auto-merge`).
+    Open,
+    /// No PR resolvable for the branch, or `gh` errored — treated as "no
+    /// ground-truth success signal" so a failing bot-merge stays a failure.
+    Unknown,
+}
+
+/// CREDIBLE-1506: pure decision table from (bot-merge exit) × (PR ground
+/// truth) → [`ShipResult`]. Total + side-effect-free so the exit-code contract
+/// is unit-tested directly.
+fn classify_ship(
+    bot_merge_succeeded: bool,
+    exit_code: i32,
+    auto_merge_requested: bool,
+    pr: Option<u64>,
+    pr_state: PrState,
+) -> ShipResult {
+    // 1. Landed on main — unambiguous success regardless of the local exit code.
+    if pr_state == PrState::Merged {
+        if let Some(pr_number) = pr {
+            return ShipResult::Shipped { pr_number };
+        }
+    }
+    // 2. Armed + pending — success only when auto-merge was actually requested,
+    //    so an externally-armed PR can't mask a genuinely failed run.
+    if pr_state == PrState::Armed && auto_merge_requested {
+        if let Some(pr_number) = pr {
+            return ShipResult::Armed { pr_number };
+        }
+    }
+    // 3. bot-merge reported success and we have a PR — opened/shipped.
+    if bot_merge_succeeded {
+        return match pr {
+            Some(pr_number) => ShipResult::Shipped { pr_number },
+            None => ShipResult::Blocked {
+                reason: "ship succeeded but no PR is resolvable for the branch".to_string(),
+            },
+        };
+    }
+    // 4. bot-merge failed and the PR neither landed nor armed — genuine failure.
+    ShipResult::Aborted {
+        error: format!("bot-merge.sh exited {exit_code}"),
     }
 }
 
@@ -1984,36 +2077,44 @@ fn current_pr_number(repo_root: &Path) -> Result<u64> {
         .with_context(|| format!("parse PR# from {s:?}"))
 }
 
-/// CREDIBLE-297: bot-merge.sh exit codes that reflect a *local-only* gate
-/// (this invocation's own repo-wide clippy pass) rather than the PR's own
-/// scoped CI — a prior invocation may have already landed the PR while this
-/// run's local check is still noisy on unrelated pre-existing lint. `13` is
-/// bot-merge.sh's clippy-fail code (see `scripts/coord/bot-merge.sh`
-/// `_bm_fail "clippy" 13 ...`).
-fn is_locally_recoverable_exit_code(exit_code: i32) -> bool {
-    exit_code == 13
-}
-
-/// Best-effort check of whether `pr_number` has actually merged. Used only
-/// to recover from a locally-recoverable bot-merge.sh failure (see
-/// [`is_locally_recoverable_exit_code`]) — any `gh` error is treated as
-/// "not merged" so we fall back to reporting the original failure honestly.
-fn pr_is_merged(repo_root: &Path, pr_number: u64) -> bool {
+/// CREDIBLE-1506: best-effort ground-truth of the branch's PR on GitHub.
+/// One `gh pr view` fetches `state` + `autoMergeRequest` so [`classify_ship`]
+/// can tell a landed/armed ship from a genuine failure regardless of
+/// bot-merge.sh's exit code. Any `gh`/parse error degrades to
+/// [`PrState::Unknown`] (no success signal), so a failing bot-merge stays a
+/// failure rather than being masked. (Generalizes CREDIBLE-297's exit-13 +
+/// merged-only recovery to any post-arm non-zero exit.)
+fn probe_pr_state(repo_root: &Path, pr_number: u64) -> PrState {
     let out = Command::new("gh")
         .args([
             "pr",
             "view",
             &pr_number.to_string(),
             "--json",
-            "state",
-            "-q",
-            ".state",
+            "state,autoMergeRequest",
         ])
         .current_dir(repo_root)
         .output();
-    match out {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim() == "MERGED",
-        _ => false,
+    let o = match out {
+        Ok(o) if o.status.success() => o,
+        _ => return PrState::Unknown,
+    };
+    let v: serde_json::Value = match serde_json::from_slice(&o.stdout) {
+        Ok(v) => v,
+        Err(_) => return PrState::Unknown,
+    };
+    let state = v.get("state").and_then(|s| s.as_str()).unwrap_or("");
+    if state == "MERGED" {
+        return PrState::Merged;
+    }
+    let armed = v
+        .get("autoMergeRequest")
+        .map(|a| !a.is_null())
+        .unwrap_or(false);
+    if state == "OPEN" && armed {
+        PrState::Armed
+    } else {
+        PrState::Open
     }
 }
 
@@ -2172,12 +2273,106 @@ mod tests {
         }
     }
 
+    // ── CREDIBLE-1506: exit-code contract ────────────────────────────────────
     #[test]
-    fn clippy_exit_code_is_locally_recoverable() {
-        assert!(is_locally_recoverable_exit_code(13));
-        assert!(!is_locally_recoverable_exit_code(1));
-        assert!(!is_locally_recoverable_exit_code(14));
-        assert!(!is_locally_recoverable_exit_code(-1));
+    fn classify_exit_landed_and_armed_are_success() {
+        // A landed PR is exit 0 with a line naming the PR.
+        let (code, reason, status) = classify_exit(&ShipResult::Shipped { pr_number: 5500 });
+        assert_eq!(code, 0);
+        assert_eq!(status, "shipped");
+        assert!(reason.contains("5500"), "reason must name the PR: {reason}");
+
+        // An armed+pending PR is ALSO exit 0 — this is the CREDIBLE-301 (#5500)
+        // regression: a fully successful zero-touch ship must not read `aborted`.
+        let (code, reason, status) = classify_exit(&ShipResult::Armed { pr_number: 5500 });
+        assert_eq!(code, 0, "armed+pending must be success, not aborted");
+        assert_eq!(status, "armed");
+        assert!(reason.contains("5500"), "reason must name the PR: {reason}");
+        assert!(!reason.contains("aborted"));
+    }
+
+    #[test]
+    fn classify_exit_genuine_failure_stays_exit_one() {
+        let (code, reason, status) = classify_exit(&ShipResult::Aborted {
+            error: "bot-merge.sh exited 15".into(),
+        });
+        assert_eq!(code, 1, "a genuine failure must stay exit 1");
+        assert_eq!(status, "failed");
+        assert!(reason.contains("aborted"));
+
+        let (code, _, status) = classify_exit(&ShipResult::Blocked {
+            reason: "CI red".into(),
+        });
+        assert_eq!(code, 2);
+        assert_eq!(status, "blocked");
+    }
+
+    // ── CREDIBLE-1506: ship classification decision table ─────────────────────
+    #[test]
+    fn classify_ship_armed_pending_is_success_even_when_bot_merge_failed() {
+        // The CREDIBLE-301 shape: bot-merge exited non-zero (post-arm auto-close
+        // crashed before the merge could exist) BUT the PR is armed + pending.
+        let r = classify_ship(
+            /* bot_merge_succeeded */ false,
+            /* exit_code */ 1,
+            /* auto_merge_requested */ true,
+            Some(5500),
+            PrState::Armed,
+        );
+        assert_eq!(r, ShipResult::Armed { pr_number: 5500 });
+    }
+
+    #[test]
+    fn classify_ship_landed_is_success_on_any_nonzero_exit() {
+        // Generalizes CREDIBLE-297: any non-zero bot-merge exit is recoverable
+        // when ground truth says the PR already merged.
+        for exit in [1, 13, 15, 144] {
+            let r = classify_ship(false, exit, true, Some(5500), PrState::Merged);
+            assert_eq!(
+                r,
+                ShipResult::Shipped { pr_number: 5500 },
+                "exit {exit} + merged PR must be Shipped"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_ship_failure_with_no_landed_or_armed_pr_aborts() {
+        // bot-merge failed and the PR neither merged nor armed → genuine failure.
+        let r = classify_ship(false, 15, true, Some(5500), PrState::Open);
+        assert_eq!(
+            r,
+            ShipResult::Aborted {
+                error: "bot-merge.sh exited 15".into()
+            }
+        );
+        // No PR at all is also a genuine failure.
+        let r = classify_ship(false, 15, true, None, PrState::Unknown);
+        assert!(matches!(r, ShipResult::Aborted { .. }));
+    }
+
+    #[test]
+    fn classify_ship_armed_without_request_is_not_masked() {
+        // An externally-armed PR must NOT turn a failed run (auto-merge NOT
+        // requested) into a success — keeps genuine failures honest.
+        let r = classify_ship(
+            false,
+            15,
+            /* auto_merge_requested */ false,
+            Some(7),
+            PrState::Armed,
+        );
+        assert!(matches!(r, ShipResult::Aborted { .. }));
+    }
+
+    #[test]
+    fn classify_ship_success_exit_opens_pr() {
+        // bot-merge clean exit + PR resolvable → Shipped (opened).
+        let r = classify_ship(true, 0, false, Some(42), PrState::Open);
+        assert_eq!(r, ShipResult::Shipped { pr_number: 42 });
+        // clean exit but no PR → Blocked (not Aborted).
+        let r = classify_ship(true, 0, true, None, PrState::Unknown);
+        assert!(matches!(r, ShipResult::Blocked { .. }));
     }
 
     /// Test helper: build a Workspace with a fixed working_dir, skipping
