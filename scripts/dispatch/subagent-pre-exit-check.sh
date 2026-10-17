@@ -70,7 +70,11 @@ fi
 
 # ── (c) auto-merge armed ────────────────────────────────────────────────────
 PR_N=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null)
-AM=$(gh pr view "$PR_N" --json autoMergeRequest --jq '.autoMergeRequest.merge_method // "DISARMED"' 2>/dev/null)
+# CREDIBLE-1518: armed means autoMergeRequest is non-null. gh's GraphQL JSON
+# names the field mergeMethod; the REST-backed gh-shim (pr-view-translate.py)
+# carries both. Reading only .merge_method made every armed PR a false red.
+AM=$(gh pr view "$PR_N" --json autoMergeRequest \
+    --jq 'if .autoMergeRequest == null then "DISARMED" else (.autoMergeRequest.mergeMethod // .autoMergeRequest.merge_method // "ARMED") end' 2>/dev/null)
 if [[ "$AM" == "DISARMED" ]]; then
     printf '[pre-exit-check] FAIL: PR #%s exists but auto-merge not armed (INFRA-1906); re-arm via GraphQL\n' "$PR_N" >&2
     emit_idle "auto_merge_not_armed"

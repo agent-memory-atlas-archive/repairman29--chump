@@ -1523,6 +1523,9 @@ jobs:
       - name: node pause invariant (RESILIENT-1614)
         run: bash scripts/ci/test-resilient-1614-node-pause-invariant.sh
 
+      - name: subagent pre-exit check armed/unarmed (CREDIBLE-1518)
+        run: bash scripts/ci/test-subagent-pre-exit-check.sh
+
       - name: pre-push cargo-test full-suite gate (INFRA-761)
         run: bash scripts/ci/test-pre-push-test-gate.sh
 

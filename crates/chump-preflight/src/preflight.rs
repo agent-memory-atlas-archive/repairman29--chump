@@ -2713,6 +2713,13 @@ pub fn run(argv: &[String]) -> i32 {
             ],
             GateKind::Scripts,
         ));
+        // CREDIBLE-1518: subagent pre-exit check reads autoMergeRequest, not
+        // the REST-only merge_method field; stubbed gh, armed + unarmed fixtures.
+        steps.push(step(
+            "subagent-pre-exit-check",
+            &["bash", "scripts/ci/test-subagent-pre-exit-check.sh"],
+            GateKind::Scripts,
+        ));
         // INFRA-8193: docs/gaps/*.yaml is an export-only mirror of state.db;
         // fail when a new script or Rust path writes it outside the export.
         steps.push(step(
