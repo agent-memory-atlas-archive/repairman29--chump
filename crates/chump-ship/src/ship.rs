@@ -85,6 +85,79 @@ impl LandingReceipt {
     }
 }
 
+/// CREDIBLE-1508: receipt documenting a decomposed-umbrella auto-close —
+/// every child slice of a `decomposed` parent reached `done`, so the parent
+/// closes with no PR of its own (the children's own [`LandingReceipt`]s are
+/// the actual proof-of-merge).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChildrenDoneReceipt {
+    /// Parent gap ID being auto-closed.
+    pub gap_id: String,
+    /// Child gap IDs that were all `done` at close time.
+    pub children: Vec<String>,
+    /// UTC timestamp of receipt creation.
+    pub created_at: DateTime<Utc>,
+}
+
+impl ChildrenDoneReceipt {
+    pub fn new(gap_id: impl Into<String>, children: Vec<String>) -> Self {
+        ChildrenDoneReceipt {
+            gap_id: gap_id.into(),
+            children,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Validate: gap_id non-empty, at least one child.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.gap_id.is_empty() {
+            return Err("gap_id cannot be empty".to_string());
+        }
+        if self.children.is_empty() {
+            return Err("children cannot be empty".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// CREDIBLE-1508: receipt documenting a terminal-status row reconciled into
+/// state.db from an out-of-band source (the `docs/gaps/*.yaml` mirror, or a
+/// canonical peer store) rather than a live `ship()` — the PR/merge proof (if
+/// any) already happened in the past and is not re-verified here. This is the
+/// "explicit reconciler receipt variant" the single done-writer accepts in
+/// place of a `closed_pr`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportedReceipt {
+    /// Gap ID being reconciled.
+    pub gap_id: String,
+    /// Where the terminal status was reconciled from, e.g. "yaml_sync" or
+    /// "canonical_peer".
+    pub source: String,
+    /// UTC timestamp of receipt creation.
+    pub created_at: DateTime<Utc>,
+}
+
+impl ImportedReceipt {
+    pub fn new(gap_id: impl Into<String>, source: impl Into<String>) -> Self {
+        ImportedReceipt {
+            gap_id: gap_id.into(),
+            source: source.into(),
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Validate: gap_id and source both non-empty.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.gap_id.is_empty() {
+            return Err("gap_id cannot be empty".to_string());
+        }
+        if self.source.trim().is_empty() {
+            return Err("source cannot be empty".to_string());
+        }
+        Ok(())
+    }
+}
+
 /// Selection of which executor path runs the ship.
 ///
 /// Mirrors the three flavours of `scripts/coord/bot-merge.sh` today:

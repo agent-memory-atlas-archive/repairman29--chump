@@ -185,6 +185,36 @@ pub struct LeaseRow {
     pub expires_at: i64,
 }
 
+/// CREDIBLE-1508: how `GapStore::finalize_status_done` cleans up leases once a
+/// gap flips to `done`. `ship()` only knows the claiming session's own lease;
+/// no-actor closes (decomposed-parent auto-close, YAML/peer reconcile, a
+/// `chump gap set --status done` with no session context) have no single
+/// session to key on, so they clear every lease on the gap instead.
+enum LeaseCleanup {
+    /// Delete only the lease held by this session — `ship()`'s behaviour.
+    ForSession(String),
+    /// Delete every lease on `gap_id` regardless of session.
+    All,
+}
+
+/// CREDIBLE-1508: how much ship-specific ceremony `finalize_status_done` runs
+/// AFTER the receipt-gated row write. The DB write, lease cleanup, idempotency
+/// short-circuit, and the `gap_status_done_written` audit event are the same
+/// for every caller; these extras differ.
+enum DoneExtras {
+    /// A PR-backed `ship()`: also run EFFECT-verification, emit the
+    /// `ship_landed` landing event, and kick the publication resolver.
+    /// Only `ship()` uses this, which keeps `ship_landed` meaning exactly what
+    /// its consumers (fleet-brief, phase-r-measurement) count: one landed PR.
+    ShipCeremony,
+    /// Every other done-writer (`gap set --status done`, decomposed-parent
+    /// auto-close, YAML / canonical-peer reconcile): stamp the receipt and
+    /// emit `gap_status_done_written`, nothing else. These paths never ran the
+    /// ship ceremony before CREDIBLE-1508 and still do not, so a dup-archive or
+    /// umbrella close does not count as a landing or queue publication work.
+    ReceiptOnly,
+}
+
 /// A typed gap-to-PR link (INFRA-8192). Written at PR-open time by
 /// `chump gap link-pr <GAP> <PR> --sha <SHA>`, instead of being parsed from
 /// the PR title after the fact.
@@ -1051,6 +1081,9 @@ async fn resolve_publication(event: PublicationEvent, repo_root: PathBuf) -> Res
     Ok(())
 }
 
+/// CREDIBLE-1508: (id, closed_pr, closed_date) of a canonically-done row.
+type CanonDoneRow = (String, Option<i64>, Option<String>);
+
 impl GapStore {
     /// Total row count across all statuses. Used to detect an empty-on-clone DB.
     pub fn gap_count(&self) -> Result<i64> {
@@ -1076,15 +1109,61 @@ impl GapStore {
                     [canonical_db.to_string_lossy().as_ref()],
                 )
             })?;
+        // CREDIBLE-1508: `done` is NOT replayed by this raw UPDATE. Collect the
+        // locally-open / canonically-done rows (with the canonical closed_pr and
+        // closed_date) and route each through the single receipt-gated
+        // done-writer below. The other terminal statuses keep the bulk UPDATE.
+        let done_rows: Result<Vec<CanonDoneRow>> = (|| {
+            let mut stmt = self.conn.prepare(
+                "SELECT g.id, c.closed_pr, c.closed_date FROM gaps g
+                 JOIN canon.gaps c ON c.id = g.id
+                 WHERE g.status = 'open' AND c.status = 'done'",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<i64>>(1).ok().flatten(),
+                    r.get::<_, Option<String>>(2).ok().flatten(),
+                ))
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })();
         let res = self.conn.execute(
             "UPDATE gaps SET status = (SELECT c.status FROM canon.gaps c WHERE c.id = gaps.id)
              WHERE status = 'open' AND id IN (
                 SELECT id FROM canon.gaps
-                WHERE status IN ('done','superseded','decomposed','already_satisfied','closed'))",
+                WHERE status IN ('superseded','decomposed','already_satisfied','closed'))",
             [],
         );
         let _ = self.conn.execute("DETACH DATABASE canon", []);
-        Ok(res?)
+        let mut updated = res?;
+        for (id, closed_pr, closed_date) in done_rows? {
+            let closed_pr = closed_pr.filter(|pr| *pr > 0);
+            let receipt = chump_ship::ImportedReceipt::new(id.clone(), "canonical_peer");
+            receipt
+                .validate()
+                .map_err(|e| anyhow::anyhow!("CREDIBLE-1508: invalid imported receipt: {e}"))?;
+            let receipt_json = serde_json::to_string(&receipt)
+                .context("CREDIBLE-1508: failed to serialize imported receipt")?;
+            if self.finalize_status_done(
+                &id,
+                closed_pr,
+                receipt_json,
+                LeaseCleanup::All,
+                DoneExtras::ReceiptOnly,
+                "canonical_peer",
+            )? {
+                // Keep the canonical store's closed_date, not today's.
+                if let Some(cd) = closed_date.filter(|d| !d.is_empty()) {
+                    self.conn.execute(
+                        "UPDATE gaps SET closed_date=?1 WHERE id=?2",
+                        params![cd, id],
+                    )?;
+                }
+                updated += 1;
+            }
+        }
+        Ok(updated)
     }
 
     /// If the DB has zero rows and docs/gaps/ contains YAML files, auto-import.
@@ -1680,6 +1759,38 @@ impl GapStore {
             && fields.closed_pr.is_none()
             && fields.closed_date.is_none();
 
+        // CREDIBLE-1508: a flip to status=done is a terminal CLOSURE — it must
+        // go through the single receipt-gated done-writer (finalize_status_done),
+        // NOT the generic field UPDATE below, so landing_receipt_json is stamped
+        // and kind=gap_status_done_written fires. Every OTHER field in this same
+        // call still rides the generic UPDATE; only the status flip is delegated.
+        // The INFRA-402 / recycle / hijack guards above have already run, so by
+        // here a done flip is sanctioned. `effective_closed_pr` is the PR this
+        // close is backed by: the one supplied in this call, else the one already
+        // on the row (the two-step `--closed-pr` then `--status done` pattern).
+        let closing_done = fields.status.as_deref() == Some("done");
+        // finalize_status_done stamps closed_date = today (live-ship semantics).
+        // A caller that supplied an explicit closed_date (historical migration /
+        // byte-stable YAML round-trip) must keep it, so capture it here and
+        // re-apply after the delegated write.
+        let explicit_closed_date: Option<String> = if closing_done {
+            fields.closed_date.clone()
+        } else {
+            None
+        };
+        let effective_closed_pr: Option<i64> = if closing_done {
+            fields.closed_pr.or_else(|| {
+                self.conn
+                    .query_row("SELECT closed_pr FROM gaps WHERE id=?", [gap_id], |row| {
+                        row.get(0)
+                    })
+                    .ok()
+                    .flatten()
+            })
+        } else {
+            None
+        };
+
         let mut sets: Vec<&str> = Vec::new();
         let mut vals: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(v) = fields.title {
@@ -1699,8 +1810,12 @@ impl GapStore {
             vals.push(Box::new(v));
         }
         if let Some(v) = fields.status {
-            sets.push("status=?");
-            vals.push(Box::new(v));
+            // CREDIBLE-1508: `done` is delegated to finalize_status_done below;
+            // every other status still flips via this generic UPDATE.
+            if v != "done" {
+                sets.push("status=?");
+                vals.push(Box::new(v));
+            }
         }
         if let Some(v) = fields.acceptance_criteria {
             sets.push("acceptance_criteria=?");
@@ -1782,15 +1897,51 @@ impl GapStore {
             sets.push("artifact_type=?");
             vals.push(Box::new(if v.is_empty() { "code".to_string() } else { v }));
         }
-        if sets.is_empty() {
+        // Apply the non-status fields first (if any). When the ONLY change is a
+        // done flip, `sets` is empty and the generic UPDATE is skipped — the
+        // delegation below does the row write.
+        if !sets.is_empty() {
+            vals.push(Box::new(gap_id.to_string()));
+            let sql = format!("UPDATE gaps SET {} WHERE id=?", sets.join(","));
+            let params_vec: Vec<&dyn rusqlite::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
+            let changed = self.conn.execute(&sql, params_vec.as_slice())?;
+            if changed == 0 {
+                bail!("gap {} not found", gap_id);
+            }
+        } else if !closing_done {
             return Ok(());
         }
-        vals.push(Box::new(gap_id.to_string()));
-        let sql = format!("UPDATE gaps SET {} WHERE id=?", sets.join(","));
-        let params_vec: Vec<&dyn rusqlite::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
-        let changed = self.conn.execute(&sql, params_vec.as_slice())?;
-        if changed == 0 {
-            bail!("gap {} not found", gap_id);
+
+        // CREDIBLE-1508: the delegated done flip. A LandingReceipt keyed on the
+        // effective closed_pr (or None for a bypass/migration close) is stamped
+        // by finalize_status_done — the same single writer `ship()` uses — so
+        // this path can no longer produce a done row with no receipt. LeaseCleanup
+        // ::All because `chump gap set` carries no claiming-session context.
+        if closing_done {
+            let receipt = chump_ship::LandingReceipt::new(gap_id.to_string(), effective_closed_pr);
+            receipt
+                .validate()
+                .map_err(|e| anyhow::anyhow!("CREDIBLE-1508: invalid landing receipt: {e}"))?;
+            let receipt_json = serde_json::to_string(&receipt)
+                .context("CREDIBLE-1508: failed to serialize landing receipt")?;
+            let transitioned = self.finalize_status_done(
+                gap_id,
+                effective_closed_pr,
+                receipt_json,
+                LeaseCleanup::All,
+                DoneExtras::ReceiptOnly,
+                "gap_set",
+            )?;
+            // Restore a caller-supplied closed_date that finalize overwrote with
+            // today's date (only when the row actually transitioned).
+            if transitioned {
+                if let Some(cd) = explicit_closed_date {
+                    self.conn.execute(
+                        "UPDATE gaps SET closed_date=?1 WHERE id=?2",
+                        params![cd, gap_id],
+                    )?;
+                }
+            }
         }
         Ok(())
     }
@@ -3131,36 +3282,81 @@ impl GapStore {
         receipt
             .validate()
             .map_err(|e| anyhow::anyhow!("CREDIBLE-1495: invalid landing receipt: {e}"))?;
+        let receipt_json = serde_json::to_string(&receipt)
+            .context("CREDIBLE-1495: failed to serialize landing receipt")?;
 
-        // CREDIBLE-1495 R3: Check if gap is already done (idempotent behavior).
-        // If already done, return Ok() with no event emitted.
-        let current_status: String = match self.conn.query_row(
-            "SELECT status FROM gaps WHERE id=?1",
-            params![gap_id],
-            |r| r.get(0),
-        ) {
-            Ok(status) => status,
-            Err(_) => {
-                bail!(
-                    "gap {} not found, already done, or in a deliberate terminal status \
-                     (superseded/wontfix/closed)",
-                    gap_id
-                );
-            }
-        };
+        // CREDIBLE-1508: the actual status=done write, idempotency check, lease
+        // cleanup, EFFECT-verification, ship_landed event, and publication kick
+        // now live in the single receipt-gated done-writer. `ship()` keeps only
+        // its PR-specific gates above (proof-of-merge, running-and-effective,
+        // cargo build/hakari) — everything a real PR-backed closure needs that
+        // a no-actor reconcile does not. A `changed == 0` outcome here is the
+        // idempotent "already terminal" short-circuit (CREDIBLE-1495 R3), which
+        // ship() surfaces as the same Ok(()) it always has.
+        self.finalize_status_done(
+            gap_id,
+            closed_pr,
+            receipt_json,
+            LeaseCleanup::ForSession(session_id.to_string()),
+            DoneExtras::ShipCeremony,
+            "ship",
+        )?;
+        Ok(())
+    }
 
-        // CREDIBLE-1495 R3: If already in a terminal status, return Ok() with no event.
-        if matches!(
-            current_status.as_str(),
-            "done"
-                | "superseded"
-                | "wontfix"
-                | "wont_fix"
-                | "closed"
-                | "closed_not_a_bug"
-                | "already_satisfied"
-        ) {
-            return Ok(());
+    /// CREDIBLE-1508: the single `status=done` writer. Every path that flips a
+    /// gap to `done` — `ship()`, `chump gap set --status done`, the
+    /// decomposed-parent auto-close, the YAML backfill, `sync_pull`, and the
+    /// canonical-peer reconciler (`reconcile_terminal_from`) — funnels
+    /// through here so that (a) a validated receipt is always stamped onto
+    /// `landing_receipt_json` (a `LandingReceipt` keyed on `closed_pr`, or an
+    /// explicit reconciler receipt variant when no PR backs the close), and
+    /// (b) exactly one `kind=gap_status_done_written` audit event fires on the
+    /// first transition. Callers validate and serialize their own receipt and
+    /// hand the JSON in; this function does not care which receipt variant it
+    /// is, only that `receipt_json` is non-empty. `writer` names the calling
+    /// path (`ship`, `gap_set`, `decomposed_auto_close`, `yaml_backfill`,
+    /// `yaml_sync`, `canonical_peer`) and rides on the audit event.
+    ///
+    /// Returns `Ok(true)` if the row actually transitioned to `done`, `Ok(false)`
+    /// if it was already in a terminal status (idempotent no-op, no event) —
+    /// matching CREDIBLE-1495 R3's "already done" short-circuit.
+    fn finalize_status_done(
+        &self,
+        gap_id: &str,
+        closed_pr: Option<i64>,
+        receipt_json: String,
+        lease_cleanup: LeaseCleanup,
+        extras: DoneExtras,
+        writer: &str,
+    ) -> Result<bool> {
+        // Defensive: a receipt is mandatory. Callers always pass a serialized,
+        // pre-validated receipt; an empty string would mean a done-write with
+        // no provenance, which is exactly what CREDIBLE-1508 closes off.
+        if receipt_json.trim().is_empty() {
+            bail!("CREDIBLE-1508: refusing to write status=done for {gap_id} without a receipt");
+        }
+
+        // CREDIBLE-1495 R3: idempotent — if already terminal, no write, no event.
+        let current_status: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT status FROM gaps WHERE id=?1",
+                params![gap_id],
+                |r| r.get(0),
+            )
+            .ok();
+        match current_status.as_deref() {
+            None => bail!(
+                "gap {} not found, already done, or in a deliberate terminal status \
+                 (superseded/wontfix/closed)",
+                gap_id
+            ),
+            Some(
+                "done" | "superseded" | "wontfix" | "wont_fix" | "closed" | "closed_not_a_bug"
+                | "already_satisfied",
+            ) => return Ok(false),
+            Some(_) => {}
         }
 
         let now = unix_now();
@@ -3172,8 +3368,6 @@ impl GapStore {
         // (merged on main, still shown open). We exclude only the DELIBERATE terminal
         // statuses (already done, or an operator's superseded/wontfix/closed decision)
         // so a real terminal choice is never silently flipped to done.
-        let receipt_json = serde_json::to_string(&receipt)
-            .context("CREDIBLE-1495: failed to serialize landing receipt")?;
         let changed = if let Some(pr) = closed_pr {
             self.conn.execute(
                 "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2, closed_pr=?3, landing_receipt_json=?4
@@ -3190,29 +3384,31 @@ impl GapStore {
             )?
         };
         if changed == 0 {
-            bail!(
-                "gap {} not found, already done, or in a deliberate terminal status \
-                 (superseded/wontfix/closed)",
-                gap_id
-            );
+            // Raced with a concurrent closer between the SELECT and the UPDATE.
+            // Treat as an idempotent no-op rather than a hard failure.
+            return Ok(false);
         }
-        let _ = self.conn.execute(
-            "DELETE FROM leases WHERE session_id=?1 AND gap_id=?2",
-            params![session_id, gap_id],
-        );
 
-        // META-555 (advisory MVP): now that the gap has flipped to done,
-        // evaluate whether its acceptance criterion was EFFECT-verified and
-        // not merely CI-green. Best-effort + NEVER blocks — a gap with no
-        // `verify:` criterion (the default) is untouched; one whose `verify:`
-        // live-check fails is flagged (note + `closed_effect_unverified`
-        // signal) so it stays visible under the SAME id instead of silently
-        // respawning as a fresh gap id (root incident: RESILIENT-1230 ->
-        // 1258 -> 1294, one unfixed symptom, three ids).
-        self.record_effect_verification(gap_id);
+        match lease_cleanup {
+            LeaseCleanup::ForSession(session_id) => {
+                let _ = self.conn.execute(
+                    "DELETE FROM leases WHERE session_id=?1 AND gap_id=?2",
+                    params![session_id, gap_id],
+                );
+            }
+            LeaseCleanup::All => {
+                let _ = self
+                    .conn
+                    .execute("DELETE FROM leases WHERE gap_id=?1", params![gap_id]);
+            }
+        }
 
-        // CREDIBLE-1495 R4: Emit exactly one ship_landed ambient event on first transition.
-        // This event is crucial for tracking the moment a gap transitioned to done.
+        // CREDIBLE-1508: exactly one gap_status_done_written audit event per
+        // real transition — the credibility backbone this gap exists to
+        // provide. Emitted for EVERY done-writer (live ship, set, auto-close,
+        // reconcile) so "was a receipt stamped when this row went done?" is
+        // answerable from the ambient stream alone.
+        // scanner-anchor: "kind":"gap_status_done_written"
         {
             use std::io::Write as _;
             let ts = unix_to_iso_full(unix_now());
@@ -3220,9 +3416,15 @@ impl GapStore {
                 .map(|pr| format!(",\"closed_pr\":{pr}"))
                 .unwrap_or_default();
             let line = format!(
-                "{{\"ts\":\"{ts}\",\"kind\":\"ship_landed\",\"gap_id\":\"{gap_id}\"{pr_str}}}\n"
+                "{{\"ts\":\"{ts}\",\"kind\":\"gap_status_done_written\",\"gap_id\":\"{gap_id}\",\"writer\":\"{writer}\"{pr_str}}}\n"
             );
-            let amb = self.repo_root.join(".chump-locks").join("ambient.jsonl");
+            // create_dir_all the lock dir first: unlike ship_landed (whose
+            // call sites always run with .chump-locks already present), this
+            // audit event is the one credibility signal that must never be
+            // silently dropped just because the dir doesn't exist yet.
+            let locks = self.repo_root.join(".chump-locks");
+            let _ = std::fs::create_dir_all(&locks);
+            let amb = locks.join("ambient.jsonl");
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -3232,52 +3434,114 @@ impl GapStore {
             }
         }
 
-        // EFFECTIVE-478 (EFFECTIVE-364 slice): trigger the publication
-        // resolver asynchronously so "ship -> told" work gets queued
-        // without blocking this transition. `ship()` is called from a sync
-        // context with no ambient tokio runtime, so we spin up a
-        // lightweight current-thread runtime on a background OS thread
-        // rather than calling `tokio::spawn` directly (which panics
-        // outside a runtime). Any failure is logged and never propagated —
-        // publication is best-effort and must not turn a successful ship
-        // into an error.
-        {
-            let artifact_type = self
-                .get_artifact_type(gap_id)
-                .unwrap_or_else(|_| "code".to_string());
-            let event = PublicationEvent {
-                source_gap_id: gap_id.to_string(),
-                artifact_type,
-            };
-            let repo_root = self.repo_root.clone();
-            std::thread::spawn(move || {
-                let rt = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
+        // The remaining ceremony (EFFECT-verification, the `ship_landed` landing
+        // event, and the publication resolver) belongs to a PR-backed ship()
+        // only. The other writers never ran it before CREDIBLE-1508; running it
+        // now would count a dup-archive or umbrella close as a landing.
+        if matches!(extras, DoneExtras::ShipCeremony) {
+            // META-555 (advisory MVP): now that the gap has flipped to done,
+            // evaluate whether its acceptance criterion was EFFECT-verified and
+            // not merely CI-green. Best-effort + NEVER blocks — a gap with no
+            // `verify:` criterion (the default) is untouched; one whose `verify:`
+            // live-check fails is flagged (note + `closed_effect_unverified`
+            // signal) so it stays visible under the SAME id instead of silently
+            // respawning as a fresh gap id (root incident: RESILIENT-1230 ->
+            // 1258 -> 1294, one unfixed symptom, three ids).
+            self.record_effect_verification(gap_id);
+
+            // CREDIBLE-1495 R4: Emit exactly one ship_landed ambient event on first transition.
+            // This event is crucial for tracking the moment a gap transitioned to done.
+            {
+                use std::io::Write as _;
+                let ts = unix_to_iso_full(unix_now());
+                let pr_str = closed_pr
+                    .map(|pr| format!(",\"closed_pr\":{pr}"))
+                    .unwrap_or_default();
+                let line = format!(
+                    "{{\"ts\":\"{ts}\",\"kind\":\"ship_landed\",\"gap_id\":\"{gap_id}\"{pr_str}}}\n"
+                );
+                let amb = self.repo_root.join(".chump-locks").join("ambient.jsonl");
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&amb)
                 {
-                    Ok(rt) => rt,
-                    Err(e) => {
-                        eprintln!(
-                            "WARN: EFFECTIVE-478: publication resolver runtime init failed: {e:#}"
-                        );
-                        return;
-                    }
-                };
-                let _guard = rt.enter();
-                let handle = tokio::spawn(resolve_publication(event, repo_root));
-                match rt.block_on(handle) {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
-                        eprintln!("WARN: EFFECTIVE-478: publication resolver failed: {e:#}")
-                    }
-                    Err(e) => {
-                        eprintln!("WARN: EFFECTIVE-478: publication resolver task panicked: {e:#}")
-                    }
+                    let _ = f.write_all(line.as_bytes());
                 }
-            });
+            }
+
+            // EFFECTIVE-478 (EFFECTIVE-364 slice): trigger the publication
+            // resolver asynchronously so "ship -> told" work gets queued
+            // without blocking this transition. This runs from a sync context
+            // with no ambient tokio runtime, so we spin up a lightweight
+            // current-thread runtime on a background OS thread rather than
+            // calling `tokio::spawn` directly (which panics outside a runtime).
+            // Any failure is logged and never propagated — publication is
+            // best-effort and must not turn a successful ship into an error.
+            {
+                let artifact_type = self
+                    .get_artifact_type(gap_id)
+                    .unwrap_or_else(|_| "code".to_string());
+                let event = PublicationEvent {
+                    source_gap_id: gap_id.to_string(),
+                    artifact_type,
+                };
+                let repo_root = self.repo_root.clone();
+                std::thread::spawn(move || {
+                    let rt = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            eprintln!(
+                                "WARN: EFFECTIVE-478: publication resolver runtime init failed: {e:#}"
+                            );
+                            return;
+                        }
+                    };
+                    let _guard = rt.enter();
+                    let handle = tokio::spawn(resolve_publication(event, repo_root));
+                    match rt.block_on(handle) {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            eprintln!("WARN: EFFECTIVE-478: publication resolver failed: {e:#}")
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "WARN: EFFECTIVE-478: publication resolver task panicked: {e:#}"
+                            )
+                        }
+                    }
+                });
+            }
         }
 
-        Ok(())
+        Ok(true)
+    }
+
+    /// CREDIBLE-1508: auto-close a decomposed umbrella whose children are all
+    /// `done`, through the single receipt-gated done-writer — but skipping
+    /// `ship()`'s PR-specific gates (proof-of-merge / cargo build / hakari),
+    /// since there is no PR for the PARENT itself: each child's own `ship()`
+    /// already proved ITS work landed, and the `ChildrenDoneReceipt` records
+    /// which children stood behind this close. Returns whether the parent
+    /// actually transitioned (false = already terminal / raced).
+    pub fn close_children_done(&self, gap_id: &str, children: Vec<String>) -> Result<bool> {
+        let receipt = chump_ship::ChildrenDoneReceipt::new(gap_id.to_string(), children);
+        receipt
+            .validate()
+            .map_err(|e| anyhow::anyhow!("CREDIBLE-1508: invalid children-done receipt: {e}"))?;
+        let receipt_json = serde_json::to_string(&receipt)
+            .context("CREDIBLE-1508: failed to serialize children-done receipt")?;
+        self.finalize_status_done(
+            gap_id,
+            None,
+            receipt_json,
+            LeaseCleanup::All,
+            DoneExtras::ReceiptOnly,
+            "decomposed_auto_close",
+        )
     }
 
     /// META-555: after a gap flips to done in `ship()`, evaluate whether its
@@ -5058,6 +5322,25 @@ impl GapStore {
             if g.status != "done" {
                 continue;
             }
+            // Monotonic, open-only gate (unchanged from the prior UPDATE's
+            // `WHERE status='open'`): any hand-set non-open DB state
+            // (superseded/blocked/deferred, or already-done) is operator
+            // intent and stays as-is — we don't trust YAML to overwrite it.
+            let cur: Option<(String, String)> = self
+                .conn
+                .query_row(
+                    "SELECT status, closed_date FROM gaps WHERE id=?1",
+                    params![g.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .ok();
+            let (cur_status, existing_closed_date) = match cur {
+                Some(v) => v,
+                None => continue,
+            };
+            if cur_status != "open" {
+                continue;
+            }
             let yaml_closed_date = g
                 .closed_date
                 .as_ref()
@@ -5065,22 +5348,42 @@ impl GapStore {
                 .unwrap_or_default();
             let yaml_closed_pr = g.closed_pr.as_ref().and_then(yaml_value_to_i64);
 
-            // UPDATE only flips when DB.status = 'open'. Any other DB
-            // state (done, superseded, blocked, deferred) is operator
-            // intent and stays as-is — we don't blindly trust YAML to
-            // overwrite hand-set states. closed_date and closed_pr
-            // piggyback if the YAML provides them; COALESCE keeps any DB
-            // value already populated so a divergent hand-set date is
-            // preserved.
-            let changed = self.conn.execute(
-                "UPDATE gaps
-                 SET status = 'done',
-                     closed_date = CASE WHEN ?1 = '' THEN closed_date ELSE ?1 END,
-                     closed_pr   = COALESCE(?2, closed_pr)
-                 WHERE id = ?3 AND status = 'open'",
-                params![yaml_closed_date, yaml_closed_pr, g.id],
+            // CREDIBLE-1508: route the YAML-closure reconcile through the single
+            // receipt-gated done-writer. An `ImportedReceipt("yaml_sync")` is the
+            // "explicit reconciler receipt variant" that stands in for a PR — the
+            // merge this YAML records already happened in the past, so this is a
+            // DoneExtras::ReceiptOnly close (no EFFECT-verify / ship_landed /
+            // publication re-run; just the receipt + gap_status_done_written).
+            let receipt = chump_ship::ImportedReceipt::new(g.id.clone(), "yaml_sync".to_string());
+            receipt
+                .validate()
+                .map_err(|e| anyhow::anyhow!("CREDIBLE-1508: invalid imported receipt: {e}"))?;
+            let receipt_json = serde_json::to_string(&receipt)
+                .context("CREDIBLE-1508: failed to serialize imported receipt")?;
+            let transitioned = self.finalize_status_done(
+                &g.id,
+                yaml_closed_pr,
+                receipt_json,
+                LeaseCleanup::All,
+                DoneExtras::ReceiptOnly,
+                "yaml_backfill",
             )?;
-            backfilled += changed;
+            if transitioned {
+                // closed_date COALESCE semantics (preserved from the prior UPDATE):
+                // take the YAML's value when present, else keep the DB's existing
+                // one. finalize stamped today's date, so re-apply the intended
+                // value here.
+                let final_cd = if yaml_closed_date.is_empty() {
+                    existing_closed_date
+                } else {
+                    yaml_closed_date
+                };
+                self.conn.execute(
+                    "UPDATE gaps SET closed_date=?1 WHERE id=?2",
+                    params![final_cd, g.id],
+                )?;
+                backfilled += 1;
+            }
         }
         Ok(backfilled)
     }
@@ -6581,8 +6884,6 @@ impl GapStore {
     pub fn auto_close_decomposed_parents(&self) -> Result<Vec<String>> {
         let parents = self.list(Some("decomposed"))?;
         let mut closed = Vec::new();
-        let now = unix_now();
-        let iso = unix_to_iso_date(now);
         for parent in parents {
             let child_ids = parse_decomposed_children(&parent.notes);
             if child_ids.is_empty() {
@@ -6601,16 +6902,10 @@ impl GapStore {
             if !all_done {
                 continue;
             }
-            let changed = self.conn.execute(
-                "UPDATE gaps SET status='done', closed_at=?1, closed_date=?2
-                 WHERE id=?3 AND status NOT IN
-                   ('done','superseded','wontfix','wont_fix','closed','closed_not_a_bug','already_satisfied')",
-                params![now, iso, parent.id],
-            )?;
-            if changed > 0 {
-                let _ = self
-                    .conn
-                    .execute("DELETE FROM leases WHERE gap_id=?1", params![parent.id]);
+            // CREDIBLE-1508: route through the single receipt-gated done-writer —
+            // a `ChildrenDoneReceipt` records which children stood behind this
+            // close instead of a bare `UPDATE` with no provenance.
+            if self.close_children_done(&parent.id, child_ids.clone())? {
                 closed.push(parent.id);
             }
         }
@@ -9391,6 +9686,87 @@ mod tests {
             .unwrap();
         assert_eq!(status, "done");
         assert_eq!(closed_pr, Some(1234));
+    }
+
+    /// CREDIBLE-1508: the single done-writer invariant. A `gap set --status
+    /// done` (the set_fields path) must now (a) stamp a validated receipt onto
+    /// landing_receipt_json and (b) emit exactly one gap_status_done_written
+    /// ambient event — the two things the CREDIBLE-1496 guard (PR #5494) can
+    /// then rely on for EVERY done row, not just ship()-closed ones.
+    #[test]
+    #[serial_test::serial(closed_pr_guard_env)]
+    fn set_fields_done_stamps_receipt_and_emits_event() {
+        let (store, dir) = test_store();
+        let id = store.reserve("INFRA", "receipt path", "P1", "s").unwrap();
+        store
+            .set_fields(
+                &id,
+                GapFieldUpdate {
+                    status: Some("done".into()),
+                    closed_pr: Some(4242),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // (a) receipt stamped — a LandingReceipt carrying the gap id + PR.
+        let receipt_json: Option<String> = store
+            .conn
+            .query_row(
+                "SELECT landing_receipt_json FROM gaps WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let receipt_json = receipt_json.expect("done row must carry a landing receipt");
+        assert!(
+            receipt_json.contains(&id) && receipt_json.contains("4242"),
+            "receipt must name the gap and PR, got: {receipt_json}"
+        );
+
+        // (b) exactly one gap_status_done_written event for this gap.
+        let amb = dir.path().join(".chump-locks").join("ambient.jsonl");
+        let stream = std::fs::read_to_string(&amb).unwrap_or_default();
+        let hits = stream
+            .lines()
+            .filter(|l| {
+                l.contains("\"kind\":\"gap_status_done_written\"")
+                    && l.contains(&format!("\"gap_id\":\"{id}\""))
+            })
+            .count();
+        assert_eq!(
+            hits, 1,
+            "expected exactly one gap_status_done_written event, got {hits}"
+        );
+    }
+
+    /// CREDIBLE-1508: the decomposed-parent auto-close flows through the same
+    /// writer, stamping a ChildrenDoneReceipt (no PR of its own) rather than a
+    /// bare UPDATE.
+    #[test]
+    fn close_children_done_stamps_children_receipt() {
+        let (store, _dir) = test_store();
+        let parent = store.reserve("INFRA", "umbrella", "P1", "m").unwrap();
+        let transitioned = store
+            .close_children_done(&parent, vec!["INFRA-1".into(), "INFRA-2".into()])
+            .unwrap();
+        assert!(transitioned, "parent must transition to done");
+        let receipt_json: String = store
+            .conn
+            .query_row(
+                "SELECT landing_receipt_json FROM gaps WHERE id=?1",
+                [&parent],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            receipt_json.contains("INFRA-1") && receipt_json.contains("INFRA-2"),
+            "ChildrenDoneReceipt must record the children, got: {receipt_json}"
+        );
+        // Idempotent: a second call is a no-op (already terminal).
+        assert!(!store
+            .close_children_done(&parent, vec!["INFRA-1".into()])
+            .unwrap());
     }
 
     #[test]
@@ -12986,5 +13362,68 @@ mod reconcile_terminal_tests {
         assert_eq!(n, 1);
         assert_eq!(local.get("X-1").unwrap().unwrap().status, "superseded");
         assert_eq!(local.get("X-2").unwrap().unwrap().status, "open");
+    }
+
+    /// CREDIBLE-1508: a canonically-done row replays through the single
+    /// done-writer: ImportedReceipt("canonical_peer") stamped, canonical
+    /// closed_pr / closed_date carried over, one gap_status_done_written event
+    /// naming the writer, and no ship_landed (a replay is not a landing).
+    #[test]
+    fn reconcile_replays_done_through_receipt_gated_writer() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let canon = GapStore::open(a.path()).unwrap();
+        let local = GapStore::open(b.path()).unwrap();
+        canon
+            .conn_for_test()
+            .execute(
+                "INSERT INTO gaps (id, domain, title, status, closed_pr, closed_date)
+                 VALUES ('X-3','X','t','done',777,'2026-10-01')",
+                [],
+            )
+            .unwrap();
+        local
+            .conn_for_test()
+            .execute(
+                "INSERT INTO gaps (id, domain, title, status) VALUES ('X-3','X','t','open')",
+                [],
+            )
+            .unwrap();
+        drop(canon);
+        let n = local
+            .reconcile_terminal_from(&GapStore::db_path(a.path()))
+            .unwrap();
+        assert_eq!(n, 1);
+        let (status, closed_pr, closed_date, receipt): (String, Option<i64>, String, String) =
+            local
+                .conn_for_test()
+                .query_row(
+                    "SELECT status, closed_pr, closed_date, landing_receipt_json FROM gaps WHERE id='X-3'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .unwrap();
+        assert_eq!(status, "done");
+        assert_eq!(closed_pr, Some(777));
+        assert_eq!(closed_date, "2026-10-01");
+        assert!(receipt.contains("canonical_peer"), "receipt: {receipt}");
+        let amb = b.path().join(".chump-locks").join("ambient.jsonl");
+        let stream = std::fs::read_to_string(&amb).unwrap_or_default();
+        let written = stream
+            .lines()
+            .filter(|l| {
+                l.contains("\"kind\":\"gap_status_done_written\"")
+                    && l.contains("\"writer\":\"canonical_peer\"")
+            })
+            .count();
+        assert_eq!(written, 1, "stream: {stream}");
+        assert!(!stream.contains("\"kind\":\"ship_landed\""));
+        // Idempotent: a second replay is a no-op.
+        assert_eq!(
+            local
+                .reconcile_terminal_from(&GapStore::db_path(a.path()))
+                .unwrap(),
+            0
+        );
     }
 }

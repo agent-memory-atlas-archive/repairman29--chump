@@ -105,7 +105,9 @@ grep -q "\"kind\":\"state_db_yaml_orphan\".*\"gap_id\":\"$OPEN_A\"" "$AMBIENT" \
 grep -q "\"kind\":\"state_db_yaml_orphan\".*\"gap_id\":\"$OPEN_B\"" "$AMBIENT" \
     && ok "orphan event emitted for $OPEN_B in dry-run" \
     || fail "no orphan event for $OPEN_B in dry-run"
-grep -q "\"gap_id\":\"$DONE_C\"" "$AMBIENT" \
+# Scope to orphan events: the done flip itself legitimately emits
+# kind=gap_status_done_written for $DONE_C (CREDIBLE-1508).
+grep -q "\"kind\":\"state_db_yaml_orphan\".*\"gap_id\":\"$DONE_C\"" "$AMBIENT" \
     && fail "orphan event emitted for done gap $DONE_C (must never fire for terminal statuses)" \
     || ok "no orphan event for done gap $DONE_C"
 

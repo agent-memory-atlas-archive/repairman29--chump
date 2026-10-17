@@ -174,6 +174,8 @@ pub fn sync_pull(store: &GapStore, gaps_dir: &Path, dry_run: bool) -> Result<Syn
                 if !dry_run {
                     insert_gap_row(conn, yaml_row)
                         .with_context(|| format!("inserting {id} from YAML during sync_pull"))?;
+                    stamp_imported_receipt_if_done(conn, id, &yaml_row.status)
+                        .with_context(|| format!("stamping import receipt for {id}"))?;
                 }
                 report.inserted += 1;
                 report.changed_ids.push(id.clone());
@@ -229,9 +231,48 @@ pub fn sync_pull(store: &GapStore, gaps_dir: &Path, dry_run: bool) -> Result<Syn
                         report.skipped += 1;
                     } else {
                         if !dry_run {
-                            update_gap_row(conn, &effective_row).with_context(|| {
-                                format!("updating {id} from YAML during sync_pull")
-                            })?;
+                            // CREDIBLE-1508: a YAML pull that flips a live row
+                            // to done is a status transition, so the flip goes
+                            // through the single receipt-gated done-writer.
+                            // Every other field is written by update_gap_row
+                            // with the row's PRIOR status; the writer then
+                            // flips it, and the YAML's closure fields (and the
+                            // DB's closed_at, which update_gap_row never
+                            // touched) are restored over the writer's stamp.
+                            let flips_done = effective_row.status.trim() == "done"
+                                && db_row.status.trim() != "done";
+                            if flips_done {
+                                let mut staged = effective_row.clone();
+                                staged.status = db_row.status.clone();
+                                update_gap_row(conn, &staged).with_context(|| {
+                                    format!("updating {id} from YAML during sync_pull")
+                                })?;
+                                let receipt_json = imported_receipt_json(id)?;
+                                if store.finalize_status_done(
+                                    id,
+                                    effective_row.closed_pr.filter(|pr| *pr > 0),
+                                    receipt_json,
+                                    crate::LeaseCleanup::All,
+                                    crate::DoneExtras::ReceiptOnly,
+                                    "yaml_sync",
+                                )? {
+                                    conn.execute(
+                                        "UPDATE gaps SET closed_at=?1, closed_date=?2, closed_pr=?3 WHERE id=?4",
+                                        params![
+                                            db_row.closed_at,
+                                            effective_row.closed_date,
+                                            effective_row.closed_pr,
+                                            id
+                                        ],
+                                    )?;
+                                }
+                            } else {
+                                update_gap_row(conn, &effective_row).with_context(|| {
+                                    format!("updating {id} from YAML during sync_pull")
+                                })?;
+                                stamp_imported_receipt_if_done(conn, id, &effective_row.status)
+                                    .with_context(|| format!("stamping import receipt for {id}"))?;
+                            }
                         }
                         report.updated += 1;
                         report.changed_ids.push(id.clone());
@@ -506,6 +547,40 @@ fn is_terminal_status(status: &str) -> bool {
             | "obsolete"
             | "duplicate"
     )
+}
+
+/// CREDIBLE-1508: when `sync_pull` materializes a row that is ALREADY done
+/// (a new row inserted from its YAML mirror, or a recycle-allowed rewrite of a
+/// row that was done before) — a historical row, not a status transition, so
+/// no audit event — stamp an `ImportedReceipt` onto `landing_receipt_json` — the same
+/// receipt-gated column every live done-writer populates — so a sync-recovered
+/// done row is never silently receiptless. Only fires when the column is still
+/// unset, so a real `ship()`/closure receipt already on the row is never
+/// clobbered by a later sync pass.
+fn stamp_imported_receipt_if_done(
+    conn: &rusqlite::Connection,
+    gap_id: &str,
+    status: &str,
+) -> Result<()> {
+    if status.trim() != "done" {
+        return Ok(());
+    }
+    let receipt_json = imported_receipt_json(gap_id)?;
+    conn.execute(
+        "UPDATE gaps SET landing_receipt_json=?1 WHERE id=?2 AND landing_receipt_json IS NULL",
+        params![receipt_json, gap_id],
+    )?;
+    Ok(())
+}
+
+/// CREDIBLE-1508: the serialized `ImportedReceipt("yaml_sync")` every
+/// YAML-sourced done row carries in `landing_receipt_json`.
+fn imported_receipt_json(gap_id: &str) -> Result<String> {
+    let receipt = chump_ship::ImportedReceipt::new(gap_id.to_string(), "yaml_sync".to_string());
+    receipt
+        .validate()
+        .map_err(|e| anyhow::anyhow!("CREDIBLE-1508: invalid imported receipt: {e}"))?;
+    serde_json::to_string(&receipt).context("CREDIBLE-1508: failed to serialize imported receipt")
 }
 
 /// Atomic single-gap YAML write: render via `dump_per_file_single` into a
@@ -1024,6 +1099,50 @@ mod tests {
         assert_eq!(report.inserted, 1);
         let row = store.get("INFRA-9005").unwrap().unwrap();
         assert_eq!(row.title, "yaml-only insert");
+    }
+
+    /// CREDIBLE-1508: a pull that flips a live row to done goes through the
+    /// single receipt-gated done-writer: ImportedReceipt("yaml_sync") stamped,
+    /// the YAML's closed_date / closed_pr kept, exactly one
+    /// gap_status_done_written event with writer=yaml_sync, no ship_landed.
+    #[test]
+    fn pull_done_flip_goes_through_receipt_gated_writer() {
+        let root = tempdir().unwrap();
+        let store = fresh_store(root.path());
+        insert_minimal(&store, "INFRA-9010", "Flip me", "[\"a\"]");
+        let gaps_dir = root.path().join("docs/gaps");
+        write_yaml(
+            &gaps_dir,
+            "INFRA-9010",
+            "- id: INFRA-9010\n  domain: INFRA\n  title: Flip me\n  status: done\n  priority: P1\n  effort: s\n  closed_date: '2026-09-30'\n  closed_pr: 4321\n  acceptance_criteria:\n    - a\n",
+        );
+        let report = sync_pull(&store, &gaps_dir, false).unwrap();
+        assert_eq!(report.updated, 1);
+        let row = store.get("INFRA-9010").unwrap().unwrap();
+        assert_eq!(row.status, "done");
+        assert_eq!(row.closed_pr, Some(4321));
+        assert_eq!(row.closed_date, "2026-09-30");
+        let receipt: String = store
+            .conn_for_sync()
+            .query_row(
+                "SELECT landing_receipt_json FROM gaps WHERE id='INFRA-9010'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(receipt.contains("yaml_sync"), "receipt: {receipt}");
+        let amb = root.path().join(".chump-locks").join("ambient.jsonl");
+        let stream = std::fs::read_to_string(&amb).unwrap_or_default();
+        let hits = stream
+            .lines()
+            .filter(|l| {
+                l.contains("\"kind\":\"gap_status_done_written\"")
+                    && l.contains("\"writer\":\"yaml_sync\"")
+                    && l.contains("INFRA-9010")
+            })
+            .count();
+        assert_eq!(hits, 1, "stream: {stream}");
+        assert!(!stream.contains("\"kind\":\"ship_landed\""));
     }
 
     #[test]
