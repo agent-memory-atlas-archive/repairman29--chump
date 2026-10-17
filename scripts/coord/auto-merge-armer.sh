@@ -30,6 +30,10 @@ export CHUMP_GH_SCRIPT="auto-merge-armer.sh"
 # label) or an `Auto-merge: hold` body/comment line is a decision, not a fault.
 # shellcheck source=lib/arm-policy.sh
 source "${SCRIPT_DIR}/lib/arm-policy.sh"
+# RESILIENT-1616: the shared pr-cut predicate — a deliberately cut PR is
+# terminal; the central armer must refuse it no matter which organ delegated here.
+# shellcheck source=lib/pr-cut-guard.sh
+source "${SCRIPT_DIR}/lib/pr-cut-guard.sh"
 
 # RESILIENT-1613: name the caller in pr_arm_skipped_hold / pr_rearmed so a
 # re-arm war is attributable to the organ that started it, not just to the
@@ -462,6 +466,14 @@ LAST_ARM_TS=0
 ANY_FAILED=0
 
 for PR_NUM in "${PR_NUMS[@]}"; do
+    # RESILIENT-1616: a deliberately cut PR is terminal — refuse to arm it even
+    # when a sweeper or rescue organ delegated the arm here.
+    if pr_cut_honored "${PR_NUM}" "auto-merge-armer.sh" "arm" "" "${REPO}"; then
+        echo "[auto-merge-armer] PR #${PR_NUM}: pr-cut (deliberate close, terminal; RESILIENT-1616) — skipping."
+        LAST_ARM_TS="$(date -u +%s)"
+        continue
+    fi
+
     # Enforce spacing between successive arm calls.
     _now="$(date -u +%s)"
     _since=$(( _now - LAST_ARM_TS ))

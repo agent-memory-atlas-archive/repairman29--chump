@@ -797,6 +797,9 @@ CHUMP_OPERATOR_CONSENSUS_BYPASS
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_AMBIENT_PATH
+# RESILIENT-1616: repo override for the shared pr-cut predicate's gh label read
+# (scripts/coord/lib/pr-cut-guard.sh); defaults to repairman29/chump.
+CHUMP_PR_CUT_REPO
 # detected in: (standard input)
 CHUMP_FIX_TRUNK_DISPATCH
 

@@ -36,8 +36,11 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPO="${GITHUB_REPOSITORY:-$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||;s|\.git$||')}"
-AMBIENT="$REPO_ROOT/.chump-locks/ambient.jsonl"
-SEEN_FILE="$REPO_ROOT/.chump-locks/closed-pr-watchdog-seen.txt"
+# RESILIENT-1616: honor the fleet-standard ambient override (so the ambient
+# stream and the seen-ledger relocate together under test) rather than a
+# hardcoded repo path.
+AMBIENT="${CHUMP_AMBIENT_PATH:-${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}}"
+SEEN_FILE="$(dirname "$AMBIENT")/closed-pr-watchdog-seen.txt"
 LOOKBACK_HOURS="${CHUMP_WATCHDOG_LOOKBACK_HOURS:-72}"
 DRY_RUN="${CHUMP_WATCHDOG_DRY_RUN:-0}"
 REOPEN="${CHUMP_WATCHDOG_REOPEN:-0}"
@@ -70,6 +73,11 @@ log() { echo "[closed-pr-watchdog] $*" >&2; }
 # reopened by this watchdog. Hold label list comes from the one arm policy.
 # shellcheck source=scripts/coord/lib/arm-policy.sh
 source "$SCRIPT_DIR/../coord/lib/arm-policy.sh" 2>/dev/null || ARM_POLICY_HOLD_LABELS="no-auto-merge hold do-not-merge CHUMP_HOLD"
+# RESILIENT-1616: the shared pr-cut predicate — reuse it (and emit
+# kind=pr_cut_honored) so a cut close is honored via the one source of truth,
+# not a watchdog-local label list.
+# shellcheck source=scripts/coord/lib/pr-cut-guard.sh
+source "$SCRIPT_DIR/../coord/lib/pr-cut-guard.sh" 2>/dev/null || true
 _deliberate_label() { # <labels-json-array> -> prints the matching label, rc 0 when deliberate
     python3 -c '
 import json, sys
@@ -161,7 +169,11 @@ for pr in data:
                     "\"pr\":$pr_num,\"gap_id\":\"$gap_id\",\"branch\":\"$pr_branch\",\"title\":\"$pr_title\""
 
                 pr_labels=$(python3 -c "import json,sys; print(json.dumps(json.loads(sys.argv[1]).get('labels',[])))" "$entry" 2>/dev/null || echo '[]')
-                if held_label=$(_deliberate_label "$pr_labels"); then
+                # RESILIENT-1616: the shared predicate first (label OR local
+                # kind=pr_cut event); it emits kind=pr_cut_honored when it skips.
+                if declare -F pr_cut_honored >/dev/null 2>&1 && pr_cut_honored "$pr_num" "closed-pr-watchdog.sh" "reopen" "" "$REPO"; then
+                    log "SKIP reopen PR #$pr_num — pr-cut (deliberate close, terminal; RESILIENT-1616)"
+                elif held_label=$(_deliberate_label "$pr_labels"); then
                     log "SKIP reopen PR #$pr_num — labeled '$held_label' (deliberate close / arm-policy hold, INFRA-8221)"
                 elif [[ "$REOPEN" == "1" && "$DRY_RUN" != "1" ]]; then
                     if gh api "repos/$REPO/pulls/$pr_num" -X PATCH -f state=open >/dev/null 2>&1; then

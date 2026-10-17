@@ -2710,6 +2710,12 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-pr-cut-honored.sh"],
             GateKind::Scripts,
         ));
+        // RESILIENT-1616: every PR-mutating organ honors the shared pr-cut predicate.
+        steps.push(step(
+            "pr-cut-organs",
+            &["bash", "scripts/ci/test-pr-cut-organs.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "load-aware-deadman",
             &["bash", "scripts/ci/test-load-aware-deadman.sh"],

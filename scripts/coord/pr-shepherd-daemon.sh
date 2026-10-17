@@ -134,6 +134,10 @@ source "$REPO_ROOT/scripts/coord/lib/merge-pipeline-lock.sh"
 # RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
 # shellcheck source=scripts/coord/lib/arm-policy.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
+# RESILIENT-1616: the shared pr-cut predicate — a deliberately cut PR is
+# terminal; never admin-merge/rebase/arm it, whatever its classification.
+# shellcheck source=scripts/coord/lib/pr-cut-guard.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pr-cut-guard.sh"
 
 emit_tick() {
   local count="$1"
@@ -1186,6 +1190,13 @@ for p in prs:
       age_hours=$(printf '%s' "$line" | python3 -c "import json,sys; print(json.load(sys.stdin).get('age_hours',0))" 2>/dev/null || echo "0")
       fail_check_names=$(printf '%s' "$line" | python3 -c "import json,sys; print(json.load(sys.stdin).get('fail_check_names',''))" 2>/dev/null || echo "")
       _emit_pr_classified "$pr_num" "$c" "$gap_id" "$age"
+
+      # RESILIENT-1616: a deliberately cut PR is terminal — never admin-merge,
+      # rebase or arm it, whatever its classification says.
+      if pr_cut_honored "$pr_num" "pr-shepherd-daemon.sh" "mutate"; then
+        echo "[pr-shepherd-daemon] PR #${pr_num} is pr-cut (terminal; RESILIENT-1616) — skipping all actions" >&2
+        continue
+      fi
 
       # META-141: flake detection — track consecutive identical-fingerprint
       # failures per test/check name; tags 'flake' in flake.db after 3+ in a row.

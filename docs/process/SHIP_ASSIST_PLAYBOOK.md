@@ -395,6 +395,24 @@ Never apply `rot-reaped` by hand: it is a claim that the janitor closed the PR, 
 **Also covered (RESILIENT-1606).** `post-push-integrity-watch.sh` additionally leaves a close alone when a non-bot actor commented within 60s of the close (tunable: `CHUMP_POST_PUSH_WATCH_COMMENT_S`, `CHUMP_POST_PUSH_WATCH_AUTOMATION_LOGINS`). GitHub's stale-push auto-close posts no comment, so the original INFRA-2026 incident (a close right after a force-push, no comment) is still reopened.
 
 **Receipt.** 2026-10-16: the architect's deliberate duplicate cuts of #5478 and #5483 were reopened by the watch within 15s of each close (ambient `post_push_auto_close_recovered` 13:35:12Z and 13:35:15Z; also 05:59Z and 10:41Z), then revived by the reviver at 14:31Z after being labeled `rot-reaped` by hand at 14:02Z. Four reopens, two PRs, one verb missing. Test: `scripts/ci/test-pr-cut-honored.sh` and `scripts/ci/test-trunk-recovery-reviver.sh`.
+
+**Every organ that honors `pr-cut` (RESILIENT-1616).** The watch + reviver (RESILIENT-1606/1607) were only the first two. A deliberately cut PR must never be re-armed, reopened, rebased or auto-commented by *any* organ. There is now ONE shared predicate — `pr_is_cut <N>` / `pr_cut_honored <N> <organ> <action>` in `scripts/coord/lib/pr-cut-guard.sh` — that reads EITHER the `pr-cut` label OR a local `kind=pr_cut` ambient event for the PR, and emits `kind=pr_cut_honored` whenever it skips an action. Receipt: `auto-arm-sweeper.sh` re-armed the cut duplicate #5562 at 18:29Z 2026-10-17 (`kind=pr_rearmed`), which would have landed the same diff twice.
+
+Honoring organs (each calls the predicate before its mutation):
+
+| Organ | Action it refuses on a cut PR |
+|---|---|
+| `scripts/ops/auto-arm-sweeper.sh` | arm (delegates to the armer) |
+| `scripts/coord/auto-merge-armer.sh` | arm (the central armer — refuses even when another organ delegated the arm) |
+| `scripts/ops/closed-pr-watchdog.sh` | reopen |
+| `scripts/coord/pr-rescue-false-close.sh` | reopen + comment + re-arm |
+| `scripts/coord/cascade-unblock-detector.sh` | rebase (stale sweep AND cascade) |
+| `scripts/coord/pr-shepherd-daemon.sh` | admin-merge / rebase / arm (all actions, whatever the classification) |
+| `scripts/coord/queue-driver.sh` | rebase/refresh (BEHIND, DIRTY, and the hot-file cascade sweep) |
+| `scripts/coord/post-push-integrity-watch.sh` | reopen (RESILIENT-1606, label-based) |
+| `scripts/coord/trunk-recovery-reviver.sh` | revive (RESILIENT-1607, label-based) |
+
+**CI guards.** `scripts/ci/test-pr-cut-organs.sh` drives each organ with a stubbed `gh` and a seeded `kind=pr_cut` event, asserting it skips + emits `kind=pr_cut_honored`; it also runs a grep gate that FAILS any new `gh pr reopen` / `gh pr merge --auto` call site under `scripts/coord` or `scripts/ops` that does not reference the predicate (grandfather list: `scripts/ci/pr-cut-guard-exceptions.txt`).
 **Clippy must use the pinned toolchain, not Homebrew's rust (INFRA-8225).** `rust-toolchain.toml`
 pins the compiler to a single patch (today `channel = "1.96.0"`) so local and CI agree on the lint
 set. A **Homebrew `rust`** (`brew install rust`) is a stand-alone toolchain, *not* a rustup proxy — it

@@ -75,6 +75,9 @@ ARMER="${CHUMP_AUTOARM_ARMER:-${REPO_ROOT}/scripts/coord/auto-merge-armer.sh}"
 HOLD_LABELS_RE='^(no-auto-merge|hold|do-not-merge|CHUMP_HOLD)$'
 # shellcheck source=scripts/coord/lib/arm-policy.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../coord/lib/arm-policy.sh"
+# RESILIENT-1616: the shared pr-cut predicate — never re-arm a deliberately cut PR.
+# shellcheck source=scripts/coord/lib/pr-cut-guard.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../coord/lib/pr-cut-guard.sh"
 
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 log() { printf '[auto-arm %s] %s\n' "$(ts)" "$*"; }
@@ -120,6 +123,12 @@ armed=0; skipped_wip=0; skipped_dirty=0; skipped_armed=0; skipped_draft=0; skipp
 
 while IFS=$'\t' read -r num title is_draft merge_st has_auto labels sha; do
     [[ -z "$num" ]] && continue
+    # RESILIENT-1616: a deliberately cut PR is terminal — never re-arm it.
+    # (Receipt: this sweeper re-armed the cut duplicate #5562 at 18:29Z 2026-10-17.)
+    if pr_cut_honored "$num" "auto-arm-sweeper.sh" "arm" "$labels"; then
+        log "  PR#$num SKIP arm — pr-cut (deliberate close, terminal; RESILIENT-1616)"
+        continue
+    fi
     if [[ "$is_draft" == "true" ]]; then
         skipped_draft=$((skipped_draft + 1))
         continue

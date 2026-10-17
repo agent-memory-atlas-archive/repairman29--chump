@@ -45,6 +45,10 @@ REPO_ROOT="${CHUMP_HOME:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 # RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
 # shellcheck source=scripts/coord/lib/arm-policy.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
+# RESILIENT-1616: the shared pr-cut predicate — a deliberate close is terminal;
+# never reopen/re-arm/comment it even if an auto-closer looks "false".
+# shellcheck source=scripts/coord/lib/pr-cut-guard.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pr-cut-guard.sh"
 AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 
 repo_arg=""
@@ -70,6 +74,14 @@ fi
 if [[ -z "$head_ref" ]]; then
     echo "[pr-rescue] ERROR: PR #$PR has no head ref recorded" >&2
     exit 1
+fi
+
+# RESILIENT-1616: a deliberately cut PR is terminal — do NOT reopen, comment or
+# re-arm it. A "false close" never looks like a pr-cut, but an organ must prove
+# it consulted the predicate before undoing any close.
+if pr_cut_honored "$PR" "pr-rescue-false-close.sh" "reopen" "" "${REPO:-}"; then
+    echo "[pr-rescue] PR #$PR is pr-cut (deliberate close, terminal; RESILIENT-1616) — NOT reopening." >&2
+    exit 0
 fi
 
 # Confirm branch still exists on remote.

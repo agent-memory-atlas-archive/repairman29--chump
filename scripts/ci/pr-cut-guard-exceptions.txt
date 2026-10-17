@@ -1,0 +1,33 @@
+# scripts/ci/pr-cut-guard-exceptions.txt — RESILIENT-1616
+#
+# The grep gate in scripts/ci/test-pr-cut-organs.sh fails any script under
+# scripts/coord or scripts/ops that has a `gh pr reopen` or `gh pr merge --auto`
+# call site but does NOT reference the shared pr-cut predicate
+# (scripts/coord/lib/pr-cut-guard.sh — pr_is_cut / pr_cut_honored, or the
+# literal `pr-cut` label the already-wired watch/reviver read).
+#
+# These files pre-date RESILIENT-1616 and are NOT (yet) in scope for honoring
+# pr-cut — each has a reopen/arm/merge call site but no predicate. A NEW organ
+# (or a brand-new file) that adds such a call site must honor the predicate; it
+# will NOT be on this list, so the gate will fail it.
+#
+# To wire one of these: add the predicate (see the honoring organs in
+# docs/process/SHIP_ASSIST_PLAYBOOK.md) and DELETE its line here.
+#
+# One basename per line; blank lines and # comments ignored.
+
+armed-pr-rebaser.sh
+auto-merge-arm-watcher.sh
+auto-merge-rearm-daemon.sh
+bot-merge.sh
+break-trunk-cascade.sh
+chump-pr-ready-to-ship.sh
+chump-pr-triage.sh
+chump-runner-migration-pipeline.sh
+conflict-resolution-consumer.sh
+oracle-refresh.sh
+pr-auto-rearm.sh
+pr-clean-dirty-classifier.sh
+pr-pulse-consumer.sh
+pr-rescue.sh
+rescue-stale-pr.sh

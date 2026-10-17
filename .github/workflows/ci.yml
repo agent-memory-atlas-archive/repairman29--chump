@@ -1524,6 +1524,9 @@ jobs:
       - name: pr-cut honored by watch and reviver (RESILIENT-1606/1607)
         run: bash scripts/ci/test-pr-cut-honored.sh
 
+      - name: pr-cut honored by every PR-mutating organ (RESILIENT-1616)
+        run: bash scripts/ci/test-pr-cut-organs.sh
+
       - name: load-aware dead-man smoke (RESILIENT-1611)
         run: bash scripts/ci/test-load-aware-deadman.sh
 

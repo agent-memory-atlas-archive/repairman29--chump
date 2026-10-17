@@ -56,6 +56,10 @@ AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 GH="${CHUMP_UNBLOCK_TEST_GH:-gh}"
 # shellcheck source=lib/pr_rebase.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/pr_rebase.sh"
+# RESILIENT-1616: the shared pr-cut predicate — a deliberately cut PR is
+# terminal; never rebase it in either the stale sweep or the cascade.
+# shellcheck source=lib/pr-cut-guard.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/pr-cut-guard.sh"
 _shared_rebase() { CHUMP_PR_REBASE_GH="$GH" pr_rebase_if_strict "$1" "${CHUMP_REPO:-repairman29/chump}" main; }
 LIB_CACHE="$REPO_ROOT/scripts/coord/lib/github_cache.sh"
 
@@ -454,6 +458,11 @@ stale_sweep() {
             skipped=$(( skipped + 1 )); continue
         fi
 
+        # RESILIENT-1616: never rebase a deliberately cut PR.
+        if pr_cut_honored "$num" "cascade-unblock-detector.sh" "rebase"; then
+            log "stale-sweep: PR #$num is pr-cut (terminal; RESILIENT-1616) — skipping"
+            continue
+        fi
         TOTAL_ATTEMPTED=$(( TOTAL_ATTEMPTED + 1 )); attempted=$(( attempted + 1 ))
         if [[ "$DRY_RUN" == "1" ]]; then
             log "stale-sweep: DRY_RUN — would call: gh pr update-branch $num ($st, behind=$behind)"
@@ -542,6 +551,11 @@ while IFS=$'\t' read -r source_pr sig_hash; do
             continue
         fi
 
+        # RESILIENT-1616: never rebase a deliberately cut PR.
+        if pr_cut_honored "$pr_num" "cascade-unblock-detector.sh" "rebase"; then
+            log "cascade-unblock: PR #$pr_num is pr-cut (terminal; RESILIENT-1616) — skipping"
+            continue
+        fi
         TOTAL_ATTEMPTED=$(( TOTAL_ATTEMPTED + 1 ))
 
         if [[ "$DRY_RUN" == "1" ]]; then

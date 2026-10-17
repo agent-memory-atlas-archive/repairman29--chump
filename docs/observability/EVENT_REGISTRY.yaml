@@ -4834,6 +4834,23 @@ events:
     fields_required: [ts, kind, pr, reason]
     expected_volume: "very low; one per deliberate close"
 
+  - kind: pr_cut_honored
+    effect_metric: resilient
+    emitter: scripts/coord/lib/pr-cut-guard.sh pr_cut_honored (RESILIENT-1616)
+    # scanner-anchor: "kind":"pr_cut_honored"
+    trigger: >
+      A PR-mutating organ (auto-arm-sweeper, auto-merge-armer,
+      closed-pr-watchdog, pr-rescue-false-close, cascade-unblock-detector,
+      pr-shepherd-daemon, queue-driver, …) consulted the shared pr_is_cut
+      predicate before reopening/arming/rebasing/commenting and found the PR
+      deliberately cut (pr-cut label OR a local kind=pr_cut event), so it
+      skipped the action. This is the audit trail proving the terminal cut was
+      honored fleet-wide, not just by the two organs #5527 taught.
+    consumers: [board-cycle, fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, organ, action]
+    expected_volume: "very low; one per organ per cut PR per cycle"
+    status: stable
+
   # ── Free-tier dispatch testing ─────────────────────────────────────────
   - kind: free_tier_e2e
     effect_metric: self

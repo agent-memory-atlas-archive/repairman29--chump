@@ -34,6 +34,11 @@ source "$(dirname "$0")/lib/github.sh"
 # shellcheck source=lib/ambient-write.sh
 # shellcheck disable=SC1091
 source "$(dirname "$0")/lib/ambient-write.sh"
+# RESILIENT-1616: the shared pr-cut predicate — a deliberately cut PR is
+# terminal; never rebase/refresh it even when it shows BEHIND/DIRTY.
+# shellcheck source=lib/pr-cut-guard.sh
+# shellcheck disable=SC1091
+source "$(dirname "$0")/lib/pr-cut-guard.sh"
 export CHUMP_GH_SCRIPT="queue-driver.sh"
 # shellcheck source=../lib/orchestrator-log.sh
 # shellcheck disable=SC1091
@@ -197,6 +202,11 @@ cascade_rebase_if_hot() {
     local run_started_s; run_started_s="$(date +%s)"
     local ok=0 fail=0 auto_resolved=0 timeout_count=0
     for pr in $all_prs; do
+        # RESILIENT-1616: never rebase a deliberately cut PR.
+        if pr_cut_honored "$pr" "queue-driver.sh" "rebase"; then
+            echo "queue-driver: PR #$pr is pr-cut (terminal; RESILIENT-1616) — skipping cascade rebase"
+            continue
+        fi
         if [[ "$DRY_RUN" -eq 1 ]]; then
             echo "queue-driver: (dry-run) cascade would rebase PR #$pr"
             ok=$((ok + 1))
@@ -672,6 +682,11 @@ for pr in $behind_candidates; do
   if [[ "$count" -ge "$MAX" ]]; then
     break
   fi
+  # RESILIENT-1616: never refresh a deliberately cut PR.
+  if pr_cut_honored "$pr" "queue-driver.sh" "rebase"; then
+    echo "queue-driver: PR #$pr is pr-cut (terminal; RESILIENT-1616) — skipping refresh"
+    continue
+  fi
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "queue-driver: (dry-run) would refresh PR #$pr (BEHIND)"
   else
@@ -694,6 +709,11 @@ skipped=0
 for pr in $dirty_candidates; do
   if [[ "$count" -ge "$MAX" ]]; then
     break
+  fi
+  # RESILIENT-1616: never rebase/auto-resolve a deliberately cut PR.
+  if pr_cut_honored "$pr" "queue-driver.sh" "rebase"; then
+    echo "queue-driver: PR #$pr is pr-cut (terminal; RESILIENT-1616) — skipping DIRTY auto-resolve"
+    continue
   fi
   echo "queue-driver: attempting DIRTY auto-resolve for PR #$pr"
   orch_log_step "attempting DIRTY auto-resolve for PR #$pr"
