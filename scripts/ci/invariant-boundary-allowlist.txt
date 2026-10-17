@@ -1,0 +1,56 @@
+# invariant-boundary-allowlist.txt — INFRA-8218
+#
+# Baseline: scripts that write state.db, .chump-locks/*.json, or gap status
+# directly (not via 'chump gap set'). The allowlist may ONLY SHRINK over time.
+# CI fails if a line is ADDED.
+#
+# Date: 2026-10-17 (INFRA-8218 R6.1 baseline)
+
+# 9 baseline store writers (from gap description):
+bot-merge.sh
+gap-reserve.sh
+gap-doctor.py
+gap-normalize-domains.sh
+backfill-opened-dates.sh
+stale-gap-lock-reaper.sh
+stale-worktree-reaper.sh
+chump-pe-suite-demo.sh
+ci/lib/gate-fixtures.sh
+
+# Additional detected writers (2026-10-17 baseline scan):
+admin-merge-cycle.sh
+check-pr-scope.sh
+cog-041-semantic-vs-recency.sh
+conflict-resolver-agent.sh
+discord-advisor-agent.sh
+discord-command-agent.sh
+disk-pressure-reaper.sh
+doctrine-weave-detectors.py
+electrician.sh
+fleet-bot-pat.sh
+fleet-unstick.sh
+gap-store-single-source-check.sh
+install-a2a-dead-letter-reaper-launchd.sh
+install-autonomous-mode-launchd.sh
+install-daemon-exit-loop-watcher-launchd.sh
+install-disk-critical-reactor-launchd.sh
+install-do-droplet-runner.sh
+install-ghost-gap-reaper-launchd.sh
+install-installer-audit-launchd.sh
+install-main-preflight-watchdog-daemon-launchd.sh
+install-pr-shepherd-daemon.sh
+install-trunk-sentinel.sh
+install-weekly-digest-launchd.sh
+mission-scoreboard.sh
+off-rails-guard.sh
+organ-binary-freshness-selftest.sh
+pr-shepherd-daemon.sh
+pre-commit-rust-first.sh
+prereg-enforce.sh
+rescue-stale-pr.sh
+run-cache.sh
+run-local-ci.sh
+sccache-reaper.sh
+target-dir-reaper.sh
+uninstall-do-droplet-runner.sh
+worker.sh

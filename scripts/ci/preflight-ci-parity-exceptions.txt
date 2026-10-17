@@ -91,6 +91,7 @@ test-obs-coverage-guard.sh        # reason: CI meta — audits new src/ files fo
 
 # Mirrorable: AC completeness / gap quality
 test-gap-preflight-ac-gate.sh   # reason: MIRRORED in preflight.rs — should not appear; if here, BUG
+test-invariant-boundary.sh      # reason: INFRA-8218 — boundary-gate (scripts/ direct state mutations); Tier-D (static grep analysis over source files, not a runtime guard); cannot mirror in preflight.rs (requires analyzing shell+python scripts, out of scope)
 
 # Remaining Tier-C gates (not yet mirrored — follow-up gaps exist or TBD):
 test-markdown-intra-doc-links.sh      # reason: Tier-C; gap: INFRA-1790

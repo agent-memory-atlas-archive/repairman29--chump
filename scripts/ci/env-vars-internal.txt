@@ -3517,3 +3517,8 @@ CHUMP_ARM_POLICY_REARM_AUDIT
 # INFRA-8190: gap-store single-source gate — node.env location override + optional Rust/shell resolver parity binary for the CI fixture test
 CHUMP_NODE_ENV_FILE
 CHUMP_STORE_PATH_PARITY_BIN
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_BOUNDARY_GATE

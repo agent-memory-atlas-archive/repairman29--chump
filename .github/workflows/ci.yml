@@ -1057,6 +1057,15 @@ jobs:
         # blocking. Promote to --strict once the long-tail cleanup is done.
         run: bash scripts/ci/test-doc-freshness.sh
 
+      - name: invariant-boundary gate (INFRA-8218)
+        # Phase R R6.1: enforces that scripts/ (except test-*) don't write state.db
+        # or .chump-locks/*.json directly. All state mutations must go through
+        # 'chump gap set'. CHUMP_BOUNDARY_GATE=enforce fails on any violator not
+        # in the allowlist; the allowlist may only shrink (CI fails if it grows).
+        env:
+          CHUMP_BOUNDARY_GATE: enforce
+        run: bash scripts/ci/test-invariant-boundary.sh
+
       - name: capabilities registry gate (CREDIBLE-240)
         # docs/CAPABILITIES_REGISTRY.json is indexed by almanac, so a stale or
         # broken catalog gets served to agents with a file:line receipt. This
