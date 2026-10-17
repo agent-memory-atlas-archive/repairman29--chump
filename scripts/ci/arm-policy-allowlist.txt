@@ -9,5 +9,4 @@
 # the gate green: wire the helper instead.
 #
 # Format: <repo-relative path>   # reason: <why>
-scripts/coord/armed-pr-rebaser.sh   # reason: owned by CREDIBLE-1510 (queue-aware skip) in flight; gets the arm_policy_allows call in the follow-up after it lands
 scripts/coord/oracle-refresh.sh     # reason: arms the PR it opened one line earlier on a fresh per-run branch (no PR number in hand, no prior human decision can exist)

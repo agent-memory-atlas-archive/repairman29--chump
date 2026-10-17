@@ -38,6 +38,11 @@ command -v gh >/dev/null 2>&1 || exit 0
 # organ can never race another merge-mutation organ on the same branch.
 # shellcheck source=scripts/coord/lib/merge-pipeline-lock.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/merge-pipeline-lock.sh"
+# INFRA-8221 (RESILIENT-1613 arm policy): a held PR (label no-auto-merge / hold /
+# do-not-merge / CHUMP_HOLD, or an `Auto-merge: hold` line) is a human decision;
+# this organ force-pushes and (adopt mode) arms, so it must honor the hold.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 git fetch origin main --quiet 2>/dev/null || true
 
 prs="$(gh pr list --repo "$REPO" --state open \
@@ -61,6 +66,11 @@ for p in json.load(sys.stdin):
 
 while read -r num br mode; do
     [ -z "$num" ] && continue
+    # INFRA-8221: skip held PRs entirely (no rebase, no force-push, no arm). An
+    # already-armed PR is not being re-armed, so skip the re-arm timeline audit
+    # there (it would log a pr_rearmed that did not happen); adopt mode does arm.
+    _audit=0; [ "$mode" = "adopt" ] && _audit=1
+    CHUMP_ARM_POLICY_REARM_AUDIT="$_audit" arm_policy_allows "$num" "armed-pr-rebaser.sh" "$REPO" || continue
     git fetch origin "$br" --quiet 2>/dev/null || continue
     wt="/tmp/armed-rebaser-$num"
     git worktree remove "$wt" --force 2>/dev/null || true

@@ -3537,3 +3537,18 @@ CHUMP_STORE_PATH_PARITY_BIN
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_BOUNDARY_GATE
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_AUTO_MERGE_SPACING_S
+# detected in: (standard input)
+CHUMP_MERGE_SERIALIZER_LOCK_WAIT_S
+# detected in: (standard input)
+CHUMP_MERGE_SERIALIZER_MAX_MERGES
+# detected in: (standard input)
+CHUMP_MERGE_SERIALIZER_TRUNK_GATE
+# detected in: (standard input)
+CHUMP_PR_MERGE_METHOD
+# detected in: (standard input)
+CHUMP_WATCHDOG_REOPEN

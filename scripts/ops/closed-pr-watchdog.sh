@@ -64,6 +64,27 @@ emit() {
 
 log() { echo "[closed-pr-watchdog] $*" >&2; }
 
+# INFRA-8221: a PR a human or architect closed on purpose (`pr-cut`, the
+# deliberate-close label from scripts/coord/pr-cut.sh) or parked under the arm
+# policy (no-auto-merge / hold / do-not-merge / CHUMP_HOLD) must never be
+# reopened by this watchdog. Hold label list comes from the one arm policy.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$SCRIPT_DIR/../coord/lib/arm-policy.sh" 2>/dev/null || ARM_POLICY_HOLD_LABELS="no-auto-merge hold do-not-merge CHUMP_HOLD"
+_deliberate_label() { # <labels-json-array> -> prints the matching label, rc 0 when deliberate
+    python3 -c '
+import json, sys
+try:
+    names = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(1)
+stop = {h.lower() for h in sys.argv[2].split()} | {"pr-cut"}
+for n in names:
+    if str(n).lower() in stop:
+        print(n)
+        sys.exit(0)
+sys.exit(1)' "$1" "$ARM_POLICY_HOLD_LABELS" 2>/dev/null
+}
+
 # ── Step 1: scan closed-not-merged PRs via REST ─────────────────────────────
 # REST: GET /repos/{owner}/{repo}/pulls?state=closed&per_page=100
 # merged_at==null means closed without merge.
@@ -99,6 +120,7 @@ for pr in data:
         'title': pr['title'],
         'branch': pr['head']['ref'],
         'closed_at': pr.get('closed_at',''),
+        'labels': [l.get('name','') for l in (pr.get('labels') or [])],
     }))
 " 2>/dev/null || true)
 
@@ -138,7 +160,10 @@ for pr in data:
                 emit "pr_bounced_open_gap" \
                     "\"pr\":$pr_num,\"gap_id\":\"$gap_id\",\"branch\":\"$pr_branch\",\"title\":\"$pr_title\""
 
-                if [[ "$REOPEN" == "1" && "$DRY_RUN" != "1" ]]; then
+                pr_labels=$(python3 -c "import json,sys; print(json.dumps(json.loads(sys.argv[1]).get('labels',[])))" "$entry" 2>/dev/null || echo '[]')
+                if held_label=$(_deliberate_label "$pr_labels"); then
+                    log "SKIP reopen PR #$pr_num — labeled '$held_label' (deliberate close / arm-policy hold, INFRA-8221)"
+                elif [[ "$REOPEN" == "1" && "$DRY_RUN" != "1" ]]; then
                     if gh api "repos/$REPO/pulls/$pr_num" -X PATCH -f state=open >/dev/null 2>&1; then
                         log "reopened PR #$pr_num for $gap_id"
                         emit "pr_reopened" "\"pr\":$pr_num,\"gap_id\":\"$gap_id\""

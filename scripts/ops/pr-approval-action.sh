@@ -56,6 +56,10 @@ emit_ambient() {  # kind, extra-json (no leading/trailing comma), best-effort
 #   scanner-anchor: "kind":"pr_approval_action_error"
 #   scanner-anchor: "kind":"pr_approval_action_refused"
 
+# INFRA-8221 (RESILIENT-1613 arm policy): a held PR is not merged by a tap.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../coord/lib/arm-policy.sh"
+
 usage() { echo "usage: pr-approval-action.sh <merge|reject> <owner/repo> <number> [--dry-run]" >&2; exit 1; }
 
 ACTION="${1:-}"; REPO="${2:-}"; NUMBER="${3:-}"; DRY="${4:-}"
@@ -118,6 +122,16 @@ if [[ "$ACTION" == "reject" ]]; then
 fi
 
 # ============================ MERGE ==========================================
+# INFRA-8221: refuse a held PR (label no-auto-merge / hold / do-not-merge /
+# CHUMP_HOLD, or an `Auto-merge: hold` line in the body or a comment). The hold
+# is a standing human decision; remove the label / marker, then tap again.
+# arm_policy_allows emits kind=pr_arm_skipped_hold and logs the reason on stderr.
+if ! arm_policy_allows "$NUMBER" "pr-approval-action.sh" "$REPO"; then
+  echo "$short held ⛔ — not merged (no-auto-merge label or 'Auto-merge: hold' marker; remove it to release, then tap ✅ again)"
+  emit_ambient pr_approval_action_refused "\"repo\":\"$REPO\",\"number\":$NUMBER,\"reason\":\"arm_policy_hold\""
+  exit 1
+fi
+
 # Pick a merge method the repo actually allows (squash preferred).
 method="${CHUMP_PR_MERGE_METHOD:-}"
 if [[ -z "$method" ]]; then

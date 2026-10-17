@@ -2544,6 +2544,14 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-css-token-discipline.sh"],
             GateKind::Scripts,
         ));
+        // RESILIENT-1613 / INFRA-8221: every shell armer, the rebaser, the direct
+        // mergers and the repair loop honor the arm policy (no-auto-merge label /
+        // `Auto-merge: hold`). Stubbed gh + throwaway git repos, no network.
+        steps.push(step(
+            "arm-policy",
+            &["bash", "scripts/ci/test-arm-policy.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "grep-c-echo0-guard-smoke",
             &["bash", "scripts/ci/test-grep-c-echo0-guard.sh"],

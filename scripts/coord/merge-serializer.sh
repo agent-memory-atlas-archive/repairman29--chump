@@ -142,6 +142,10 @@ SELF_LOCK="$LOCK_DIR/merge-serializer.lock"
 # an overlapping copy of THIS script; this one is the cross-organ authority).
 # shellcheck source=lib/merge-pipeline-lock.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/merge-pipeline-lock.sh"
+# INFRA-8221 (RESILIENT-1613 arm policy): this organ rebases, force-pushes and
+# squash-merges directly, bypassing every armer; it must still honor a hold.
+# shellcheck source=lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 
 _ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 _emit() { # _emit <kind> [extra-json-without-braces]
@@ -273,6 +277,14 @@ _drive_pr() {
     local pr="$1" br="$2" ms="$3"
     local wt="${TMPDIR:-/tmp}/merge-serializer-${pr}.$$"
 
+    # INFRA-8221: a held PR (no-auto-merge / hold label, `Auto-merge: hold` line)
+    # is never rebased, force-pushed or merged by the serializer. arm_policy_allows
+    # emits kind=pr_arm_skipped_hold and logs the reason on stderr.
+    if ! arm_policy_allows "$pr" "merge-serializer.sh" "$REPO"; then
+        echo "[merge-serializer] #$pr: HELD (arm policy) — refusing to rebase or merge, skipping"
+        return 1
+    fi
+
     git fetch origin main --quiet 2>/dev/null || true
     git fetch origin "$br" --quiet 2>/dev/null || { echo "[merge-serializer] #$pr fetch $br failed"; return 1; }
 
@@ -330,6 +342,13 @@ _drive_pr() {
         1) _emit merge_serializer_verify_failed "\"pr\":$pr"; echo "[merge-serializer] #$pr: verified FAILED post-rebase — skipping"; return 1 ;;
         2) _emit merge_serializer_verify_timeout "\"pr\":$pr,\"waited_s\":${waited:-0}"; echo "[merge-serializer] #$pr: verified TIMEOUT (${waited}s) — skipping"; return 1 ;;
     esac
+
+    # INFRA-8221: the verified wait can take many minutes; a hold placed during it
+    # must still stop the squash-merge. Re-check immediately before the mutation.
+    if ! arm_policy_allows "$pr" "merge-serializer.sh" "$REPO"; then
+        echo "[merge-serializer] #$pr: HELD (arm policy) while waiting for verified — refusing to squash-merge, skipping"
+        return 1
+    fi
 
     # ---- MUTATION 2: squash-merge (under merge-pipeline-driver.lock + bot-merge.lock) ----
     if ! merge_pipeline_lock_acquire; then

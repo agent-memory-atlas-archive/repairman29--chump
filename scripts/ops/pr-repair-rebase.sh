@@ -67,6 +67,7 @@ repaired=0
 skipped_young=0
 skipped_cooldown=0
 skipped_conflict=0
+skipped_held=0
 processed=0
 
 # Required checks — only consider PRs where these fail
@@ -118,6 +119,17 @@ while IFS='|' read -r pr_num branch created_at has_auto_merge; do
             skipped_cooldown=$((skipped_cooldown + 1))
             continue
         fi
+    fi
+
+    # INFRA-8221: a held PR (label no-auto-merge / hold / do-not-merge /
+    # CHUMP_HOLD, or an `Auto-merge: hold` line) is left alone entirely: no
+    # rebase, no force-push, no arm, and no cooldown consumed. Before this, the
+    # hold was only honored at the arm step, so the force-push still happened
+    # and CI restarted on a PR the architect had parked (#5494, 02:52Z).
+    if ! arm_policy_allows "$pr_num" "pr-repair-rebase.sh"; then
+        log "PR #$pr_num ($branch) is HELD (arm policy) — skipping rebase/force-push/arm"
+        skipped_held=$((skipped_held + 1))
+        continue
     fi
 
     log "PR #$pr_num ($branch) has failing required checks — attempting rebase"
@@ -212,6 +224,9 @@ printf '{"ts":"%s","event":"pr_repair_run","kind":"pr_repair","repaired":%d,"ski
     "$_ts" "$repaired" "$skipped_young" "$skipped_cooldown" "$skipped_conflict" "$processed" \
     >> "$AMBIENT_LOG"
 
+if (( skipped_held > 0 )); then
+    log "skipped $skipped_held held PR(s) (arm policy)"
+fi
 if (( repaired > 0 )); then
     log "repaired $repaired PR(s) via rebase"
 fi
