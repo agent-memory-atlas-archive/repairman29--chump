@@ -1172,6 +1172,14 @@ jobs:
       - name: gap-preflight AC gate + picker AC filter (INFRA-1259)
         run: bash scripts/ci/test-gap-preflight-ac-gate.sh
 
+      - name: one-picker mission-first regression (INFRA-8224)
+        # Proves the one-picker consolidation: the canonical picker
+        # (_pick_and_claim_gap.py) ranks a P0 MISSION gap over a P0
+        # self-maintenance gap while a substrate P0 still beats a mission P1,
+        # and the _pick_gap.py shim + --dry-run + --list all agree (one picker,
+        # one answer). Mirrored in crates/chump-preflight/src/preflight.rs.
+        run: bash scripts/ci/test-one-picker-mission-first.sh
+
       - name: decompose re-slice guard — parent sliced at most once (RESILIENT-1437)
         run: bash scripts/ci/test-gap-decompose-reslice-guard.sh
 

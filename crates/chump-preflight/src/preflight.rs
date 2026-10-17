@@ -2278,6 +2278,20 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
 
+        // INFRA-8224: one-picker consolidation gate. Mirrors the ci.yml
+        // "one-picker mission-first regression" step — proves the single
+        // canonical picker (_pick_and_claim_gap.py) ranks a P0 MISSION gap over
+        // a P0 self-maintenance gap while a substrate P0 still beats a mission
+        // P1, AND that the _pick_gap.py shim, --dry-run, and --list all agree
+        // (one picker, one answer — the property that stops #3055's "fix one
+        // picker, miss the other" class). Same characteristics as the picker
+        // gates above: pure-Python + JSON fixtures, <2s, no network, no binary.
+        steps.push(step(
+            "one-picker-mission-first",
+            &["bash", "scripts/ci/test-one-picker-mission-first.sh"],
+            GateKind::Scripts,
+        ));
+
         // RESILIENT-332: worker-picker anti-SPIN gate. Mirrors the audit.yml
         // test-worker-no-spin.sh step — proves the worker picker
         // (_pick_and_claim_gap.py) ADVANCES past a preflight-failing or

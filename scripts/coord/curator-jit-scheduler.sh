@@ -10,7 +10,10 @@
 #
 # Composes existing primitives:
 #   scripts/coord/broadcast.sh           — canonical curator-to-curator channel
-#   scripts/dispatch/_pick_gap.py        — fleet picker (consumes GAP_JSON_FILE)
+#   scripts/dispatch/_pick_and_claim_gap.py --dry-run
+#                                         — THE canonical fleet picker
+#                                         (INFRA-8224; was _pick_gap.py, now its
+#                                          deprecated shim; consumes GAP_JSON_FILE)
 #   .chump-locks/ambient.jsonl           — event stream
 #   .chump-locks/jit-scheduler-state.jsonl — throttle/dedup ledger (created here)
 #
@@ -23,7 +26,7 @@
 #                                         <repo>/.chump-locks/ambient.jsonl)
 #   CHUMP_JIT_STATE_FILE                 override state ledger (default
 #                                         <repo>/.chump-locks/jit-scheduler-state.jsonl)
-#   CHUMP_JIT_PRIORITY_FILTER            forwarded to _pick_gap.py
+#   CHUMP_JIT_PRIORITY_FILTER            forwarded to the canonical picker
 #                                         (default "P0,P1" — JIT is for important work)
 #   CHUMP_JIT_ONCE                       process current ambient state then exit
 #                                         (used by CI smoke test)
@@ -33,11 +36,11 @@
 # Emits ambient events:
 #   curator_jit_scheduled  {curator, gap_id, priority, lane}
 #   curator_jit_skipped    {curator, reason}     # dedup hit / no candidate / active lease
-#   curator_jit_no_gap     {curator}             # _pick_gap returned nothing
+#   curator_jit_no_gap     {curator}             # picker returned nothing
 #
 # Exit codes:
 #   0 — normal (signal exit, --once done, or bypass)
-#   2 — _pick_gap.py missing or broadcast.sh missing (operator-fix needed)
+#   2 — canonical picker missing or broadcast.sh missing (operator-fix needed)
 
 set -uo pipefail
 
@@ -57,11 +60,13 @@ SLEEP_S="${CHUMP_JIT_SLEEP_S:-5}"
 RUN_ONCE="${CHUMP_JIT_ONCE:-0}"
 
 BROADCAST_SH="$REPO_ROOT/scripts/coord/broadcast.sh"
-PICKER_PY="$REPO_ROOT/scripts/dispatch/_pick_gap.py"
+# INFRA-8224: one picker — call the canonical picker in no-claim --dry-run mode
+# (was _pick_gap.py, now its deprecated shim).
+PICKER_PY="$REPO_ROOT/scripts/dispatch/_pick_and_claim_gap.py"
 CHUMP_BIN="${CHUMP_BIN:-chump}"
 
 [ -x "$BROADCAST_SH" ] || { echo "ERROR: broadcast.sh missing at $BROADCAST_SH" >&2; exit 2; }
-[ -f "$PICKER_PY" ]    || { echo "ERROR: _pick_gap.py missing at $PICKER_PY" >&2; exit 2; }
+[ -f "$PICKER_PY" ]    || { echo "ERROR: canonical picker missing at $PICKER_PY" >&2; exit 2; }
 
 mkdir -p "$(dirname "$AMBIENT_LOG")" "$(dirname "$STATE_FILE")" 2>/dev/null
 
@@ -140,7 +145,7 @@ print(' '.join(ids))
         FLEET_MODEL="opus" \
         EXCLUDE_RE="" \
         ACTIVE_GAPS="$active" \
-        python3 "$PICKER_PY" 2>/dev/null
+        python3 "$PICKER_PY" --dry-run 2>/dev/null
 }
 
 # ── process one event line ────────────────────────────────────────────────

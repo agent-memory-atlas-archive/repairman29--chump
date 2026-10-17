@@ -667,3 +667,42 @@ When a sub-agent encounters a decision that isn't trivially its own:
 - If neither works AND it's not a T1-T4 trigger, broadcast `STUCK` with the exact ambiguity and HALT the PR — do NOT ping the operator
 
 The 4 legitimate operator-escalation triggers (T1 irreversible / T2 cred-rotation / T3 operator-domain / T4 halt-class) apply to sub-agents too.
+
+## One picker (INFRA-8224, carries MISSION-028)
+
+The fleet used to carry **three** gap pickers that drifted apart — the class of
+bug where #3055 fixed the mission ordering in one picker while the worker kept
+picking the old way (MISSION-028). INFRA-8224 consolidated them to **one**.
+
+**Canonical picker:** [`scripts/dispatch/_pick_and_claim_gap.py`](../../scripts/dispatch/_pick_and_claim_gap.py).
+It is the single source of ranking + filtering logic. Two surfaces:
+
+| Invocation | Mode | Behavior |
+|---|---|---|
+| `python3 _pick_and_claim_gap.py` (worker.sh) | **claim** | ranks with `wedge_rank` (affinity + FLEET-046/INFRA-720 rebalance), applies the skill hard-filter + in-flight/merged/cooldown exclusions, **writes a lease** |
+| `… --dry-run` / `… --list` | **curator** | the old `_pick_gap.py` behavior — `planner_rank` tiebreak (INFRA-1258), vague-AC skip (INFRA-1259), inbox handoff-first (INFRA-1254), `picker_mission_boost`/`picker_used_priority`/`picker_priority_stale` emits; **no lease, no affinity/rebalance** |
+| `CHUMP_FLEET_DRY_RUN=1 … ` (legacy env, no flag) | **claim-preview** | the claim ranking (wedge) **without** writing a lease — a true preview of what the worker would claim |
+
+Priority is always the primary sort key and the mission tiebreaker
+(`mission_rank`) the second, in every mode: a P0 MISSION gap beats a P0
+self-maintenance gap, and a substrate P0 still beats a mission P1. That
+invariant is now a live CI gate — [`scripts/ci/test-one-picker-mission-first.sh`](../../scripts/ci/test-one-picker-mission-first.sh)
+(wired into `ci.yml` + `chump preflight`), which also asserts the `_pick_gap.py`
+shim, `--dry-run`, and `--list` all agree (one picker, one answer).
+
+**Before → after caller map:**
+
+- [`scripts/dispatch/_pick_gap.py`](../../scripts/dispatch/_pick_gap.py) — **was** a second standalone ranking picker; **now** a thin deprecated shim that `execv`s the canonical picker with `--dry-run`. Kept so existing by-path callers + CI gates keep working.
+- [`scripts/coord/curator-jit-scheduler.sh`](../../scripts/coord/curator-jit-scheduler.sh) — **was** `_pick_gap.py`; **now** calls `_pick_and_claim_gap.py --dry-run` directly.
+- [`src/briefing.rs`](../../src/briefing.rs) — never execed a picker; it shares [`scripts/dispatch/picker-policy.json`](../../scripts/dispatch/picker-policy.json) (the sync-overhead ceiling). Doc comments updated to name the canonical picker; no behavior change.
+- [`scripts/coord/musher.py`](../../scripts/coord/musher.py) — a **different** multi-command dispatcher (`--pick/--check/--assign/--status/--why`) on a different data source (`docs/gaps.yaml`), still consumed by the MCP coord server, war-room, and fleet-unstick. Its priority-only `--pick` arm is marked deprecated in favor of the canonical picker; it is **not** a third ranking picker and is left in place because deleting it would break those non-picker consumers.
+
+**Behavior delta:** the `_pick_gap.py` shim no longer owns its own copy of the
+ranking logic (it inherits the canonical picker's). The INFRA-1258 planner
+tiebreak, vague-AC skip, handoff-first, and sync-overhead guard were all
+**ported** into the canonical picker's curator mode, so the ranking + guard
+behavior on the no-claim path is preserved. Two intentional additions to the
+curator path (both input-gated, both improvements): it now also honors the
+worker's in-flight / merged-recent / cooldown exclusions, so curator-jit won't
+re-dispatch a gap that already has an open PR. The worker **claim** path
+(wedge_rank, affinity, rebalance, lease write) is byte-for-byte unchanged.

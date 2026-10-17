@@ -135,14 +135,16 @@ pub struct GapBriefing {
     /// CREDIBLE-167: ceiling on the share of recent commits that may be
     /// automated coherence syncs before the picker stops handing out work.
     /// `None` = no ceiling configured. INFRA-8060: loaded from the shared
-    /// `scripts/dispatch/picker-policy.json` (the same file `_pick_gap.py` enforces) by
+    /// `scripts/dispatch/picker-policy.json` (the same file the canonical picker
+    /// `_pick_and_claim_gap.py` enforces, INFRA-8224) by
     /// [`load_sync_overhead_ceiling`], and compared against
     /// [`GapBriefing::sync_overhead_ratio`] via
     /// [`GapBriefing::sync_overhead_exceeded`].
     pub sync_overhead_ceiling: Option<f64>,
 }
 
-/// INFRA-8060: path of the picker policy shared with `_pick_gap.py`.
+/// INFRA-8060: path of the picker policy shared with the canonical picker
+/// `scripts/dispatch/_pick_and_claim_gap.py` (INFRA-8224).
 pub const PICKER_POLICY_PATH: &str = "scripts/dispatch/picker-policy.json";
 
 /// INFRA-8060: read `sync_overhead_ceiling` (0.0-1.0) from the shared picker
@@ -157,7 +159,8 @@ pub fn load_sync_overhead_ceiling(root: &Path) -> Option<f64> {
 /// CREDIBLE-167: a commit subject is an automated coherence sync when it
 /// contains "coherence sync" (case-insensitive), e.g.
 /// `chore(backlog): coherence sync — 0 gaps closed, state.sql regenerated`.
-/// Mirrored in `scripts/dispatch/_pick_gap.py`.
+/// Mirrored in the canonical picker `scripts/dispatch/_pick_and_claim_gap.py`
+/// (`_sync_overhead_guard`, INFRA-8224).
 pub fn is_coherence_sync_subject(subject: &str) -> bool {
     subject.to_lowercase().contains("coherence sync")
 }

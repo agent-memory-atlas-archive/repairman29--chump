@@ -8,6 +8,15 @@ Usage:
   python3.12 scripts/coord/musher.py --assign <N>
   python3.12 scripts/coord/musher.py --status
   python3.12 scripts/coord/musher.py --why <GAP-ID>
+
+INFRA-8224 (one-picker consolidation): the `--pick` arm here is a priority-only
+dispatcher view over docs/gaps.yaml and is NOT the fleet's ranking picker. The
+single canonical picker is scripts/dispatch/_pick_and_claim_gap.py (use
+`--dry-run` for a no-claim preview). `--pick` is DEPRECATED for ranking; it is
+kept only because musher's other arms (--check/--assign/--status/--why) and its
+callers (the MCP coord server `musher_pick`, war-room, fleet-unstick) still rely
+on musher's text surface + docs/gaps.yaml data source. Do not add ranking
+heuristics here — change the canonical picker instead.
 """
 
 import json

@@ -11,9 +11,18 @@ and pillar starvation (a pillar absent from recent ships). Gaps from
 underserved domains/pillars get a sort-key boost so they surface ahead
 of yet-another-INFRA-fix.
 
-MISSION-028 FIX: this file now mirrors the ranking logic from _pick_gap.py
-(the CANONICAL ranking source). When changing ranking behaviour, change
-_pick_gap.py first and mirror here. Key invariants:
+INFRA-8224: this file is now THE CANONICAL picker (one-picker consolidation).
+It exposes a no-claim preview path via `--dry-run` (print the single top gap)
+and `--list` (print every pickable gap-id in ranked order); the legacy
+`CHUMP_FLEET_DRY_RUN=1` env is kept as an alias for `--dry-run`. Callers:
+  - worker.sh                → claim path (writes a lease; unchanged by INFRA-8224)
+  - curator-jit-scheduler.sh → `--dry-run` (migrated off _pick_gap.py)
+  - _pick_gap.py             → thin deprecated shim: execs this file --dry-run
+The ranking logic is single-sourced HERE. When changing ranking behaviour,
+change it here (the shim and curator-jit inherit it). Guards ported from the
+old _pick_gap.py (loop-stop sentinel, sync-overhead ceiling, inbox handoff-first,
+vague-AC skip, picker_mission_boost emit) fire ONLY on the no-claim path so the
+live worker claim path is byte-for-byte unchanged. Key invariants:
   - Sort tuple: (prio_rank, mission_rank, wedge_rank, age, effort_rank, id)
   - prio_rank is the PRIMARY key (P0=0 < P1=1 < P2=2 < P3=3). A P0 ALWAYS
     beats any lower-priority gap — no heuristic may promote a lower-priority
@@ -657,7 +666,262 @@ def cooled_down_gaps(cooldown_dir: str, worker_id: str = "") -> set[str]:
     return cooled
 
 
+# ── INFRA-8224: one-picker consolidation ─────────────────────────────────────
+# This file is now THE canonical picker. _pick_gap.py is a thin deprecated shim
+# that execs this file with --dry-run; curator-jit-scheduler.sh calls --dry-run
+# directly. The helpers below were ported from _pick_gap.py so the shimmed
+# (no-claim) path preserves its behavior exactly — see _one_picker_notes in the
+# module docstring region. The live worker CLAIM path is deliberately untouched:
+# the behavior-changing guards (handoff-first, AC-vague skip, picker_mission_boost
+# emit) fire ONLY in the no-claim (--dry-run / --list / CHUMP_FLEET_DRY_RUN) path,
+# so worker.sh picks exactly as it did before this change.
+
+
+def _resolve_ambient_path() -> str:
+    """Ambient log path, honoring the curator/test env the shim forwards.
+
+    Resolution order: CHUMP_AMBIENT_LOG → AMBIENT_JSONL → <repo>/.chump-locks/
+    ambient.jsonl, where <repo> is CHUMP_REPO → REPO_ROOT → cwd. CHUMP_AMBIENT_LOG
+    is what test-mission-picker.sh (and the _pick_gap.py callers) set.
+    """
+    p = os.environ.get("CHUMP_AMBIENT_LOG")
+    if p:
+        return p
+    p = os.environ.get("AMBIENT_JSONL")
+    if p:
+        return p
+    root = os.environ.get("CHUMP_REPO") or os.environ.get("REPO_ROOT") or os.getcwd()
+    return os.path.join(root, ".chump-locks", "ambient.jsonl")
+
+
+def _emit_picker_event(kind: str, **fields: object) -> None:
+    """Best-effort ambient emit (ported from _pick_gap.py). Never break the
+    picker on log failure; silently no-op when the ambient dir is absent."""
+    ambient = _resolve_ambient_path()
+    if not os.path.isdir(os.path.dirname(ambient)):
+        return
+    # scanner-anchor: "kind":"picker_mission_boost"
+    rec = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "kind": kind,
+        **{k: v for k, v in fields.items() if v is not None},
+    }
+    try:
+        with open(ambient, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
+def _picker_policy(key: str):
+    """INFRA-8060 (ported): read `key` from scripts/dispatch/picker-policy.json —
+    the single-source policy file shared with the Rust GapBriefing. Looks in
+    CHUMP_REPO first, then the repo this script lives in. Returns None when
+    absent/null/unreadable. An env var named after the key (upper-case) still
+    overrides it for one run."""
+    roots = []
+    if os.environ.get("CHUMP_REPO"):
+        roots.append(os.environ["CHUMP_REPO"])
+    roots.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    for root in roots:
+        try:
+            with open(os.path.join(root, "scripts", "dispatch", "picker-policy.json")) as f:
+                return json.load(f).get(key)
+        except (OSError, ValueError, AttributeError):
+            continue
+    return None
+
+
+def _sync_overhead_guard() -> int | None:
+    """CREDIBLE-167 (ported from _pick_gap.py): refuse to pick when automated
+    coherence syncs crowd the last 50 commits past the ceiling. Ceiling from
+    SYNC_OVERHEAD_CEILING env, else `sync_overhead_ceiling` in picker-policy.json
+    (committed value is null → off in production). Returns 1 to abort, None to
+    continue. Applies in every mode: a global pick-abort the worker should honor
+    too, and a no-op whenever the ceiling is unset (the production default)."""
+    raw = os.environ.get("SYNC_OVERHEAD_CEILING", "").strip()
+    if not raw:
+        raw = str(_picker_policy("sync_overhead_ceiling") or "")
+    if not raw:
+        return None
+    try:
+        ceiling = float(raw)
+    except ValueError:
+        return None
+    log_file = os.environ.get("SYNC_OVERHEAD_LOG_FILE")
+    try:
+        if log_file:
+            with open(log_file) as f:
+                subjects = f.read().splitlines()[:50]
+        else:
+            out = subprocess.run(
+                ["git", "-C", os.environ.get("CHUMP_REPO", os.getcwd()),
+                 "log", "-n", "50", "--format=%s"],
+                capture_output=True, text=True, timeout=30, check=True,
+            )
+            subjects = out.stdout.splitlines()
+    except Exception:
+        return None
+    if not subjects:
+        return None
+    ratio = sum("coherence sync" in s.lower() for s in subjects) / len(subjects)
+    if ratio > ceiling:
+        print(
+            f"Sync overhead {ratio * 100:.0f}% exceeds ceiling {ceiling * 100:.0f}%",
+            file=sys.stderr,
+        )
+        return 1
+    return None
+
+
+def _is_acceptance_criteria_vague(ac: str) -> bool:
+    """INFRA-1259 (ported from _pick_gap.py): True when acceptance_criteria is
+    empty, all-TODO, or all-TBD. Used ONLY in the no-claim path so the live
+    worker claim path keeps its prior (no AC filter) behavior."""
+    if not ac:
+        return True
+    try:
+        arr = json.loads(ac)
+        if isinstance(arr, list):
+            if not arr:
+                return True
+            return all(
+                isinstance(item, str) and item.upper() in ("TODO", "TBD")
+                for item in arr
+            )
+    except (json.JSONDecodeError, TypeError):
+        pass
+    upper = ac.upper()
+    return upper in ("TODO", "TBD") or (
+        len(ac) < 50 and upper.count("TODO") == 1 and len(ac.split()) <= 2
+    )
+
+
+def _inbox_handoff_pick(gaps):
+    """INFRA-1254 (ported from _pick_gap.py): inbox-first picker. Returns the
+    gap-id of an unread HANDOFF event for this session when the named gap is
+    still open, else None. No-claim path only (the claim path never short-circuits
+    the atomic claim). Operator opt-out: CHUMP_IGNORE_INBOX=1."""
+    if os.environ.get("CHUMP_IGNORE_INBOX", "0") == "1":
+        return None
+    session = (
+        os.environ.get("CHUMP_SESSION_ID")
+        or os.environ.get("CLAUDE_SESSION_ID")
+        or ""
+    )
+    if not session:
+        return None
+    lock_dir = os.environ.get("CHUMP_LOCK_DIR")
+    if not lock_dir:
+        repo_root = os.environ.get("CHUMP_REPO") or os.getcwd()
+        lock_dir = os.path.join(repo_root, ".chump-locks")
+    inbox_file = os.path.join(lock_dir, "inbox", f"{session}.jsonl")
+    if not os.path.isfile(inbox_file):
+        return None
+    by_id = {g.get("id"): g for g in gaps if isinstance(g, dict)}
+    try:
+        with open(inbox_file) as fh:
+            for raw in fh:
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    evt = json.loads(raw)
+                except Exception:
+                    continue
+                if evt.get("event") != "HANDOFF":
+                    continue
+                gid = evt.get("gap") or evt.get("corr_id") or ""
+                if not gid:
+                    continue
+                g = by_id.get(gid)
+                if not g or g.get("status") != "open":
+                    continue
+                return gid
+    except Exception:
+        return None
+    return None
+
+
+def _load_planner_priority(
+    repo_root: str, max_age_s: int = 7200
+) -> tuple[dict, str]:
+    """INFRA-1258 (ported from _pick_gap.py): read
+    .chump-locks/gap-priority.json written by the INFRA-1257 hourly planner.
+    Returns (gap_id -> rank, status_tag) where status_tag is one of
+    absent/stale/invalid/ok. Used ONLY in curator_mode (the --dry-run / --list
+    preview path), matching where the old _pick_gap.py consumed it."""
+    path = os.path.join(repo_root, ".chump-locks", "gap-priority.json")
+    if not os.path.exists(path):
+        return {}, "absent"
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}, "invalid"
+    if (time.time() - mtime) > max_age_s:
+        return {}, "stale"
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        return {}, "invalid"
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return {}, "invalid"
+    out: dict = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        gid = item.get("gap_id")
+        rank = item.get("rank")
+        if isinstance(gid, str) and isinstance(rank, int):
+            out[gid] = rank
+    return out, "ok"
+
+
 def main() -> int:
+    # INFRA-8224: CLI flags for the no-claim (preview/ranking) path that the
+    # _pick_gap.py shim and curator-jit-scheduler call.
+    argv = sys.argv[1:]
+    # INFRA-8224: two distinct no-claim surfaces, each preserving the historical
+    # behavior of the picker it replaces:
+    #   curator_mode (--dry-run / --list CLI flags) → the OLD _pick_gap.py
+    #     curator picker: planner-betweenness tiebreak (INFRA-1258), vague-AC
+    #     skip (INFRA-1259), inbox handoff-first (INFRA-1254), picker_* emits,
+    #     NO affinity/rebalance/skill-filter. This is what the _pick_gap.py shim
+    #     and curator-jit-scheduler invoke.
+    #   claim_preview (legacy CHUMP_FLEET_DRY_RUN=1 env, no CLI flag) → the
+    #     worker's OWN claim ranking (wedge = affinity + FLEET-046/INFRA-720
+    #     rebalance) without writing a lease — so a dry-run of the worker still
+    #     previews exactly what the worker would claim.
+    # Both skip the lease write; only the ranking + curator guards differ.
+    list_mode = "--list" in argv
+    curator_mode = list_mode or ("--dry-run" in argv)
+    claim_preview = (not curator_mode) and os.environ.get(
+        "CHUMP_FLEET_DRY_RUN", "0"
+    ) == "1"
+    no_claim = curator_mode or claim_preview
+
+    # INFRA-1737 (ported): loop-stop sentinel — halt dispatch within one cycle.
+    # Applies in all modes (normally absent → no-op).
+    repo_root_for_stop = (
+        os.environ.get("CHUMP_REPO") or os.environ.get("REPO_ROOT") or os.getcwd()
+    )
+    stop_sentinel = os.path.join(
+        repo_root_for_stop, ".chump-locks", "loop-stop-requested"
+    )
+    if os.path.exists(stop_sentinel):
+        print(
+            "stop requested: .chump-locks/loop-stop-requested exists, exiting",
+            file=sys.stderr,
+        )
+        return 0
+
+    # CREDIBLE-167 (ported): sync-overhead guard — no-op when ceiling unset.
+    overhead_rc = _sync_overhead_guard()
+    if overhead_rc is not None:
+        return overhead_rc
+
     gap_file = os.environ.get("GAP_JSON_FILE")
     if not gap_file or not os.path.exists(gap_file):
         return 0
@@ -667,8 +931,23 @@ def main() -> int:
     except Exception:
         return 0
 
-    session_id = get_session_id()
-    lock_dir = get_lock_dir()
+    # INFRA-1254 (ported): inbox-first handoff — curator single-pick only.
+    # In --list mode we rank everything, so the handoff short-circuit (which
+    # hides the ranking) is restricted to the --dry-run curator single-pick.
+    if curator_mode and not list_mode:
+        handoff_gid = _inbox_handoff_pick(gaps)
+        if handoff_gid:
+            print(handoff_gid)
+            return 0
+
+    # Session + lease dir are only needed when we actually claim. The no-claim
+    # (--dry-run / --list) path must run without a session id (curator-jit and
+    # the picker CI fixtures do not set one), so resolve lazily.
+    session_id = ""
+    lock_dir = None
+    if not no_claim:
+        session_id = get_session_id()
+        lock_dir = get_lock_dir()
 
     prio_filter = [p.upper() for p in csv("FLEET_PRIORITY_FILTER")]
     domain_filter = [d.lower() for d in csv("FLEET_DOMAIN_FILTER")]
@@ -710,7 +989,12 @@ def main() -> int:
 
     # INFRA-314: Worker skill affinity scoring.
     # CHUMP_AFFINITY=0 disables affinity matching (treats all gaps as eligible).
-    affinity_enabled = os.environ.get("CHUMP_AFFINITY", "1") != "0"
+    # INFRA-8224: affinity + skill hard-filter belong to the worker claim path
+    # only — the old _pick_gap.py curator picker had neither, so curator_mode
+    # disables them to reproduce that behavior exactly.
+    affinity_enabled = (
+        (not curator_mode) and os.environ.get("CHUMP_AFFINITY", "1") != "0"
+    )
     worker_skills = set(
         s.lower().strip()
         for s in os.environ.get("WORKER_SKILLS", "").split(",")
@@ -718,7 +1002,12 @@ def main() -> int:
     ) if affinity_enabled else set()
 
     # FLEET-046: pillar/domain rebalancing.
-    rebalance_enabled = os.environ.get("CHUMP_REBALANCE", "1") != "0"
+    # INFRA-8224: rebalance (and its wedge_rank) is the claim-path tiebreaker;
+    # curator_mode uses planner_rank instead (loaded below), so skip rebalance
+    # entirely in curator_mode — matching the old _pick_gap.py.
+    rebalance_enabled = (
+        (not curator_mode) and os.environ.get("CHUMP_REBALANCE", "1") != "0"
+    )
     monopoly_domain: str = ""
     starved_pillars: set[str] = set()
     under_represented_pillars: set[str] = set()
@@ -741,6 +1030,22 @@ def main() -> int:
     # MISSION-028: load the active mission outcome ID for mission_rank scoring.
     # Canonical logic mirrors _pick_gap.py (_load_active_mission / _is_mission_linked).
     active_mission = _load_active_mission()
+
+    # INFRA-1258 (ported, INFRA-8224): planner-betweenness tiebreak — curator_mode
+    # ONLY (the --dry-run / --list preview the _pick_gap.py shim + curator-jit
+    # use). Loaded from .chump-locks/gap-priority.json; on absent/stale/invalid we
+    # fall back to legacy ordering and emit kind=picker_priority_stale once.
+    planner_ranks: dict = {}
+    planner_status = "absent"
+    if curator_mode:
+        planner_repo_root = os.environ.get("CHUMP_REPO", os.getcwd())
+        planner_ranks, planner_status = _load_planner_priority(planner_repo_root)
+        if planner_status != "ok":
+            _emit_picker_event(
+                "picker_priority_stale",
+                reason=planner_status,
+                worker_id=os.environ.get("WORKER_ID", ""),
+            )
 
     # RESILIENT-1509: per-exclusion-reason counters. An empty cycle used to
     # log a bare "no pickable gap" with no way to tell "467 gaps all
@@ -778,6 +1083,15 @@ def main() -> int:
             continue
         if not _is_pickable_open(g):
             reasons["not_pickable_status"] += 1
+            continue
+        # INFRA-1259 (ported, INFRA-8224): skip vague / TODO-only AC gaps.
+        # curator_mode ONLY (mirrors the old _pick_gap.py). The worker claim /
+        # claim-preview path keeps its prior behavior (it never filtered on AC),
+        # so this cannot shrink the fleet's pickable set in the hot path.
+        if curator_mode and _is_acceptance_criteria_vague(
+            (g.get("acceptance_criteria") or "").strip()
+        ):
+            reasons["vague_acceptance_criteria"] += 1
             continue
         notes = (g.get("notes") or "").lstrip()
         if notes.upper().startswith("SUPERSEDED"):
@@ -916,6 +1230,16 @@ def main() -> int:
         # below as a within-band tiebreaker only.
         prio_rank = PRIO_RANK.get(p, 9)
 
+        # INFRA-756 (ported, INFRA-8224): curator_mode downranks gaps whose AC
+        # carries obs-placeholder markers (keeps them pickable but below
+        # fully-specified gaps). Claim path keeps prio_rank pristine.
+        if curator_mode:
+            ac_upper = (g.get("acceptance_criteria") or "").strip().upper()
+            if ac_upper and (
+                "TODO" in ac_upper or "TBD" in ac_upper or "<FILL IN>" in ac_upper
+            ):
+                prio_rank += 5
+
         # MISSION-028: mission_rank = 0 for gaps linked to the active mission,
         # 1 for everything else. Placed AFTER prio_rank so a P0-MISSION gap beats
         # a P0-self-maintenance gap within the same priority band, but a
@@ -923,21 +1247,27 @@ def main() -> int:
         # because prio_rank is compared first.
         mission_rank = 0 if _is_mission_linked(g, active_mission) else 1
 
-        # INFRA-3616: wedge_rank folds the affinity + FLEET-046/INFRA-720
-        # rebalance heuristics into a single within-band tiebreaker. Lower sorts
-        # earlier, so a higher affinity/rebalance score (more desirable) yields a
-        # more-negative wedge_rank and wins WITHIN its priority tier — never
-        # across tiers. This preserves the wedge/topology "ship order" heuristic
-        # (SHIP_ORDER_VISION) as a tiebreaker while priority stays authoritative.
-        wedge_rank = -(affinity_score + rebalance_boost)
+        # INFRA-8224: the third sort key is mode-dependent, preserving the
+        # historical tiebreaker of each picker this file consolidates:
+        #   claim / claim-preview → wedge_rank (INFRA-3616: affinity + FLEET-046/
+        #     INFRA-720 rebalance folded into one within-band tiebreaker; lower =
+        #     more desirable, never crosses a priority tier).
+        #   curator_mode          → planner_rank (INFRA-1258 betweenness; lower =
+        #     better, unranked gaps get a 10_000 sentinel so they sort after
+        #     planner-ranked gaps within the SAME priority band).
+        # Both are strictly within-band — prio_rank + mission_rank are compared
+        # first, so neither can override priority or the mission invariant.
+        if curator_mode:
+            third_rank = planner_ranks.get(gid, 10_000)
+        else:
+            third_rank = -(affinity_score + rebalance_boost)
 
-        # Canonical sort order matches _pick_gap.py:
-        #   (prio_rank, mission_rank, wedge_rank, age, effort_rank, id)
+        # Sort order: (prio_rank, mission_rank, third_rank, age, effort_rank, id)
         candidates.append(
             (
                 prio_rank,
                 mission_rank,
-                wedge_rank,
+                third_rank,
                 g.get("created_at") or 0,
                 EFFORT_RANK.get(e, 9),
                 gid,
@@ -945,6 +1275,13 @@ def main() -> int:
         )
 
     candidates.sort()
+
+    # INFRA-8224: --list — print every pickable gap-id in ranked order, no claim.
+    # The curator/preview surface for "what would the fleet pick next, in order".
+    if list_mode:
+        for c in candidates:
+            print(c[5])
+        return 0
 
     if candidates:
         # Try to claim candidates in priority order. Return the first one we
@@ -957,16 +1294,50 @@ def main() -> int:
         # Start from staggered offset (same logic as _pick_gap.py).
         offset = (max(worker_idx, 1) - 1) % len(candidates)
 
-        # INFRA-569: dry-run mode — pick without claiming (no lease written).
-        dry_run = os.environ.get("CHUMP_FLEET_DRY_RUN", "0") == "1"
+        # INFRA-569 / INFRA-8224: no-claim single-pick — print WITHOUT writing a
+        # lease. Covers --dry-run (curator_mode) and the legacy CHUMP_FLEET_DRY_RUN
+        # env (claim_preview). The picker_* ambient emits fire ONLY in curator_mode
+        # (the _pick_gap.py shim + curator-jit path), so the worker's own dry-run
+        # preview keeps its historical quiet emit surface.
+        if no_claim:
+            picked = candidates[offset]
+            picked_prio_rank = picked[0]
+            picked_mission_rank = picked[1]
+            picked_third_rank = picked[2]
+            picked_gid = picked[5]
+            if curator_mode:
+                # INFRA-1258 (ported): attribution when the planner influenced
+                # this pick (rank < sentinel).
+                if planner_status == "ok" and picked_third_rank < 10_000:
+                    _emit_picker_event(
+                        "picker_used_priority",
+                        gap_id=picked_gid,
+                        planner_rank=picked_third_rank,
+                        worker_id=os.environ.get("WORKER_ID", ""),
+                    )
+                # MISSION-011/028 (ported): emit picker_mission_boost when the
+                # mission tiebreaker displaced an equal-priority substrate gap,
+                # so the mission-picker gate can observe it.
+                if picked_mission_rank == 0 and active_mission:
+                    displaced = any(
+                        c[0] == picked_prio_rank and c[1] == 1
+                        for c in candidates
+                        if c[5] != picked_gid
+                    )
+                    if displaced:
+                        _emit_picker_event(
+                            "picker_mission_boost",
+                            gap_id=picked_gid,
+                            active_mission=active_mission,
+                            worker_id=os.environ.get("WORKER_ID", ""),
+                        )
+            print(picked_gid)
+            return 0
 
         # Try candidates in rotated order.
         for i in range(len(candidates)):
             idx = (offset + i) % len(candidates)
             gap_id = candidates[idx][5]  # Index [5]: (prio_rank, mission_rank, wedge_rank, effort, age, gid)
-            if dry_run:
-                print(gap_id)
-                return 0
             if not try_claim_gap(gap_id, session_id, lock_dir):
                 # RESILIENT-1509: a candidate that passed every filter but
                 # lost the atomic claim race (another worker got there
