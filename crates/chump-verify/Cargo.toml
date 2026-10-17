@@ -16,6 +16,7 @@ chump-comprehension-organ = { path = "../chump-comprehension-organ", version = "
 # connect itself is bounded by CoordClient::connect's own tokio::time::timeout,
 # so a minimal current-thread runtime is enough to drive it synchronously.
 chump-coord = { path = "../chump-coord", version = "0.2.0" }
+chump-ship = { path = "../chump-ship", version = "0.2.0" } # INFRA-8221: arm policy
 tokio = { version = "1", features = ["rt"] }
 
 [dev-dependencies]

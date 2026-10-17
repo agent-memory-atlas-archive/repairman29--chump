@@ -729,15 +729,9 @@ impl IntegratorDaemon {
             .and_then(|s| s.trim().parse::<u64>().ok())
             .with_context(|| format!("could not parse PR number from gh output: {pr_url}"))?;
 
-        let merge_status = tokio::process::Command::new("gh")
-            .args(["pr", "merge", &pr_number.to_string(), "--auto", "--squash"])
-            .current_dir(repo)
-            .status()
-            .await
-            .with_context(|| format!("gh pr merge --auto for PR {pr_number}"))?;
-
-        if !merge_status.success() {
-            anyhow::bail!("gh pr merge --auto --squash failed for PR {pr_number}");
+        if !arm_integration_pr(pr_number, repo).await? {
+            eprintln!("[integrator] LIVE ship: PR #{pr_number} ({pr_url}) is HELD by the arm policy — left unarmed");
+            return Ok(pr_url);
         }
 
         eprintln!("[integrator] LIVE ship complete: PR #{pr_number} ({pr_url}) — auto-merge armed");
@@ -1025,6 +1019,33 @@ fn git_working_tree_dirty(repo_root: &Path) -> bool {
     }
 }
 
+/// INFRA-8221: arm auto-merge on an integration PR through the one arm
+/// policy. `Ok(false)` = the PR is held (no-auto-merge label / `Auto-merge:
+/// hold`), nothing was armed and `kind=pr_arm_skipped_hold` was emitted.
+async fn arm_integration_pr(pr_number: u64, repo: &Path) -> Result<bool> {
+    if chump_ship::arm_policy::require_allowed_at(
+        &pr_number.to_string(),
+        "",
+        "chump-integrator",
+        chump_ship::arm_policy::GateAction::Arm,
+        Some(repo),
+    )
+    .is_err()
+    {
+        return Ok(false);
+    }
+    let merge_status = tokio::process::Command::new("gh")
+        .args(["pr", "merge", &pr_number.to_string(), "--auto", "--squash"])
+        .current_dir(repo)
+        .status()
+        .await
+        .with_context(|| format!("gh pr merge --auto for PR {pr_number}"))?;
+    if !merge_status.success() {
+        anyhow::bail!("gh pr merge --auto --squash failed for PR {pr_number}");
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1119,5 +1140,20 @@ mod tests {
         // tags surface — tags are token-equality, not substring.
         let c = candidate("chump/infra-1234-claim", None, "do-not-batch-later");
         assert!(!IntegratorDaemon::candidate_has_label("do-not-batch", &c));
+    }
+
+    /// INFRA-8221: the integrator's arm site refuses a held PR before gh runs.
+    #[tokio::test]
+    async fn arm_integration_pr_refuses_held_pr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("do-not-merge");
+        let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+        let armed = arm_integration_pr(4242, tmp.path()).await.unwrap();
+        assert!(!armed);
+        assert_eq!(fake.calls.get(), 1);
+        let ev = std::fs::read_to_string(&amb).unwrap();
+        assert!(ev.contains("\"armer\":\"chump-integrator\""), "{ev}");
+        assert!(ev.contains("label:do-not-merge"), "{ev}");
     }
 }

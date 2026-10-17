@@ -26,6 +26,7 @@ uuid            = { version = "1", features = ["v4"] }
 chump-coord     = { path = "../chump-coord", version = "0.2.0" }
 chump-gap-store = { path = "../chump-gap-store", version = "0.2.0" }
 chump-ambient-cli = { path = "../ambient-cli", version = "0.1.0" }
+chump-ship      = { path = "../chump-ship", version = "0.2.0" } # INFRA-8221: arm policy
 
 [dev-dependencies]
 serial_test = "4"

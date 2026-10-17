@@ -719,6 +719,14 @@ fn emit_paramedic_standby(repo_root: &Path, machine: &str, pid: u32, dry_run: bo
 // ── action runners ────────────────────────────────────────────────────────────
 
 fn run_action(item: &ActionItem, repo_root: &Path, dry_run: bool, _skips: &SkipList) -> Result<()> {
+    // INFRA-8221: the one arm policy. A held PR (no-auto-merge label /
+    // `Auto-merge: hold`) is never update-branched or patched by the paramedic.
+    if !dry_run
+        && matches!(item.action.as_str(), "REBASE_DIRTY" | "RESCUE_CI_FAILURE")
+        && !touch_allowed(item.pr_number, repo_root)
+    {
+        return Ok(());
+    }
     match item.action.as_str() {
         "REBASE_DIRTY" => action_rebase_dirty(item.pr_number, repo_root, dry_run),
         "RERUN_FLAKE" => action_rerun_flake(item.pr_number, repo_root, dry_run),
@@ -729,6 +737,19 @@ fn run_action(item: &ActionItem, repo_root: &Path, dry_run: bool, _skips: &SkipL
         "RESCUE_CI_FAILURE" => action_rescue_ci_failure(item, repo_root, dry_run),
         other => anyhow::bail!("unknown action: {other}"),
     }
+}
+
+/// INFRA-8221: arm-policy gate for paramedic PR mutations (emits
+/// `kind=pr_arm_skipped_hold` when it refuses).
+fn touch_allowed(pr: u64, repo_root: &Path) -> bool {
+    chump_ship::arm_policy::require_allowed_at(
+        &pr.to_string(),
+        "",
+        "chump-paramedic",
+        chump_ship::arm_policy::GateAction::Touch,
+        Some(repo_root),
+    )
+    .is_ok()
 }
 
 /// INFRA-1420: KEYSTONE_CASCADE action. `item.reason` carries the check
@@ -749,6 +770,10 @@ fn action_keystone_cascade(item: &ActionItem, repo_root: &Path, dry_run: bool) -
     let mut ok_count = 0;
     let mut skipped: Vec<u64> = Vec::new();
     for pr in &targets {
+        if !touch_allowed(*pr, repo_root) {
+            skipped.push(*pr);
+            continue;
+        }
         let out = std::process::Command::new("gh")
             .args(["pr", "update-branch", &pr.to_string(), "--rebase"])
             .output();
@@ -2280,6 +2305,27 @@ mod ci_rescue_tests {
 mod keystone_cascade_tests {
     //! INFRA-1420: unit tests for keystone-fix detector + trailer parser.
     use super::*;
+
+    /// INFRA-8221: REBASE_DIRTY on a held PR returns before gh runs.
+    #[test]
+    fn rebase_dirty_refuses_held_pr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("no-auto-merge");
+        let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+        let item = ActionItem {
+            pr_number: 4242,
+            action: "REBASE_DIRTY".into(),
+            reason: String::new(),
+            gap_id: None,
+        };
+        run_action(&item, tmp.path(), false, &SkipList::default())
+            .expect("held = skipped, not an error");
+        assert_eq!(fake.calls.get(), 1);
+        let ev = std::fs::read_to_string(&amb).unwrap();
+        assert!(ev.contains("\"armer\":\"chump-paramedic\""), "{ev}");
+        assert!(!ev.contains("stale_branch_auto_rebased"));
+    }
 
     #[test]
     fn extract_unblocks_cluster_trailer_finds_value() {

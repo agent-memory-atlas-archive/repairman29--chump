@@ -61,6 +61,9 @@ pub enum RebaseStatus {
     TooLarge,
     /// git / gh failed with an unexpected error.
     Error,
+    /// INFRA-8221: the PR is held by the arm policy (no-auto-merge label /
+    /// `Auto-merge: hold`); its branch was not touched.
+    Held,
 }
 
 // ── gh query helpers ──────────────────────────────────────────────────────────
@@ -127,6 +130,18 @@ pub fn parse_dirty_prs(json: &str) -> Vec<DirtyPr> {
 /// Returns the outcome. If `apply` is true and the rebase is within the safety
 /// threshold, force-pushes the rebased branch with `--force-with-lease`.
 pub fn attempt_rebase(pr: &DirtyPr, apply: bool) -> RebaseOutcome {
+    // INFRA-8221: a held PR is never rebased + force-pushed by automation.
+    if apply {
+        if let Err(held) =
+            chump_ship::arm_policy::require_touch_allowed(pr.number, "", "chump rebase-stuck")
+        {
+            return RebaseOutcome {
+                pr: pr.clone(),
+                status: RebaseStatus::Held,
+                message: held.to_string(),
+            };
+        }
+    }
     let tmp = match tempdir() {
         Some(d) => d,
         None => {
@@ -494,6 +509,7 @@ pub fn run(args: &[String]) -> i32 {
             RebaseStatus::Clean => 0,
             RebaseStatus::SmallConflict => 1,
             RebaseStatus::TooLarge => 1,
+            RebaseStatus::Held => 1,
             RebaseStatus::Error => 3,
         };
         if exit_code > worst_exit {
@@ -543,6 +559,27 @@ fn fetch_single_pr(number: u64) -> Option<DirtyPr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// INFRA-8221: --apply on a held PR returns Held before any clone/push.
+    #[test]
+    fn attempt_rebase_apply_refuses_held_pr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("no-auto-merge");
+        let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+        let pr = DirtyPr {
+            number: 4242,
+            title: "t".into(),
+            branch: "chump/held".into(),
+            merge_state_status: "DIRTY".into(),
+        };
+        let out = attempt_rebase(&pr, true);
+        assert!(matches!(out.status, RebaseStatus::Held), "{}", out.message);
+        assert_eq!(fake.calls.get(), 1);
+        assert!(std::fs::read_to_string(&amb)
+            .unwrap()
+            .contains("chump rebase-stuck"));
+    }
 
     #[test]
     fn parse_dirty_prs_filters_non_dirty() {

@@ -2051,6 +2051,15 @@ pub fn run(argv: &[String]) -> i32 {
             ));
         }
 
+        // INFRA-8221 (slice 2): every Rust and Python armer / merger / rebaser
+        // calls the one arm policy; the gardener's hold detection is exercised
+        // with a scripted fetcher. Static scan + python, no network.
+        steps.push(step(
+            "arm-policy-native",
+            &["bash", "scripts/ci/test-arm-policy-native.sh"],
+            GateKind::Scripts,
+        ));
+
         // INFRA-2350 (META-269 sub-1): mirror three CI gates that today's
         // session demonstrated are NOT caught locally — pipefail-race-sweep
         // (INFRA-1658), path-filter-coverage (INFRA-682), and install-mapping

@@ -40,6 +40,7 @@
 //!  10. unstable + failures (not conflict) → ConflictRecover
 //!  11. anything else → OperatorAction
 
+pub mod arm_policy;
 pub mod bot_merge;
 pub mod manual_ship;
 pub mod ship;
@@ -414,6 +415,49 @@ pub fn decide_steps(plan: &ShipPlan) -> Vec<ExecutorStep> {
         | ShipPlan::ConflictRecover { .. }
         | ShipPlan::OperatorAction { .. }
         | ShipPlan::CreatePr { .. } => vec![],
+    }
+}
+
+/// INFRA-8221: what the executor must ask the arm policy before running
+/// `decide_steps(plan)`. `Some((selector, action))` — the PR number for
+/// RestDirectMerge / ArmAutoMerge, the branch for RebaseAndPush (its
+/// force-push rewrites the PR's head). `None` = the plan touches no PR.
+pub fn plan_gate_target(plan: &ShipPlan, branch: &str) -> Option<(String, arm_policy::GateAction)> {
+    match plan {
+        ShipPlan::RestDirectMerge { pr, .. } => {
+            Some((pr.to_string(), arm_policy::GateAction::Touch))
+        }
+        ShipPlan::ArmAutoMerge { pr, .. } => Some((pr.to_string(), arm_policy::GateAction::Arm)),
+        ShipPlan::RebaseAndPush { .. } if !branch.is_empty() && branch != "HEAD" => {
+            Some((branch.to_string(), arm_policy::GateAction::Touch))
+        }
+        _ => None,
+    }
+}
+
+/// Current checkout's branch (`git symbolic-ref --short HEAD`), or "HEAD"
+/// when detached / unreadable.
+pub fn current_branch_name() -> String {
+    std::process::Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "HEAD".to_string())
+}
+
+/// INFRA-8221: the executor's arm-policy gate. `Err` = the PR is held; run
+/// no step (the refusal is already emitted as `kind=pr_arm_skipped_hold`).
+pub fn gate_plan(
+    plan: &ShipPlan,
+    branch: &str,
+    repo: &str,
+    armer: &str,
+) -> Result<(), arm_policy::ArmHeld> {
+    match plan_gate_target(plan, branch) {
+        Some((sel, action)) => arm_policy::require_allowed(&sel, repo, armer, action),
+        None => Ok(()),
     }
 }
 
@@ -1073,5 +1117,43 @@ mod tests {
             threshold: 15,
         });
         assert_eq!(v, FreshnessVerdict::Fresh);
+    }
+
+    /// INFRA-8221: the executor gate covers every PR-touching plan variant
+    /// and refuses a held PR (the call site in `chump ship execute`).
+    #[test]
+    fn gate_plan_targets_and_refuses_held_pr() {
+        use arm_policy::GateAction;
+        let arm = ShipPlan::ArmAutoMerge {
+            pr: 7,
+            reason: String::new(),
+        };
+        assert_eq!(
+            plan_gate_target(&arm, "b"),
+            Some(("7".into(), GateAction::Arm))
+        );
+        let rebase = ShipPlan::RebaseAndPush { behind_count: 3 };
+        assert_eq!(
+            plan_gate_target(&rebase, "chump/x"),
+            Some(("chump/x".into(), GateAction::Touch))
+        );
+        assert_eq!(plan_gate_target(&rebase, "HEAD"), None);
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = arm_policy::testing::FakeFetcher::held_by_label("CHUMP_HOLD");
+        let _g = arm_policy::override_for_tests(fake.clone(), &amb);
+        let held = gate_plan(&arm, "b", "o/r", "chump ship execute").unwrap_err();
+        assert_eq!(
+            held.reason,
+            arm_policy::HoldReason::Label("CHUMP_HOLD".into())
+        );
+        assert!(gate_plan(&rebase, "chump/x", "o/r", "chump ship execute").is_err());
+        let done = ShipPlan::WaitForChecks {
+            pr: 7,
+            incomplete: 1,
+            reason: String::new(),
+        };
+        assert!(gate_plan(&done, "b", "o/r", "x").is_ok());
+        assert_eq!(fake.calls.get(), 2, "no read for a plan that touches no PR");
     }
 }

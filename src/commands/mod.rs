@@ -29,6 +29,7 @@ pub mod durable_resume;
 pub mod emit_event;
 pub mod install_daemon;
 pub mod inventory;
+pub mod pr_cut; // INFRA-8221: chump pr cut <N> --reason (RESILIENT-1607)
 pub mod reachability;
 pub mod registry;
 pub mod roadmap_from_vision;

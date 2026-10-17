@@ -3611,7 +3611,19 @@ fn pr_authored_by_agent(opts: &Opts, pr_num: u64) -> bool {
 }
 
 /// Rebase a BEHIND PR onto its base (branch-protection "require up-to-date").
-fn rebase_behind_pr(opts: &Opts, pr_num: u64) {
+/// INFRA-8221: a PR held by the one arm policy (no-auto-merge label /
+/// `Auto-merge: hold`) is never rebased. Returns whether the rebase ran.
+fn rebase_behind_pr(opts: &Opts, pr_num: u64) -> bool {
+    if chump_ship::arm_policy::require_touch_allowed(
+        pr_num,
+        &opts.owner_repo,
+        "chump improve(shepherd)",
+    )
+    .is_err()
+    {
+        println!("[improve] shepherd: PR #{pr_num} is held (arm policy); not rebasing");
+        return false;
+    }
     let _ = Command::new(improve_gh_bin())
         .args([
             "pr",
@@ -3623,6 +3635,7 @@ fn rebase_behind_pr(opts: &Opts, pr_num: u64) {
         ])
         .status();
     println!("[improve] shepherd: rebased BEHIND PR #{pr_num}");
+    true
 }
 
 /// MISSION-061: sweep the loop's own open PRs and drive each to terminal.
@@ -4326,6 +4339,24 @@ fn extract_pr_number(pr_url: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// INFRA-8221: the shepherd's BEHIND rebase refuses a held PR.
+    #[test]
+    fn rebase_behind_pr_refuses_held_pr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("no-auto-merge");
+        let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+        let opts = Opts {
+            owner_repo: "o/r".into(),
+            ..Default::default()
+        };
+        assert!(!rebase_behind_pr(&opts, 4242));
+        assert_eq!(fake.calls.get(), 1);
+        assert!(std::fs::read_to_string(&amb)
+            .unwrap()
+            .contains("chump improve(shepherd)"));
+    }
     use chrono::Utc;
     use chump_handoff::external_repo_schema::{
         save_scan, Confidence, Effort, InputRead, OnboardScan, Priority, ProposedGap,

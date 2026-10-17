@@ -1066,6 +1066,12 @@ jobs:
           CHUMP_BOUNDARY_GATE: enforce
         run: bash scripts/ci/test-invariant-boundary.sh
 
+      - name: arm policy in Rust and Python armers (INFRA-8221)
+        # Every Rust/Python site that arms, merges, update-branches or
+        # force-pushes a PR calls the one arm policy (no-auto-merge label /
+        # `Auto-merge: hold`); mirrored in chump preflight (arm-policy-native).
+        run: bash scripts/ci/test-arm-policy-native.sh
+
       - name: capabilities registry gate (CREDIBLE-240)
         # docs/CAPABILITIES_REGISTRY.json is indexed by almanac, so a stale or
         # broken catalog gets served to agents with a file:line receipt. This

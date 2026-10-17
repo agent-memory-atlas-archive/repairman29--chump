@@ -646,6 +646,13 @@ pub fn run_triage(opts: &TriageOptions) -> Result<TriageReport, String> {
                     "chump pr triage: --rebase-dirty: rebasing PR #{} ({})",
                     entry.number, entry.branch
                 );
+                if !rebase_allowed(entry.number) {
+                    eprintln!(
+                        "  → PR #{} is held (arm policy); not touching it",
+                        entry.number
+                    );
+                    continue;
+                }
                 let status = Command::new(gh_cmd())
                     .args(["pr", "update-branch", &entry.number.to_string()])
                     .status();
@@ -669,6 +676,12 @@ pub fn run_triage(opts: &TriageOptions) -> Result<TriageReport, String> {
     }
 
     Ok(TriageReport { entries })
+}
+
+/// INFRA-8221: the one arm policy — a held PR (no-auto-merge label /
+/// `Auto-merge: hold`) is never update-branched by `--rebase-dirty`.
+fn rebase_allowed(pr: u64) -> bool {
+    chump_ship::arm_policy::require_touch_allowed(pr, "", "chump pr triage --rebase-dirty").is_ok()
 }
 
 pub fn render_text(report: &TriageReport) -> String {
@@ -783,6 +796,19 @@ fn json_str(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// INFRA-8221: --rebase-dirty refuses a held PR.
+    #[test]
+    fn rebase_dirty_refuses_held_pr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("no-auto-merge");
+        let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+        assert!(!rebase_allowed(4242));
+        assert!(std::fs::read_to_string(&amb)
+            .unwrap()
+            .contains("--rebase-dirty"));
+    }
 
     #[test]
     fn test_classify_clean() {

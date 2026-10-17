@@ -149,6 +149,12 @@ enum RescueOutcome {
 }
 
 fn rescue_one(pr: u32, dry_run: bool) -> RescueOutcome {
+    // INFRA-8221: a held PR (no-auto-merge label / `Auto-merge: hold`) is
+    // never rebased, force-pushed or patched by the rescuer.
+    if chump_ship::arm_policy::require_touch_allowed(u64::from(pr), "", "chump pr-rescue").is_err()
+    {
+        return RescueOutcome::Skipped;
+    }
     // Cooldown gate: don't thrash on the same PR within 5 min.
     if !cooldown_ok(pr) {
         emit_ambient(
@@ -1345,6 +1351,20 @@ fn emit_ambient(kind: &str, fields: serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// INFRA-8221: a held PR is skipped before cooldown, classification or any fix.
+    #[test]
+    fn rescue_one_skips_held_pr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("CHUMP_HOLD");
+        let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+        assert!(matches!(rescue_one(4242, false), RescueOutcome::Skipped));
+        assert_eq!(fake.calls.get(), 1);
+        assert!(std::fs::read_to_string(&amb)
+            .unwrap()
+            .contains("chump pr-rescue"));
+    }
 
     /// INFRA-3490: the debt-ceiling auto-fix replaces the single numeric ceiling line with
     /// the new count + appends a reasoned entry, leaving the header + history intact.

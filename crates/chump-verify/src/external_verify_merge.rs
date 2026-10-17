@@ -2098,7 +2098,17 @@ fn emit_outcome_probe(opts: &Opts, url: &str, passed: bool, note: &str) {
 }
 
 /// Execute `gh pr merge <N> --repo <repo> --squash`.
+///
+/// INFRA-8221: refuses (Err) a PR held by the one arm policy — a
+/// `no-auto-merge` / hold label or an `Auto-merge: hold` line — before gh
+/// runs; the refusal is emitted as `kind=pr_arm_skipped_hold`.
 fn merge_pr(opts: &Opts) -> anyhow::Result<bool> {
+    chump_ship::arm_policy::require_touch_allowed(
+        opts.pr,
+        &opts.repo,
+        "chump-verify(external_verify_merge)",
+    )
+    .map_err(|held| anyhow::anyhow!("{held}"))?;
     let status = Command::new(&opts.gh_bin)
         .args([
             "pr",
@@ -3538,5 +3548,30 @@ exit 0
         std::env::remove_var("CHUMP_OUTCOME_PROBE_RENDER");
         std::env::remove_var("CHUMP_CHROMIUM_BIN");
         std::env::remove_var("CHUMP_CURL_BIN");
+    }
+
+    /// INFRA-8221: the --apply merge refuses a held PR before gh runs.
+    #[test]
+    fn merge_pr_refuses_held_pr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("no-auto-merge");
+        let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+        let opts = super::Opts {
+            pr: 4242,
+            repo: "o/r".into(),
+            gap: "INFRA-8221".into(),
+            clone_dir: None,
+            apply: true,
+            gh_bin: "/nonexistent/gh-must-not-run".into(),
+            outcome_probe_url: None,
+            outcome_probe_contains: None,
+        };
+        let err = super::merge_pr(&opts).unwrap_err().to_string();
+        assert!(err.contains("HELD"), "{err}");
+        assert_eq!(fake.calls.get(), 1);
+        assert!(std::fs::read_to_string(&amb)
+            .unwrap()
+            .contains("pr_arm_skipped_hold"));
     }
 }

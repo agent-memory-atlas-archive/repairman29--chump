@@ -4750,7 +4750,7 @@ events:
 
   - kind: pr_arm_skipped_hold
     effect_metric: resilient
-    emitter: scripts/coord/lib/arm-policy.sh arm_policy_allows (RESILIENT-1613)
+    emitter: scripts/coord/lib/arm-policy.sh arm_policy_allows (RESILIENT-1613); crates/chump-ship/src/arm_policy.rs require_allowed (Rust armers, INFRA-8221); scripts/coord/gap-gardener.py arm_allowed (INFRA-8221)
     trigger: >
       An armer asked the shared arm policy for permission and was refused
       because the PR is deliberately held: it carries the `no-auto-merge`
@@ -4765,7 +4765,7 @@ events:
 
   - kind: pr_rearmed
     effect_metric: credible
-    emitter: scripts/coord/lib/arm-policy.sh arm_policy_allows (RESILIENT-1613)
+    emitter: scripts/coord/lib/arm-policy.sh arm_policy_allows (RESILIENT-1613); crates/chump-ship/src/arm_policy.rs require_allowed with GateAction::Arm (INFRA-8221)
     trigger: >
       An armer is about to enable auto-merge on a PR whose most recent
       auto-merge timeline event is auto_merge_disabled, i.e. it is undoing a
@@ -4779,6 +4779,20 @@ events:
     expected_volume: "0-N; routine after gate-triggered disarms, a page-worthy pattern when one PR repeats"
     status: stable
     # payload: {pr: number, armer: string, disarm_actor: string, disarmed_at: string, ts: string}
+
+  - kind: pr_cut
+    effect_metric: self
+    emitter: src/commands/pr_cut.rs cut (`chump pr cut`, INFRA-8221; delegates to scripts/coord/pr-cut.sh when present, RESILIENT-1607)
+    # scanner-anchor: "kind":"pr_cut"
+    trigger: >
+      A human or architect closed a fleet PR on purpose through the sanctioned
+      verb (`chump pr cut <N> --reason`). The PR carries the terminal pr-cut
+      label; post-push-integrity-watch.sh will not reopen it and
+      trunk-recovery-reviver.sh will not revive it. Distinct from pr_reaped
+      (a reaper victim, revivable). Fields also carry branch, gap and the reason.
+    consumers: [board-cycle, fleet-brief]
+    fields_required: [ts, kind, pr, reason]
+    expected_volume: "very low; one per deliberate close"
 
   # ── Free-tier dispatch testing ─────────────────────────────────────────
   - kind: free_tier_e2e

@@ -382,6 +382,19 @@ impl ManualShipPath {
             tracing::info!(pr = pr_number, "[dry-run] skipping auto-merge arm");
             return Ok(true);
         }
+        // INFRA-8221: the one arm policy. A held PR (no-auto-merge label or an
+        // `Auto-merge: hold` line, possibly carried in from the intent's body)
+        // is left unarmed; not-armed is already a non-fatal outcome here.
+        if let Err(held) = crate::arm_policy::require_allowed_at(
+            &pr_number.to_string(),
+            "",
+            "chump-ship(manual_ship)",
+            crate::arm_policy::GateAction::Arm,
+            Some(&self.repo_root),
+        ) {
+            tracing::warn!(pr = pr_number, %held, "arm policy: PR held; not arming");
+            return Ok(false);
+        }
         let out = self
             .gh()
             .args(["pr", "merge", &pr_number.to_string(), "--auto", "--squash"])
@@ -608,5 +621,24 @@ mod tests {
         let shipper = ManualShipPath::new(intent, tmp.path(), true).expect("bind");
         assert_eq!(&*shipper.intent().gap_id, "INFRA-X");
         assert_eq!(&*shipper.intent().branch, "b");
+    }
+
+    /// INFRA-8221: a held PR is refused by arm_auto_merge before any gh call
+    /// (the pr_arm_skipped_hold event is only written by the gate).
+    #[tokio::test]
+    async fn arm_auto_merge_refuses_held_pr() {
+        let tmp = TempDir::new().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let fake = crate::arm_policy::testing::FakeFetcher::held_by_label("no-auto-merge");
+        let _g = crate::arm_policy::override_for_tests(fake.clone(), &amb);
+        let session = unique_session_id("held");
+        let intent = ShipIntent::owned("INFRA-8221", "b", "main", "msg", session);
+        let shipper = ManualShipPath::new(intent, tmp.path(), false).expect("bind");
+        let armed = shipper.arm_auto_merge(4242).await.expect("non-fatal");
+        assert!(!armed, "held PR must not be armed");
+        assert_eq!(fake.calls.get(), 1);
+        let ev = std::fs::read_to_string(&amb).unwrap();
+        assert!(ev.contains("\"kind\":\"pr_arm_skipped_hold\""), "{ev}");
+        assert!(ev.contains("chump-ship(manual_ship)"), "{ev}");
     }
 }

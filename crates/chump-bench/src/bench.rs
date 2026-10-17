@@ -1350,11 +1350,7 @@ fn rescue_ship_and_score(
     match rescue_disposition(last.0, ship_opt_in) {
         RescueDisposition::Merge => {
             eprintln!("[bench] CHUMP_BENCH_SHIP=1 + green → merging rescue PR to {base}");
-            let _ = Command::new(&gh)
-                .args([
-                    "pr", "merge", &branch, "--repo", repo, "--squash", "--admin",
-                ])
-                .status();
+            merge_rescue_pr(&gh, &branch, repo);
         }
         RescueDisposition::Close => {
             eprintln!("[bench] scored on PR-green — closing proof PR (main untouched)");
@@ -2039,6 +2035,27 @@ fn run_heat(args: &[String]) -> i32 {
     }
 }
 
+/// Merge the bench's proof PR (by branch) through the one arm policy
+/// (INFRA-8221): a PR someone put on hold while the bench waited for checks
+/// (no-auto-merge label / `Auto-merge: hold`) is left alone. Returns whether
+/// the merge command ran and succeeded.
+fn merge_rescue_pr(gh: &str, branch: &str, repo: &str) -> bool {
+    if let Err(held) = chump_ship::arm_policy::require_allowed(
+        branch,
+        repo,
+        "chump-bench(rescue)",
+        chump_ship::arm_policy::GateAction::Touch,
+    ) {
+        eprintln!("[bench] {held}");
+        return false;
+    }
+    Command::new(gh)
+        .args(["pr", "merge", branch, "--repo", repo, "--squash", "--admin"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2668,5 +2685,25 @@ budget:
 
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&js_dir);
+    }
+
+    /// INFRA-8221: the rescue-PR merge refuses a held PR before gh runs.
+    #[test]
+    fn merge_rescue_pr_refuses_held_pr() {
+        let dir = std::env::temp_dir().join(format!("bench-arm-policy-{}", std::process::id()));
+        let amb = dir.join("ambient.jsonl");
+        let _ = std::fs::remove_file(&amb);
+        let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("hold");
+        let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+        assert!(!merge_rescue_pr(
+            "/nonexistent/gh-must-not-run",
+            "bench/x",
+            "o/r"
+        ));
+        assert_eq!(fake.calls.get(), 1);
+        assert!(std::fs::read_to_string(&amb)
+            .unwrap()
+            .contains("chump-bench(rescue)"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

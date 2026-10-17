@@ -5516,6 +5516,17 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    // `chump pr cut <N> --reason "<text>"` (INFRA-8221 / RESILIENT-1607): the one
+    // deliberate-close verb. Thin arm; logic in commands::pr_cut.
+    if args.get(1).map(String::as_str) == Some("pr")
+        && args.get(2).map(String::as_str) == Some("cut")
+    {
+        std::process::exit(commands::pr_cut::run_cli(
+            &args[3..],
+            &repo_path::repo_root(),
+        ));
+    }
+
     // `chump pr explain-block <PR#> [--json]` (INFRA-1416) — reads the
     // status-check rollup + cross-refs other open PRs failing the same
     // checks, then names the next mechanical action per row. Replaces
@@ -22457,6 +22468,25 @@ async fn ship_execute_cli(args: &[String]) -> Result<()> {
             })
             .unwrap_or_else(|| "{OWNER_REPO}".to_string())
     };
+
+    // INFRA-8221: the one arm policy gates every PR-touching step (arm, REST
+    // merge, rebase+force-push). Logic lives in chump_ship::gate_plan.
+    if !dry_run {
+        let branch = chump_ship::current_branch_name();
+        let repo = if owner_repo.starts_with('{') {
+            ""
+        } else {
+            owner_repo.as_str()
+        };
+        if let Err(held) = chump_ship::gate_plan(&plan, &branch, repo, "chump ship execute") {
+            let payload = serde_json::json!({
+                "plan_action": plan_action, "executed": false, "steps": [],
+                "any_failure": false, "held": true, "note": held.to_string(),
+            });
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+            return Ok(());
+        }
+    }
 
     let mut step_results: Vec<serde_json::Value> = Vec::new();
     let mut any_failure = false;

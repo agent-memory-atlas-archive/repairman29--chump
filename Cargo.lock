@@ -1558,6 +1558,7 @@ name = "chump-bench"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chump-ship",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1853,6 +1854,7 @@ dependencies = [
  "chump-ambient-cli",
  "chump-coord",
  "chump-gap-store",
+ "chump-ship",
  "serde",
  "serde_json",
  "serial_test",
@@ -2031,6 +2033,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "chump-ship",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2171,6 +2174,7 @@ dependencies = [
  "chump-ambient-cli",
  "chump-comprehension-organ",
  "chump-coord",
+ "chump-ship",
  "serde_json",
  "serial_test",
  "tempfile",

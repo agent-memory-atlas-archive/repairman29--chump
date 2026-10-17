@@ -51,6 +51,81 @@ SRC_DIR = REPO_ROOT / "src"
 TODAY = date.today().isoformat()
 
 
+# ── Arm policy (INFRA-8221, mirrors scripts/coord/lib/arm-policy.sh) ─────────────
+# A PR is HELD when it carries a hold label (no-auto-merge, hold, do-not-merge,
+# CHUMP_HOLD; case-insensitive) or its body / any comment has a line
+# `Auto-merge: hold`. A held PR is never armed; the refusal is emitted as
+# kind=pr_arm_skipped_hold. Fails open when gh cannot be read.
+# scanner-anchor: "kind":"pr_arm_skipped_hold"
+ARM_POLICY_HOLD_LABELS = {"no-auto-merge", "hold", "do-not-merge", "chump_hold"}
+_ARM_POLICY_MARKER = re.compile(r"^[ \t]*auto-merge:[ \t]*hold\b", re.I | re.M)
+
+
+def pr_hold_reason(payload: Any) -> str | None:
+    """label:<name> | marker:body | marker:comment for a held PR, else None."""
+    if not isinstance(payload, dict):
+        return None
+    for lab in payload.get("labels") or []:
+        name = lab.get("name", "") if isinstance(lab, dict) else str(lab)
+        if name.lower() in ARM_POLICY_HOLD_LABELS:
+            return f"label:{name}"
+    if _ARM_POLICY_MARKER.search(payload.get("body") or ""):
+        return "marker:body"
+    for c in payload.get("comments") or []:
+        body = c.get("body", "") if isinstance(c, dict) else str(c)
+        if _ARM_POLICY_MARKER.search(body or ""):
+            return "marker:comment"
+    return None
+
+
+def _ambient_path() -> Path:
+    env = os.environ.get("CHUMP_AMBIENT_LOG")
+    return Path(env) if env else REPO_ROOT / ".chump-locks" / "ambient.jsonl"
+
+
+def _emit_ambient(event: dict) -> None:
+    path = _ambient_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a") as fh:
+            fh.write(json.dumps(event, separators=(",", ":")) + "\n")
+    except OSError as exc:
+        print(f"[gap-gardener] WARN: ambient write failed ({path}): {exc}", file=sys.stderr)
+
+
+def _gh_pr_view_hold_fields(pr: str, repo_root: Path) -> Any:
+    out = subprocess.run(
+        ["gh", "pr", "view", pr, "--json", "labels,body,comments"],
+        cwd=str(repo_root), capture_output=True, text=True,
+        env={**os.environ, "CHUMP_GH_CALL_CRITICALITY": "background"},
+    )
+    if out.returncode != 0:
+        raise RuntimeError(out.stderr.strip() or f"gh exited {out.returncode}")
+    return json.loads(out.stdout)
+
+
+def arm_allowed(pr: str, repo_root: Path, armer: str = "gap-gardener.py", fetch=None) -> bool:
+    """The one arm policy. False = held (event emitted); fails open on read errors."""
+    try:
+        payload = (fetch or _gh_pr_view_hold_fields)(pr, repo_root)
+    except Exception as exc:  # noqa: BLE001 — fail open, like the shell policy
+        print(f"[arm-policy] WARN: PR #{pr}: could not read labels/body/comments ({exc}); failing open", file=sys.stderr)
+        return True
+    reason = pr_hold_reason(payload)
+    if reason is None:
+        return True
+    _emit_ambient({
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "kind": "pr_arm_skipped_hold",
+        "pr": int(pr) if str(pr).isdigit() else pr,
+        "armer": armer,
+        "reason": reason,
+        "source": "gh",
+    })
+    print(f"[arm-policy] PR #{pr}: HELD ({reason}) — {armer} will not arm it", file=sys.stderr)
+    return False
+
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 def log(msg: str) -> None:
     ts = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -593,7 +668,10 @@ def ship_gaps(
         pr_num_match = re.search(r"/pull/(\d+)", pr_url)
         pr_num = pr_num_match.group(1) if pr_num_match else "?"
 
-        # Arm auto-merge
+        # Arm auto-merge — through the one arm policy (INFRA-8221).
+        if not arm_allowed(pr_num if pr_num != "?" else pr_url, repo_root):
+            log(f"  PR #{pr_num} is held (arm policy); not arming")
+            return pr_num
         merge_result = subprocess.run(
             ["gh", "pr", "merge", "--auto", "--squash", pr_url],
             cwd=str(repo_root),
