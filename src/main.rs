@@ -12667,6 +12667,12 @@ async fn main() -> Result<()> {
                 let session_id = flag("--session")
                     .or_else(|| crate::ambient_stream::env_session_id())
                     .unwrap_or_else(|| format!("chump-anon-{}", unix_ts()));
+                // PHASE-R R1 (CREDIBLE-1491): re-ship of a terminal gap is a no-op
+                // before any gate, fetch, YAML mirror or ambient emit runs.
+                if let Ok(Some(st)) = store.already_terminal(&gap_id) {
+                    println!("shipped {gap_id} (already {st}; no-op, PHASE-R R1)");
+                    return Ok(());
+                }
                 // MISSION-045: close-side outcome gate — refuse to flip a P0/P1 gap
                 // to done without an outcome_id. Backstop for the reserve gate
                 // (catches gaps that pre-date it). Bypass: --no-outcome-required

@@ -20,9 +20,10 @@
 #                     4. YAML-only IDs        — gaps in YAML with no DB row
 #                                                (skipped on import)
 #
-#   sync-from-yaml  For bucket 2 (DB open / YAML done): UPDATE state.db
-#                   rows to match YAML's status='done', pulling closed_at,
-#                   closed_date, closed_pr from the YAML entry. Idempotent.
+#   sync-from-yaml  For bucket 2 (DB open / YAML done): close the DB row
+#                   through `chump gap ship` (the single receipt-gated
+#                   writer, PHASE-R R1), passing the YAML closed_pr. A
+#                   refused ship is reported and left open. Idempotent.
 #
 #   sync-from-db    For bucket 1 (DB done / YAML open): rewrite per-file YAML
 #                   rows from the DB. Implemented by calling `chump gap dump
@@ -324,10 +325,6 @@ def cmd_sync_from_yaml(args, root: Path) -> int:
     yaml_view = load_yaml_status(root)
     db_view = load_db_status(root)
 
-    db = root / ".chump" / "state.db"
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-
     plan = []
     for gid, y in yaml_view.items():
         if y.get("status") != "done":
@@ -364,25 +361,27 @@ def cmd_sync_from_yaml(args, root: Path) -> int:
         print("nothing to do")
         return 0
 
+    # PHASE-R R1 (CREDIBLE-1491): gap-doctor holds no write connection.
+    # `chump gap ship` (-> GapStore::finalize_status_done) is the only path to
+    # status=done. A refused ship stays open and is reported with the
+    # writer's own reason; it is never written around.
+    refused = []
     for gid, cd, cp, ca in plan:
+        cmd = ["chump", "gap", "ship", gid]
+        if cp:
+            cmd.extend(["--closed-pr", str(cp)])
         try:
-            cmd = ["chump", "gap", "ship", gid]
-            if cp:
-                cmd.extend(["--closed-pr", str(cp)])
-            subprocess.run(
-                cmd,
-                check=True, capture_output=True, text=True
-            )
-        except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            print(f"  WARN {gid}: chump gap ship failed, falling back to direct DB update: {str(e)[:60]}", file=sys.stderr)
-            cur.execute(
-                "UPDATE gaps SET status='done', closed_at=?, closed_date=?, closed_pr=? "
-                "WHERE id=? AND status='open'",
-                (ca if ca > 0 else None, cd, cp, gid),
-            )
-    conn.commit()
-    conn.close()
-    print(f"applied: {len(plan)} rows")
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            print(f"  SHIPPED {gid} via: {' '.join(cmd)}")
+        except FileNotFoundError:
+            refused.append(gid)
+            print(f"  REFUSED {gid}: chump binary not on PATH; single writer unreachable, left open", file=sys.stderr)
+        except subprocess.CalledProcessError as e:
+            refused.append(gid)
+            reason = ((e.stderr or "") + (e.stdout or "")).strip().replace("\n", " ")[:200]
+            print(f"  REFUSED {gid}: {' '.join(cmd)} exited {e.returncode}; left open: {reason or '(no reason given)'}", file=sys.stderr)
+    args.refused = refused
+    print(f"applied: {len(plan) - len(refused)} rows, refused: {len(refused)}")
 
     # INFRA-8193: .chump/state.sql left git; no dump is regenerated here.
     return 0
@@ -527,6 +526,7 @@ def cmd_safe_sweep(args, root: Path) -> int:
     print(f"  Bucket 4 (YAML-only / missing) : {len(bucket4)} → ALERT (manual review)")
 
     # Apply safe buckets (these are no-ops if --dry-run)
+    refused = []
     if not args.dry_run:
         if bucket1:
             # Per-file YAML rewrite (post-INFRA-188 canonical path).
@@ -552,8 +552,9 @@ def cmd_safe_sweep(args, root: Path) -> int:
                 print(f"  {gid} → status=done")
         if bucket2:
             print("\n-- applying sync-from-yaml --")
-            sub_args = argparse.Namespace(apply=True)
+            sub_args = argparse.Namespace(apply=True, refused=[])
             cmd_sync_from_yaml(sub_args, root)
+            refused = list(sub_args.refused)
 
     # Emit ambient ALERTs for unsafe buckets (non-blocking; skipped in dry-run).
     if (bucket3 or bucket4) and not args.dry_run:
@@ -623,7 +624,11 @@ def cmd_safe_sweep(args, root: Path) -> int:
     if getattr(args, "prune_orphans", False) and not args.dry_run and bucket4:
         _prune_yaml_orphans(root, bucket4)
 
-    print(f"\n[safe-sweep] complete (auto-fixed: {len(bucket1) + len(bucket2)}, alerted: {len(bucket3) + len(bucket4)})")
+    # PHASE-R R1: a Bucket 2 row the single writer refused is NOT auto-fixed.
+    fixed = len(bucket1) + len(bucket2) - len(refused)
+    print(f"\n[safe-sweep] complete (auto-fixed: {fixed}, refused-by-single-writer: {len(refused)}, alerted: {len(bucket3) + len(bucket4)})")
+    if refused:
+        print(f"[safe-sweep] left open (single writer refused): {', '.join(refused)}", file=sys.stderr)
     return 0
 
 
@@ -633,7 +638,7 @@ def main() -> int:
 
     sub.add_parser("doctor", help="print drift report (read-only)")
 
-    p1 = sub.add_parser("sync-from-yaml", help="UPDATE DB rows where YAML says done")
+    p1 = sub.add_parser("sync-from-yaml", help="close DB rows where YAML says done, via chump gap ship (R1 single writer)")
     p1.add_argument("--apply", action="store_true", help="actually mutate state.db")
 
     p2 = sub.add_parser("sync-from-db", help="regenerate per-file YAML mirrors from DB (post-INFRA-188)")

@@ -2040,6 +2040,9 @@ jobs:
       - name: external verify-merge judge — 5-case synthetic matrix (CREDIBLE-096)
         run: bash scripts/ci/test-external-verify-merge.sh
 
+      - name: PHASE-R R1 ship is one receipt-gated transition, 1562 replay (CREDIBLE-1491)
+        run: CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-r1-ship-one-transition.sh
+
       - name: Emit self-hosted runner stats (CREDIBLE-069)
         if: always() && runner.os != 'Linux'
         uses: ./.github/actions/emit-self-hosted-run-stats

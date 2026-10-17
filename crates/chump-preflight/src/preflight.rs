@@ -2470,6 +2470,14 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-external-verify-merge.sh"],
             GateKind::Scripts,
         ));
+        // PHASE-R R1 (CREDIBLE-1491): gap set needs a resolvable closed_pr,
+        // re-ship is a no-op, and the RESILIENT-1562 replay records one
+        // transition. Drives the debug binary; builds it when absent.
+        steps.push(step(
+            "r1-ship-one-transition",
+            &["bash", "scripts/ci/test-r1-ship-one-transition.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "gate-promotion-no-regression",
             &["bash", "scripts/ci/test-gate-promotion-no-regression.sh"],

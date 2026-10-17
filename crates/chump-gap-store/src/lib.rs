@@ -237,6 +237,19 @@ pub struct GapStore {
     repo_root: PathBuf,
 }
 
+/// PHASE-R R1 (CREDIBLE-1491): statuses the single done-writer never
+/// overwrites. Kept in step with the `status NOT IN (...)` clause of
+/// `finalize_status_done`.
+pub const TERMINAL_DONE_GUARD_STATUSES: &[&str] = &[
+    "done",
+    "superseded",
+    "wontfix",
+    "wont_fix",
+    "closed",
+    "closed_not_a_bug",
+    "already_satisfied",
+];
+
 impl GapStore {
     /// The gap store path for `repo_root`. Delegates to the ONE resolver
     /// (INFRA-8190, `chump-store-path`): `CHUMP_STATE_DB` > the main
@@ -1659,12 +1672,39 @@ impl GapStore {
                         .flatten();
                     if existing_pr.unwrap_or(0) == 0 {
                         bail!(
-                            "INFRA-402/CREDIBLE-1496: refusing to flip {gap_id} to status=done without a receipt: \
+                            "PHASE-R R1 (INFRA-402/CREDIBLE-1496): refusing to flip {gap_id} to status=done without a receipt: \
                              no numeric closed_pr (in this call or on the row) to key a LandingReceipt on. \
                              Close via `chump gap ship` (a bypass close stamps an ImportedReceipt). \
                              Pass --closed-pr <N>, or set CHUMP_BYPASS_CLOSED_PR_GUARD=1 for genuine migration cases."
                         );
                     }
+                }
+                // PHASE-R R1 (CREDIBLE-1491): the closed_pr must RESOLVE to a
+                // landing receipt, not merely be a positive number. Same proof
+                // `ship()` requires: the PR's own squash commit `(#N)` is on
+                // origin/main (RESILIENT-1592). An already-terminal row is a
+                // no-op in the single writer, so it is not re-proven here.
+                let pr = if supplied_pr > 0 {
+                    supplied_pr
+                } else {
+                    self.conn
+                        .query_row("SELECT closed_pr FROM gaps WHERE id=?", [gap_id], |row| {
+                            row.get::<_, Option<i64>>(0)
+                        })
+                        .ok()
+                        .flatten()
+                        .unwrap_or(0)
+                };
+                if pr > 0
+                    && self.already_terminal(gap_id)?.is_none()
+                    && !self.landing_receipt_resolves(gap_id, pr)
+                {
+                    bail!(
+                        "PHASE-R R1 (CREDIBLE-1491): refusing to flip {gap_id} to status=done: \
+                         closed_pr #{pr} does not resolve to a landing receipt (no commit carrying \
+                         (#{pr}) on origin/main after a fetch). Wait for the merge to land, then \
+                         close via `chump gap ship {gap_id} --closed-pr {pr}`."
+                    );
                 }
             }
         }
@@ -3051,6 +3091,14 @@ impl GapStore {
     /// status:done flip in YAML, so passing it here keeps the canonical
     /// state.db and the YAML mirror in agreement (INFRA-156).
     pub fn ship(&self, gap_id: &str, session_id: &str, closed_pr: Option<i64>) -> Result<()> {
+        // PHASE-R R1 (CREDIBLE-1491): a second ship of an already-terminal gap
+        // is a true no-op. Return before the fetch / auto-pull / cargo build /
+        // hakari steps below, so a re-ship touches nothing: no status write,
+        // no ambient event, no rebuild. RESILIENT-1562 shipped 87 times in 2h;
+        // each of those calls must now cost one SELECT.
+        if self.already_terminal(gap_id)?.is_some() {
+            return Ok(());
+        }
         // INFRA-1392 PROOF-OF-MERGE: refuse to flip status=done unless we
         // can verify the work actually landed. Pattern observed
         // 2026-05-22: sibling claim flipped INFRA-1368 / INFRA-1363 to
@@ -3322,6 +3370,41 @@ impl GapStore {
             "ship",
         )?;
         Ok(())
+    }
+
+    /// PHASE-R R1 (CREDIBLE-1491): does `closed_pr` resolve to a landing
+    /// receipt for `gap_id`? The proof is `verify_proof_of_merge` (the PR's
+    /// own squash commit `(#N)` on origin/main). A miss retries once after a
+    /// best-effort `git fetch origin main`, so a closer running seconds after
+    /// the merge is not refused by a stale remote-tracking ref.
+    pub fn landing_receipt_resolves(&self, gap_id: &str, closed_pr: i64) -> bool {
+        if verify_proof_of_merge(&self.repo_root, gap_id, Some(closed_pr)) {
+            return true;
+        }
+        let _ = std::process::Command::new("git")
+            .args(["fetch", "origin", "main", "--quiet"])
+            .current_dir(&self.repo_root)
+            .stderr(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .status();
+        verify_proof_of_merge(&self.repo_root, gap_id, Some(closed_pr))
+    }
+
+    /// PHASE-R R1 (CREDIBLE-1491): the gap's status when it is already in a
+    /// terminal status that `finalize_status_done` would refuse to overwrite
+    /// (`done` or a deliberate triage close), `None` when it is open-ish or
+    /// absent. `ship()` and the `chump gap ship` arm use it to make a re-ship
+    /// a no-op before any side effect runs.
+    pub fn already_terminal(&self, gap_id: &str) -> Result<Option<String>> {
+        let status: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT status FROM gaps WHERE id=?1",
+                params![gap_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(status.filter(|s| TERMINAL_DONE_GUARD_STATUSES.contains(&s.as_str())))
     }
 
     /// CREDIBLE-1508: the single `status=done` writer. Every path that flips a
@@ -7340,6 +7423,177 @@ impl GapStore {
 }
 
 // ────────────────────────── tests ──────────────────────────
+
+/// PHASE-R R1 (CREDIBLE-1491): ship is one idempotent state transition gated
+/// on a landing receipt. Real git repos (branch `main`, no origin) so
+/// `verify_proof_of_merge` runs for real instead of failing open.
+#[cfg(test)]
+mod phase_r_r1_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(ok, "git {args:?} failed in {}", dir.display());
+    }
+
+    /// A repo on `main` whose history carries the squash commit of PR #4242.
+    fn repo_with_landed_pr(dir: &std::path::Path) -> GapStore {
+        git(dir, &["init", "--quiet"]);
+        git(dir, &["config", "user.email", "test@test.local"]);
+        git(dir, &["config", "user.name", "test"]);
+        git(dir, &["config", "commit.gpgsign", "false"]);
+        git(dir, &["checkout", "--quiet", "-b", "main"]);
+        git(
+            dir,
+            &[
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "RESILIENT-1562: the fix that landed (#4242)",
+            ],
+        );
+        unsafe {
+            std::env::set_var("CHUMP_RESERVE_SCAN_OPEN_PRS", "0");
+        }
+        GapStore::open(dir).unwrap()
+    }
+
+    fn ambient(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_to_string(dir.join(".chump-locks").join("ambient.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .map(String::from)
+            .collect()
+    }
+
+    fn count_kind(lines: &[String], kind: &str, gap_id: &str) -> usize {
+        let k = format!("\"kind\":\"{kind}\"");
+        let g = format!("\"gap_id\":\"{gap_id}\"");
+        lines
+            .iter()
+            .filter(|l| l.contains(&k) && l.contains(&g))
+            .count()
+    }
+
+    fn row(store: &GapStore, id: &str) -> (String, Option<i64>, String, Option<String>) {
+        store
+            .conn_for_test()
+            .query_row(
+                "SELECT status, closed_at, closed_date, landing_receipt_json FROM gaps WHERE id=?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap()
+    }
+
+    /// AC3: a second ship is a no-op: status, closed_at and the stamped
+    /// receipt are unchanged and the ambient stream gains zero lines.
+    #[test]
+    fn reship_is_a_noop_no_write_no_event() {
+        let dir = tempdir().unwrap();
+        let store = repo_with_landed_pr(dir.path());
+        let id = store
+            .reserve("RESILIENT", "r1 idempotent", "P2", "s")
+            .unwrap();
+
+        store.ship(&id, "sess-a", Some(4242)).unwrap();
+        let first = row(&store, &id);
+        assert_eq!(first.0, "done");
+        assert!(first.3.is_some(), "first ship stamps a landing receipt");
+        let before = ambient(dir.path());
+
+        store.ship(&id, "sess-b", Some(4242)).unwrap();
+        store.ship(&id, "sess-c", None).unwrap();
+        assert_eq!(row(&store, &id), first, "re-ship must not rewrite the row");
+        assert_eq!(
+            ambient(dir.path()),
+            before,
+            "re-ship must emit zero ambient events"
+        );
+        assert_eq!(
+            store.already_terminal(&id).unwrap().as_deref(),
+            Some("done")
+        );
+    }
+
+    /// AC4: replay of RESILIENT-1562 (shipped 87 times in 2h on 2026-10-12):
+    /// 87 ships of one gap record exactly one transition and one ship_landed.
+    #[test]
+    fn replay_resilient_1562_eighty_seven_ships_one_transition() {
+        let dir = tempdir().unwrap();
+        let store = repo_with_landed_pr(dir.path());
+        let id = store
+            .reserve("RESILIENT", "r1 replay 1562", "P2", "s")
+            .unwrap();
+        for i in 0..87 {
+            store
+                .ship(&id, &format!("worker-{i}"), Some(4242))
+                .unwrap_or_else(|e| panic!("ship #{i} failed: {e:#}"));
+        }
+        let lines = ambient(dir.path());
+        assert_eq!(count_kind(&lines, "gap_status_done_written", &id), 1);
+        assert_eq!(count_kind(&lines, "ship_landed", &id), 1);
+        assert_eq!(row(&store, &id).0, "done");
+    }
+
+    /// AC2 (merge-SHA half): ship refuses a PR whose squash commit is not on main.
+    #[test]
+    fn ship_refuses_a_pr_that_never_landed() {
+        let dir = tempdir().unwrap();
+        let store = repo_with_landed_pr(dir.path());
+        let id = store
+            .reserve("RESILIENT", "r1 unlanded", "P2", "s")
+            .unwrap();
+        let err = store.ship(&id, "s", Some(999)).unwrap_err();
+        assert!(format!("{err:#}").contains("PROOF-OF-MERGE"), "{err:#}");
+        assert_eq!(row(&store, &id).0, "open");
+        assert_eq!(count_kind(&ambient(dir.path()), "ship_landed", &id), 0);
+    }
+
+    /// AC5: `gap set --status done` needs a closed_pr that RESOLVES to a
+    /// landing receipt; a bare positive number is not enough.
+    #[test]
+    #[serial_test::serial(closed_pr_guard_env)]
+    fn gap_set_done_requires_a_resolvable_closed_pr() {
+        let dir = tempdir().unwrap();
+        let store = repo_with_landed_pr(dir.path());
+        let id = store.reserve("RESILIENT", "r1 gap set", "P2", "s").unwrap();
+        let done = |pr: Option<i64>| GapFieldUpdate {
+            status: Some("done".into()),
+            closed_pr: pr,
+            ..Default::default()
+        };
+
+        let err = store.set_fields(&id, done(None)).unwrap_err().to_string();
+        assert!(err.contains("PHASE-R R1"), "{err}");
+
+        let err = store
+            .set_fields(&id, done(Some(999)))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("PHASE-R R1") && err.contains("#999") && err.contains("landing receipt"),
+            "{err}"
+        );
+        assert_eq!(
+            row(&store, &id).0,
+            "open",
+            "refused write leaves the row open"
+        );
+
+        store.set_fields(&id, done(Some(4242))).unwrap();
+        assert_eq!(row(&store, &id).0, "done");
+    }
+}
 
 /// INFRA-2423: auto-fetch unit tests for `GapStore::ship()`.
 ///
