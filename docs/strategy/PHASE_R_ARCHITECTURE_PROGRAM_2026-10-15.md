@@ -77,6 +77,25 @@ dedupe), not a missing block. Fixed in the same gap: stable keys on `verified-re
 `chump preflight`) so a per-run key on any `workflow_run`/`schedule` workflow fails CI. Depth:
 structural only; it checks the key is stable, not that it is the right one.
 
+**Train receipt, 2026-10-17 20:08Z (merge `47ecda326`, PR #5561).** With the hosted runners
+serving a handful of jobs an hour and `strict=true` requeuing every armed PR on each main
+landing, 29 fleet PRs sat BLOCKED for most of a day. The architect built one integration branch
+from 18 of them (61 commits, later 78 with the fixes), opened it as #5561, cut the 18 component
+PRs with `pr-cut` after the merge, and shipped 22 gaps against the train on the node:
+PRODUCT-382, CREDIBLE-1496/1499/1509/1511/1513/1514/1493, RESILIENT-1606/1607/1609/1611,
+INFRA-8176/8193/8194/8199/8208/8209/8211/8223/8570, ZERO-WASTE-134/135. PHASE-R rollup 52% →
+80% (60 of 75). Five CI rounds were needed, each a one-step failure that only CI could see:
+the bypass-var debt ceiling (a new `*_NO_GATE` env var, now a `--no-gate` flag), shellcheck
+SC2002 in `load-aware-deadman.sh`, two rounds of PyYAML-illegal scalars in
+`EVENT_REGISTRY.yaml` (a backtick from #3472 and 24 multi-line plain scalars with `: ` inside,
+caught by the new union merge driver because it is the first gate to parse the registry), and
+an export-only detector whose `grep -q` pipelines went blind under `pipefail` on GNU grep.
+Receipts: classes 28-32 in the ship-path measurement. Zero admin merges. Still open after the
+train (13): R6 ×5 (INFRA-8195, RESILIENT-1604/1615/1616/1617), R3 ×4 (CREDIBLE-1492/1516,
+INFRA-8203, ZERO-WASTE-133), R1 (CREDIBLE-1491), R5 (INFRA-8571), R7 slice 2, plus the
+R6 shell-absorption umbrella. The second train is #5566 (CREDIBLE-1506) and the chain v8/v9
+PRs (CREDIBLE-1516, RESILIENT-1617, RESILIENT-1615, RESILIENT-1616, INFRA-8571).
+
 **The honest metric for the whole program.** One gap filed, dispatched, built, merged
 and flipped to shipped by the fleet with zero admin merges and zero human terminal.
 Until that happens once, the factory is not running. R1 plus R3 is the gate to it.
