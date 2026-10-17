@@ -174,6 +174,87 @@ Lint-Gate-Bypass: known upstream issue in rustfmt 1.7.1" | grep -i '^Lint-Gate-B
   && ok "Lint-Gate-Bypass trailer extraction works correctly" \
   || fail "Lint-Gate-Bypass trailer extraction failed: got '$TRAILER_OUT'"
 
+# ── 8. INFRA-8225: pinned-toolchain clippy resolution (lib/clippy-toolchain.sh)
+# Fixture tests for chump_clippy_toolchain_plan across the four branches, with
+# the newer-clippy branch (the one that false-blocked three Mac pushes) covered
+# explicitly. The lib reads rust-toolchain.toml + `cargo clippy --version` +
+# `command -v rustup`; we stub all three via a fixture repo + a clean PATH.
+LIB="$REPO_ROOT/scripts/git-hooks/lib/clippy-toolchain.sh"
+[[ -r "$LIB" ]] \
+  && ok "clippy-toolchain.sh lib present" \
+  || fail "clippy-toolchain.sh lib missing at $LIB"
+
+grep -q "INFRA-8225" "$HOOK" \
+  && ok "Guard 0c wires INFRA-8225 pinned-toolchain resolution" \
+  || fail "Guard 0c missing INFRA-8225 wiring"
+
+# Fixture: a repo pinned to 1.96.0 and a fake-bin dir we control.
+CT="$TMP/clippy-toolchain"
+mkdir -p "$CT/repo" "$CT/bin"
+cat > "$CT/repo/rust-toolchain.toml" <<'TOML'
+[toolchain]
+channel = "1.96.0"
+components = ["clippy"]
+TOML
+
+# make_cargo <minor>: a fake `cargo` whose `clippy --version` reports 0.1.<minor>
+make_cargo() {
+  cat > "$CT/bin/cargo" <<CARGOEOF
+#!/usr/bin/env bash
+if [[ "\$1" == "clippy" && "\$2" == "--version" ]]; then
+  echo "clippy 0.1.$1 ... "  # placeholder, overwritten below
+fi
+CARGOEOF
+  # Rewrite with the requested minor (avoid heredoc var escaping headaches).
+  printf '#!/usr/bin/env bash\nif [[ "$1" == "clippy" && "$2" == "--version" ]]; then echo "clippy 0.1.%s (deadbeef 2026-01-01)"; exit 0; fi\nexit 0\n' "$1" > "$CT/bin/cargo"
+  chmod +x "$CT/bin/cargo"
+}
+
+# A minimal PATH with our fake cargo first and the real coreutils for sed/grep.
+# Deliberately excludes rustup (fresh dir) for the no-rustup branches.
+CT_PATH="$CT/bin:/usr/bin:/bin"
+
+# 8a. NEWER clippy (0.1.99) + no rustup → defer:0.1.99:1.96.0
+make_cargo 99
+PLAN="$(PATH="$CT_PATH" bash -c '. "'"$LIB"'"; chump_clippy_toolchain_plan "'"$CT/repo"'"')"
+[[ "$PLAN" == "defer:0.1.99:1.96.0" ]] \
+  && ok "newer clippy + no rustup → defer (got '$PLAN')" \
+  || fail "newer-clippy branch: expected 'defer:0.1.99:1.96.0', got '$PLAN'"
+
+# 8b. MATCHING clippy (0.1.96) + no rustup → direct (gating, legacy)
+make_cargo 96
+PLAN="$(PATH="$CT_PATH" bash -c '. "'"$LIB"'"; chump_clippy_toolchain_plan "'"$CT/repo"'"')"
+[[ "$PLAN" == "direct" ]] \
+  && ok "matching clippy + no rustup → direct (got '$PLAN')" \
+  || fail "matching-clippy branch: expected 'direct', got '$PLAN'"
+
+# 8c. OLDER clippy (0.1.90) + no rustup → direct (gating)
+make_cargo 90
+PLAN="$(PATH="$CT_PATH" bash -c '. "'"$LIB"'"; chump_clippy_toolchain_plan "'"$CT/repo"'"')"
+[[ "$PLAN" == "direct" ]] \
+  && ok "older clippy + no rustup → direct (got '$PLAN')" \
+  || fail "older-clippy branch: expected 'direct', got '$PLAN'"
+
+# 8d. rustup present → rustup:1.96.0 (regardless of local clippy version)
+make_cargo 99
+cat > "$CT/bin/rustup" <<'RUSTUPEOF'
+#!/usr/bin/env bash
+exit 0
+RUSTUPEOF
+chmod +x "$CT/bin/rustup"
+PLAN="$(PATH="$CT_PATH" bash -c '. "'"$LIB"'"; chump_clippy_toolchain_plan "'"$CT/repo"'"')"
+[[ "$PLAN" == "rustup:1.96.0" ]] \
+  && ok "rustup present → pin via rustup (got '$PLAN')" \
+  || fail "rustup branch: expected 'rustup:1.96.0', got '$PLAN'"
+rm -f "$CT/bin/rustup"
+
+# 8e. CHUMP_CLIPPY_PIN=0 opt-out → direct even with newer clippy + no rustup
+make_cargo 99
+PLAN="$(CHUMP_CLIPPY_PIN=0 PATH="$CT_PATH" bash -c '. "'"$LIB"'"; chump_clippy_toolchain_plan "'"$CT/repo"'"')"
+[[ "$PLAN" == "direct" ]] \
+  && ok "CHUMP_CLIPPY_PIN=0 opt-out → direct (got '$PLAN')" \
+  || fail "opt-out branch: expected 'direct', got '$PLAN'"
+
 echo
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]

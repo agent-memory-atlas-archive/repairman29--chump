@@ -809,6 +809,44 @@ elif command -v cargo &>/dev/null; then
         echo "[pre-push] INFRA-1390: running cargo clippy (diff has .rs changes)..." >&2
         echo "[pre-push] Bypass: CHUMP_CLIPPY_GATE=0 git push  (with Lint-Gate-Bypass: trailer)" >&2
 
+        # INFRA-8225: resolve clippy against the PINNED toolchain
+        # (rust-toolchain.toml), not whatever clippy is first on PATH. A
+        # Homebrew rust newer than the pin emits lints the pin + CI never see
+        # and false-blocked three Mac pushes. The lib picks the gating cmd.
+        _clippy_cmd=(cargo clippy --all-targets --quiet -- -D warnings)
+        _clippy_gating=1
+        if [[ -r "$REPO_ROOT/scripts/git-hooks/lib/clippy-toolchain.sh" ]]; then
+            # shellcheck source=lib/clippy-toolchain.sh
+            . "$REPO_ROOT/scripts/git-hooks/lib/clippy-toolchain.sh"
+            _clippy_plan="$(chump_clippy_toolchain_plan "$REPO_ROOT_CL")"
+            case "$_clippy_plan" in
+                rustup:*)
+                    _clippy_pin="${_clippy_plan#rustup:}"
+                    echo "[pre-push] INFRA-8225: pinning clippy to rust-toolchain.toml channel '${_clippy_pin}' via 'rustup run'." >&2
+                    _clippy_cmd=(rustup run "$_clippy_pin" cargo clippy --all-targets --quiet -- -D warnings)
+                    ;;
+                defer:*)
+                    _clippy_rest="${_clippy_plan#defer:}"
+                    _clippy_localver="${_clippy_rest%%:*}"
+                    _clippy_pin="${_clippy_rest##*:}"
+                    _clippy_gating=0
+                    echo "" >&2
+                    echo "[pre-push] INFRA-8225: local clippy ${_clippy_localver} is NEWER than the pinned toolchain (${_clippy_pin}) and rustup is absent." >&2
+                    echo "[pre-push] Running clippy for SIGNAL but DEFERRING the gate to CI — a newer-clippy-only lint must not block a push the pin + CI never see (CI is authoritative, INFRA-3524)." >&2
+                    echo "[pre-push] To gate locally against the pin: install rustup (e.g. 'brew install rustup && rustup toolchain install ${_clippy_pin}')." >&2
+                    echo "" >&2
+                    _ct_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+                    _ct_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+                    _ct_gap="$(echo "$_ct_branch" | grep -oiE '[A-Za-z]+-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || echo "")"
+                    mkdir -p "${_ct_root}/.chump-locks" 2>/dev/null || true
+                    printf '{"ts":"%s","kind":"clippy_toolchain_deferred","local_version":"%s","pinned_channel":"%s","gated":false,"branch":"%s","gap_id":"%s"}\n' \
+                        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_clippy_localver" "$_clippy_pin" "$_ct_branch" "$_ct_gap" \
+                        >> "${_ct_root}/.chump-locks/ambient.jsonl" 2>/dev/null || true
+                    unset _ct_root _ct_branch _ct_gap _clippy_rest
+                    ;;
+            esac
+        fi
+
         # RESILIENT-1448: reuse a persistent, WARM target dir for the clippy
         # gate instead of a COLD per-worktree .cargo-test-target rebuilt from
         # scratch on every push. A cold full `cargo clippy --all-targets` runs
@@ -842,21 +880,37 @@ elif command -v cargo &>/dev/null; then
         # INFRA-5126: per-phase timeout via _pp_run_timed — wrapped in
         # `bash -c` (positional args, not string interpolation) so the cd +
         # env-var invocation still runs under `timeout`.
-        if ! _pp_run_timed clippy bash -c \
-            'cd "$0" && CARGO_TARGET_DIR="$1" cargo clippy --all-targets --quiet -- -D warnings' \
-            "$REPO_ROOT_CL" "$_WT_CLIPPY_TARGET" 2>&1; then
-            echo "" >&2
-            echo "[pre-push] BLOCKED: cargo clippy -D warnings failed (INFRA-1390)." >&2
-            echo "[pre-push] Lint errors must be fixed before pushing — CI will reject them." >&2
-            echo "[pre-push] Fix: cargo clippy --all-targets -- -D warnings  # then git add -u && git commit --amend" >&2
-            echo "" >&2
-            echo "[pre-push] Bypass (rare — lint infra broken, known upstream regression):" >&2
-            echo "[pre-push]   CHUMP_CLIPPY_GATE=0 git push" >&2
-            echo "[pre-push]   Add 'Lint-Gate-Bypass: <reason>' to HEAD commit body." >&2
-            echo "" >&2
-            exit 1
+        # INFRA-8225: run "${_clippy_cmd[@]}" (may be `rustup run <pin> cargo
+        # clippy …`) rather than a hard-coded `cargo clippy`, so the gate
+        # matches the pinned toolchain. $1=repo root, $2=target dir; shift 2
+        # leaves the resolved clippy command.
+        _clippy_rc=0
+        _pp_run_timed clippy bash -c \
+            'cd "$1" && export CARGO_TARGET_DIR="$2" && shift 2 && exec "$@"' \
+            _ "$REPO_ROOT_CL" "$_WT_CLIPPY_TARGET" "${_clippy_cmd[@]}" 2>&1 || _clippy_rc=$?
+
+        if [[ "$_clippy_gating" == "1" ]]; then
+            if [[ "$_clippy_rc" -ne 0 ]]; then
+                echo "" >&2
+                echo "[pre-push] BLOCKED: cargo clippy -D warnings failed (INFRA-1390)." >&2
+                echo "[pre-push] Lint errors must be fixed before pushing — CI will reject them." >&2
+                echo "[pre-push] Fix: cargo clippy --all-targets -- -D warnings  # then git add -u && git commit --amend" >&2
+                echo "" >&2
+                echo "[pre-push] Bypass (rare — lint infra broken, known upstream regression):" >&2
+                echo "[pre-push]   CHUMP_CLIPPY_GATE=0 git push" >&2
+                echo "[pre-push]   Add 'Lint-Gate-Bypass: <reason>' to HEAD commit body." >&2
+                echo "" >&2
+                exit 1
+            fi
+            echo "[pre-push] INFRA-1390: ✓ clippy clean" >&2
+        else
+            # INFRA-8225 defer branch: clippy already ran for signal; never gate.
+            if [[ "$_clippy_rc" -ne 0 ]]; then
+                echo "[pre-push] INFRA-8225: clippy reported findings above — ADVISORY only (newer-clippy, gate deferred to CI). NOT blocking." >&2
+            else
+                echo "[pre-push] INFRA-8225: clippy clean (advisory; gate deferred to CI)." >&2
+            fi
         fi
-        echo "[pre-push] INFRA-1390: ✓ clippy clean" >&2
     fi
 fi
 

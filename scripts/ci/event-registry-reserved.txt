@@ -237,6 +237,7 @@ preflight_gapsint_bypassed # reason: INFRA-1831 emitted from src/preflight.rs wh
 preflight_mdlinks_bypassed # reason: INFRA-1790 emitted from src/preflight.rs when CHUMP_PREFLIGHT_SKIP_MDLINKS=1; allowlist while EVENT_REGISTRY entry catches up (mirrors INFRA-1731 pattern)
 preflight_registry_bypassed # reason: INFRA-1731 #2377 emitted from src/preflight.rs when CHUMP_PREFLIGHT_SKIP_REGISTRY=1; allowlist while EVENT_REGISTRY entry catches up
 preflight_subcmdhelp_bypassed # reason: INFRA-1789 emitted from src/preflight.rs when CHUMP_PREFLIGHT_SKIP_SUBCMDHELP=1; allowlist while EVENT_REGISTRY entry catches up (mirrors INFRA-1731 preflight_registry_bypassed pattern)
+clippy_toolchain_deferred  # reason: INFRA-8225 emitted from scripts/git-hooks/pre-push Guard 0c (newer-clippy-no-rustup defer branch); git-hooks/ dir is outside PROD_PATHS grep scan
 prepush_duration  # reason: RESILIENT-1552 emitted from scripts/git-hooks/pre-push _pp_emit_duration_event via the existing EXIT trap; git-hooks/ dir is outside PROD_PATHS grep scan
 prepush_head_drift  # reason: emitted by scripts/git-hooks/pre-push (INFRA-1372); git-hooks/ dir is outside PROD_PATHS grep scan
 prepush_test_timeout  # reason: INFRA-1744 emitted from scripts/git-hooks/pre-push timeout branch; printf-formatted from bash, not via emit_event helper

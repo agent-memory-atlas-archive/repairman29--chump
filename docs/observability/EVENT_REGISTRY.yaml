@@ -6314,6 +6314,25 @@ events:
     consumers: [fleet-brief, curator]
     fields_required: [ts, kind, gap_id, reason, branch, bypassed_by]
 
+  # ── INFRA-8225: pinned-toolchain clippy gate, newer-clippy defer branch ───
+  - kind: clippy_toolchain_deferred
+    effect_metric: self
+    emitter: scripts/git-hooks/pre-push Guard 0c + lib/clippy-toolchain.sh (INFRA-8225)
+    trigger: the local clippy is NEWER than the rust-toolchain.toml pin AND
+      rustup is absent, so the pre-push clippy gate cannot reproduce the
+      pinned lint set; clippy runs for signal but the gate is deferred to CI
+    consumers: [fleet-brief, curator]
+    fields_required: [ts, kind, local_version, pinned_channel, gated, branch, gap_id]
+    docs: |
+      gated is always false — this is the explicit "defer to CI" branch
+      (CI is authoritative, INFRA-3524). Never a silent pass: the hook also
+      prints a loud multi-line diagnostic pointing at `rustup toolchain
+      install <pin>` so a Mac lane with a Homebrew rust newer than the pin
+      is not false-blocked by a lint the pin + CI never emit (the
+      src/routes/settings_repo.rs:204 manual_filter class). When rustup IS
+      present the gate pins via `rustup run <pin> cargo clippy` and no event
+      is emitted (normal gating path).
+
   # ── RESILIENT-1552 (RESILIENT-1548 slice): pre-push duration measurement ──
   - kind: prepush_duration
     effect_metric: prepush_wallclock_median_s

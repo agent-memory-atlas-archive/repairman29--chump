@@ -366,6 +366,26 @@ to hide them. Real reds as of `origin/main` eef8a96c3:
 
 Treat these as known-red until their owning lane fixes them; do not let them gate a Mac push.
 
+**Clippy must use the pinned toolchain, not Homebrew's rust (INFRA-8225).** `rust-toolchain.toml`
+pins the compiler to a single patch (today `channel = "1.96.0"`) so local and CI agree on the lint
+set. A **Homebrew `rust`** (`brew install rust`) is a stand-alone toolchain, *not* a rustup proxy — it
+ignores `rust-toolchain.toml` and lints with whatever version Homebrew shipped. When that is newer than
+the pin it emits lints the pin and CI never see (precedent: a brew rust 1.97 failed three pushes on
+`src/routes/settings_repo.rs:204` `manual_filter`, a lint 1.96 + CI do not have). Fix: **install rustup**
+so the pin is honoured —
+```bash
+brew uninstall rust            # remove the stand-alone brew toolchain (optional but avoids PATH ambiguity)
+brew install rustup            # or: curl https://sh.rustup.rs -sSf | sh
+rustup toolchain install 1.96.0   # match rust-toolchain.toml channel; cargo auto-installs on first use anyway
+```
+The pre-push clippy gate (Guard 0c in `scripts/git-hooks/pre-push`, via
+`scripts/git-hooks/lib/clippy-toolchain.sh`) now resolves the toolchain for you: with **rustup present**
+it runs `rustup run <pin> cargo clippy` so the gate always matches the pin; with **rustup absent and the
+local clippy newer than the pin** it runs clippy for signal but **defers the gate to CI** (CI is
+authoritative, INFRA-3524) with one loud line + a `clippy_toolchain_deferred` ambient event — never a
+silent pass, and never a false block on a newer-clippy-only lint. Opt out with `CHUMP_CLIPPY_PIN=0`
+(legacy raw-PATH clippy).
+
 ## Maintenance
 
 This playbook should be **updated whenever a new wedge class is discovered** (new entry in §1), a **new ship-assist tool ships** (entry added to §2), or a **lesson-learning gap closes** (move from §4/§5 in-flight to §6 shipped + cross-link the doc to the fix's PR).

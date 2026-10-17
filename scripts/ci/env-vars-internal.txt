@@ -944,6 +944,9 @@ CHUMP_CI_REGRESSION_GUARD
 # detected in: (standard input)
 CHUMP_CLIPPY_GATE
 # detected in: (standard input)
+# INFRA-8225: set 0 to disable pinned-toolchain clippy resolution (legacy raw-PATH clippy)
+CHUMP_CLIPPY_PIN
+# detected in: (standard input)
 CHUMP_FIXTURE_AUTHOR_GUARD
 # detected in: (standard input)
 CHUMP_FMT_CHECK
