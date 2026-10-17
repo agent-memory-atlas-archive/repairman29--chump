@@ -62,6 +62,12 @@
 #                        failure mode where a stale/parked checkout silently
 #                        degrades `gap ship` proof-of-merge and other
 #                        main-relative tooling until someone notices by hand.
+#   18. single-branch-refspec — INFRA-8210: REPO_ROOT's remote.origin.fetch is
+#                        a single-branch refspec instead of all-branches
+#                        (+refs/heads/*:refs/remotes/origin/*), so remote
+#                        feature branches never fetch — the cuphead-hub failure
+#                        mode that silently broke dispatch resume, salvage, and
+#                        rebases (kind=checkout_single_branch_refspec).
 #
 # Thresholds (override via env)
 #   LEASE_STALE_HOURS         default 2    — leases older than N hours are flagged
@@ -1501,6 +1507,46 @@ check_checkout_parked_off_main() {
         "checkout on '$branch' for ${age}s (threshold ${stale_s}s) — not yet stale" ""
 }
 
+#  18. single-branch-refspec — INFRA-8210: the cuphead hub's gap-store checkout
+#      was cloned with a single-branch fetch refspec
+#      (+refs/heads/main:refs/remotes/origin/main), so `git fetch origin` only
+#      ever updated origin/main — every remote FEATURE branch was invisible,
+#      silently breaking dispatch resume, salvage, and rebases (they look for
+#      remote branches that were never fetched). chump-node-install.sh and
+#      node-converge now repair this to the all-branches refspec; this check
+#      surfaces any checkout they have not yet reached as a finding.
+check_fetch_refspec_single_branch() {
+    if [[ ! -d "$REPO_ROOT/.git" ]]; then
+        register_check "single-branch-refspec" "skip" "no .git under REPO_ROOT" ""
+        return
+    fi
+    local full='+refs/heads/*:refs/remotes/origin/*'
+    local current
+    current="$(git -C "$REPO_ROOT" config --get-all remote.origin.fetch 2>/dev/null)"
+    if [[ -z "$current" ]]; then
+        # No fetch refspec at all (unusual) — a fetch would no-op. Treat as a
+        # finding so the installer/converge repair gets a chance to run.
+        register_check "single-branch-refspec" "fail" \
+            "remote.origin.fetch is unset on $REPO_ROOT — remote branches will not fetch" \
+            "git -C $REPO_ROOT config remote.origin.fetch '$full' && git -C $REPO_ROOT fetch origin"
+        return
+    fi
+    if [[ "$current" == "$full" ]]; then
+        register_check "single-branch-refspec" "pass" "fetch refspec is all-branches" ""
+        return
+    fi
+    local amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+    mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+    # Collapse any embedded newlines (multi-entry refspec) so the JSON stays one line.
+    local refspec_field
+    refspec_field="$(printf '%s' "$current" | tr '\n' ' ')"
+    printf '{"ts":"%s","kind":"checkout_single_branch_refspec","refspec":"%s","source":"fleet-doctor-strict.sh"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$refspec_field" >> "$amb" 2>/dev/null || true
+    register_check "single-branch-refspec" "fail" \
+        "remote.origin.fetch on $REPO_ROOT is single-branch/narrow ('$refspec_field') — remote feature branches are invisible, breaking dispatch resume/salvage/rebases" \
+        "git -C $REPO_ROOT config --replace-all remote.origin.fetch '$full' && git -C $REPO_ROOT fetch origin"
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -1527,6 +1573,7 @@ check_auth_probe
 check_self_healer_heartbeat
 check_tracked_config_drift
 check_checkout_parked_off_main
+check_fetch_refspec_single_branch
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

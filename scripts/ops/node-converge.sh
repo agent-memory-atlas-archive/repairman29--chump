@@ -250,6 +250,22 @@ _clear_stale_index_lock() {
 }
 _clear_stale_index_lock || true
 
+# --- INFRA-8210: repair a single-branch fetch refspec on every tick ----------
+# A checkout cloned with --single-branch only ever fetches origin/main, so
+# remote feature branches never populate refs/remotes/<remote>/* — which
+# silently broke dispatch resume, salvage, and rebases on the cuphead hub. The
+# installer sets the full refspec at install time; converge re-asserts it every
+# tick so a hand-reclone or a legacy checkout self-heals without a reinstall.
+# Same shared primitive as the installer; idempotent when already all-branches.
+source "$_CONVERGE_DIR/../setup/lib/refspec-repair.sh" 2>/dev/null || true
+if command -v repair_fetch_refspec >/dev/null 2>&1; then
+    repair_fetch_refspec "$REPO_ROOT" "$CONVERGE_REMOTE"; _refspec_rc=$?
+    if [[ "$_refspec_rc" -eq 10 ]]; then
+        log "repaired fetch refspec for '$CONVERGE_REMOTE' -> all-branches (was single-branch/narrow)"
+        emit node_converge_refspec_repaired "\"remote\":\"$CONVERGE_REMOTE\",\"repo\":\"$REPO_ROOT\""
+    fi
+fi
+
 # --- fetch (auth-independent: a public-repo fetch needs no credentials) -------
 if ! git fetch "$CONVERGE_REMOTE" "$CONVERGE_BRANCH" --quiet 2>>"$LOG"; then
     # Offline / transient network. Not fatal — nothing to converge to that we

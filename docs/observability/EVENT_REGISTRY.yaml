@@ -9871,6 +9871,21 @@ events:
     consumers: [ops-audit, fleet-brief]
     fields_required: [ts, kind, source, branch, age_s]
 
+  - kind: checkout_single_branch_refspec
+    effect_metric: resilient
+    emitter: scripts/coord/fleet-doctor-strict.sh (INFRA-8210)
+    trigger: >
+      Emitted when check_fetch_refspec_single_branch finds REPO_ROOT's
+      remote.origin.fetch is a single-branch refspec
+      (+refs/heads/main:refs/remotes/origin/main) instead of the all-branches
+      refspec (+refs/heads/*:refs/remotes/origin/*). Closes the cuphead-hub
+      failure mode where a --single-branch clone hid every remote feature
+      branch from `git fetch origin`, silently breaking dispatch resume,
+      salvage, and rebases. The installer + node-converge self-heal this; the
+      check surfaces any checkout they have not yet reached.
+    consumers: [ops-audit, fleet-brief]
+    fields_required: [ts, kind, source, refspec]
+
   - kind: wedge_detected
     effect_metric: resilient
     emitter: scripts/coord/wizard-daemon.sh step3 (META-107)

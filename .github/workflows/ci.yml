@@ -859,6 +859,15 @@ jobs:
       - name: Install scripts executable-bit gate (INFRA-1808)
         run: bash scripts/ci/test-install-scripts-executable.sh
 
+      # INFRA-8210: single-branch fetch-refspec repair. A clone made with
+      # --single-branch hid every remote feature branch from `git fetch origin`,
+      # silently breaking dispatch resume / salvage / rebases on the cuphead hub.
+      # Proves the installer step + node-converge repair it to all-branches and
+      # the fleet-doctor check flags an un-repaired checkout. Hermetic (bare
+      # origin + fixture clone in a tmpdir); mirrored in chump preflight.
+      - name: Single-branch refspec repair gate (INFRA-8210)
+        run: bash scripts/ci/test-infra-8210-single-branch-refspec-repair.sh
+
       # INFRA-1808: bootstrap-auto-install smoke — the hourly launchd job
       # (install-bootstrap-auto-launchd.sh) that self-runs
       # chump-fleet-bootstrap.sh --install must generate a valid plist and

@@ -2198,6 +2198,22 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
 
+        // INFRA-8210: single-branch fetch-refspec repair. A --single-branch
+        // clone only fetches origin/main, hiding every remote feature branch
+        // from `git fetch origin` — the cuphead-hub failure that silently broke
+        // dispatch resume / salvage / rebases. Proves the installer step +
+        // node-converge rewrite it to all-branches and the fleet-doctor check
+        // flags an un-repaired checkout. Hermetic (bare origin + fixture clone
+        // in a tmpdir); fast (<2s).
+        steps.push(step(
+            "single-branch-refspec-repair",
+            &[
+                "bash",
+                "scripts/ci/test-infra-8210-single-branch-refspec-repair.sh",
+            ],
+            GateKind::Scripts,
+        ));
+
         // INFRA-1808: bootstrap-auto-install smoke. install-bootstrap-auto-
         // launchd.sh (the hourly self-install job for chump-fleet-bootstrap.sh)
         // must generate a valid plist and its runner must emit

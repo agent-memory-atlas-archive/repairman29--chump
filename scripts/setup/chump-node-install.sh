@@ -278,6 +278,30 @@ toolchain_preflight() {
   ensure_rust || { echo "fix rust toolchain above (see hint), then re-run" >&2; exit 1; }
 }
 
+# INFRA-8210: force the full fetch refspec on an owned node's checkout. A clone
+# made with --single-branch only fetches origin/main, hiding every other remote
+# branch from dispatch resume / salvage / rebases. The shared primitive lives in
+# lib/refspec-repair.sh so the installer (here) and the converge organ re-assert
+# it through the same code. Idempotent: a checkout already carrying the full
+# refspec is left untouched.
+# shellcheck source=lib/refspec-repair.sh
+source "$(dirname "$0")/lib/refspec-repair.sh" 2>/dev/null || true
+ensure_full_refspec() {
+  local repo="$1"
+  [ -d "$repo/.git" ] || return 0
+  if [ "$DRY" = 1 ]; then
+    echo "  DRY: git -C '$repo' config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'"
+    return 0
+  fi
+  command -v repair_fetch_refspec >/dev/null 2>&1 || { no "refspec-repair.sh missing — cannot set full fetch refspec on $repo"; return 0; }
+  repair_fetch_refspec "$repo" origin
+  case "$?" in
+    0)  : ;;  # already all-branches
+    10) ok "fetch refspec set to all-branches on $repo (was single-branch/narrow)" ;;
+    *)  no "could not set full fetch refspec on $repo" ;;
+  esac
+}
+
 # ---------- 2. HOME ----------
 ensure_home() {
   run "mkdir -p '$NODE_DIR/bin' '$ORGAN_DIR' '$LOG_DIR' '$STATE_DIR'"
@@ -314,6 +338,7 @@ ensure_home() {
       fi
     fi
   fi
+  ensure_full_refspec "$NODE_DIR/repo"
   ok "node home: $NODE_DIR"
 }
 
