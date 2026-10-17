@@ -737,6 +737,11 @@ jobs:
       - name: Doctrine weave detectors fixture test
         run: bash scripts/ci/test-doctrine-weave-detectors.sh
 
+      # CREDIBLE-1499: enforce gap status='done' single-source invariant —
+      # only the ship() function in src/dispatch.rs should UPDATE gaps status.
+      - name: Gap status single-source enforcement (CREDIBLE-1499)
+        run: bash scripts/ci/test-gap-ship-single-source.sh
+
       # INFRA-1541: pre-merge AC coverage gate.
       # ADVISORY-ONLY by default — `CHUMP_AC_GATE_BLOCKING=false` makes the
       # script always exit 0 after emitting `kind=ac_coverage_miss` events
