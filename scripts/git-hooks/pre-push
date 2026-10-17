@@ -889,7 +889,30 @@ elif command -v cargo &>/dev/null; then
             'cd "$1" && export CARGO_TARGET_DIR="$2" && shift 2 && exec "$@"' \
             _ "$REPO_ROOT_CL" "$_WT_CLIPPY_TARGET" "${_clippy_cmd[@]}" 2>&1 || _clippy_rc=$?
 
+        # RESILIENT-1608: a clippy that hit the phase timeout (rc 124 from
+        # _pp_run_timed) is NOT a lint failure; say which one it was, in the
+        # BLOCKED line and in kind=prepush_clippy_blocked (outcome=timeout |
+        # lint_failure), instead of reporting every non-zero exit as lints.
+        if [[ "$_clippy_gating" == "1" && "$_clippy_rc" -ne 0 ]]; then
+            _cb_outcome="lint_failure"
+            [[ "$_clippy_rc" -eq 124 ]] && _cb_outcome="timeout"
+            _cb_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+            _cb_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+            _cb_amb="${CHUMP_AMBIENT_LOG:-$_cb_root/.chump-locks/ambient.jsonl}"
+            mkdir -p "$(dirname "$_cb_amb")" 2>/dev/null || true
+            printf '{"ts":"%s","kind":"prepush_clippy_blocked","outcome":"%s","rc":%d,"timeout_s":%s,"branch":"%s"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_cb_outcome" "$_clippy_rc" "${CHUMP_PREPUSH_CLIPPY_TIMEOUT_S:-600}" "$_cb_branch" \
+                >> "$_cb_amb" 2>/dev/null || true
+            unset _cb_root _cb_branch _cb_amb
+        fi
         if [[ "$_clippy_gating" == "1" ]]; then
+            if [[ "$_clippy_rc" -eq 124 ]]; then
+                echo "" >&2
+                echo "[pre-push] BLOCKED: cargo clippy TIMED OUT after ${CHUMP_PREPUSH_CLIPPY_TIMEOUT_S:-600}s (RESILIENT-1608) — no lint failure was reported; the run was cut off." >&2
+                echo "[pre-push] Re-push with a larger clippy budget: CHUMP_PREPUSH_CLIPPY_TIMEOUT_S=<secs> git push" >&2
+                echo "" >&2
+                exit 1
+            fi
             if [[ "$_clippy_rc" -ne 0 ]]; then
                 echo "" >&2
                 echo "[pre-push] BLOCKED: cargo clippy -D warnings failed (INFRA-1390)." >&2

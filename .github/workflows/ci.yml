@@ -1898,6 +1898,9 @@ jobs:
       - name: bot-merge recovery push passes pre-push Guard 4 smoke (INFRA-8208)
         run: bash scripts/ci/test-bot-merge-recovery-in-progress.sh
 
+      - name: bot-merge recovery push runs no clippy; clippy timeout != lint failure; derived budget (RESILIENT-1608)
+        run: bash scripts/ci/test-bot-merge-recovery-no-clippy.sh
+
       - name: bot-merge recovery mode opens a missing PR smoke (INFRA-8209)
         run: bash scripts/ci/test-bot-merge-recovery-pr-create.sh
 

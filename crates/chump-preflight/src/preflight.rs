@@ -2682,6 +2682,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "bot-merge-recovery-no-clippy",
+            &["bash", "scripts/ci/test-bot-merge-recovery-no-clippy.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "bot-merge-recovery-pr-create-smoke",
             &["bash", "scripts/ci/test-bot-merge-recovery-pr-create.sh"],
             GateKind::Scripts,

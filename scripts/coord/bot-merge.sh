@@ -1241,6 +1241,10 @@ stage_start() {
     # ran. Removed the dead duplicate below to prevent this exact confusion
     # from recurring.
     local budget="${2:-${CHUMP_BOT_MERGE_STAGE_BUDGET_S:-300}}"
+    # RESILIENT-1608: remember this stage's own budget for stage_done's
+    # over-budget check (it used the global 300s, so a clippy stage started
+    # with a longer budget was declared wedged after finishing green in 541s).
+    __STAGE_BUDGET="$budget"
     info "▶ $__STAGE_LABEL starting … (budget ${budget}s)"
     # INFRA-119: keep step file current so the health-file writer tracks progress
     [[ -n "${_BM_STEP_FILE:-}" ]] && printf '%s' "$__STAGE_LABEL" > "$_BM_STEP_FILE" 2>/dev/null || true
@@ -1293,7 +1297,7 @@ stage_done() {
         __STAGE_BUDGET_PID=""
     fi
     local elapsed=$(( $(date +%s) - __STAGE_T0 ))
-    local budget="${CHUMP_BOT_MERGE_STAGE_BUDGET_S:-300}"
+    local budget="${__STAGE_BUDGET:-${CHUMP_BOT_MERGE_STAGE_BUDGET_S:-300}}"
     info "✓ $__STAGE_LABEL done (${elapsed}s)"
     # RESILIENT-140: stage finished — fall back to the current named step so
     # the heartbeat never keeps reporting the completed stage's label.
@@ -3171,8 +3175,28 @@ elif command -v cargo &>/dev/null; then
     # global 300s here because no second argument was ever passed -- the
     # watchdog fired mid-compile on cold worktrees despite the command still
     # being well within its own allowed budget. Pass 900 explicitly to match.
-    stage_start "cargo clippy --workspace --all-targets" 900
-    if ! _run_cargo_with_lock_detect "cargo clippy" 900 clippy --workspace --all-targets -- -D warnings; then
+    #
+    # RESILIENT-1608: the budget is derived from measured green clippy time
+    # (1.5 x slowest of the last 5, floor 300s, no data -> 900s) instead of a
+    # fixed 900s, and logged. The stage watchdog gets 30s of slack so the
+    # timeout fires first and is reported as a timeout, not a lint failure.
+    # shellcheck source=scripts/coord/lib/clippy-budget.sh
+    . "$REPO_ROOT/scripts/coord/lib/clippy-budget.sh"
+    _clippy_amb="${CHUMP_AMBIENT_LOG:-${REPO_ROOT:-.}/.chump-locks/ambient.jsonl}"
+    read -r _clippy_budget _clippy_budget_src _clippy_slowest _clippy_samples \
+        <<<"$(chump_clippy_budget "$_clippy_amb")"
+    info "RESILIENT-1608: clippy budget ${_clippy_budget}s (source=${_clippy_budget_src}, slowest green ${_clippy_slowest}s of ${_clippy_samples} sample(s), x1.5, floor 300s, ceiling 3600s, default 900s)"
+    printf '{"ts":"%s","kind":"bot_merge_clippy_budget_derived","budget_s":%d,"source":"%s","slowest_green_s":%d,"samples":%d,"gap":"%s","branch":"%s"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_clippy_budget" "$_clippy_budget_src" "$_clippy_slowest" "$_clippy_samples" \
+        "${GAP_IDS[0]:-${GAP_ID:-unknown}}" "${BRANCH:-unknown}" >> "$_clippy_amb" 2>/dev/null || true
+    stage_start "cargo clippy --workspace --all-targets" "$((_clippy_budget + 30))"
+    _clippy_rc=0
+    _run_cargo_with_lock_detect "cargo clippy" "$_clippy_budget" clippy --workspace --all-targets -- -D warnings || _clippy_rc=$?
+    if [[ "$_clippy_rc" -eq 124 ]]; then
+        red "clippy TIMED OUT after ${_clippy_budget}s (RESILIENT-1608) — no lint failure was reported; the run was cut off."
+        _grade_clippy_ok="false"
+        _bm_fail "clippy" 13 "clippy timeout after ${_clippy_budget}s"
+    elif [[ "$_clippy_rc" -ne 0 ]]; then
         red "clippy found errors — fix them before merging."
         _grade_clippy_ok="false"
         _bm_fail "clippy" 13 "clippy lint errors"

@@ -3371,6 +3371,31 @@ events:
     consumers: [fleet-brief, waste-tally, operator-recall]
     fields_required: [ts, stage, elapsed_s, budget_s, gap]
 
+  - kind: bot_merge_clippy_budget_derived
+    status: active
+    effect_metric: self
+    emitter: scripts/coord/bot-merge.sh clippy stage (RESILIENT-1608)
+    emitter_paths: [scripts/coord/bot-merge.sh]
+    trigger: >-
+      every local clippy stage logs the budget it derived from measured green
+      clippy time (1.5 x the slowest of the last 5 bot_merge_phase_duration
+      clippy samples, floor 300s, ceiling 3600s, 900s when there are none),
+      replacing the fixed INFRA-1422 300s stage budget and INFRA-587 900s timeout.
+    consumers: [fleet-brief]
+    fields_required: [ts, kind, budget_s, source, slowest_green_s, samples, gap, branch]
+
+  - kind: prepush_clippy_blocked
+    status: active
+    effect_metric: self
+    emitter: scripts/git-hooks/pre-push Guard 0c clippy gate (RESILIENT-1608)
+    emitter_paths: [scripts/git-hooks/pre-push]
+    trigger: >-
+      the pre-push clippy gate refused a push; outcome says whether clippy hit
+      its phase timeout (timeout, rc 124) or reported lints (lint_failure), so
+      a cut-off run is never read as a lint failure.
+    consumers: [fleet-brief, ci-audit]
+    fields_required: [ts, kind, outcome, rc, timeout_s, branch]
+
   - kind: botmerge_recovery_start
     effect_metric: self
     emitter: scripts/coord/bot-merge.sh (INFRA-1422 CHUMP_BOT_MERGE_RECOVERY_MODE=1)
