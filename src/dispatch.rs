@@ -861,6 +861,14 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     // exact gap this whole gap closes: a `claude -p` headless child that
     // outlived its 1800s budget with no lease, ship phase, or supervisor.
     configure_child_lifetime(&mut cmd);
+    // INFRA-8219: node-wide admission ceiling (ports RESILIENT-1604). Bounded,
+    // fail-open wait so independent spawn sites don't pile `claude -p` children
+    // past CHUMP_MAX_CONCURRENT_CLAUDE on a small node; proceeds anyway if the
+    // ceiling never clears (a stuck gate is worse than a busy node).
+    crate::admit::gate_before_spawn(
+        crate::admit::Resource::Claude,
+        &crate::repo_path::repo_root(),
+    );
     let mut child = cmd
         .spawn()
         .context("spawn `claude -p` (is the claude CLI on PATH?)")?;

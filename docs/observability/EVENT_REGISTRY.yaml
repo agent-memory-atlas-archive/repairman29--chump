@@ -14055,3 +14055,12 @@ events:
     trigger: post-build sccache stats (compile requests, cache hits/misses) were captured for trending
     consumers: [ambient]
     fields_required: [ts, kind, compile_requests, cache_hits, cache_misses]
+
+  - kind: admission_deferred
+    status: active
+    effect_metric: resilient
+    emitter: src/admit.rs (INFRA-8219, ports RESILIENT-1604) via `chump admit` + dispatch gate
+    emitter_paths: [src/admit.rs]
+    trigger: node-wide admission ceiling hit — a `claude -p` or cargo/rustc spawn was deferred because the live count was >= CHUMP_MAX_CONCURRENT_CLAUDE / CHUMP_MAX_CONCURRENT_CARGO_JOBS (outcome=deferred on entry, outcome=timeout when the bounded wait fails open)
+    consumers: [ambient, fleet-brief]
+    fields_required: [ts, kind, resource, active, ceiling, waited_s, outcome]

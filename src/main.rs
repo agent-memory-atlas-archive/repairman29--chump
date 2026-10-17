@@ -10,6 +10,7 @@ mod acp;
 mod acp_server;
 mod activation;
 mod admission_check; // RESILIENT-1426: admission check against concurrency ceiling
+mod admit; // INFRA-8219: `chump admit <claude|cargo>` — node-wide admission ceiling (ports RESILIENT-1604)
 mod adversary;
 mod adversary_llm;
 mod agent_factory;
@@ -2435,6 +2436,13 @@ async fn main() -> Result<()> {
     if args.get(1).map(String::as_str) == Some("harvest") {
         let sub_args: Vec<String> = args.iter().skip(2).cloned().collect();
         std::process::exit(harvester_cli::run(&sub_args));
+    }
+
+    // `chump admit <claude|cargo> [--wait-s N]` (INFRA-8219) — node-wide
+    // admission ceiling. Exits 0 when a slot is free, 75 when deferred.
+    if args.get(1).map(String::as_str) == Some("admit") {
+        let sub_args: Vec<String> = args.iter().skip(2).cloned().collect();
+        std::process::exit(admit::run(&sub_args));
     }
 
     // `chump systematize <target-repo-path> [--json]` (INFRA-1783, phase 4 of

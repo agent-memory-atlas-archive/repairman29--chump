@@ -173,6 +173,10 @@ const CONTENT_GUARD_MIRRORS: &[(&str, &str)] = &[
 // `cli-observability-misc` gate.
 const CLI_OBSERVABILITY_MISC_SCRIPTS: &[(&str, &str)] = &[
     ("acp-real-clients", "scripts/ci/test-acp-real-clients.sh"),
+    // INFRA-8219: `chump admit` node-wide admission ceiling smoke — proves the
+    // free/deferred exit codes (0 / 75) + kind=admission_deferred emit. Fast
+    // (~2s), pure local (chump binary + sentinel sleeps, no network).
+    ("admit-ceiling", "scripts/ci/test-admit-ceiling.sh"),
     (
         "api-chat-cost-kill",
         "scripts/ci/test-api-chat-cost-kill.sh",
