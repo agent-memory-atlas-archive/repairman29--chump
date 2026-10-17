@@ -2509,9 +2509,10 @@ jobs:
           fi
 
   # ── System integration test (INFRA-849) ──────────────────────────────────────
-  # Non-blocking end-to-end test for the claim→commit→ship pipeline using stubs.
-  # Does not gate merges (continue-on-error: true); provides CREDIBLE signal
-  # that the full pipeline round-trips without requiring real GitHub API calls.
+  # End-to-end test for the claim→commit→ship pipeline using stubs.
+  # Gates merges via the verified aggregator (CREDIBLE-1515, INFRA-849);
+  # provides CREDIBLE signal that the full pipeline round-trips without requiring
+  # real GitHub API calls.
   integration-test:
     name: System integration test (INFRA-849)
     runs-on: ubuntu-latest
