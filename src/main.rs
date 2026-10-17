@@ -171,6 +171,7 @@ mod intent_parser;
 mod interrupt_notify;
 mod intervention_watchdog; // COTG-2.1/INFRA-3489: log every human touch as an autonomy defect
 mod introspect_tool;
+mod node_mode; // RESILIENT-1614: node pause/resume commands (enforce paused mode as invariant)
 mod scan; // INFRA-1882: chump scan <repo-path> — repo takeover opener (2026 demo #2)
 pub use chump_inventory::inventory; // META-271: fleet inventory + tech-debt review-only audit DB (EFFECTIVE-401: extracted to crates/chump-inventory)
 mod job_log;
@@ -3457,6 +3458,88 @@ async fn main() -> Result<()> {
             let _ = std::io::stdout().flush();
         }
         return Ok(());
+    }
+
+    // RESILIENT-1614: `chump node pause|resume` — enforce paused mode as an invariant.
+    // Writes CHUMP_NODE_MODE to node.env and emits lifecycle events that organs check.
+    if args.get(1).map(String::as_str) == Some("node") {
+        let subcmd = args.get(2).map(String::as_str).unwrap_or("help");
+
+        if subcmd == "--help" || subcmd == "help" || subcmd == "-h" {
+            println!("Usage: chump node pause --reason \"<reason>\"");
+            println!("       chump node resume");
+            println!();
+            println!("Pause and resume the node. When paused, work organs (node-converge,");
+            println!("organ-reconcile, organ-deploy, paramedic, process-organ-heal,");
+            println!("self-doctor, worker loop) check the mode first and exit 0 without");
+            println!("installing, enabling, or restarting anything.");
+            println!();
+            println!("Pause writes CHUMP_NODE_MODE=paused to node.env + a .chump/fleet-paused");
+            println!("sentinel with reason and actor, then emits kind=node_paused.");
+            println!();
+            println!("Resume reverses it: writes CHUMP_NODE_MODE=work-ready, removes the");
+            println!("sentinel, and emits kind=node_resumed.");
+            println!();
+            println!("Examples:");
+            println!("  chump node pause --reason \"maintenance window\"");
+            println!("  chump node resume");
+            return Ok(());
+        }
+
+        match subcmd {
+            "pause" => {
+                let reason = args
+                    .iter()
+                    .position(|a| a == "--reason")
+                    .and_then(|i| args.get(i + 1))
+                    .map(|s| s.as_str())
+                    .unwrap_or("operator requested");
+
+                let state = match node_mode::NodeModeState::new(None) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("chump node pause: {e:#}");
+                        std::process::exit(1);
+                    }
+                };
+
+                match state.pause(reason) {
+                    Ok(()) => {
+                        println!("Node paused with reason: {}", reason);
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("chump node pause: {e:#}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "resume" => {
+                let state = match node_mode::NodeModeState::new(None) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("chump node resume: {e:#}");
+                        std::process::exit(1);
+                    }
+                };
+
+                match state.resume() {
+                    Ok(()) => {
+                        println!("Node resumed");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("chump node resume: {e:#}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            _ => {
+                eprintln!("Usage: chump node pause --reason \"<reason>\"");
+                eprintln!("       chump node resume");
+                std::process::exit(2);
+            }
+        }
     }
 
     // INFRA-1613: `chump skill <subcmd>` — operator-facing CLI for skill management.

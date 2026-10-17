@@ -487,6 +487,11 @@ cascade_unblock_skipped           # reason: INFRA-2070 emitted by scripts/coord/
 # ── INFRA-2006: A2A inbox-routing fix ────────────────────────────────────────
 a2a_inbox_alias_resolved        # reason: INFRA-2006; emitted by scripts/coord/chump-inbox.sh read when messages are found in a lease-id alias inbox (primary env-session-id != broadcast --to target); also by scripts/coord/lib/inbox-routing.sh resolve_inbox_target on sender-side lookup. Carries primary_session, alias_session, message_count. Registered in EVENT_REGISTRY.yaml.
 a2a_inbox_message_orphan        # reason: INFRA-2006; advisory event emitted by scripts/coord/chump-inbox.sh when a message is found in an inbox file no live session owns. Not fatal; archive-on-dead-session cleans up. Carries inbox_file, message_count. Registered in EVENT_REGISTRY.yaml.
+
+# ── RESILIENT-1614: node pause/resume invariant ──────────────────────────────────
+node_paused                     # reason: RESILIENT-1614 emitted by src/node_mode.rs when chump node pause --reason is invoked; carries reason and actor. Makes fleet pause an invariant honored by converge, reconcile, deploy, paramedic, heal, self-doctor, worker loop.
+node_resumed                    # reason: RESILIENT-1614 emitted by src/node_mode.rs when chump node resume is invoked. Reverses node_paused state.
+organ_skipped_paused            # reason: RESILIENT-1614 emitted by work organs (scripts/ops/node-converge.sh, scripts/ops/organ-reconcile.sh, scripts/ops/organ-deploy.sh, scripts/ops/paramedic.sh, scripts/ops/process-organ-heal.sh, scripts/ops/self-doctor.sh, scripts/dispatch/worker.sh) when CHUMP_NODE_MODE=paused is detected; organs exit 0 without installing, enabling, or restarting anything.
 queue_driver_iter_attempted
 
 # ── INFRA-2295: stale-pr-rebase-bot (SCALE-C safety net) ─────────────────────
