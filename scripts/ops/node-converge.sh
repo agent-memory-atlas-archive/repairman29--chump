@@ -122,6 +122,11 @@ _reconcile_role_organs() {
         log "WARN: $installer not found; skipping role-organ reconcile"
         return 0
     fi
+    # RESILIENT-1615: never reconcile organs into a second scope.
+    if ! _nc_second_scope_ok; then
+        log "SKIP: refusing organ reconcile — a chump install exists in another scope (see node_second_scope_refused)"
+        return 0
+    fi
     if CHUMP_NODE_REPO="$REPO_ROOT" CHUMP_STATE_DIR="${CHUMP_STATE_DIR:-$HOME/.chump}" \
          bash "$installer" --role "$NODE_ROLE" --reconcile-organs-only >>"$LOG" 2>&1; then
         log "OK: role-organ reconcile complete (role=$NODE_ROLE)"
@@ -142,6 +147,47 @@ emit() {
     printf '[%s] %s %s\n' "$ts" "$kind" "$extra" >> "$LOG"
 }
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG"; }
+
+# RESILIENT-1615: honor a node pause BEFORE any mutation. A paused node must
+# converge/install/restart NOTHING — the cuphead receipt (2026-10-17 04:41Z)
+# was converge re-enabling 42 timers on a node the operator had paused. Detect
+# the pause three ways, all of which `chump node pause` / the stopgap set:
+#   * CHUMP_NODE_MODE=paused in node.env
+#   * the .chump/fleet-paused sentinel
+#   * CHUMP_NODE_WORK_ENABLED=0 (the 2026-10-17 hand-edit, honored for compat)
+# Emit organ_skipped_paused once and exit 0 before touching a single unit.
+_nc_paused() {
+    local sd="${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}"
+    [[ -f "$sd/.chump/fleet-paused" ]] && return 0
+    local ne="$sd/node.env"
+    if [[ -f "$ne" ]]; then
+        grep -Eq '^(export )?CHUMP_NODE_MODE=paused([[:space:]]|$)' "$ne" && return 0
+        grep -Eq '^(export )?CHUMP_NODE_WORK_ENABLED=0([[:space:]]|$)' "$ne" && return 0
+    fi
+    [[ "${CHUMP_NODE_WORK_ENABLED:-}" == "0" ]] && return 0
+    [[ "${CHUMP_NODE_MODE:-}" == "paused" ]] && return 0
+    return 1
+}
+if _nc_paused; then
+    log "SKIP: node is paused (CHUMP_NODE_MODE=paused / fleet-paused sentinel / CHUMP_NODE_WORK_ENABLED=0) — converging and installing nothing this tick"
+    emit organ_skipped_paused "\"organ\":\"node-converge\",\"reason\":\"node_paused\""
+    exit 0
+fi
+
+# RESILIENT-1615: a chump install in a SECOND supervisor scope means another
+# fleet owns this box (cuphead ran a root/system-scope install for 24 days
+# alongside the ubuntu user-scope one). Refuse to (re)install organs into a
+# second scope. Resolves a chump binary (PATH, then the repo's built target)
+# and defers to `chump node scopes --install-guard`, which emits
+# kind=node_second_scope_refused when the OTHER scope already has an install.
+_nc_second_scope_ok() {
+    local chump
+    chump="$(command -v chump 2>/dev/null || true)"
+    [[ -z "$chump" && -x "$REPO_ROOT/target/release/chump" ]] && chump="$REPO_ROOT/target/release/chump"
+    [[ -z "$chump" && -x "$REPO_ROOT/target/debug/chump" ]] && chump="$REPO_ROOT/target/debug/chump"
+    [[ -z "$chump" ]] && return 0   # best-effort: no binary to check with yet
+    "$chump" node scopes --install-guard >>"$LOG" 2>&1
+}
 
 # RESILIENT-1453: restart a running worker whose worker.sh changed under it.
 # This organ hard-resets the SOURCE tree to origin/main, but the long-running

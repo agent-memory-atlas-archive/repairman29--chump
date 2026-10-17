@@ -40,6 +40,8 @@
 //! literal rules as [`find_host_literals`].
 
 pub mod cli;
+pub mod scopes; // RESILIENT-1615: two-scope node enumeration (pure logic)
+pub mod scopes_live; // RESILIENT-1615: live systemctl/launchctl runner + `node scopes` CLI
 
 use std::fmt;
 use std::path::{Path, PathBuf};

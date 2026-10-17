@@ -15,6 +15,11 @@ Usage:
       Placeholders: __HOME__ __REPO_ROOT__ __BIN_DIR__ __NODE_ENV__ __BREW_PREFIX__.
       A template carrying User=<name>, /home/<name>, /root/ or /opt/homebrew
       is refused; User= is injected only for linux-systemd-system.
+  chump node scopes [--json] [--install-guard]
+      Enumerate chump work organs in BOTH systemd scopes (--user + system) or
+      the mac launchd user domain. Exits 3 on a two-scope node. --install-guard
+      refuses (exit 3, kind=node_second_scope_refused) if the OTHER scope
+      already has an install.
 
 Host variants: mac-launchd, linux-systemd-user, linux-systemd-system, termux
 Override detection with CHUMP_PROVISION_HOST=<variant>.";
@@ -25,6 +30,8 @@ pub fn run_cli(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         Some("host") => run_host(&args[1..], &Probe::from_env()),
         Some("render-unit") => run_render(&args[1..], &Probe::from_env()),
+        // RESILIENT-1615: two-scope enumeration + installer second-scope guard.
+        Some("scopes") => crate::scopes_live::run_scopes(&args[1..], &Probe::from_env()),
         Some("-h") | Some("--help") | Some("help") => {
             println!("{USAGE}");
             0

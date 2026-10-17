@@ -130,6 +130,30 @@ emit_ambient() {  # kind, extra-json (no leading/trailing comma)
   return 0  # best-effort telemetry; must never sink self_test
 }
 
+# ---------- second-scope refusal (RESILIENT-1615) ----------
+# A converged node must have exactly ONE chump install in ONE supervisor scope.
+# cuphead ran a SECOND, root/system-scope install (out of /root/.chumpnode/repo,
+# 60+ enabled chump-* units under /etc/systemd/system) alongside the ubuntu
+# user-scope install for 24 days — the user-scope pause never touched the
+# system-scope organs, so cut PRs were reopened four times and converge
+# re-enabled timers. Refuse to stack a second scope. Defers to the typed-Host
+# scanner in `chump node scopes --install-guard`, which emits
+# kind=node_second_scope_refused when the OTHER scope already has an install.
+refuse_second_scope() {
+  local chump
+  chump="$(command -v chump 2>/dev/null || true)"
+  [ -z "$chump" ] && [ -x "$NODE_REPO/target/release/chump" ] && chump="$NODE_REPO/target/release/chump"
+  [ -z "$chump" ] && [ -x "$NODE_REPO/target/debug/chump" ] && chump="$NODE_REPO/target/debug/chump"
+  [ -z "$chump" ] && return 0   # pre-binary on a fresh box: no second scope to clash with yet
+  if ! "$chump" node scopes --install-guard; then
+    printf '\033[41m REFUSING INSTALL \033[0m a chump install already exists in another supervisor scope.\n' >&2
+    printf 'A converged node must have exactly ONE install in ONE scope (the cuphead two-fleet defect,\n' >&2
+    printf 'RESILIENT-1615). Retire the other install — its .chumpnode tree in the other scope home and its\n' >&2
+    printf 'enabled chump-* units — then re-run. Inspect with: chump node scopes\n' >&2
+    exit 2
+  fi
+}
+
 # ---------- install budget + per-phase timeouts (RESILIENT-1015) ----------
 # The 2026-09-05 mugman repro (2-core aarch64) verified chump-node-install.sh
 # hanging past BINARY even with the binary pre-placed + fetch disabled — a
@@ -1969,6 +1993,9 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 printf '\033[1m=== chump-node-install: role=%s home=%s ===\033[0m\n' "$ROLE" "$NODE_DIR"
 info GAP-STORE "canonical shared gap store pinned: CHUMP_GAP_STORE_URL=$CHUMP_GAP_STORE_URL"
 detect_host
+# RESILIENT-1615: refuse a second-scope install before any mutation (skip for
+# the read-only self-test and dry-run paths).
+if [ "$SELF_TEST_ONLY" != 1 ] && [ "$DRY" != 1 ]; then refuse_second_scope; fi
 if [ "$RECONCILE_ORGANS_ONLY" = 1 ]; then
   run "mkdir -p '$ORGAN_DIR' '$LOG_DIR' '$STATE_DIR'"
   install_organs

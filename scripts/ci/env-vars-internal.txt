@@ -2185,6 +2185,10 @@ CHUMP_BOOTSTRAP_CREDS
 CHUMP_NODE_DIR
 CHUMP_RUNNER_BIN
 CHUMP_NODE_REPO_URL
+# RESILIENT-1615: ambient-stream path override read by the node-scope scanner
+# (crates/chump-provision/src/scopes_live.rs) when emitting node_second_scope_refused;
+# mirrors the long-standing shell convention in scripts/ops/*.sh.
+NODE_AMBIENT
 
 # AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
 # Replace the AUTO marker with a real description on the next commit.

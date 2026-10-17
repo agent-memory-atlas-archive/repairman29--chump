@@ -2728,6 +2728,14 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-subagent-pre-exit-check.sh"],
             GateKind::Scripts,
         ));
+        // RESILIENT-1615: two-scope enumeration + installer second-scope
+        // refusal. The script resolves ${CARGO_TARGET_DIR:-target}/debug/chump
+        // and builds it when absent, so it runs the same here as in fast-checks.
+        steps.push(step(
+            "node-two-scope-refuse",
+            &["bash", "scripts/ci/test-resilient-1615-two-scope-refuse.sh"],
+            GateKind::Scripts,
+        ));
         // INFRA-8193: docs/gaps/*.yaml is an export-only mirror of state.db;
         // fail when a new script or Rust path writes it outside the export.
         steps.push(step(

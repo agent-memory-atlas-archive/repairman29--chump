@@ -493,6 +493,7 @@ a2a_inbox_message_orphan        # reason: INFRA-2006; advisory event emitted by 
 node_paused                     # reason: RESILIENT-1614 emitted by src/node_mode.rs when chump node pause --reason is invoked; carries reason and actor. Makes fleet pause an invariant honored by converge, reconcile, deploy, paramedic, heal, self-doctor, worker loop.
 node_resumed                    # reason: RESILIENT-1614 emitted by src/node_mode.rs when chump node resume is invoked. Reverses node_paused state.
 organ_skipped_paused            # reason: RESILIENT-1614 emitted by work organs (scripts/ops/node-converge.sh, scripts/ops/organ-reconcile.sh, scripts/ops/organ-deploy.sh, scripts/ops/paramedic.sh, scripts/ops/process-organ-heal.sh, scripts/ops/self-doctor.sh, scripts/dispatch/worker.sh) when CHUMP_NODE_MODE=paused is detected; organs exit 0 without installing, enabling, or restarting anything.
+node_second_scope_refused       # reason: RESILIENT-1615 emitted by crates/chump-provision/src/scopes_live.rs (chump node scopes --install-guard, called by scripts/setup/chump-node-install.sh + scripts/ops/node-converge.sh) when a chump install already exists in the OTHER supervisor scope; the installer/converge refuses to stack a second scope (the cuphead two-fleet defect).
 queue_driver_iter_attempted
 
 # ── INFRA-2295: stale-pr-rebase-bot (SCALE-C safety net) ─────────────────────

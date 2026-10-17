@@ -30,6 +30,18 @@ if ! [ -x "$CHUMP_BIN" ]; then
     fail "CHUMP_BIN not found or not executable: $CHUMP_BIN"
 fi
 
+# RESILIENT-1615: `chump node pause` now enumerates BOTH systemd scopes (and
+# launchd on mac) and refuses to report PAUSED while a foreign-scope work organ
+# is active. Stub the supervisors to empty output so tests 1 & 2 stay hermetic
+# regardless of the host's real systemd state — this runner may itself be a
+# multi-scope node (the exact defect RESILIENT-1615 detects). Test 3 prepends
+# its own logging stub for the node-converge invocation.
+STUB_SUP="$TMP/stub-sup"; mkdir -p "$STUB_SUP"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_SUP/systemctl"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_SUP/launchctl"
+chmod +x "$STUB_SUP/systemctl" "$STUB_SUP/launchctl"
+export PATH="$STUB_SUP:$PATH"
+
 # ── Test 1: node pause creates sentinel and updates node.env ──────────────────
 STATE_DIR="$TMP/state"
 mkdir -p "$STATE_DIR/.chump"

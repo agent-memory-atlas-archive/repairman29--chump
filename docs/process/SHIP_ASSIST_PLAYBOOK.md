@@ -415,6 +415,35 @@ authoritative, INFRA-3524) with one loud line + a `clippy_toolchain_deferred` am
 silent pass, and never a false block on a newer-clippy-only lint. Opt out with `CHUMP_CLIPPY_PIN=0`
 (legacy raw-PATH clippy).
 
+## Pausing a node the right way — `chump node pause` (two-scope aware, RESILIENT-1615)
+
+**The rule.** Pause a node with `chump node pause --reason "<text>"` and resume with
+`chump node resume` — never by hand-editing `node.env` or a `paused-timers.txt`. Pause writes
+`CHUMP_NODE_MODE=paused` + a `.chump/fleet-paused` sentinel (emits `kind=node_paused`); the work
+organs (node-converge today; the others follow) check it first and exit 0 with
+`kind=organ_skipped_paused` instead of installing, enabling, or restarting anything.
+
+**Why the hand-edit failed on cuphead (the stopgap this replaces).** On 2026-10-17 cuphead was
+running TWO fleets: the ubuntu **user-scope** install (`~/.chumpnode`, current main) and a second
+**root/system-scope** install (`/root/.chumpnode/repo`, parked at a Sept-24 checkout, 60+ enabled
+`chump-*` units under `/etc/systemd/system`). A user-scope pause never touched the system-scope
+organs, so cut PRs were reopened four times, workers respawned three times, and converge re-enabled
+42 timers — the pause was not an invariant. The architect had to `sudo systemctl --system disable`
+them by hand.
+
+**What `chump node pause` now does about it.** It enumerates units from BOTH `systemctl --user` and
+the system scope (and the mac launchd user domain) through the typed Host in `crates/chump-provision`,
+prints the per-scope work-organ counts, and **refuses to report PAUSED (exit 3) while any work organ
+is still active in either scope** — so a second-scope install can no longer silently undo the pause.
+Inspect the scopes any time with `chump node scopes [--json]` (exit 3 == two-scope node, names both
+roots). `fleet-doctor --strict` reports a two-scope node RED (`check_second_scope`).
+
+**Preventing the second scope.** `chump-node-install.sh` and `node-converge.sh` call
+`chump node scopes --install-guard` before installing; it refuses (exit 2/3,
+`kind=node_second_scope_refused`) when a chump install already exists in the OTHER scope
+(`/root/.chumpnode` or `~/.chumpnode` present, or `chump-*` units enabled there). A converged node
+must have exactly ONE install in ONE scope. Test: `scripts/ci/test-resilient-1615-two-scope-refuse.sh`.
+
 ## Maintenance
 
 This playbook should be **updated whenever a new wedge class is discovered** (new entry in §1), a **new ship-assist tool ships** (entry added to §2), or a **lesson-learning gap closes** (move from §4/§5 in-flight to §6 shipped + cross-link the doc to the fix's PR).

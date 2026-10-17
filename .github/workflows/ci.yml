@@ -1534,6 +1534,10 @@ jobs:
       - name: subagent pre-exit check armed/unarmed (CREDIBLE-1518)
         run: bash scripts/ci/test-subagent-pre-exit-check.sh
 
+      # The script builds ${CARGO_TARGET_DIR:-target}/debug/chump when absent.
+      - name: two-scope enumeration + install refusal (RESILIENT-1615)
+        run: bash scripts/ci/test-resilient-1615-two-scope-refuse.sh
+
       - name: pre-push cargo-test full-suite gate (INFRA-761)
         run: bash scripts/ci/test-pre-push-test-gate.sh
 

@@ -1557,6 +1557,47 @@ check_fetch_refspec_single_branch() {
         "git -C $REPO_ROOT config --replace-all remote.origin.fetch '$full' && git -C $REPO_ROOT fetch origin"
 }
 
+#  20. two-scope node — RESILIENT-1615: cuphead ran a SECOND, root/system-scope
+#      chump install (out of /root/.chumpnode, 60+ enabled chump-* units under
+#      /etc/systemd/system) alongside the ubuntu user-scope one for 24 days. The
+#      user-scope `chump node pause` never touched the system-scope organs, so
+#      cut PRs were reopened four times and converge re-enabled timers. A
+#      converged node must have exactly ONE install in ONE scope. RED when
+#      `chump node scopes` reports a two-scope node, naming both roots.
+check_second_scope() {
+    local bin
+    bin="$(command -v "$CHUMP_BIN" 2>/dev/null || true)"
+    if [[ -z "$bin" ]]; then
+        register_check "second-scope" "skip" "chump binary not found — skipping two-scope check" ""
+        return
+    fi
+    local out
+    out="$("$bin" node scopes --json 2>/dev/null || true)"
+    if [[ -z "$out" ]]; then
+        register_check "second-scope" "skip" "chump node scopes produced no output" ""
+        return
+    fi
+    local two_scope
+    two_scope="$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("1" if d.get("two_scope") else "0")' 2>/dev/null || echo 0)"
+    if [[ "$two_scope" == "1" ]]; then
+        local roots
+        roots="$(printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+parts = []
+for s in d.get("scopes", []):
+    if s.get("installed"):
+        parts.append("%s=%s" % (s.get("scope"), s.get("root") or "(units only)"))
+print(", ".join(parts))
+' 2>/dev/null || echo "")"
+        register_check "second-scope" "fail" \
+            "two-scope node: a chump install exists in more than one supervisor scope [$roots] — a converged node must have exactly ONE install in ONE scope (RESILIENT-1615)" \
+            "retire the second install (disable its chump-* units + remove its ~/.chumpnode or /root/.chumpnode); inspect with: chump node scopes"
+        return
+    fi
+    register_check "second-scope" "pass" "single-scope node (no second-scope install)" ""
+}
+
 # ── Check 19 (RESILIENT-1604): node admission ceiling ──────────────────────────
 # cuphead 2026-10-16: 9 worker.sh + 8 claude -p + 9 cargo/rustc on 4 cores
 # (load 12-16) while node.env carried no ceiling, so the 900s subagent budget
@@ -1626,6 +1667,7 @@ check_self_healer_heartbeat
 check_tracked_config_drift
 check_checkout_parked_off_main
 check_fetch_refspec_single_branch
+check_second_scope
 check_admission_ceiling
 
 # ── Render output ──────────────────────────────────────────────────────────────

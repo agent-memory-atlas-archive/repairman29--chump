@@ -3521,7 +3521,26 @@ async fn main() -> Result<()> {
 
                 match state.pause(reason) {
                     Ok(()) => {
+                        // RESILIENT-1615: a user-scope pause alone was the cuphead
+                        // trap — a second, system-scope install kept its work
+                        // organs running and undid every pause. Enumerate BOTH
+                        // scopes (systemctl --user + system, or mac launchd) and
+                        // REFUSE to report PAUSED while any work organ is still
+                        // active in either scope.
                         println!("Node paused with reason: {}", reason);
+                        let probe = chump_provision::Probe::from_env();
+                        let foreign = chump_provision::scopes_live::report_scopes(&probe);
+                        if foreign > 0 {
+                            eprintln!(
+                                "\n  ✗ NOT FULLY PAUSED: {foreign} work organ(s) active in ANOTHER scope.\n    \
+                                 The sentinel + CHUMP_NODE_MODE=paused are written, but those organs\n    \
+                                 never see this scope's sentinel and will undo the pause (the cuphead\n    \
+                                 second-scope defect). Disable the other scope's units (e.g. a second\n    \
+                                 /root/.chumpnode install) before trusting this node as PAUSED.\n    \
+                                 Inspect with: chump node scopes"
+                            );
+                            std::process::exit(3);
+                        }
                         return Ok(());
                     }
                     Err(e) => {
@@ -3542,6 +3561,11 @@ async fn main() -> Result<()> {
                 match state.resume() {
                     Ok(()) => {
                         println!("Node resumed");
+                        // RESILIENT-1615: enumerate both scopes informationally so
+                        // the operator sees which organs are coming back and in
+                        // which scope (a second-scope install shows up here too).
+                        let probe = chump_provision::Probe::from_env();
+                        let _ = chump_provision::scopes_live::report_scopes(&probe);
                         return Ok(());
                     }
                     Err(e) => {
