@@ -4,7 +4,8 @@
 #
 # Runs every check under scripts/audit/auditor-checks/, files findings via
 # `chump gap reserve` (deduped against existing AUDITOR_KEY markers), then opens
-# a single review PR with the docs/gaps.yaml + .chump/state.sql diff.
+# a single review PR with the docs/gaps.yaml diff. (INFRA-8193: .chump/state.sql
+# is no longer tracked, so it is no longer regenerated or committed here.)
 #
 # Operates in a *throwaway worktree* under /tmp so the user's main checkout is
 # never mutated. The state.db is shared across worktrees, so gaps file
@@ -59,9 +60,8 @@ scripts/audit/file-findings.sh --in "$OUT_FILE"
 
 # Regenerate canonical mirrors after filings.
 chump gap dump --out docs/gaps.yaml >/dev/null 2>&1 || true
-chump gap dump --out .chump/state.sql >/dev/null 2>&1 || true
 
-if git diff --quiet -- docs/gaps.yaml .chump/state.sql; then
+if git diff --quiet -- docs/gaps.yaml; then
     log "no gap mirror changes — nothing to commit"
     exit 0
 fi
@@ -69,7 +69,7 @@ fi
 log "committing changes on $BRANCH"
 git config user.email 'auditor@chump.bot'
 git config user.name 'Repo Auditor'
-git add docs/gaps.yaml .chump/state.sql
+git add docs/gaps.yaml
 git commit -m "chore(auditor): nightly findings $(date -u +%FT%TZ)
 
 Filed by scripts/overnight/10-auditor.sh (INFRA-087). Each new gap row carries

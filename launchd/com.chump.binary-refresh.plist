@@ -34,11 +34,11 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/ops/refresh-chump-binary.sh</string>
+    <string>__REPO_ROOT__/scripts/ops/refresh-chump-binary.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- Every hour. -->
   <key>StartInterval</key>
@@ -56,9 +56,9 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/path/to/HOME</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/path/to/.cargo/bin:/usr/bin:/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin:__BIN_DIR__:/usr/bin:/bin</string>
   </dict>
 
   <!-- Throttle so launchd can't run two refreshes overlapping. -->

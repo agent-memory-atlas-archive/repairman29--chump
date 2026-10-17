@@ -16,5 +16,5 @@ Type=oneshot
 # Source providers.env for ANTHROPIC/CLAUDE + DISCORD_TOKEN credentials (export
 # format, so source it in a shell rather than systemd EnvironmentFile which
 # can't parse `export KEY=val`).
-Environment=HOME=/root
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/dispatch/board-ceo-briefing-beat.sh'
+Environment=HOME=__HOME__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/dispatch/board-ceo-briefing-beat.sh'

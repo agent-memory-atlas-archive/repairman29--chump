@@ -8,11 +8,11 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/dev/heartbeat-self-improve.sh</string>
+    <string>__REPO_ROOT__/scripts/dev/heartbeat-self-improve.sh</string>
   </array>
-  <!-- Replace /path/to/Chump with your repo path (e.g. /Users/you/Projects/Chump). -->
+  <!-- Placeholders (__REPO_ROOT__, __HOME__, __BREW_PREFIX__) are filled per host by scripts/setup/install-roles-launchd.sh (chump node render-unit, INFRA-8194). -->
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
   <!-- Run once at load (e.g. on login), then every 8 hours. Each run is one 8h self-improve session. -->
   <key>RunAtLoad</key>
   <true/>
@@ -20,13 +20,13 @@
   <integer>28800</integer>
   <!-- 28800 = 8 hours. For daily: 86400. For 4h: 14400. -->
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/heartbeat-self-improve-launchd.out.log</string>
+  <string>__REPO_ROOT__/logs/heartbeat-self-improve-launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/heartbeat-self-improve-launchd.err.log</string>
+  <string>__REPO_ROOT__/logs/heartbeat-self-improve-launchd.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/Users/you/.local/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__HOME__/.local/bin</string>
     <!-- Optional: Cursor runs can take 5–10 min; raise timeout so research_cursor rounds don't kill agent. Script sources .env; set CHUMP_CLI_TIMEOUT_SECS=600 there instead if you prefer. -->
     <!-- <key>CHUMP_CLI_TIMEOUT_SECS</key>
     <string>600</string> -->

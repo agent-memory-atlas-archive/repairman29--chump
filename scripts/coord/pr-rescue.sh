@@ -325,7 +325,7 @@ This is automated and happens at most once per head SHA." \
                 # sits forever, which is a quieter failure than the original.
                 if ! arm_policy_allows "${PR_NUM}" "pr-rescue.sh" "${REPO}"; then
                     log "PR #${PR_NUM}: re-fired; held (no-auto-merge / Auto-merge: hold) so NOT re-armed."
-                elif chump_gh pr merge "${PR_NUM}" --repo "${REPO}" --auto --squash >/dev/null 2>&1; then
+                elif bash "${SCRIPT_DIR}/auto-merge-armer.sh" --pr "${PR_NUM}" --repo "${REPO}" >/dev/null 2>&1; then
                     log "PR #${PR_NUM}: re-fired and auto-merge re-armed."
                 else
                     log "PR #${PR_NUM}: re-fired, but AUTO-MERGE RE-ARM FAILED — needs a human."

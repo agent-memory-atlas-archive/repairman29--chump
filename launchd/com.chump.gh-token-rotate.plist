@@ -25,7 +25,7 @@
     rm ~/Library/LaunchAgents/com.chump.gh-token-rotate.plist
 
   Linux equivalent (crontab):
-    */50 * * * * /path/to/chump gh-token rotate >> ~/Library/Logs/chump-gh-token-rotate.log 2>&1
+    */50 * * * * __BIN_DIR__/chump gh-token rotate >> ~/Library/Logs/chump-gh-token-rotate.log 2>&1
 -->
 <dict>
   <key>Label</key>
@@ -34,24 +34,24 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/chump gh-token rotate</string>
+    <string>__BIN_DIR__/chump gh-token rotate</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>StartInterval</key>
   <integer>3000</integer>
   <key>RunAtLoad</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/path/to/HOME/Library/Logs/chump-gh-token-rotate.log</string>
+  <string>__HOME__/Library/Logs/chump-gh-token-rotate.log</string>
   <key>StandardErrorPath</key>
-  <string>/path/to/HOME/Library/Logs/chump-gh-token-rotate.log</string>
+  <string>__HOME__/Library/Logs/chump-gh-token-rotate.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/path/to/HOME</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/path/to/.cargo/bin:/usr/bin:/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin:__BIN_DIR__:/usr/bin:/bin</string>
   </dict>
   <key>ThrottleInterval</key>
   <integer>60</integer>

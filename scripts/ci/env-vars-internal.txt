@@ -89,10 +89,22 @@ CHUMP_INCLUDE_COS_WEEKLY
 CHUMP_COS_WEEKLY_MAX_CHARS
 
 # ── Tier 3: test / CI / eval only ─────────────────────────────────────────
+# INFRA-8211: gap-guard perf test knobs (gap count + wall-clock budget).
+CHUMP_PERF_TEST_GAPS
+CHUMP_PERF_TEST_BUDGET_S
 CHUMP_BATTLE_BENCHMARK
 CHUMP_BATTLE_LABEL
 CHUMP_BATTLE_PRINT_METRICS
 CHUMP_EVAL_WITH_JUDGE
+# CREDIBLE-1514: scripts/ci census (scripts/ci/census.sh, test-census-shrink-only.sh)
+CHUMP_CENSUS_ALLOW_GROWTH
+CHUMP_CENSUS_BASE_REF
+CHUMP_CENSUS_IN_PROGRESS
+CHUMP_CENSUS_JOBS
+CHUMP_CENSUS_KEEP_SANDBOX
+CHUMP_CENSUS_ROOT
+CHUMP_CENSUS_STATE_DB_FIXTURE
+CHUMP_CENSUS_TIMEOUT_S
 FLEET_029_AMBIENT_GLANCE_SKIP
 CHUMP_GEN_STUB_FILE
 CHUMP_REVIEW_STUB_OUTPUT
@@ -3549,10 +3561,49 @@ CHUMP_CI_PICKUP_RUNS
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_BOUNDARY_GATE
+# RESILIENT-1606: post-push-integrity-watch.sh deliberate-close detection.
+# COMMENT_S = +-seconds around a close in which a human comment marks it deliberate;
+# AUTOMATION_LOGINS = comma list of logins whose comments do not count as human.
+CHUMP_POST_PUSH_WATCH_COMMENT_S
+CHUMP_POST_PUSH_WATCH_AUTOMATION_LOGINS
+
+# INFRA-8194 (Phase R R5, typed host provisioning, crates/chump-provision):
+# CHUMP_PROVISION_HOST pins the Host enum variant (mac-launchd |
+# linux-systemd-user | linux-systemd-system | termux) instead of detecting it;
+# CHUMP_ORGAN_MANIFEST_RUN_SCOPE overrides the manager scope (user|system)
+# organ-manifest-lib.sh's organ_current_run_scope / organ-reconcile.sh use for
+# the manifest run-scope= filter (tests, or an installer that knows its scope).
+CHUMP_PROVISION_HOST
+CHUMP_ORGAN_MANIFEST_RUN_SCOPE
+# CREDIBLE-1493: chump calibrate (self-report calibration). Tunables + the env
+# it exports to the SELF_REPORTS.yaml commands.
+CHUMP_CALIBRATE_REGISTRY
+CHUMP_CALIBRATE_TIMEOUT_SECS
+CHUMP_CALIBRATE_GH_REPO
+CHUMP_CALIBRATE_ORGAN_BIN
+CHUMP_CALIBRATE_REPO_ROOT
+CHUMP_CALIBRATE_LOCKS_DIR
+CHUMP_CALIBRATE_NOW_EPOCH
+CHUMP_CALIBRATE_SINCE_1H
+CHUMP_CALIBRATE_SINCE_24H
+CHUMP_CALIBRATE_SINCE_7D
+
+# ZERO-WASTE-134: per-user override of the shared default cargo target dir
+# (scripts/ci/lib/resolve-cargo-target-dir.sh); default ~/.cargo/chump-shared-target
+CHUMP_CARGO_TARGET
 
 # AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
+CHUMP_REAPER_NEW_WORKTREE_GRACE_MIN
+# INFRA-8176: soft skill filter opt-out + open-PR anti-spin fallback (scripts/dispatch/_pick_and_claim_gap.py, scripts/coord/lib/github_cache.sh)
+WORKER_SKILLS_HARD
+CHUMP_PICKER_OPEN_PR_FALLBACK
+CHUMP_PICKER_OPEN_PR_GH_MAX
+CHUMP_PICKER_OPEN_PR_GH_TIMEOUT_S
+CHUMP_OPEN_PR_LOOKUP_TTL_S
+CHUMP_OPEN_PR_LOOKUP_DIR
+CHUMP_PR_STATE_MAX_AGE_S
 CHUMP_AUTO_MERGE_SPACING_S
 # detected in: (standard input)
 CHUMP_MERGE_SERIALIZER_LOCK_WAIT_S
@@ -3564,3 +3615,24 @@ CHUMP_MERGE_SERIALIZER_TRUNK_GATE
 CHUMP_PR_MERGE_METHOD
 # detected in: (standard input)
 CHUMP_WATCHDOG_REOPEN
+# CREDIBLE-1509: chump kpi report R6.4 gauge — =1 reuses the last recorded
+# invariant-boundary reading instead of running the ~20s gate (fleet-brief banner).
+CHUMP_RE
+
+# INFRA-8199: not an env var. The INFRA-1853 scanner matched the filename
+# docs/process/CHUMP_DISPATCH_RULES.md, which src/dispatch_repair.rs reads as
+# the rules preamble for the repair / decompose-review prompts.
+CHUMP_DISPATCH_RULES
+
+# RESILIENT-1609: worktree reapers spare a worktree with a live bot-merge ship
+# (grace in minutes for a fresh bot-merge-*.steps file; lsof cwd-scan cache seconds)
+CHUMP_REAPER_BOT_MERGE_GRACE_MIN
+CHUMP_WT_CWD_CACHE_S
+# RESILIENT-1609 / INFRA-8208: knobs the new fixture tests set or read
+# (reaper lease/index freshness, target-reaper scan glob, pre-push test fixtures)
+CHUMP_ALLOW_UNREGISTERED_GAP
+CHUMP_OPERATOR_RECOVERY
+CHUMP_REAPER_ACTIVE_LEASE_MIN
+CHUMP_REAPER_INDEX_MMIN
+CHUMP_TARGET_REAPER_SCAN_GLOB
+CHUMP_CARGO_TARGET_ANNOUNCED

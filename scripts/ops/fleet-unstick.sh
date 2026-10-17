@@ -24,8 +24,9 @@ if command -v chump >/dev/null 2>&1; then
   chump gap dump --out docs/gaps.yaml >/dev/null 2>&1 && say "regenerated docs/gaps.yaml from the store" || say "WARN dump failed"
 fi
 
-# STEP 2 — reconcile YAML<->db drift (per-file <-> state.db)
-chump gap sync --pull >/dev/null 2>&1 && say "gap sync --pull ok" || true
+# STEP 2 — retired (INFRA-8193): YAML no longer writes back into state.db
+# (`gap sync --pull` is a hard error). Reconcile stores with
+# `chump store reconcile` (INFRA-8222) once it lands.
 
 # STEP 3 — release stale claims/leases (dead PIDs holding gaps)
 released=0

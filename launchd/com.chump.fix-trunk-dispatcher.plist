@@ -66,7 +66,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin</string>
+        <string>/usr/local/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin:/usr/bin:/bin</string>
         <key>CHUMP_AMBIENT_PATH</key>
         <string>REPO_ROOT/.chump-locks/ambient.jsonl</string>
         <!-- Kill-switch — set to "0" to disable without unloading the agent. -->

@@ -71,7 +71,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ftue-cold-install-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  # ZERO-WASTE-135: schedule runs share one stable key (was github.run_id, which
+  # never dedupes). PR runs stay per-PR; push/dispatch stay per-sha so a main push
+  # is never cancelled by a later one. Pure test run, safe to cancel.
+  group: ftue-cold-install-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.event_name == 'schedule' && 'schedule' || github.sha }}
   cancel-in-progress: true
 
 jobs:

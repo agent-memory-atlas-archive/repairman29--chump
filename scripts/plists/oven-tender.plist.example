@@ -8,23 +8,23 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/dev/oven-tender.sh</string>
+    <string>__REPO_ROOT__/scripts/dev/oven-tender.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>RunAtLoad</key>
   <true/>
   <key>StartInterval</key>
   <integer>3600</integer>
   <!-- 3600 = 1 hour. Pre-warms model (warm-the-ovens) if not already warm. For Ollama set WARM_PORT=11434 in .env or here. -->
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/oven-tender-launchd.out.log</string>
+  <string>__REPO_ROOT__/logs/oven-tender-launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/oven-tender-launchd.err.log</string>
+  <string>__REPO_ROOT__/logs/oven-tender-launchd.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/Users/you/.local/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__HOME__/.local/bin</string>
     <!-- Max mode default: WARM_PORT=8000 (vLLM). If using Ollama: <key>WARM_PORT</key><string>11434</string> -->
   </dict>
 </dict>

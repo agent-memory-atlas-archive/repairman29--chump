@@ -1,8 +1,12 @@
 # Chump faculty-collector — the DATA SOURCE for the OS self-portrait. Reads the
 # 11 faculties' live endpoints and writes ~/.chump/faculty-status.json + a
 # faculty_status ambient heartbeat every 15m (paired with the .timer). Deployed
-# by scripts/setup/install-helsinki-atc.sh, which host-rewrites /root/ -> the
-# run-user's HOME and User=root -> the run-user per node (helsinki=root, CJ=jeff).
+# by scripts/setup/install-helsinki-atc.sh.
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
 [Unit]
 Description=Chump faculty-collector — writes faculty-status.json for the OS self-portrait
 After=network-online.target
@@ -10,6 +14,5 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Environment=HOME=/root
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/ops/faculty-collector.sh'
+Environment=HOME=__HOME__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/ops/faculty-collector.sh'

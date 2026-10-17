@@ -11,7 +11,7 @@ Three commands replace three classes of mistake:
 | Mistake | Diagnostic | Fix |
 |---|---|---|
 | "File X doesn't exist" via local `ls` | `git ls-tree origin/main path/to/X` | Pull main; or use the [`verify-existence`](../../.claude/skills/verify-existence/SKILL.md) skill |
-| "Gap X has TODO ACs" | `chump gap show X` against state.db | `chump gap sync --pull` (INFRA-2053) |
+| "Gap X has TODO ACs" | `chump gap show X` against state.db | `chump gap set X --acceptance-criteria ...` (state.db is the only truth; `sync --pull` retired, INFRA-8193) |
 | "Binary doesn't support new flag" | `chump --build-info` vs `git log -1 --format=%H origin/main` | `cargo install --path . --force` |
 
 When in doubt, run the per-session freshness preamble first:
@@ -29,10 +29,10 @@ Inherited from [META-114](../gaps/META-114.yaml). Each layer has a distinct fres
 | # | Layer | How it goes stale | Today's fix |
 |---|---|---|---|
 | 1 | **git main** | local checkout not pulled | `freshness-preamble.sh` checks `git rev-list HEAD..origin/main --count`; ≥50 commits behind → CRITICAL_STALE |
-| 2 | **state.db** | `chump gap reserve` writes TODO ACs; YAML edits don't sync back | `chump gap sync --pull` (INFRA-2053) reconciles in 1 command |
+| 2 | **state.db** | `chump gap reserve` writes TODO ACs; YAML edits don't sync back (by design since INFRA-8193) | edit the store: `chump gap set`; `chump gap sync --push` refreshes the mirror |
 | 3 | **chump binary** | new CLI features ship to main faster than `cargo install` runs locally | `freshness-preamble.sh` checks binary mtime; INFRA-2054 adds `--rebuild-if-stale` gate |
 | 4 | **launchd plists** | new daemon shipped; operator hasn't reloaded; or plist installed without `StartInterval` | `chump cron health` (META-110/INFRA-2046) audits every Chump plist |
-| 5 | **YAML gaps** | atomic Write edits don't propagate to state.db | `chump gap sync --pull` (same as #2) |
+| 5 | **YAML gaps** | atomic Write edits don't propagate to state.db | export-only mirror (INFRA-8193): never hand-edit; `chump gap sync --push` |
 | 6 | **active leases / fleet-registry** | local `.chump-locks/*.json` doesn't propagate cross-machine | NATS-primary path ([META-061](../gaps/META-061.yaml)) — not yet shipped; file-fallback only today |
 | 7 | **docs (CLAUDE.md, playbooks)** | doctrine evolves mid-session; agents don't re-read | A2A peer broadcasts (INFRA-1932 Pattern 0) surface doctrine updates fast — **today's honest state (verified 2026-07-30): the NATS broker is genuinely live and both A2A flags are ON at the launchd level, but the end-to-end proof (`consensus_result` firing) has never happened once — see [RESILIENT-212](../gaps/RESILIENT-212.yaml). Don't assume this fix is load-bearing yet; verify.** |
 | 8 | **new-content placement** ("Drift Doctor", [DOC-076](../gaps/DOC-076.yaml)) | a finding gets written as a brand-new doc/gap without checking whether it already exists, or belongs in an existing doc as a section | run [§ The doc-placement decision](#the-doc-placement-decision-layer-8) below before creating any new `.md` file |
@@ -56,7 +56,7 @@ INFRA-2047 was correctly closed `superseded`. The lesson: **two stale curators a
 | Situation | WRONG | RIGHT |
 |---|---|---|
 | Filing a gap titled "X is missing" | `bash -c "ls path/to/X"` returns 1, file gap | `git ls-tree origin/main path/to/X` shows blob → don't file; OR invoke `verify-existence` skill which checks both |
-| Discovering a gap has TODO ACs | Concluding the AC is missing | `chump gap show <ID>` against canonical state.db AND `cat docs/gaps/<ID>.yaml`; reconcile via `chump gap sync --pull` |
+| Discovering a gap has TODO ACs | Concluding the AC is missing | `chump gap show <ID>` against canonical state.db AND `cat docs/gaps/<ID>.yaml`; fix in the store with `chump gap set` (`sync --pull` retired, INFRA-8193) |
 | Operator reference to a primitive | Assuming the primitive doesn't exist if local `which` fails | `git ls-tree origin/main` + check `Cargo.toml` workspace members + check `scripts/launchd/com.chump.*.plist` |
 | Operator says "this binary should have flag Y" | Assuming the flag isn't shipped if local binary doesn't recognize it | `chump --build-info` shows local binary's git SHA; compare to `git log -1 --format=%H origin/main`; rebuild via `cargo install --path . --force` if drift |
 | A claim claims a file path that doesn't seem to exist | Concluding the claim is broken | The lease's `paths:` field is what the claimer INTENDS to touch in the worktree, not a precondition |
@@ -84,7 +84,7 @@ INFRA-2047 was correctly closed `superseded`. The lesson: **two stale curators a
 
 **Real cause**: `chump gap reserve` writes TODO ACs to state.db on creation. Subsequent `Write` tool edits to `docs/gaps/<ID>.yaml` are atomic but don't auto-propagate to state.db. `chump gap set --acceptance-criteria` uses a pipe-delimited input that breaks on common chars (INFRA-2022).
 
-**Fix**: `chump gap sync --pull` (INFRA-2053). Run after every YAML edit until INFRA-2022 fix lands.
+**Fix**: edit the store (`chump gap set <ID> --acceptance-criteria ...`), never the YAML. INFRA-8193 retired `chump gap sync --pull`: the YAML mirror is export-only.
 
 **Precedent**: today, shepherd direct-sqlite-UPDATE'd state.db **6+ times** as workaround.
 

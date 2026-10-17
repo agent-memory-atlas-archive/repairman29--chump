@@ -18,6 +18,11 @@
 #   install-coord-assign-launchd.sh --check     — exit 0 if installed+running, else 1
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): __BREW_PREFIX__ in the plist template resolves
+# through the host resolver (chump_brew_prefix, the shell mirror of
+# chump_provision::brew_prefix) instead of a baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -138,6 +143,7 @@ mkdir -p "$LAUNCH_AGENTS_DIR" "$LOG_DIR"
 
 # Substitute placeholders in the plist template.
 sed \
+    -e "s|__BREW_PREFIX__|$(chump_brew_prefix)|g" \
     -e "s|COORD_BIN_PLACEHOLDER|${COORD_BIN}|g" \
     -e "s|REPO_ROOT_PLACEHOLDER|${REPO_ROOT}|g" \
     -e "s|CARGO_BIN_PLACEHOLDER|${CARGO_BIN}|g" \

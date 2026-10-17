@@ -18,6 +18,13 @@
 #   CHUMP_AUTO_MERGE_REARM_OPEN        — set to 1 to bypass fix-class allowlist
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 # Use resolve-main-worktree so the plist path survives worktree reaping (INFRA-451).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -96,7 +103,7 @@ cat > "$PLIST" <<PLISTEOF
         <key>HOME</key>
         <string>${HOME}</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>${BREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>CHUMP_AUTO_MERGE_REARM_INTERVAL_S</key>
         <string>${INTERVAL_S}</string>
 ${DRY_RUN_KEY}

@@ -131,6 +131,7 @@ install-node-refresh-systemd.sh
 install-opencode-harness.sh
 install-armed-pr-rebaser-launchd.sh
 install-keep-mergeable-organ-launchd.sh
+install-load-aware-deadman.sh
 install-conflict-resolution-consumer-launchd.sh
 install-discord-gateway.sh
 # reason: RESILIENT-256 — writes PreToolUse hooks into USER-scope

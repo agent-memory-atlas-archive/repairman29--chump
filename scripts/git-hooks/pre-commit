@@ -106,15 +106,17 @@ set -e
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 
-# INFRA-1374: pin cargo build artifacts to a per-worktree hidden directory so
-# parallel git commit runs across /tmp/chump-* worktrees do NOT contend on the
-# same cargo file lock. Without this, cargo clippy in the smoke script (step 9)
-# and cargo fmt (step 0) both resolve to the global target-dir from
-# .cargo/config.toml (install-sccache.sh, INFRA-481), serializing parallel
-# fleet commits behind a single mutex (observed: 6-min stall at 4-way parallelism).
-# Only set if caller has not already pinned it (e.g. bot-merge.sh sets it first).
-if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
-    export CARGO_TARGET_DIR="${REPO_ROOT}/.cargo-build-target"
+# ZERO-WASTE-134: ONE cargo target resolver, never a path inside the worktree.
+# Supersedes the INFRA-1374 per-worktree .cargo-build-target default, which grew
+# a private 2.4-3 GB build dir in every worktree (the hook does not inherit the
+# agent's shell). $CARGO_TARGET_DIR > $CHUMP_CARGO_TARGET > ~/.cargo/chump-shared-target.
+# If the resolver file is missing (old checkout) CARGO_TARGET_DIR stays unset and
+# cargo falls back to .cargo/config.toml.
+if [[ -f "$REPO_ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh" ]]; then
+    # shellcheck source=../ci/lib/resolve-cargo-target-dir.sh
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh"
+    chump_export_cargo_target_dir
 fi
 
 # ------------------------------------------------------------------
@@ -578,29 +580,6 @@ except ImportError:
     sys.stderr.write("[pre-commit]\n")
     sys.stderr.write("[pre-commit] This guard is required for gap YAML validation.\n")
     sys.exit(1)
-def _gaps_text(ref=None):
-    """Read all gaps as monolithic YAML text from per-file or monolithic layout."""
-    prefix = f"{ref}:" if ref else ":"
-    try:
-        if ref is None:
-            ls_out = subprocess.check_output(["git","ls-files","--cached","docs/gaps/"],
-                                             text=True,stderr=subprocess.DEVNULL)
-        else:
-            ls_out = subprocess.check_output(["git","ls-tree","--name-only","-r",ref,"docs/gaps/"],
-                                             text=True,stderr=subprocess.DEVNULL)
-        files = sorted(f for f in ls_out.splitlines() if f.endswith(".yaml"))
-        if files:
-            parts = [subprocess.check_output(["git","show",f"{prefix}{f}"],
-                                             text=True,stderr=subprocess.DEVNULL).rstrip()
-                     for f in files]
-            return "gaps:\n" + "\n".join(parts) + "\n"
-    except Exception:
-        pass
-    try:
-        return subprocess.check_output(["git","show",f"{prefix}docs/gaps.yaml"],
-                                       text=True,stderr=subprocess.DEVNULL)
-    except Exception:
-        return ""
 # Check each staged gap file for valid YAML
 errors = []
 staged_files = subprocess.check_output(
@@ -677,25 +656,10 @@ PYEOF_YAMLLINT
             redefinitions=$(python3 - "$base" <<'PYEOF'
 import subprocess, sys, re
 base = sys.argv[1]
-def _gaps_text(ref=None):
-    prefix = f"{ref}:" if ref else ":"
-    try:
-        cmd = ["git","ls-files","--cached","docs/gaps/"] if ref is None else \
-              ["git","ls-tree","--name-only","-r",ref,"docs/gaps/"]
-        ls_out = subprocess.check_output(cmd,text=True,stderr=subprocess.DEVNULL)
-        files = sorted(f for f in ls_out.splitlines() if f.endswith(".yaml"))
-        if files:
-            parts = [subprocess.check_output(["git","show",f"{prefix}{f}"],
-                                             text=True,stderr=subprocess.DEVNULL).rstrip()
-                     for f in files]
-            return "gaps:\n" + "\n".join(parts) + "\n"
-    except Exception:
-        pass
-    try:
-        return subprocess.check_output(["git","show",f"{prefix}docs/gaps.yaml"],
-                                       text=True,stderr=subprocess.DEVNULL)
-    except Exception:
-        return ""
+# INFRA-8211: batched gap reader (one `git cat-file --batch`, not one
+# `git show` per file). Behaviour identical to the old per-file loop.
+sys.path.insert(0, "scripts/git-hooks/lib")
+from gaps_text import gaps_text as _gaps_text
 def gap_titles(text):
     """Returns {gap_id: (title, description_first_line)}."""
     out = {}
@@ -760,25 +724,10 @@ PYEOF
         if command -v python3 >/dev/null 2>&1 && git rev-parse --quiet --verify origin/main >/dev/null 2>&1; then
             reopened=$(python3 - <<'PYEOF_RECYCLE'
 import subprocess, sys, re
-def _gaps_text(ref=None):
-    prefix = f"{ref}:" if ref else ":"
-    try:
-        cmd = ["git","ls-files","--cached","docs/gaps/"] if ref is None else \
-              ["git","ls-tree","--name-only","-r",ref,"docs/gaps/"]
-        ls_out = subprocess.check_output(cmd,text=True,stderr=subprocess.DEVNULL)
-        files = sorted(f for f in ls_out.splitlines() if f.endswith(".yaml"))
-        if files:
-            parts = [subprocess.check_output(["git","show",f"{prefix}{f}"],
-                                             text=True,stderr=subprocess.DEVNULL).rstrip()
-                     for f in files]
-            return "gaps:\n" + "\n".join(parts) + "\n"
-    except Exception:
-        pass
-    try:
-        return subprocess.check_output(["git","show",f"{prefix}docs/gaps.yaml"],
-                                       text=True,stderr=subprocess.DEVNULL)
-    except Exception:
-        return ""
+# INFRA-8211: batched gap reader (one `git cat-file --batch`, not one
+# `git show` per file). Behaviour identical to the old per-file loop.
+sys.path.insert(0, "scripts/git-hooks/lib")
+from gaps_text import gaps_text as _gaps_text
 def gap_statuses(text):
     """Returns {gap_id: status} for all gaps in text.
 
@@ -867,25 +816,10 @@ def parse_gaps(text):
                 out[cur_id]["closed_pr"] = c.group(1)
     return out
 
-def _gaps_text(ref=None):
-    prefix = f"{ref}:" if ref else ":"
-    try:
-        cmd = ["git","ls-files","--cached","docs/gaps/"] if ref is None else \
-              ["git","ls-tree","--name-only","-r",ref,"docs/gaps/"]
-        ls_out = subprocess.check_output(cmd,text=True,stderr=subprocess.DEVNULL)
-        files = sorted(f for f in ls_out.splitlines() if f.endswith(".yaml"))
-        if files:
-            parts = [subprocess.check_output(["git","show",f"{prefix}{f}"],
-                                             text=True,stderr=subprocess.DEVNULL).rstrip()
-                     for f in files]
-            return "gaps:\n" + "\n".join(parts) + "\n"
-    except Exception:
-        pass
-    try:
-        return subprocess.check_output(["git","show",f"{prefix}docs/gaps.yaml"],
-                                       text=True,stderr=subprocess.DEVNULL)
-    except Exception:
-        return ""
+# INFRA-8211: batched gap reader (one `git cat-file --batch`, not one
+# `git show` per file). Behaviour identical to the old per-file loop.
+sys.path.insert(0, "scripts/git-hooks/lib")
+from gaps_text import gaps_text as _gaps_text
 old_text = _gaps_text("origin/main") or _gaps_text("HEAD")
 if not old_text:
     sys.exit(0)
@@ -1128,25 +1062,10 @@ if [ "${CHUMP_PREREG_CHECK:-1}" != "0" ]; then
             missing_prereg=$(python3 - <<'PYEOF_PREREG'
 import subprocess, sys, re
 
-def _gaps_text(ref=None):
-    prefix = f"{ref}:" if ref else ":"
-    try:
-        cmd = ["git","ls-files","--cached","docs/gaps/"] if ref is None else \
-              ["git","ls-tree","--name-only","-r",ref,"docs/gaps/"]
-        ls_out = subprocess.check_output(cmd,text=True,stderr=subprocess.DEVNULL)
-        files = sorted(f for f in ls_out.splitlines() if f.endswith(".yaml"))
-        if files:
-            parts = [subprocess.check_output(["git","show",f"{prefix}{f}"],
-                                             text=True,stderr=subprocess.DEVNULL).rstrip()
-                     for f in files]
-            return "gaps:\n" + "\n".join(parts) + "\n"
-    except Exception:
-        pass
-    try:
-        return subprocess.check_output(["git","show",f"{prefix}docs/gaps.yaml"],
-                                       text=True,stderr=subprocess.DEVNULL)
-    except Exception:
-        return ""
+# INFRA-8211: batched gap reader (one `git cat-file --batch`, not one
+# `git show` per file). Behaviour identical to the old per-file loop.
+sys.path.insert(0, "scripts/git-hooks/lib")
+from gaps_text import gaps_text as _gaps_text
 
 # Get the old and new gaps content (per-file or monolithic)
 old_text = _gaps_text("origin/main") or _gaps_text("HEAD")
@@ -1238,25 +1157,10 @@ PYEOF_PREREG
                 if [ -x "$checker" ]; then
                     flipping_gids=$(python3 - <<'PYEOF_PREREG_FLIP'
 import subprocess, sys, re
-def _gaps_text(ref=None):
-    prefix = f"{ref}:" if ref else ":"
-    try:
-        cmd = ["git","ls-files","--cached","docs/gaps/"] if ref is None else \
-              ["git","ls-tree","--name-only","-r",ref,"docs/gaps/"]
-        ls_out = subprocess.check_output(cmd,text=True,stderr=subprocess.DEVNULL)
-        files = sorted(f for f in ls_out.splitlines() if f.endswith(".yaml"))
-        if files:
-            parts = [subprocess.check_output(["git","show",f"{prefix}{f}"],
-                                             text=True,stderr=subprocess.DEVNULL).rstrip()
-                     for f in files]
-            return "gaps:\n" + "\n".join(parts) + "\n"
-    except Exception:
-        pass
-    try:
-        return subprocess.check_output(["git","show",f"{prefix}docs/gaps.yaml"],
-                                       text=True,stderr=subprocess.DEVNULL)
-    except Exception:
-        return ""
+# INFRA-8211: batched gap reader (one `git cat-file --batch`, not one
+# `git show` per file). Behaviour identical to the old per-file loop.
+sys.path.insert(0, "scripts/git-hooks/lib")
+from gaps_text import gaps_text as _gaps_text
 old_text = _gaps_text("origin/main") or _gaps_text("HEAD")
 new_text = _gaps_text()
 if not old_text or not new_text:
@@ -1326,28 +1230,11 @@ PYEOF_PREREG_FLIP
                     # INFRA-188: use per-file docs/gaps/*.yaml if available, else fall back to monolithic.
                     python3 - > "$new_yaml_tmp" <<'PYEOF_CJ_LOAD'
 import subprocess, sys
-def _gaps_text(ref=None):
-    prefix = f"{ref}:" if ref else ":"
-    try:
-        cmd = ["git","ls-files","--cached","docs/gaps/"] if ref is None else \
-              ["git","ls-tree","--name-only","-r",ref,"docs/gaps/"]
-        ls_out = subprocess.check_output(cmd,text=True,stderr=subprocess.DEVNULL)
-        files = sorted(f for f in ls_out.splitlines() if f.endswith(".yaml"))
-        if files:
-            parts = [subprocess.check_output(["git","show",f"{prefix}{f}"],
-                                             text=True,stderr=subprocess.DEVNULL).rstrip()
-                     for f in files]
-            sys.stdout.write("gaps:\n" + "\n".join(parts) + "\n")
-            return True
-    except Exception:
-        pass
-    try:
-        sys.stdout.write(subprocess.check_output(["git","show",f"{prefix}docs/gaps.yaml"],
-                                                 text=True,stderr=subprocess.DEVNULL))
-        return True
-    except Exception:
-        return False
-_gaps_text()
+# INFRA-8211: batched gap reader (one `git cat-file --batch`, not one
+# `git show` per file). Behaviour identical to the old per-file loop.
+sys.path.insert(0, "scripts/git-hooks/lib")
+from gaps_text import gaps_text as _gaps_text
+sys.stdout.write(_gaps_text())
 PYEOF_CJ_LOAD
                     while IFS= read -r gid; do
                         [ -z "$gid" ] && continue

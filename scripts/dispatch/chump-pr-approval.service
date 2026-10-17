@@ -14,5 +14,5 @@ Wants=network-online.target
 Type=oneshot
 # Source providers.env for GH_TOKEN + DISCORD_TOKEN + CHUMP_READY_DM_USER_ID
 # (export-format, so source it in a shell rather than systemd EnvironmentFile).
-Environment=HOME=/root
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/dispatch/pr-approval-surface-beat.sh'
+Environment=HOME=__HOME__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/dispatch/pr-approval-surface-beat.sh'

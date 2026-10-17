@@ -1,0 +1,24 @@
+# CREDIBLE-1493 (Phase R R7, slice 1) — nightly self-report calibration.
+# Runs `chump calibrate`: every self-report in docs/observability/SELF_REPORTS.yaml
+# next to its ground-truth probe, then appends one kind=self_report_calibration
+# event that fleet-brief and `chump kpi report` read for their
+# "calibration: N/M instruments agree" line.
+#
+# No host literals: User=/HOME=/WorkingDirectory=/PATH (with the run-user's
+# ~/.cargo/bin, where node-install links `chump`) are injected per node by
+# scripts/ops/lib/organ-unit-install-lib.sh when place_role_unit_files installs
+# it. $$HOME is systemd's escape for a literal $HOME, so bash expands it at run
+# time from the injected Environment=HOME.
+#
+# Always exits 0 on disagreement (no --strict): a lying instrument is data for
+# the score, not a failed organ that would itself page.
+[Unit]
+Description=Chump self-report calibration: self-reports vs ground-truth probes (CREDIBLE-1493)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/bin/bash -c 'set -a; . "$$HOME/.chump/providers.env" 2>/dev/null; set +a; exec chump calibrate'
+TimeoutStartSec=1800

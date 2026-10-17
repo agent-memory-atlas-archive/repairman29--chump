@@ -6,8 +6,11 @@
 # HOLDS PRs during trunk-red so no NEW victims are created); this reopens the
 # ones legacy trunk-reds (and non-trunk-aware closers) already killed.
 #
-# CHUMP_REPO_ROOT / paths mirror chump-rot-reaper.service (primary node =
-# helsinki, root). Non-root nodes: adjust per docs/process/LINUX_NODE_ONBOARDING.md.
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
 [Unit]
 Description=Chump trunk-recovery reviver — reopen trunk-red victim PRs on recovery (RESILIENT-1190)
 After=network-online.target
@@ -15,6 +18,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; cd /root/Projects/chump; exec bash scripts/coord/trunk-recovery-reviver.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/coord/trunk-recovery-reviver.sh'

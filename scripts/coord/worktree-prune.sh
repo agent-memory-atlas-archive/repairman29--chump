@@ -83,6 +83,13 @@ export REAPER_REPO_ROOT
 _prune_is_inflight() {
     local wt_dir="$1"
     [[ "$REAPER_SAFETY_CHECK" != "1" ]] && return 1
+    # RESILIENT-1609: a live bot-merge ship (fresh .steps file or a process
+    # whose cwd is this worktree) protects it even with no lease / idle index.
+    if declare -F wt_has_live_bot_merge >/dev/null 2>&1 && wt_has_live_bot_merge "$wt_dir" "$MAIN_REPO/.chump-locks"; then
+        emit_reaper_event "worktree_reaper_skipped_active" "$wt_dir" "bot_merge_live" \
+            "\"detail\":\"${WT_LIVE_BOT_MERGE_DETAIL:-}\""
+        return 0
+    fi
     # Lease check via shared lib (replaces the old _PRUNE_ACTIVE_WORKTREES loop).
     if wt_has_active_lease "$wt_dir" 900; then
         emit_reaper_event "worktree_reaper_skipped_active" "$wt_dir" "active_lease"

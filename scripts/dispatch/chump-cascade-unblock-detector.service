@@ -19,7 +19,7 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/coord/cascade-unblock-detector.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/coord/cascade-unblock-detector.sh'
 TimeoutStartSec=600

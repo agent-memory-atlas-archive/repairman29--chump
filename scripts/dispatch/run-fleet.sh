@@ -482,7 +482,12 @@ FLEET_START_EPOCH="${FLEET_START_EPOCH:-$(date +%s)}"
 # (the 2026-07-26 disk-100% incident). Converge on worker.sh's exact canonical
 # value so launcher, workers, and interactive builds all share one target dir.
 if [ -z "${CARGO_TARGET_DIR:-}" ]; then
-    export CARGO_TARGET_DIR="${CHUMP_SHARED_CARGO_TARGET:-$HOME/.cargo/chump-shared-target}"
+    # ZERO-WASTE-134: the one shared resolver (CHUMP_CARGO_TARGET, legacy
+    # CHUMP_SHARED_CARGO_TARGET alias, default ~/.cargo/chump-shared-target).
+    # shellcheck source=../ci/lib/resolve-cargo-target-dir.sh
+    # shellcheck disable=SC1091
+    . "$REPO_ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh"
+    export CARGO_TARGET_DIR="$(chump_cargo_target_dir)"
 fi
 
 # INFRA-3662: one CARGO_TARGET_DIR shared by every worker means the cargo
@@ -867,7 +872,7 @@ if (( _stale_reaped > 0 )); then
 fi
 
 # INFRA-465: seed state.db before spawning workers so fresh worktrees have
-# pickable gaps. Compare state.db open-gap count against origin/main's
+# pickable gaps. Compare state.db open-gap count against the registry's
 # state.sql line count as a cheap drift signal; run 'chump gap import' if
 # state.db appears empty or behind. chump gap import is idempotent (skips
 # already-present rows) so running it on an up-to-date db is safe.
@@ -876,18 +881,20 @@ _db_open=0
 if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$_db" ]]; then
     _db_open=$(sqlite3 "$_db" "SELECT COUNT(*) FROM gaps WHERE status='open';" 2>/dev/null || echo 0)
 fi
-# Count open gaps visible on origin/main via the tracked state.sql mirror.
+# Count open gaps visible in the published registry state.sql mirror.
 # grep -c prints "0" AND exits 1 on zero-match; the old `|| true` then wrote a
 # SECOND "0", yielding "0\n0" and a `((` syntax error (VOA-004). Capture the count
 # as-is and default only if the whole expansion is empty.
-# Registry privacy: the mirror is published to the private `registry` remote;
-# origin/main only carries it in the legacy (pre-cutover) layout.
-_reg_ref="origin/main"
-git -C "$REPO_ROOT" remote get-url registry >/dev/null 2>&1 && _reg_ref="registry/main"
-_sql_open=$(git -C "$REPO_ROOT" show "${_reg_ref}:.chump/state.sql" 2>/dev/null | grep -c "^INSERT.*'open'" 2>/dev/null)
-_sql_open=${_sql_open:-0}
+# Registry privacy: the mirror is published ONLY to the private `registry`
+# remote (INFRA-8193: origin/main no longer tracks .chump/state.sql). Without a
+# registry remote there is no published count, so the drift signal is 0.
+_sql_open=0
+if git -C "$REPO_ROOT" remote get-url registry >/dev/null 2>&1; then
+    _sql_open=$(git -C "$REPO_ROOT" show "registry/main:.chump/state.sql" 2>/dev/null | grep -c "^INSERT.*'open'" 2>/dev/null)
+    _sql_open=${_sql_open:-0}
+fi
 if (( _db_open < _sql_open )); then
-    echo "[run-fleet] INFRA-465: state.db has $_db_open open gaps, origin/main has $_sql_open — running 'chump gap import'"
+    echo "[run-fleet] INFRA-465: state.db has $_db_open open gaps, the registry has $_sql_open — running 'chump gap import'"
     (cd "$REPO_ROOT" && chump gap import) \
         && echo "[run-fleet] gap import complete — state.db seeded" \
         || echo "[run-fleet] WARNING: 'chump gap import' failed; workers may see no pickable gaps"

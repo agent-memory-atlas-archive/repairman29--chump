@@ -93,6 +93,7 @@ mod discord_intent;
 mod disk_plan_gate; // INFRA-2198: disk-aware gate for fleet up + auto-scale (META-128/C7)
 mod dispatch;
 mod dispatch_model_defaults; // INFRA-8220: layer-aware default model/budget when --model omitted
+mod dispatch_repair; // INFRA-8199: dispatch open-PR gate + repair brief; auto-prompt never decomposes
 mod doctor;
 mod duty_officer; // RESILIENT-444: DutyOfficer trait contract (RESILIENT-274 slice)
 mod ego_tool;
@@ -1124,6 +1125,9 @@ fn print_help() {
         "  kpi report --debt-index  crown gauge (live_pct/debt/top-5 dormant) + NBA feed (CREDIBLE-357)"
     );
     println!(
+        "  kpi report --shell-invariant-writers [--no-gate]  R6.4 gauge: invariant-boundary gate violator count (CREDIBLE-1509)"
+    );
+    println!(
         "  kpi report --integration  integration-cycle dashboard: ship velocity, CI efficiency, quality, external costs (INFRA-2143)"
     );
     println!("  kpi report --integration --window 24h|7d|30d  window override (default 7d)");
@@ -1530,10 +1534,9 @@ async fn main() -> Result<()> {
     }
 
     // INFRA-5754 (INFRA-1748 pilot slice): self-registered subcommands take
-    // priority over the legacy if/else dispatch chain below. Nothing is
-    // registered via `inventory::submit! { CommandEntry::new(...) }` yet —
-    // this is a no-op until the first subcommand migrates per
-    // docs/refactor/MAIN_RS_DECOMPOSITION.md.
+    // priority over the legacy if/else dispatch chain below. Registered via
+    // `inventory::submit! { CommandEntry::new(...) }`; first user is
+    // `calibrate` (CREDIBLE-1493, src/commands/calibrate.rs).
     if let Some(name) = args.get(1) {
         if let Some(result) = commands::registry::dispatch(name, &args) {
             return result;
@@ -1656,6 +1659,19 @@ async fn main() -> Result<()> {
             threshold_commits,
             want_json,
         ));
+    }
+
+    // INFRA-8194 (Phase R R5): `chump node host` / `chump node render-unit` —
+    // the typed host provisioning enum (crates/chump-provision). Thin arm only.
+    // `chump node pause|resume` (RESILIENT-1614, src/node_mode.rs) falls through to its own arm.
+    if args.get(1).map(String::as_str) == Some("node")
+        && !matches!(
+            args.get(2).map(String::as_str),
+            Some("pause") | Some("resume")
+        )
+    {
+        let sub_args: Vec<String> = args.iter().skip(2).cloned().collect();
+        std::process::exit(chump_provision::cli::run_cli(&sub_args));
     }
 
     // RESILIENT-069: `chump farmer status [--json] [--quiet]` — the
@@ -6401,7 +6417,7 @@ async fn main() -> Result<()> {
             Some(g) if !g.starts_with('-') => g.clone(),
             _ => {
                 eprintln!(
-                    "Usage: chump dispatch <GAP-ID> [--auto-merge] [--skip-tests] [--paths X,Y] [--backend BACKEND] [--model M] [--prompt P]"
+                    "Usage: chump dispatch <GAP-ID> [--auto-merge] [--skip-tests] [--paths X,Y] [--backend BACKEND] [--model M] [--prompt P] [--print-prompt]"
                 );
                 std::process::exit(2);
             }
@@ -6434,6 +6450,40 @@ async fn main() -> Result<()> {
             .unwrap_or_default();
 
         let repo_root = repo_path::repo_root();
+
+        // INFRA-8199: run the INFRA-1982 open-PR check BEFORE spawning any
+        // work backend. An open PR refuses (PR number + head branch printed)
+        // unless CHUMP_CLAIM_ALLOW_DUPLICATE_PR=1, which turns the cycle into
+        // a repair on the PR head branch. Logic lives in dispatch_repair.
+        // `--print-prompt` prints the resolved mode + prompt and exits 0
+        // without spawning anything (operator preview; CI fixture surface).
+        let print_prompt = args.iter().any(|a| a == "--print-prompt");
+        let spawns_work = backend != "interactive" && backend != "claude";
+        let open_pr = if spawns_work {
+            match dispatch_repair::open_pr_gate(&repo_root, &gap_id) {
+                Ok(pr) => pr,
+                Err(refusal) => {
+                    eprintln!("{refusal}");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            None
+        };
+        let mut mode = match &open_pr {
+            Some(pr) => {
+                eprintln!(
+                    "[dispatch] {}=1 and open PR #{} exists: repairing on {}",
+                    dispatch_repair::ALLOW_DUP_ENV,
+                    pr.number,
+                    pr.head_branch
+                );
+                dispatch::DispatchMode::Repair {
+                    head_branch: pr.head_branch.clone(),
+                }
+            }
+            None => dispatch::DispatchMode::Work,
+        };
 
         // INFRA-8220: layer-aware default model/budget when --model is omitted.
         // Inspect the gap's footprint (--paths lease scope + description path
@@ -6507,16 +6557,35 @@ async fn main() -> Result<()> {
                     eprintln!(
                         "[dispatch] no --prompt given; auto-building the work prompt from gap {gap_id}"
                     );
-                    execute_gap::build_execute_gap_prompt(&gap_id, &repo_root)
+                    // INFRA-8199: repair brief when a PR is open; decompose
+                    // --dry-run + stop when the description asks for it;
+                    // never self-directed decomposition.
+                    let (kind, built) =
+                        dispatch_repair::build_auto_prompt(&gap_id, &repo_root, open_pr.as_ref());
+                    if kind == dispatch_repair::AutoPromptKind::DecomposeReview {
+                        mode = dispatch::DispatchMode::ReviewOnly;
+                    }
+                    eprintln!("[dispatch] auto-prompt kind={kind:?}");
+                    built
                 } else {
                     prompt.clone()
                 };
+                if print_prompt {
+                    println!("[dispatch] mode={mode:?}\n{work_prompt}");
+                    return Ok(());
+                }
                 dispatch::WorkBackend::Headless {
                     model: model.clone(),
                     prompt: work_prompt,
                 }
             }
-            "exec-gap" | "chump-local" /* alias */ => dispatch::WorkBackend::ExecGap,
+            "exec-gap" | "chump-local" /* alias */ => {
+                if print_prompt {
+                    println!("[dispatch] mode={mode:?} (exec-gap builds its own prompt)");
+                    return Ok(());
+                }
+                dispatch::WorkBackend::ExecGap
+            }
             other => {
                 eprintln!(
                     "chump dispatch: unknown --backend {other:?}; expected one of: interactive, claude, headless, exec-gap"
@@ -6531,6 +6600,7 @@ async fn main() -> Result<()> {
             skip_tests,
             paths: paths.as_deref(),
             repo_root,
+            mode,
         };
 
         match dispatch::run(opts) {
@@ -7714,11 +7784,16 @@ async fn main() -> Result<()> {
                             "total_pickable": total_pickable,
                         },
                         "suggestions": suggestions,
+                        // CREDIBLE-1493: last self-report calibration score.
+                        "calibration": commands::calibrate::banner_line(),
                     });
                     println!("{}", serde_json::to_string_pretty(&out).unwrap_or_default());
                 } else {
                     let window_h = window_secs / 3600;
                     println!("═══ Fleet brief (last {window_h}h) ═══");
+                    // CREDIBLE-1493 (Phase R R7): how many of the instruments
+                    // below agree with ground truth, from the last calibration.
+                    println!("{}", commands::calibrate::banner_line());
                     // INFRA-2013: show 1h ships alongside rolling average.
                     // CREDIBLE-129: a failed git measurement prints
                     // "unavailable", never a bare 0 that reads as real data.
@@ -12277,7 +12352,7 @@ async fn main() -> Result<()> {
                             );
                         }
                         // ZERO-WASTE-020: YAML mirrors retired — state.db is
-                        // canonical, .chump/state.sql is the tracked dump.
+                        // canonical (INFRA-8193: .chump/state.sql left git).
                         // `chump gap reserve` no longer writes a per-file
                         // docs/gaps/<ID>.yaml mirror (the INFRA-228/1428
                         // write-and-autostage path this replaced is gone).
@@ -12408,34 +12483,14 @@ async fn main() -> Result<()> {
                     None
                 };
 
-                let claim_result = match store.claim(&gap_id, &session_id, &worktree, ttl) {
-                    Ok(()) => Ok(()),
-                    // INFRA-3002: a worktree's local state.db is a snapshot
-                    // taken at worktree-creation time — a gap reserved/
-                    // imported on origin/main afterward is invisible here
-                    // ("gap {id} not found in state.db") until someone
-                    // manually runs `chump gap restore --from-sql`. Self-heal
-                    // by syncing just the claimed gap's row from
-                    // .chump/state.sql (the tracked YAML mirror) and retrying
-                    // once, instead of hard-failing the interactive-claim path.
-                    Err(e) if e.to_string().contains("not found in state.db") => {
-                        let sql_path = repo_path::repo_root().join(".chump").join("state.sql");
-                        match store.sync_gap_from_state_sql(&sql_path, &gap_id) {
-                            Ok(true) => {
-                                eprintln!(
-                                    "[claim] INFRA-3002: {gap_id} was missing from local state.db — synced from state.sql, retrying claim"
-                                );
-                                store.claim(&gap_id, &session_id, &worktree, ttl)
-                            }
-                            Ok(false) => Err(e),
-                            Err(sync_err) => {
-                                eprintln!("[claim] INFRA-3002: state.sql sync attempt failed: {sync_err:#}");
-                                Err(e)
-                            }
-                        }
-                    }
-                    Err(e) => Err(e),
-                };
+                // INFRA-8193: the INFRA-3002 self-heal (sync the missing row
+                // from the tracked .chump/state.sql and retry) is gone with the
+                // file. Its premise, a linked worktree holding a stale
+                // snapshot store, no longer holds: worktrees resolve to their
+                // main checkout's state.db (INFRA-8190). A gap missing here is
+                // missing from the one store; reconcile stores with
+                // `chump store reconcile` (INFRA-8222).
+                let claim_result = store.claim(&gap_id, &session_id, &worktree, ttl);
 
                 match claim_result {
                     Ok(()) => {
@@ -12534,55 +12589,17 @@ async fn main() -> Result<()> {
                         std::process::exit(1);
                     }
                     Ok(gap_store::PreflightResult::NotFound) => {
-                        // CREDIBLE-1486: a worktree's local state.db is a snapshot
-                        // taken at worktree-creation time (same INFRA-3002 class as
-                        // `chump claim`'s self-heal) — a gap reserved/imported on
-                        // origin/main afterward is invisible here until someone
-                        // manually runs `chump gap restore --from-sql`. Before this
-                        // fix, NotFound still printed a WARN but returned `Ok(())`
-                        // (exit 0), so callers that gate on exit code alone — like
-                        // `chump dispatch`'s preflight step — treated a MISSING gap
-                        // as "pickable", proceeded to claim, and failed hard there
-                        // instead of at the check meant to catch exactly this.
-                        // Self-heal by syncing just this gap's row from
-                        // `.chump/state.sql` (the tracked YAML mirror) and retrying
-                        // once; only exit non-zero if the gap is genuinely absent
-                        // from both the live store and the tracked mirror.
-                        let sql_path = repo_root.join(".chump").join("state.sql");
-                        let healed = store
-                            .sync_gap_from_state_sql(&sql_path, &gap_id)
-                            .unwrap_or(false);
-                        if healed {
-                            eprintln!(
-                                "[preflight] {} was missing from local state.db — synced from state.sql (CREDIBLE-1486)",
-                                gap_id
-                            );
-                            match store.preflight(&gap_id) {
-                                Ok(gap_store::PreflightResult::Available) => {
-                                    println!("[preflight] OK {} — open and unclaimed.", gap_id);
-                                    return Ok(());
-                                }
-                                Ok(gap_store::PreflightResult::Done) => {
-                                    eprintln!("[preflight] FAIL {} — already done.", gap_id);
-                                    std::process::exit(1);
-                                }
-                                Ok(gap_store::PreflightResult::Claimed(s)) => {
-                                    eprintln!(
-                                        "[preflight] FAIL {} — live-claimed by session {}.",
-                                        gap_id, s
-                                    );
-                                    std::process::exit(1);
-                                }
-                                _ => {
-                                    eprintln!(
-                                        "[preflight] FAIL {} — not found in state.db (run `chump gap import` first).",
-                                        gap_id
-                                    );
-                                    std::process::exit(1);
-                                }
-                            }
-                        }
-                        eprintln!("[preflight] FAIL {} — not found in state.db (run `chump gap import` first).", gap_id);
+                        // CREDIBLE-1486: NotFound exits non-zero so callers that
+                        // gate on exit code alone (e.g. `chump dispatch`'s
+                        // preflight step) never treat a MISSING gap as pickable.
+                        // INFRA-8193: the old self-heal from the tracked
+                        // .chump/state.sql is gone with the file; worktrees share
+                        // their main checkout's store (INFRA-8190), so a gap
+                        // absent here is absent from the one store.
+                        eprintln!(
+                            "[preflight] FAIL {} — not found in state.db (reconcile stores with `chump store reconcile`, INFRA-8222).",
+                            gap_id
+                        );
                         std::process::exit(1);
                     }
                     Err(e) => {
@@ -13560,7 +13577,7 @@ async fn main() -> Result<()> {
                     Ok(()) => {
                         println!("updated {}", gap_id);
                         // ZERO-WASTE-020: YAML mirrors retired — state.db is
-                        // canonical, .chump/state.sql is the tracked dump.
+                        // canonical (INFRA-8193: .chump/state.sql left git).
                         // `chump gap set` no longer regenerates a per-file
                         // docs/gaps/<ID>.yaml mirror (the INFRA-470 auto-regen
                         // this replaced is gone). Use `chump gap show <ID>`
@@ -13755,14 +13772,19 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            // INFRA-538: rebuild state.db from .chump/state.sql when the DB
-            // is corrupted. Backs up existing DB first, then replays YAML.
+            // INFRA-538: rebuild state.db from a LOCAL .chump/state.sql dump
+            // when the DB is corrupted. Backs up existing DB first, then
+            // replays YAML. INFRA-8193: the dump is no longer git-tracked; it
+            // exists only where something wrote it (`chump gap dump --out`, or
+            // backlog-sync's reader materialising the private registry copy).
+            // Retired in favour of `chump store reconcile` (INFRA-8222) in R4
+            // slice 2.
             "restore" => {
                 let from_sql = args.iter().any(|a| a == "--from-sql");
                 if !from_sql {
                     eprintln!("Usage: chump gap restore --from-sql");
                     eprintln!(
-                        "       Rebuilds .chump/state.db from .chump/state.sql (YAML mirror)."
+                        "       Rebuilds .chump/state.db from a local .chump/state.sql dump (untracked since INFRA-8193)."
                     );
                     std::process::exit(2);
                 }
@@ -17806,46 +17828,32 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
-            // INFRA-2053: `chump gap sync` — bidirectional YAML <-> state.db
-            // reconciliation. Three modes (mutually exclusive):
+            // INFRA-2053: `chump gap sync` — state.db -> YAML mirror tooling.
+            // Export-only since INFRA-8193 (Phase R R4): state.db is the only
+            // truth and docs/gaps/*.yaml never writes back into it.
             //   --check  : dry-run drift report; exits non-zero on drift.
-            //   --pull   : YAML -> DB. Recovers from `chump gap reserve`
-            //              TODO-AC overwrites (INFRA-2022 class) and from
-            //              the `gap_drift_orphan` class (state.db rows w/o
-            //              YAML mirror). Atomic INSERT/UPDATE per gap.
             //   --push   : DB -> YAML. Writes `docs/gaps/<ID>.yaml` for
-            //              every open + in-progress gap whose YAML diverges
-            //              or is missing. Atomic tempfile + rename per file
-            //              with serde_yaml round-trip validation.
+            //              every gap whose YAML diverges or is missing.
+            //              Atomic tempfile + rename per file with serde_yaml
+            //              round-trip validation. The export path.
+            //   --pull   : RETIRED (hard error, exit 2) — pointed at
+            //              `chump store reconcile` (INFRA-8222) and the
+            //              insert-only `chump gap import` for empty stores.
             //
-            // --dry-run pairs with --pull and --push (--check is dry-run by
-            // design). --json switches output to a single newline-delimited
-            // JSON document.
+            // --dry-run pairs with --push (--check is dry-run by design).
+            // --json switches output to a single newline-delimited JSON doc.
             "sync" => {
-                let mode_check = args.iter().any(|a| a == "--check");
-                let mode_pull = args.iter().any(|a| a == "--pull");
-                let mode_push = args.iter().any(|a| a == "--push");
+                let sync_args: Vec<String> = args.to_vec();
+                let mode = match gap_store::sync::parse_sync_mode(&sync_args) {
+                    Ok(m) => m,
+                    Err(msg) => {
+                        eprintln!("{msg}");
+                        std::process::exit(2);
+                    }
+                };
+                let mode_check = mode == gap_store::sync::SyncMode::Check;
+                let mode_push = mode == gap_store::sync::SyncMode::Push;
                 let dry_run = args.iter().any(|a| a == "--dry-run");
-                let modes = [mode_check, mode_pull, mode_push]
-                    .iter()
-                    .filter(|m| **m)
-                    .count();
-                if modes == 0 {
-                    eprintln!(
-                        "Usage: chump gap sync (--check | --pull | --push) [--dry-run] [--json] \
-                         [--state-db PATH] [--gaps-dir PATH]\n\
-                         \n\
-                         --check  drift report; exits non-zero on drift (no mutations)\n\
-                         --pull   YAML -> DB (recovers from TODO-AC overwrites)\n\
-                         --push   DB -> YAML for open + in-progress gaps\n\
-                         --dry-run  preview pull/push without writes"
-                    );
-                    std::process::exit(2);
-                }
-                if modes > 1 {
-                    eprintln!("chump gap sync: --check, --pull, --push are mutually exclusive");
-                    std::process::exit(2);
-                }
 
                 // --state-db override resolves to the same env var GapStore reads.
                 if let Some(p) = flag("--state-db") {
@@ -17923,45 +17931,6 @@ async fn main() -> Result<()> {
                         }
                         Err(e) => {
                             eprintln!("chump gap sync --check: {e:#}");
-                            std::process::exit(1);
-                        }
-                    }
-                }
-
-                if mode_pull {
-                    match gap_store::sync::sync_pull(&sync_store, &gaps_dir, dry_run) {
-                        Ok(report) => {
-                            if json_out {
-                                let summary = serde_json::json!({
-                                    "mode": "pull",
-                                    "dry_run": dry_run,
-                                    "inserted": report.inserted,
-                                    "updated": report.updated,
-                                    "skipped": report.skipped,
-                                    "ac_preserved": report.ac_preserved,
-                                    "changed_ids": report.changed_ids,
-                                });
-                                println!("{}", summary);
-                            } else {
-                                let prefix = if dry_run { "[dry-run] " } else { "" };
-                                println!(
-                                    "{}chump gap sync --pull: {} inserted, {} updated, {} unchanged",
-                                    prefix, report.inserted, report.updated, report.skipped
-                                );
-                                if report.ac_preserved > 0 {
-                                    println!(
-                                        "  INFRA-2227: preserved concrete acceptance_criteria on {} gap(s) (not reverted to YAML template)",
-                                        report.ac_preserved
-                                    );
-                                }
-                                if !report.changed_ids.is_empty() {
-                                    println!("  changed: {}", report.changed_ids.join(", "));
-                                }
-                            }
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            eprintln!("chump gap sync --pull: {e:#}");
                             std::process::exit(1);
                         }
                     }
@@ -18219,7 +18188,7 @@ async fn main() -> Result<()> {
                 eprintln!("  dep-clean        [--apply] [--json]  # strip depends_on entries pointing at done gaps");
                 eprintln!("  dump             [--out PATH] [--per-file [--out-dir docs/gaps/]]");
                 eprintln!("  import           [--yaml docs/gaps.yaml]");
-                eprintln!("  restore          --from-sql  # rebuild state.db from .chump/state.sql (INFRA-538)");
+                eprintln!("  restore          --from-sql  # rebuild state.db from a local .chump/state.sql dump (INFRA-538)");
                 eprintln!("  audit-priorities [--json]   # PM health check (META-046)");
                 eprintln!("  triage           [--json] [--apply]  # INFRA-942: classify non-pickable open gaps by reason");
                 eprintln!("  audit-ac         [GAP-ID] [--recent N] [--json]  # COG-052 AC coverage check for closed gaps");
@@ -18231,7 +18200,7 @@ async fn main() -> Result<()> {
                 eprintln!("  import-spec      <path> [--apply] [--dry-run] [--json]  # import gaps from markdown spec (INFRA-636)");
                 eprintln!("  clear-cooldown   <GAP-ID> --reason \"text\"  # INFRA-1220: operator override for post-close cooldown");
                 eprintln!("  requeue          <GAP-ID>                  # INFRA-2137: bisect_quarantined → ready_to_ship after operator review");
-                eprintln!("  sync             (--check | --pull | --push) [--dry-run] [--json] [--state-db PATH] [--gaps-dir PATH]");
+                eprintln!("  sync             (--check | --push) [--dry-run] [--json] [--state-db PATH] [--gaps-dir PATH]  (--pull retired: INFRA-8193)");
                 eprintln!("                                # INFRA-2053: bidirectional YAML <-> state.db reconciliation");
                 eprintln!("  backfill-external-repo [--apply] [--owner-repo owner/repo]");
                 eprintln!("                                # MISSION-041: tag gaps with external_repo: in skills_required");
@@ -18453,9 +18422,25 @@ async fn main() -> Result<()> {
         let want_integration = args.iter().any(|a| a == "--integration");
         let want_mission_binary = args.iter().any(|a| a == "--mission-binary");
         let want_debt_index = args.iter().any(|a| a == "--debt-index");
+        let want_shell_invariant_writers = args.iter().any(|a| a == "--shell-invariant-writers");
+        let no_gate = args.iter().any(|a| a == "--no-gate");
         let want_ci_pickup = args.iter().any(|a| a == "--ci-pickup");
 
         let repo_root = repo_path::repo_root();
+
+        // CREDIBLE-1509: --shell-invariant-writers shows the R6.4 gauge only —
+        // the invariant-boundary gate's violator file count + reading date.
+        // --no-gate never runs the ~20s gate (fast callers such as fleet-brief).
+        if want_shell_invariant_writers {
+            let section =
+                kpi_report::build_shell_invariant_writers_section_with(&repo_root, !no_gate);
+            if want_json {
+                println!("{}", section.render_json());
+            } else {
+                print!("{}", section.render_text());
+            }
+            return Ok(());
+        }
 
         // CREDIBLE-1512: --ci-pickup shows runner pickup-latency p50/p95 per hour
         // + ci_runs_queued. With --emit-if-starved, writes kind=ci_runner_starved
@@ -18594,7 +18579,13 @@ async fn main() -> Result<()> {
             let output = if want_json {
                 report.render_json()
             } else {
-                report.render_text()
+                // CREDIBLE-1493 (Phase R R7): the gauges below carry their
+                // calibration score on top.
+                format!(
+                    "{}\n{}",
+                    commands::calibrate::banner_line(),
+                    report.render_text()
+                )
             };
 
             if want_pdf {

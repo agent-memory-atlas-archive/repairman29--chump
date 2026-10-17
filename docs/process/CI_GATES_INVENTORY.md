@@ -112,6 +112,7 @@ Documented for completeness; do **not** file follow-ups.
 | `sccache health probe` | Probes R2 remote-cache connectivity in CI runner environment; local dev has different network + credentials — meaningless to run locally (INFRA-2288) |
 | `sccache --show-config (BuildBuddy + R2 URLs)` | Diagnostic print of CI-only env vars (`SCCACHE_BUILDBUDDY_URL`, `SCCACHE_ENDPOINT`) and the running sccache server's stats; local dev has neither the secrets nor a CI-started server (INFRA-4653) |
 | `actionlint — workflow syntax gate` (META-199) | Uses `rhysd/actionlint` GitHub Action; requires the actionlint binary not in standard preflight env |
+| `census-nightly` | CREDIBLE-1514 (`ci-test-census.yml`, every step name carries this tag) — nightly run of all ~1,611 `scripts/ci/test-*.sh` in a sandbox plus the bot PR that publishes the result; hours of wall time, needs the fleet binary artifact and a PR-writing token. The per-PR half (`test-census-shrink-only.sh`) IS mirrored in preflight. |
 | `coverage-nightly.yml` (META-200) | Nightly cron only; llvm-cov instrument pass is too slow for per-PR preflight |
 | commit-msg docs-delta trailer check | INFRA-1969/INFRA-3379 — `test-docs-delta-commit-msg.sh` validates the commit-msg git hook itself; runs as a `commit-msg` hook, not a preflight gate — mirroring would duplicate hook logic rather than test something preflight doesn't already cover |
 | gap-reserve concurrency | INFRA-021/301/INFRA-3379 — `test-gap-reserve-concurrency.sh` requires a freshly `cargo build`-ed `chump` binary on `PATH`; the parallel-claim race it tests only reproduces against the compiled binary, too slow for the preflight fast loop |
@@ -164,6 +165,43 @@ Each follow-up gap (INFRA-1787..1794) ships when:
 This is the **INFRA-1731 pattern**: that's how the event-registry mirror
 shipped, and how every Tier C gap should land.
 
+## scripts/ci test census (CREDIBLE-1514)
+
+**Rule: a new scripts/ci test is wired or it is deleted.** "Wired" means its
+basename appears on a non-comment line of a top-level `.github/workflows/*.yml`
+or of `crates/chump-preflight/src/preflight.rs`. A test nothing runs is not a
+test; it is a red light nobody looks at.
+
+Why: on 2026-10-17 `scripts/ci` held 1,611 `test-*.sh`; ci.yml referenced
+about 190 and all workflows plus preflight about 380. Four agents found 40-plus
+red on untouched origin/main that nothing ran (6 fixed in #5535, 6 in #5542,
+28 of 169 bot-merge/reaper/worktree/pre-push tests reported in #5548).
+
+- `scripts/ci/census.sh` enumerates every test, classifies wired/unwired, runs
+  each in a sandbox (own HOME, CHUMP_STATE_DB copy, ambient log, lock dir,
+  session; per-test timeout `CHUMP_CENSUS_TIMEOUT_S`, default 120s;
+  `CHUMP_CENSUS_JOBS`, default 4) and writes
+  [`docs/observability/CI_TEST_CENSUS.md`](../observability/CI_TEST_CENSUS.md)
+  (wired-green, wired-red, unwired-green, unwired-red) and
+  `docs/observability/ci-test-census.json` (read by `chump kpi report` as
+  `ci_tests_unwired` / `ci_tests_red`). `--no-run` reclassifies in under a
+  second and keeps the last run's statuses; `--sample N` / `--only GLOB` /
+  `--wired-only` / `--unwired-only` run a slice into a tempdir (add `--write`
+  to merge it into the docs).
+- `.github/workflows/ci-test-census.yml` runs the full census nightly at 04:30
+  UTC on Linux with the latest fleet binary artifact (no build) and opens or
+  updates one `census: <date>` PR from `census/nightly`, label `census`, armed
+  only when the RESILIENT-1613 arm policy allows (Tier D above).
+- `scripts/ci/test-census-shrink-only.sh` (fast-checks + `chump preflight`)
+  fails a PR that leaves a test unwired that is not on origin/main's unwired
+  list, or that grows the committed red or unwired count. On the nightly
+  `census/*` PR count growth is reported, not failed
+  (`CHUMP_CENSUS_ALLOW_GROWTH=1`), because publishing the truth is its job.
+
+To fix a red census entry: fix the test (or the code), wire it, and the next
+nightly moves it to wired-green. To retire one: delete it in the same PR that
+says why.
+
 ## Tracking
 
 Each per-gate gap emits `kind=ci_gate_mirrored` when it ships, queryable via
@@ -176,3 +214,5 @@ falls roughly proportionally.
 - **2026-05-23** — Initial inventory. INFRA-1731 just shipped as the
   first mirror beyond cargo gates. INFRA-1787..1794 filed as per-gate
   follow-ups.
+- **2026-10-17** — CREDIBLE-1514: scripts/ci census section; `census-nightly`
+  added to Tier D.

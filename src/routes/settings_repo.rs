@@ -201,7 +201,7 @@ pub async fn handle_settings_repo_put(
 fn get_current_repo_path() -> String {
     std::env::var("CHUMP_REPO")
         .ok()
-        .and_then(|p| if p.trim().is_empty() { None } else { Some(p) })
+        .filter(|p| !p.trim().is_empty())
         .unwrap_or_else(|| {
             crate::repo_path::runtime_base()
                 .to_string_lossy()

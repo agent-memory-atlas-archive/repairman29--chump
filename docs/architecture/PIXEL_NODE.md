@@ -59,9 +59,11 @@ starts the supervisor. Idempotent.
    are never committed.
 4. **Fresh gap registry** — the worker keeps `~/chump-repo/.chump/state.db` in
    sync with origin/main automatically: every 30 min it does `git fetch origin
-   main --depth 1` + `reset --hard origin/main` + `chump gap sync --pull`
-   (reconciles state.db from the per-file `docs/gaps/*.yaml` mirror, which is
-   fresher than the committed `state.sql` — see INFRA-3628).
+   main --depth 1` + `reset --hard origin/main` + the insert-only
+   `chump gap import --yaml ~/chump-repo/docs/gaps` (adds gaps the store has
+   never seen; INFRA-3628). INFRA-8193 retired `chump gap sync --pull`, so status
+   changes no longer flow in from the YAML mirror; `chump store reconcile`
+   (INFRA-8222) replaces that half.
 5. **Termux:Boot (F-Droid)** — the boot hook is staged; the app fires it on boot.
    Note: `adb install` of Termux:Boot v0.8.1 fails (`INSTALL_FAILED_SHARED_USER_INCOMPATIBLE`)
    — its signing key predates the installed Termux 0.119.0-beta.3. Fix = reinstall

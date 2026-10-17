@@ -10,9 +10,8 @@
   clean runs.
 
   INSTALLATION:
-    1. Edit this file: replace /path/to/Chump with your repo path,
-       and /path/to/HOME with your $HOME.
-    2. cp launchd/com.chump.ci-health-gate.plist ~/Library/LaunchAgents/
+    1. Render the placeholders for this host (INFRA-8194; no hand edits):
+    2. chump node render-unit launchd/com.chump.ci-health-gate.plist --out ~/Library/LaunchAgents/com.chump.ci-health-gate.plist
     3. launchctl load ~/Library/LaunchAgents/com.chump.ci-health-gate.plist
     4. Verify: launchctl list | grep com.chump.ci-health-gate
     5. Manual run: launchctl start com.chump.ci-health-gate
@@ -29,11 +28,11 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/path/to/Chump/scripts/coord/ci-health-gate.sh</string>
+    <string>__REPO_ROOT__/scripts/coord/ci-health-gate.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- Every 5 minutes (300 seconds). Sleep-aware (skipped while laptop sleeping). -->
   <key>StartInterval</key>
@@ -52,9 +51,9 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/path/to/HOME</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
+    <string>/usr/local/bin:/usr/bin:/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin</string>
     <!-- chump, gh, git, python3 must be on PATH. -->
   </dict>
 

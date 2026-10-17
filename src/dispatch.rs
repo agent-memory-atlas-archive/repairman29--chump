@@ -117,6 +117,22 @@ pub fn backend_from_env(model: String, prompt: String) -> WorkBackend {
     }
 }
 
+/// INFRA-8199: what kind of cycle this dispatch is. Selected by the thin
+/// `chump dispatch` arm from the open-PR gate (`crate::dispatch_repair`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DispatchMode {
+    /// Fresh worktree off `origin/main`, work, ship. The default.
+    #[default]
+    Work,
+    /// An open PR already covers the gap and the operator set
+    /// `CHUMP_CLAIM_ALLOW_DUPLICATE_PR=1`: the worktree starts from the PR's
+    /// head branch (not `origin/main`) so the repair lands on that PR.
+    Repair { head_branch: String },
+    /// The agent only proposes (e.g. `chump gap decompose <ID> --dry-run`)
+    /// and stops for review: no ship step runs.
+    ReviewOnly,
+}
+
 /// Options for one dispatch invocation.
 #[derive(Debug)]
 pub struct DispatchOptions<'a> {
@@ -134,6 +150,8 @@ pub struct DispatchOptions<'a> {
     /// Repo root. Phase 1 derives this from the caller; the binary entry
     /// point uses `repo_path::repo_root()`.
     pub repo_root: PathBuf,
+    /// INFRA-8199: work / repair-an-open-PR / review-only. See [`DispatchMode`].
+    pub mode: DispatchMode,
 }
 
 /// What happened to the PR after [`ship`] finished.
@@ -226,11 +244,21 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
     } else {
         // Step 4: ship (calls bot-merge.sh in Phase 1; native in Phase 3).
         // Capture errors instead of `?`-ing so we always reach release.
-        let ship_result = match ship(&workspace) {
-            Ok(r) => r,
-            Err(e) => ShipResult::Aborted {
-                error: format!("{e:#}"),
-            },
+        // INFRA-8199: a review-only cycle (decompose --dry-run proposal)
+        // never ships; filing/landing is the operator's call.
+        let ship_result = if opts.mode == DispatchMode::ReviewOnly {
+            ShipResult::Blocked {
+                reason: "review-only: proposal printed, nothing shipped; filing sub-gaps \
+                         is the operator's or the decompose curator's call (INFRA-8199)"
+                    .to_string(),
+            }
+        } else {
+            match ship(&workspace) {
+                Ok(r) => r,
+                Err(e) => ShipResult::Aborted {
+                    error: format!("{e:#}"),
+                },
+            }
         };
 
         // Step 5: always release the lease. INFRA-1243: retry+emit on failure.
@@ -363,8 +391,14 @@ impl<'a> Workspace<'a> {
                 // stale-worktree-reaper sweeps it up later (see CLAUDE.md
                 // "Worktree disk hygiene"). On hard failure we also leave
                 // it in place so the operator can inspect.
-                let working_dir = create_dispatch_worktree(&opts.repo_root, opts.gap_id)
-                    .with_context(|| format!("creating worktree for {}", opts.gap_id))?;
+                // INFRA-8199: a repair starts from the open PR's head branch.
+                let repair_base = match &opts.mode {
+                    DispatchMode::Repair { head_branch } => Some(head_branch.as_str()),
+                    _ => None,
+                };
+                let working_dir =
+                    create_dispatch_worktree_from(&opts.repo_root, opts.gap_id, repair_base)
+                        .with_context(|| format!("creating worktree for {}", opts.gap_id))?;
 
                 // INFRA-8204: resolve ONE session id for the whole dispatch
                 // cycle and export it into THIS process's env so every
@@ -461,13 +495,33 @@ fn write_wt_session_id_file(working_dir: &Path, session_id: &str) {
 /// visibility — INFRA-274 covers cross-host), so the only legitimate
 /// pre-existing worktree at that path is detritus.
 fn create_dispatch_worktree(repo_root: &Path, gap_id: &str) -> Result<PathBuf> {
+    create_dispatch_worktree_from(repo_root, gap_id, None)
+}
+
+/// INFRA-8199: like [`create_dispatch_worktree`], but with
+/// `repair_branch = Some(<PR head>)` the worktree checks out that branch at
+/// `origin/<PR head>` instead of cutting `claude/<slug>` from `origin/main`.
+/// Before this, a re-dispatch of a gap whose PR was already open deleted the
+/// local `claude/<slug>` branch and started over from main (the 2026-10-16
+/// 00:35Z CREDIBLE-1491 receipt). A local copy of the head branch that is not
+/// an ancestor of the remote head is preserved under
+/// `refs/dispatch-backup/<branch>` before being reset (archive, never delete).
+fn create_dispatch_worktree_from(
+    repo_root: &Path,
+    gap_id: &str,
+    repair_branch: Option<&str>,
+) -> Result<PathBuf> {
     use coord_mesh::MeshBridge;
     // INFRA-2264: activates the `coord-mesh` crate dependency; the bridge
     // itself is not yet wired into the worktree-creation flow (that's
     // follow-on work once the real mesh-bridge substrate lands).
     let _bridge = MeshBridge::new();
 
-    let (worktree_path, branch_name) = dispatch_paths(repo_root, gap_id);
+    let (worktree_path, default_branch) = dispatch_paths(repo_root, gap_id);
+    if let Some(head) = repair_branch {
+        return create_repair_worktree(repo_root, &worktree_path, head);
+    }
+    let branch_name = default_branch;
 
     // Idempotent cleanup of any leftover worktree at the target path.
     // Failure is non-fatal — the subsequent `worktree add` will report a
@@ -531,6 +585,77 @@ fn create_dispatch_worktree(repo_root: &Path, gap_id: &str) -> Result<PathBuf> {
     chump_atomic_claim::atomic_claim::nugget_prefetch::link_state_db(repo_root, &worktree_path);
 
     Ok(worktree_path)
+}
+
+/// INFRA-8199: check out an open PR's head branch into `worktree_path`,
+/// based at `origin/<head>`. See [`create_dispatch_worktree_from`].
+fn create_repair_worktree(repo_root: &Path, worktree_path: &Path, head: &str) -> Result<PathBuf> {
+    if worktree_path.exists() {
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(repo_root)
+            .args(["worktree", "remove", "--force"])
+            .arg(worktree_path)
+            .status();
+    }
+    let remote_ref = format!("refs/remotes/origin/{head}");
+    let fetched = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["fetch", "--quiet", "origin"])
+        .arg(format!("+refs/heads/{head}:{remote_ref}"))
+        .status()
+        .with_context(|| format!("spawning git fetch origin {head}"))?;
+    if !fetched.success() {
+        bail!("git fetch origin {head} failed: cannot base the repair on the PR head");
+    }
+    // Preserve a diverged local copy before `-B` resets it.
+    let rev = |r: &str| -> Option<String> {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_root)
+            .args(["rev-parse", "--verify", "--quiet", r])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    if let Some(local) = rev(&format!("refs/heads/{head}")) {
+        let is_ancestor = Command::new("git")
+            .arg("-C")
+            .arg(repo_root)
+            .args(["merge-base", "--is-ancestor", &local, &remote_ref])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !is_ancestor {
+            let backup = format!("refs/dispatch-backup/{head}");
+            let _ = Command::new("git")
+                .arg("-C")
+                .arg(repo_root)
+                .args(["update-ref", &backup, &local])
+                .status();
+            eprintln!("[dispatch] preserved diverged local {head} at {backup} ({local})");
+        }
+    }
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["worktree", "add"])
+        .arg(worktree_path)
+        .args(["-B", head, &remote_ref])
+        .status()
+        .with_context(|| format!("spawning git worktree add -B {head} {remote_ref}"))?;
+    if !status.success() {
+        bail!(
+            "git worktree add failed for {} (branch {head}, base {remote_ref})",
+            worktree_path.display()
+        );
+    }
+    set_dispatch_branch_upstream(worktree_path, head);
+    chump_atomic_claim::atomic_claim::nugget_prefetch::link_state_db(repo_root, worktree_path);
+    eprintln!("[dispatch] repair worktree on PR head {head} (base {remote_ref}, not origin/main)");
+    Ok(worktree_path.to_path_buf())
 }
 
 /// Point `branch`'s upstream at `origin/<branch>` instead of whatever
@@ -2016,6 +2141,7 @@ mod tests {
             skip_tests: false,
             paths: Some("src/dispatch.rs"),
             repo_root: PathBuf::from("/tmp/nonexistent-dispatch-test"),
+            mode: DispatchMode::Work,
         };
         assert_eq!(opts.gap_id, "INFRA-191");
         assert!(opts.auto_merge);
@@ -2082,6 +2208,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: PathBuf::from("/tmp"),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, PathBuf::from("/tmp"));
         let err = ship(&ws).unwrap_err();
@@ -2110,6 +2237,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: PathBuf::from("/tmp"),
+            mode: DispatchMode::Work,
         };
         match opts.work {
             WorkBackend::Headless {
@@ -2163,6 +2291,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: PathBuf::from("/tmp"),
+            mode: DispatchMode::Work,
         };
         matches!(opts.work, WorkBackend::ExecGap);
     }
@@ -2176,6 +2305,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: PathBuf::from("/tmp"),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, PathBuf::from("/tmp"));
         let err = spawn_headless(&ws, "claude-sonnet-4-6", "   ").unwrap_err();
@@ -2211,6 +2341,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: PathBuf::from("/tmp"),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, PathBuf::from("/tmp"));
         // Interactive should just return Ok(()) without spawning anything.
@@ -2232,6 +2363,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: PathBuf::from("/tmp/some-existing-worktree"),
+            mode: DispatchMode::Work,
         };
         let ws = Workspace::new(&opts).expect("Interactive must not touch git");
         assert_eq!(
@@ -2455,6 +2587,117 @@ mod tests {
             .status();
     }
 
+    /// INFRA-8199 AC2: a repair dispatch's worktree must start from the open
+    /// PR's head branch, not origin/main. Builds a repo whose origin has a
+    /// `claude/credible-9999` branch one commit ahead of main (the "PR
+    /// head"), plus a stale diverged local copy of that branch, and asserts
+    /// the worktree is on that branch at the PR head commit and that the
+    /// diverged local copy was preserved under refs/dispatch-backup/.
+    #[test]
+    fn repair_worktree_is_based_on_pr_head_not_origin_main() {
+        let tmp = tempfile::TempDir::new().expect("create tempdir");
+        let repo_root = tmp.path().join("main");
+        std::fs::create_dir_all(&repo_root).expect("mk repo_root");
+        let git = |dir: &Path, args: &[&str]| -> String {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .expect("spawn git");
+            assert!(out.status.success(), "git {args:?} failed: {out:?}");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        git(&repo_root, &["init", "--quiet", "-b", "main"]);
+        git(&repo_root, &["config", "user.email", "test@example.com"]);
+        git(&repo_root, &["config", "user.name", "Test"]);
+        std::fs::write(repo_root.join("f.txt"), "x").unwrap();
+        git(&repo_root, &["add", "."]);
+        git(&repo_root, &["commit", "-m", "init", "--quiet"]);
+        let main_sha = git(&repo_root, &["rev-parse", "HEAD"]);
+
+        // The PR head: one commit ahead of main on claude/credible-9999.
+        git(
+            &repo_root,
+            &["checkout", "--quiet", "-b", "claude/credible-9999"],
+        );
+        std::fs::write(repo_root.join("pr.txt"), "pr work").unwrap();
+        git(&repo_root, &["add", "."]);
+        git(&repo_root, &["commit", "-m", "pr work", "--quiet"]);
+        let pr_sha = git(&repo_root, &["rev-parse", "HEAD"]);
+
+        let bare = tmp.path().join("origin.git");
+        assert!(Command::new("git")
+            .args(["clone", "--quiet", "--bare"])
+            .arg(&repo_root)
+            .arg(&bare)
+            .status()
+            .unwrap()
+            .success());
+        git(
+            &repo_root,
+            &["remote", "add", "origin", bare.to_str().unwrap()],
+        );
+        git(&repo_root, &["fetch", "--quiet", "origin"]);
+
+        // A stale local copy of the head branch that diverged from the PR.
+        git(&repo_root, &["checkout", "--quiet", "main"]);
+        git(
+            &repo_root,
+            &["branch", "-f", "claude/credible-9999", "main"],
+        );
+        git(&repo_root, &["checkout", "--quiet", "-b", "scratch"]);
+        std::fs::write(repo_root.join("local.txt"), "unpushed").unwrap();
+        git(&repo_root, &["add", "."]);
+        git(&repo_root, &["commit", "-m", "unpushed local", "--quiet"]);
+        let local_sha = git(&repo_root, &["rev-parse", "HEAD"]);
+        git(
+            &repo_root,
+            &["branch", "-f", "claude/credible-9999", &local_sha],
+        );
+        git(&repo_root, &["checkout", "--quiet", "main"]);
+
+        let wt = create_dispatch_worktree_from(
+            &repo_root,
+            "CREDIBLE-9999",
+            Some("claude/credible-9999"),
+        )
+        .expect("repair worktree created");
+
+        assert_eq!(
+            git(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            "claude/credible-9999",
+            "repair worktree must be on the PR head branch"
+        );
+        let head = git(&wt, &["rev-parse", "HEAD"]);
+        assert_eq!(
+            head, pr_sha,
+            "repair worktree must start at the PR head commit"
+        );
+        assert_ne!(
+            head, main_sha,
+            "repair worktree must not start from origin/main"
+        );
+        assert_eq!(
+            git(
+                &repo_root,
+                &["rev-parse", "refs/dispatch-backup/claude/credible-9999"]
+            ),
+            local_sha,
+            "diverged local branch must be preserved, not destroyed"
+        );
+        assert_eq!(
+            git(&wt, &["config", "branch.claude/credible-9999.merge"]),
+            "refs/heads/claude/credible-9999"
+        );
+
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(&repo_root)
+            .args(["worktree", "remove", "--force"])
+            .arg(&wt)
+            .status();
+    }
+
     /// INFRA-8207 regression: `set_dispatch_branch_upstream` must point a
     /// branch's upstream at itself (origin/<branch>), not leave it tracking
     /// whatever `git worktree add -b <branch> origin/main` set up (origin/main) —
@@ -2532,6 +2775,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: tmp.clone(),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, tmp.clone());
         let res = claim(&ws);
@@ -2577,6 +2821,7 @@ mod tests {
             skip_tests: false,
             paths: Some("src/,scripts/"),
             repo_root: PathBuf::from("/repo"),
+            mode: DispatchMode::Work,
         };
         assert_eq!(opts.paths, Some("src/,scripts/"));
     }
@@ -2601,6 +2846,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: PathBuf::from("/repo"),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, PathBuf::from("/working"));
         assert_eq!(ws.opts().gap_id, "INFRA-191");
@@ -2645,6 +2891,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: dir.to_path_buf(),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, dir.to_path_buf());
 
@@ -2692,6 +2939,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: dir.to_path_buf(),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, dir.to_path_buf());
 
@@ -2748,6 +2996,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: dir.to_path_buf(),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, dir.to_path_buf());
 
@@ -2788,6 +3037,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: dir.to_path_buf(),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, dir.to_path_buf());
 
@@ -2848,6 +3098,7 @@ mod tests {
             skip_tests: true,
             paths: None,
             repo_root: dir.to_path_buf(),
+            mode: DispatchMode::Work,
         };
         let ws = ws_with_dir(&opts, dir.to_path_buf());
 

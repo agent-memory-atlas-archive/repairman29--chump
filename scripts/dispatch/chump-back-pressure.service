@@ -2,5 +2,5 @@
 Description=Chump production back-pressure controller (halt/resume workers on jam)
 [Service]
 Type=oneshot
-Environment=HOME=/root
-ExecStart=/bin/bash -lc "set -a; source /root/.chump/providers.env 2>/dev/null; set +a; cd /root/Projects/chump; exec bash scripts/ops/back-pressure-controller.sh"
+Environment=HOME=__HOME__
+ExecStart=/bin/bash -lc "set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/ops/back-pressure-controller.sh"

@@ -8,7 +8,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd /Users/jeffadkins/Projects/Chump &amp;&amp; bash scripts/coord/queue-driver.sh</string>
+    <string>cd __REPO_ROOT__ &amp;&amp; bash scripts/coord/queue-driver.sh</string>
   </array>
   <!-- INFRA-1304: every 5 min. queue-driver does:
        - INFRA-1081: BEHIND PR scan from cache, gh pr update-branch refresh
@@ -23,14 +23,14 @@
   <key>StandardErrorPath</key>
   <string>/tmp/chump-queue-driver.err.log</string>
   <key>WorkingDirectory</key>
-  <string>/Users/jeffadkins/Projects/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>EnvironmentVariables</key>
   <dict>
     <!-- gh CLI needs HOME to find the auth token. -->
     <key>HOME</key>
-    <string>/Users/jeffadkins</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/Users/jeffadkins/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <string>__HOME__/.local/bin:__BREW_PREFIX__/bin:/usr/bin:/bin</string>
   </dict>
 </dict>
 </plist>

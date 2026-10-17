@@ -15,16 +15,15 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=jeff
-Environment=HOME=/home/jeff
-Environment=PATH=/home/jeff/.cargo/bin:/home/jeff/Projects/chump/target/release:/usr/local/bin:/usr/bin:/bin
-Environment=CHUMP_REPO_ROOT=/home/jeff/Projects/chump
-WorkingDirectory=/home/jeff/Projects/chump
+Environment=HOME=__HOME__
+Environment=PATH=__HOME__/.cargo/bin:__REPO_ROOT__/target/release:/usr/local/bin:/usr/bin:/bin
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+WorkingDirectory=__REPO_ROOT__
 # Source providers.env (OPENROUTER_API_KEY etc.) for parity with the other
 # organs; the drain script pins OPENAI_API_BASE->openrouter/deepseek-v4-pro from
 # OPENROUTER_API_KEY itself, so the cheap floor — not local ollama — serves the
 # enrich/decompose calls.
-ExecStart=/bin/bash -lc 'set -a; source /home/jeff/.chump/providers.env 2>/dev/null; source /home/jeff/.chump/cj.env 2>/dev/null; set +a; cd /home/jeff/Projects/chump; exec bash scripts/dispatch/gap-drain.sh'
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; source __HOME__/.chump/cj.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/dispatch/gap-drain.sh'
 # Enrichment is ~55s/gap (deepseek-v4-pro w/ reasoning); a full tick of 6 enrich
 # + 2 decompose fits well under this ceiling.
 TimeoutStartSec=1800

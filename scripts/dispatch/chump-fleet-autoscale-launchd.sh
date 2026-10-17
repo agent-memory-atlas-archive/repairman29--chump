@@ -21,6 +21,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix, the shell mirror of chump_provision::brew_prefix).
+# shellcheck source=scripts/lib/host-paths.sh
+source "$SCRIPT_DIR/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 # INFRA-451: resolve to main worktree so the plist absolute path survives
 # worktree reaping.  Fall back to two-levels-up if the helper is absent.
@@ -135,7 +140,7 @@ cat > "$PLIST" <<PLIST_EOF
         <key>HOME</key>
         <string>${HOME}</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:${HOME}/.cargo/bin:/usr/bin:/bin</string>
+        <string>/usr/local/bin:${BREW_PREFIX}/bin:${HOME}/.cargo/bin:/usr/bin:/bin</string>
         <key>CHUMP_FLEET_SCALE_LOW_GB</key>
         <string>${LOW_GB}</string>
         <key>CHUMP_FLEET_SCALE_HIGH_GB</key>

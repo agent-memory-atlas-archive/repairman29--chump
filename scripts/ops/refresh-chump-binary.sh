@@ -50,7 +50,11 @@ cd "$REPO" || { echo "cannot cd to $REPO" >&2; exit 1; }
 # worker.sh's resolution so the cron and interactive sessions share one
 # build cache.
 if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
-    export CARGO_TARGET_DIR="${CHUMP_SHARED_CARGO_TARGET:-$HOME/.cargo/chump-shared-target}"
+    # ZERO-WASTE-134: the one shared resolver.
+    # shellcheck source=../ci/lib/resolve-cargo-target-dir.sh
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/../ci/lib/resolve-cargo-target-dir.sh"
+    export CARGO_TARGET_DIR="$(chump_cargo_target_dir)"
     mkdir -p "$CARGO_TARGET_DIR" 2>/dev/null || true
     printf '{"ts":"%s","kind":"cargo_target_dir_shared","source":"refresh-chump-binary.sh","target_dir":"%s"}\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CARGO_TARGET_DIR" \

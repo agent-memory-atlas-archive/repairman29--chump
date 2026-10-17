@@ -170,14 +170,18 @@ PRE_HASH=$(git -C "$WT_PATH" rev-parse HEAD)
 # ── Step 3: Build binary ──────────────────────────────────────────────
 log "step 3/6: building chump binary"
 
-# Use per-worktree target dir to avoid shared-binary footgun (RESILIENT-001)
-export CARGO_TARGET_DIR="$WT_PATH/target"
+# ZERO-WASTE-134: one shared cargo target (no per-worktree build dir); the binary
+# path below is read from $CARGO_TARGET_DIR, not from a worktree-local target/.
+# shellcheck source=../ci/lib/resolve-cargo-target-dir.sh
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh"
+export CARGO_TARGET_DIR="$(chump_cargo_target_dir)"
 if ! cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" 2>/dev/null; then
     # Fallback: use the repo's existing binary
     log "  WARN: cargo build failed; falling back to existing binary"
     CHUMP_BIN=$(which chump 2>/dev/null || echo "$REPO_ROOT/target/release/chump")
 else
-    CHUMP_BIN="$WT_PATH/target/release/chump"
+    CHUMP_BIN="$CARGO_TARGET_DIR/release/chump"
 fi
 
 if [[ ! -x "$CHUMP_BIN" ]]; then

@@ -245,12 +245,16 @@ fi
 source "$(dirname "$0")/../lib/repo-paths.sh"
 cd "$REPO_ROOT"
 
-# INFRA-1374: pin cargo target dir to a per-worktree path so the pre-commit
-# hook's cargo clippy (triggered by `git commit` below) doesn't contend with
-# parallel fleet builds on the shared target-dir from .cargo/config.toml.
-# Only set if caller hasn't already pinned (bot-merge.sh sets it earlier).
-if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
-    export CARGO_TARGET_DIR="${REPO_ROOT}/.cargo-build-target"
+# ZERO-WASTE-134: ONE cargo target resolver (scripts/ci/lib/resolve-cargo-target-dir.sh).
+# $CARGO_TARGET_DIR > $CHUMP_CARGO_TARGET > ~/.cargo/chump-shared-target. Never a
+# path inside the worktree: the old INFRA-1374 per-worktree default grew a private
+# 2.4-3 GB build dir in every worktree (4 dirs, 10 GiB measured 2026-10-17) because
+# the hook path does not inherit the agent's shell. Prints one line per commit.
+# shellcheck source=../ci/lib/resolve-cargo-target-dir.sh
+# shellcheck disable=SC1091
+if [[ -f "$(dirname "$0")/../ci/lib/resolve-cargo-target-dir.sh" ]]; then
+    source "$(dirname "$0")/../ci/lib/resolve-cargo-target-dir.sh"
+    chump_export_cargo_target_dir
 fi
 
 # Warn (non-blocking) when operating in the main checkout. Separate

@@ -57,8 +57,17 @@ grep -q "_KEEP_ROOT_ORGANS" "$ROOT/scripts/setup/install-helsinki-atc.sh" \
 grep -qE '^enabled[[:space:]]+chump-organ-deploy\.timer' "$ROOT/scripts/ops/organ-manifest.txt" \
   || fail "organ-manifest.txt must declare chump-organ-deploy.timer enabled"
 [ -f "$ROOT/scripts/dispatch/chump-organ-deploy.service" ] || fail "missing chump-organ-deploy.service"
-grep -q "^User=root" "$ROOT/scripts/dispatch/chump-organ-deploy.service" \
-  || fail "chump-organ-deploy.service must declare User=root"
-ok "keep-root exemption + manifest row + User=root unit all present"
+# INFRA-8194 (R5 slice 2): the unit is a placeholder template and carries NO
+# User= literal; root is declared by NAME in both renderers' keep-root sets
+# (the installer map above, and chump_provision::KEEP_ROOT_UNITS, whose
+# keep_root_units_render_user_root_at_system_scope_only test proves the
+# rendered system-scope unit says User=root).
+grep -q "^User=" "$ROOT/scripts/dispatch/chump-organ-deploy.service" \
+  && fail "chump-organ-deploy.service must not bake a User= literal (the renderer injects User=root)"
+grep -qE '\[chump-organ-deploy\.service\]=1' "$ROOT/scripts/setup/install-helsinki-atc.sh" \
+  || fail "install-helsinki-atc.sh _KEEP_ROOT_ORGANS must list chump-organ-deploy.service"
+grep -q '"chump-organ-deploy.service"' "$ROOT/crates/chump-provision/src/lib.rs" \
+  || fail "chump_provision::KEEP_ROOT_UNITS must list chump-organ-deploy.service"
+ok "keep-root exemption (installer + typed renderer) + manifest row present; unit carries no User= literal"
 
 if [ "$FAIL" -eq 0 ]; then echo "PASS test-organ-deploy"; else echo "FAILED test-organ-deploy"; exit 1; fi

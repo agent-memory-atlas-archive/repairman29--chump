@@ -384,18 +384,7 @@ def cmd_sync_from_yaml(args, root: Path) -> int:
     conn.close()
     print(f"applied: {len(plan)} rows")
 
-    # Regenerate the human-readable SQL dump so the diff is reviewable.
-    # Best-effort: in CI fast-checks the `chump` binary isn't installed
-    # (no cargo install step in .github/workflows/ci.yml fast-checks job).
-    # FileNotFoundError must be caught — `check=False` does NOT suppress it
-    # (it only suppresses CalledProcessError on non-zero exit).
-    try:
-        subprocess.run(
-            ["chump", "gap", "dump", "--out", str(root / ".chump" / "state.sql")],
-            check=False, capture_output=True,
-        )
-    except FileNotFoundError:
-        pass  # chump binary not on PATH (e.g. CI runner) — state.sql regen is a nicety
+    # INFRA-8193: .chump/state.sql left git; no dump is regenerated here.
     return 0
 
 
@@ -662,8 +651,8 @@ def main() -> int:
     root = repo_root()
 
     # INFRA-499: post-INFRA-498 the per-file docs/gaps/<ID>.yaml mirrors
-    # are deleted from origin/main entirely (state.db is canonical,
-    # state.sql is the tracked human-readable mirror). gap-doctor's
+    # are deleted from origin/main entirely (state.db is canonical;
+    # INFRA-8193: no tracked dump either). gap-doctor's
     # drift checks compare state.db against those YAMLs — with no
     # tracked YAMLs the entire purpose is moot.
     #
@@ -676,8 +665,8 @@ def main() -> int:
     if not has_yamls:
         print(
             "[gap-doctor] post-INFRA-498: docs/gaps/*.yaml deleted — "
-            "no drift to detect. state.db is canonical, .chump/state.sql "
-            "is the tracked mirror. Use 'chump gap show <ID>' for "
+            "no drift to detect. state.db is the only truth (INFRA-8193). "
+            "Use 'chump gap show <ID>' for "
             "human-readable per-gap inspection.",
             file=sys.stderr,
         )

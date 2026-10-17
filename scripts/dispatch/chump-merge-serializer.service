@@ -9,9 +9,11 @@
 # Companion: where this runs, disable chump-armed-rebaser.timer (the parallel
 # rebase-everyone organ that was resetting `verified` on every main move).
 #
-# Written in the helsinki (/root) convention; install-helsinki-atc.sh host-rewrites
-# /root -> the run-user's HOME (User=, Environment=HOME=, WorkingDirectory=, PATH)
-# so the SAME unit works on any owned node (CJ: User=jeff, HOME=/home/jeff).
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
 [Unit]
 Description=Chump merge-serializer — serialize the final merge step so each PR gets a clean `verified` pass (RESILIENT-372)
 After=network-online.target
@@ -19,6 +21,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/coord/merge-serializer.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/coord/merge-serializer.sh'

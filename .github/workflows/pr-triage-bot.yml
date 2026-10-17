@@ -36,10 +36,18 @@ permissions:
   contents: write
   pull-requests: write
 
-# INFRA-1378: per-PR group, cancel-in-progress so redundant triage attempts dedupe.
+# INFRA-1378: per-branch group so redundant triage attempts dedupe.
+# ZERO-WASTE-135: the old key (workflow_run.pull_requests[0].number ||
+# pull_request.number || github.ref) was empty for same-repo push CI runs and for
+# every check_run event, so all of those fell into ONE repo-wide group
+# (refs/heads/main) with cancel-in-progress: true, cancelling unrelated PRs'
+# triage mid-write. Key on the branch under triage (workflow_run.head_branch, or
+# check_run.check_suite.head_branch). cancel-in-progress is false because this
+# workflow writes mid-run (lint-fix pushes, PR comments/labels,
+# gap-registry commits): at most one run per branch executes and one waits.
 concurrency:
-  group: pr-triage-bot-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: pr-triage-bot-${{ github.event.workflow_run.head_branch || github.event.check_run.check_suite.head_branch || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # ────────────────────────────────────────────────────────────────────

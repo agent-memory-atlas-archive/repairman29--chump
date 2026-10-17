@@ -16,9 +16,18 @@ permissions:
   actions: write
   contents: read
 
+# ZERO-WASTE-135: stable key per upstream event type + branch, NOT per upstream
+# head_sha. A per-sha key never dedupes: every Audit/integrations completion on a
+# fresh sha opened its own group, so a hosted-runner stall queued 14 of these on
+# main (2026-10-17 14:25Z). Keying on event+branch lets a newer completion
+# supersede an older queued/running one for the same branch. Event type is in
+# the key so a `push` completion (the job below skips it) can never cancel a
+# real pull_request/merge_group recompute on the same branch. Safe to cancel:
+# the job only polls and POSTs one idempotent job-rerun; a cancelled half-run
+# leaves no state and the superseding run re-derives the verdict.
 concurrency:
-  group: verified-recompute-${{ github.event.workflow_run.head_sha }}
-  cancel-in-progress: false
+  group: verified-recompute-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
 
 jobs:
   rerun-verified:
@@ -40,10 +49,10 @@ jobs:
           for _ in $(seq 1 40); do
             row="$(gh api "repos/${GH_REPO}/actions/runs/${ci_run}/jobs" --paginate -q '.jobs[] | select(.name=="verified") | "\(.id) \(.status) \(.conclusion)"' | tail -1)"
             [ -z "$row" ] && { echo "no verified job yet"; exit 0; }
-            set -- $row
-            if [ "$2" = "completed" ]; then
-              if [ "$3" = "success" ]; then echo "verified already green"; exit 0; fi
-              gh api -X POST "repos/${GH_REPO}/actions/jobs/$1/rerun" && echo "re-ran verified job $1 (run ${ci_run})"
+            read -r job_id job_status job_conclusion <<<"$row"
+            if [ "$job_status" = "completed" ]; then
+              if [ "$job_conclusion" = "success" ]; then echo "verified already green"; exit 0; fi
+              gh api -X POST "repos/${GH_REPO}/actions/jobs/${job_id}/rerun" && echo "re-ran verified job ${job_id} (run ${ci_run})"
               exit 0
             fi
             sleep 15

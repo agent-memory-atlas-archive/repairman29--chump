@@ -18,8 +18,8 @@ trap "rm -f $tmp" EXIT
 # Fixture: one done gap (must skip), one open gap (must pick), no deps.
 cat > "$tmp" <<'JSON'
 [
-  {"id":"INFRA-100","status":"done","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"},
-  {"id":"INFRA-200","status":"open","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"}
+  {"id":"INFRA-100","status":"done","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"},
+  {"id":"INFRA-200","status":"open","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"}
 ]
 JSON
 
@@ -37,8 +37,8 @@ fi
 # All-done fixture: must return nothing.
 cat > "$tmp" <<'JSON'
 [
-  {"id":"INFRA-100","status":"done","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"},
-  {"id":"INFRA-300","status":"in_progress","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"}
+  {"id":"INFRA-100","status":"done","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"},
+  {"id":"INFRA-300","status":"in_progress","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"}
 ]
 JSON
 
@@ -55,7 +55,7 @@ fi
 # the silent-empty-queue bug — `"[]".strip()` is truthy → every gap got
 # filtered out as "has dependencies").
 cat > "$tmp" <<'JSON'
-[{"id":"INFRA-400","status":"open","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"}]
+[{"id":"INFRA-400","status":"open","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"}]
 JSON
 result=$(GAP_JSON_FILE="$tmp" FLEET_PRIORITY_FILTER=P0,P1 FLEET_EFFORT_FILTER=xs,s,m \
   python3 "$PICKER")
@@ -65,14 +65,17 @@ else
   fail "picker filtered out gap with stringified empty depends_on (got: '$result')"
 fi
 
-# Real dep-blocked gap must still be skipped.
+# Real dep-blocked gap must still be skipped. The blocker INFRA-100 must EXIST
+# as open work (RESILIENT-1114: a dangling dep id is treated as resolved), and
+# is excluded from picking via EXCLUDE_RE so only INFRA-500's gating is tested.
 cat > "$tmp" <<'JSON'
-[{"id":"INFRA-500","status":"open","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[\"INFRA-100\"]"}]
+[{"id":"INFRA-100","status":"open","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]"},
+{"id":"INFRA-500","status":"open","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[\"INFRA-100\"]"}]
 JSON
-result=$(GAP_JSON_FILE="$tmp" FLEET_PRIORITY_FILTER=P0,P1 FLEET_EFFORT_FILTER=xs,s,m \
+result=$(GAP_JSON_FILE="$tmp" EXCLUDE_RE="^INFRA-100$" FLEET_PRIORITY_FILTER=P0,P1 FLEET_EFFORT_FILTER=xs,s,m \
   python3 "$PICKER")
 if [ -z "$result" ]; then
-  pass "picker still skips gap with real dependency"
+  pass "picker still skips gap with real (unresolved) dependency"
 else
   fail "picker returned dep-blocked gap: '$result'"
 fi

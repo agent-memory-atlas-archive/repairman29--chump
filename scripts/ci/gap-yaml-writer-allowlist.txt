@@ -1,0 +1,18 @@
+# gap-yaml-writer-allowlist.txt — INFRA-8193 (Phase R R4)
+#
+# Baseline of KNOWN routes that write docs/gaps/*.yaml outside the export
+# path (chump gap dump --per-file / chump gap sync --push / chump gap ship's
+# single-gap sync). Checked by scripts/ci/test-gap-yaml-export-only.sh.
+#
+# This list may ONLY SHRINK. CI fails when a line is added (vs origin/main),
+# when a detected writer is missing here, or when a line here is no longer a
+# writer (delete it). Retire an entry by routing the write through state.db
+# and the export path, then delete the line in the same PR.
+#
+# Format: <repo-relative path>  # reason
+#
+# Baseline 2026-10-17:
+scripts/ci/lib/gate-fixtures.sh            # CI fixture: writes TEST-000/TEST-001 into a scratch repo
+scripts/coord/gap-doctor.py                # bucket1 rewrites per-file YAML status=done from DB; retire in slice 2 (archive)
+scripts/dispatch/free-tier-e2e-test.sh     # e2e fixture: plants a test gap YAML in a throwaway worktree
+src/commands/voice.rs                      # chump voice files VOA-N straight to docs/gaps/; should reserve in state.db then export

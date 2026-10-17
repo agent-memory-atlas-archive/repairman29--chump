@@ -17,9 +17,9 @@ SESSION="test-session-$$"
 # Registry: two open gaps + one in the inbox HANDOFF.
 cat > "$TMP/gaps.json" <<'EOF'
 [
-  {"id":"INFRA-100","status":"open","priority":"P1","effort":"s","created_at":"2026-01-01T00:00:00Z"},
-  {"id":"INFRA-200","status":"open","priority":"P2","effort":"m","created_at":"2026-01-01T00:00:00Z"},
-  {"id":"INFRA-300","status":"done","priority":"P1","effort":"s","created_at":"2026-01-01T00:00:00Z"}
+  {"id":"INFRA-100","status":"open","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","created_at":"2026-01-01T00:00:00Z"},
+  {"id":"INFRA-200","status":"open","acceptance_criteria":"Implement the change and verify the behavior","priority":"P2","effort":"m","created_at":"2026-01-01T00:00:00Z"},
+  {"id":"INFRA-300","status":"done","acceptance_criteria":"Implement the change and verify the behavior","priority":"P1","effort":"s","created_at":"2026-01-01T00:00:00Z"}
 ]
 EOF
 

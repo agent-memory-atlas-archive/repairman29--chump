@@ -8,13 +8,15 @@
 # placeholders below and writes the result to
 # ~/.config/systemd/user/chumpd.service.
 #
-# Placeholders (substituted by provision-chumpd-host.sh):
+# Placeholders (rendered by provision-chumpd-host.sh through
+# chump_render_template: `chump node render-unit --host linux-systemd-user`,
+# sed mirror fallback; INFRA-8194):
 #   __REPO_ROOT__   absolute path to the cloned chump checkout on this host
 #   __HOME__        the provisioning user's $HOME
-#   __RUN_USER__    the provisioning user's username (`id -un`) — explicit
-#                   User= keeps this unit portable to a system-level install
-#                   (/etc/systemd/system) without silently running as root;
-#                   under `systemctl --user` it's a no-op self-reference.
+# There is deliberately NO User= line. A user manager cannot switch identity, so
+# any User= (even naming the user it already runs as) kills the unit at spawn
+# with 216/GROUP (RESILIENT-1571) or 217/USER (RESILIENT-1601). For a
+# system-level install the typed renderer injects User=<run-user> itself.
 #
 # STATUS: chumpd itself (MISSION-051) has not merged yet, so ExecStart
 # below points at a binary that may not exist until then. The unit is
@@ -31,9 +33,8 @@
 #
 # Install (user-level, no sudo/root needed):
 #   mkdir -p ~/.config/systemd/user
-#   sed -e "s|__REPO_ROOT__|/path/to/chump-host|g" -e "s|__HOME__|$HOME|g" \
-#     -e "s|__RUN_USER__|$(id -un)|g" \
-#     scripts/setup/chumpd.service > ~/.config/systemd/user/chumpd.service
+#   chump node render-unit scripts/setup/chumpd.service --host linux-systemd-user \
+#     --repo-root /path/to/chump-host --out ~/.config/systemd/user/chumpd.service
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now chumpd.service
 #   loginctl enable-linger "$(id -un)"   # keep it running after SSH logout
@@ -52,7 +53,6 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=__RUN_USER__
 WorkingDirectory=__REPO_ROOT__
 ExecStart=__REPO_ROOT__/target/release/chumpd
 EnvironmentFile=-__HOME__/.chump/chumpd.env

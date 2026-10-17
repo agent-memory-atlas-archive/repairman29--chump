@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# test-gap-sync.sh — INFRA-2053
+# test-gap-sync.sh — INFRA-2053, export-only since INFRA-8193
 #
-# Verifies bidirectional `chump gap sync` (YAML <-> state.db) across four
-# drift classes on a synthetic fixture:
-#   1. YAML-only          : YAML exists, no DB row.        Pull inserts.
+# Verifies `chump gap sync` (state.db -> YAML mirror) across five drift
+# classes on a synthetic fixture. state.db is the only truth: YAML never
+# writes back into it.
+#   1. YAML-only          : YAML exists, no DB row.        Stays drift (never imported).
 #   2. DB-only            : DB row exists, no YAML.         Push creates YAML.
-#   3. TODO-AC overwrite  : DB has TODO ACs, YAML concrete. Pull recovers.
-#   4. Title divergence   : Both exist, titles differ.      Pull updates DB.
+#   3. AC divergence      : DB has TODO ACs, YAML concrete. Push repaints YAML from DB.
+#   4. Title divergence   : Both exist, titles differ.      Push repaints YAML from DB.
+#   5. Shipped gap        : DB done, YAML stale open.       Push repaints YAML to done.
 #
-# Smoke test contract (per dispatch deliverable):
-#   - `sync --check` exits non-zero + lists all 4 drift instances.
-#   - `sync --pull` makes the DB match YAML for cases 1, 3, 4.
-#   - `sync --check` rerun exits 0 (clean) after pull repaints + push fills.
-#   - `sync --push` writes the missing YAML for case 2.
+# Smoke test contract:
+#   - `sync --check` exits non-zero + lists all 5 drift instances.
+#   - `sync --pull` (and `--pull --dry-run`) is REFUSED with exit 2, names
+#     `chump store reconcile`, and leaves the DB untouched (INFRA-8193).
+#   - `sync --push` writes YAML for cases 2-5 from the DB.
+#   - `sync --check` rerun reports only case1 (yaml-only), never imported.
 #
 # Uses a tempdir + temp state.db; never touches the real .chump/state.db
 # or docs/gaps/. Disables ambient.jsonl writes via CHUMP_AMBIENT_DISABLE.
@@ -175,64 +178,27 @@ echo "$CHECK_OUT" | grep -q 'db-only' || fail "case2 expected kind 'db-only' mis
 echo "$CHECK_OUT" | grep -q 'divergent' || fail "divergent kind missing (case3+case4+case5)"
 pass "check reported all 5 drift cases + non-zero exit ($CHECK_RC)"
 
-# ── 2. `sync --pull` updates DB for cases 1, 3, 4 — skips case5 (INFRA-3606) ──
-info "step 2: chump gap sync --pull (expect DB updates, terminal status preserved)"
-set +e
-PULL_OUT="$("$CHUMP_BIN" gap sync --pull --state-db "$FAKE_DB" --gaps-dir "$FAKE_ROOT/docs/gaps" --json 2>&1)"
-PULL_RC=$?
-set -e
-[[ $PULL_RC -eq 0 ]] || fail "pull exited non-zero: $PULL_RC. Output:\n$PULL_OUT"
-echo "$PULL_OUT" | grep -q '"inserted":1' || fail "pull should insert exactly 1 row (case1). Output:\n$PULL_OUT"
-echo "$PULL_OUT" | grep -q '"updated":2' || fail "pull should update exactly 2 rows (case3, case4). Output:\n$PULL_OUT"
-echo "$PULL_OUT" | grep -q '"skipped":1' || fail "pull should skip exactly 1 row (case5, terminal status guard). Output:\n$PULL_OUT"
-pass "pull reported 1 insert + 2 updates + 1 skipped (terminal status)"
+# ── 2. `sync --pull` is refused and the DB is untouched (INFRA-8193) ────
+info "step 2: chump gap sync --pull (expect exit 2, no DB mutation)"
+DB_BEFORE="$(sqlite3 "$FAKE_DB" "SELECT id||'|'||title||'|'||status||'|'||acceptance_criteria FROM gaps ORDER BY id;")"
+for pull_args in "--pull" "--pull --dry-run" "--pull --json"; do
+    set +e
+    # shellcheck disable=SC2086
+    PULL_OUT="$("$CHUMP_BIN" gap sync $pull_args --state-db "$FAKE_DB" --gaps-dir "$FAKE_ROOT/docs/gaps" 2>&1)"
+    PULL_RC=$?
+    set -e
+    [[ $PULL_RC -eq 2 ]] || fail "'sync $pull_args' should exit 2 (refused); got $PULL_RC. Output:\n$PULL_OUT"
+    echo "$PULL_OUT" | grep -q 'chump store reconcile' \
+        || fail "'sync $pull_args' refusal must point at chump store reconcile. Output:\n$PULL_OUT"
+done
+DB_AFTER="$(sqlite3 "$FAKE_DB" "SELECT id||'|'||title||'|'||status||'|'||acceptance_criteria FROM gaps ORDER BY id;")"
+[[ "$DB_BEFORE" == "$DB_AFTER" ]] || fail "refused --pull mutated the DB"
+[[ -z "$(sqlite3 "$FAKE_DB" "SELECT id FROM gaps WHERE id='INFRA-9101';")" ]] \
+    || fail "case1 YAML-only gap was imported into the DB"
+pass "--pull refused (exit 2, names chump store reconcile), DB untouched"
 
-# Verify case1 inserted into DB.
-INSERTED_TITLE=$(sqlite3 "$FAKE_DB" "SELECT title FROM gaps WHERE id='INFRA-9101';")
-[[ "$INSERTED_TITLE" == "case1-yaml-only" ]] \
-    || fail "case1 title in DB: expected 'case1-yaml-only', got '$INSERTED_TITLE'"
-pass "case1 row inserted into DB"
-
-# Verify case3 AC was overwritten from TODO to the concrete YAML version.
-CASE3_AC=$(sqlite3 "$FAKE_DB" "SELECT acceptance_criteria FROM gaps WHERE id='INFRA-9103';")
-if echo "$CASE3_AC" | grep -q 'TODO'; then
-    fail "case3 AC still has TODO: $CASE3_AC"
-fi
-echo "$CASE3_AC" | grep -q 'concrete recovered AC' \
-    || fail "case3 AC missing concrete content: $CASE3_AC"
-pass "case3 TODO-AC recovered from YAML"
-
-# Verify case4 title was updated.
-CASE4_TITLE=$(sqlite3 "$FAKE_DB" "SELECT title FROM gaps WHERE id='INFRA-9104';")
-[[ "$CASE4_TITLE" == "case4-YAML-NOW-WINS" ]] \
-    || fail "case4 title in DB: expected 'case4-YAML-NOW-WINS', got '$CASE4_TITLE'"
-pass "case4 title updated from YAML"
-
-# Verify case5 (INFRA-3606) status was NOT reverted from done to the stale
-# YAML's open — this is the split-brain regression this gap fixes.
-CASE5_STATUS=$(sqlite3 "$FAKE_DB" "SELECT status FROM gaps WHERE id='INFRA-9105';")
-[[ "$CASE5_STATUS" == "done" ]] \
-    || fail "INFRA-3606 REGRESSION: case5 status in DB: expected 'done', got '$CASE5_STATUS' — gap sync --pull reverted a shipped gap"
-pass "case5 (shipped gap) status stayed 'done' across sync --pull"
-
-# ── 3. `sync --check` now reports case2 + case5 (status still stale) ────
-info "step 3: chump gap sync --check after pull (expect case2 + case5 drift)"
-set +e
-CHECK_OUT2="$("$CHUMP_BIN" gap sync --check --state-db "$FAKE_DB" --gaps-dir "$FAKE_ROOT/docs/gaps" --json 2>&1)"
-CHECK_RC2=$?
-set -e
-[[ $CHECK_RC2 -ne 0 ]] || fail "expected non-zero (case2/case5 still drifted); got 0"
-echo "$CHECK_OUT2" | grep -q 'INFRA-9102' || fail "case2 should still be in drift report"
-echo "$CHECK_OUT2" | grep -q 'INFRA-9105' || fail "case5 should still be in drift report (YAML mirror still stale)"
-echo "$CHECK_OUT2" | grep -q 'INFRA-9101' && fail "case1 should be clean now"
-echo "$CHECK_OUT2" | grep -q 'INFRA-9103' && fail "case3 should be clean now"
-echo "$CHECK_OUT2" | grep -q 'INFRA-9104' && fail "case4 should be clean now"
-pass "post-pull check: only case2 + case5 remain as drift"
-
-# ── 4. `sync --push` writes case2's missing YAML + refreshes case5's stale
-#       terminal-status YAML (INFRA-3606: push now mirrors every status,
-#       not just open/in-progress, so the YAML side converges) ───────────
-info "step 4: chump gap sync --push (expect case2 + case5 YAML written)"
+# ── 3. `sync --push` repaints YAML from the DB for cases 2-5 ────────────
+info "step 3: chump gap sync --push (expect case2..case5 YAML written from DB)"
 set +e
 PUSH_OUT="$("$CHUMP_BIN" gap sync --push --state-db "$FAKE_DB" --gaps-dir "$FAKE_ROOT/docs/gaps" --json 2>&1)"
 PUSH_RC=$?
@@ -240,36 +206,28 @@ set -e
 [[ $PUSH_RC -eq 0 ]] || fail "push exited non-zero: $PUSH_RC. Output:\n$PUSH_OUT"
 [[ -f "$FAKE_ROOT/docs/gaps/INFRA-9102.yaml" ]] \
     || fail "case2 YAML not created at $FAKE_ROOT/docs/gaps/INFRA-9102.yaml"
-grep -q 'case2-db-only' "$FAKE_ROOT/docs/gaps/INFRA-9102.yaml" \
-    || fail "case2 YAML missing title"
-grep -q 'only-in-db' "$FAKE_ROOT/docs/gaps/INFRA-9102.yaml" \
-    || fail "case2 YAML missing AC"
+grep -q 'case2-db-only' "$FAKE_ROOT/docs/gaps/INFRA-9102.yaml" || fail "case2 YAML missing title"
+grep -q 'only-in-db' "$FAKE_ROOT/docs/gaps/INFRA-9102.yaml" || fail "case2 YAML missing AC"
 pass "case2 YAML written by push"
+grep -q 'case4-DB-WAS-HERE' "$FAKE_ROOT/docs/gaps/INFRA-9104.yaml" \
+    || fail "case4 YAML should carry the DB title after push: $(cat "$FAKE_ROOT/docs/gaps/INFRA-9104.yaml")"
+pass "case4 YAML repainted from the DB (the store wins)"
 grep -q 'status: done' "$FAKE_ROOT/docs/gaps/INFRA-9105.yaml" \
     || fail "case5 YAML still says status != done after push: $(cat "$FAKE_ROOT/docs/gaps/INFRA-9105.yaml")"
 pass "case5 YAML refreshed to status: done by push"
+CASE4_TITLE=$(sqlite3 "$FAKE_DB" "SELECT title FROM gaps WHERE id='INFRA-9104';")
+[[ "$CASE4_TITLE" == "case4-DB-WAS-HERE" ]] || fail "push must never write the DB (case4 title now '$CASE4_TITLE')"
 
-# ── 5. Final `sync --check` reports clean ───────────────────────────────
-info "step 5: chump gap sync --check after push (expect clean)"
+# ── 4. Final `sync --check`: only the never-imported case1 remains ─────
+info "step 4: chump gap sync --check after push (expect only case1 yaml-only)"
 set +e
-CHECK_OUT3="$("$CHUMP_BIN" gap sync --check --state-db "$FAKE_DB" --gaps-dir "$FAKE_ROOT/docs/gaps" 2>&1)"
-CHECK_RC3=$?
+CHECK_OUT2="$("$CHUMP_BIN" gap sync --check --state-db "$FAKE_DB" --gaps-dir "$FAKE_ROOT/docs/gaps" --json 2>&1)"
+CHECK_RC2=$?
 set -e
-[[ $CHECK_RC3 -eq 0 ]] \
-    || fail "expected clean post-push; got exit $CHECK_RC3. Output:\n$CHECK_OUT3"
-echo "$CHECK_OUT3" | grep -q 'clean' || fail "expected 'clean' in output: $CHECK_OUT3"
-pass "post-push check: tree is clean"
-
-# ── 6. dry-run --pull does not mutate ───────────────────────────────────
-info "step 6: dry-run pull does not mutate"
-# Re-seed a divergence to test dry-run.
-sqlite3 "$FAKE_DB" "UPDATE gaps SET title='dry-run-stale' WHERE id='INFRA-9101';"
-PRE_DRY_TITLE=$(sqlite3 "$FAKE_DB" "SELECT title FROM gaps WHERE id='INFRA-9101';")
-[[ "$PRE_DRY_TITLE" == "dry-run-stale" ]] || fail "seeding for dry-run failed"
-"$CHUMP_BIN" gap sync --pull --dry-run --state-db "$FAKE_DB" --gaps-dir "$FAKE_ROOT/docs/gaps" >/dev/null 2>&1
-POST_DRY_TITLE=$(sqlite3 "$FAKE_DB" "SELECT title FROM gaps WHERE id='INFRA-9101';")
-[[ "$POST_DRY_TITLE" == "dry-run-stale" ]] \
-    || fail "dry-run pull mutated DB (title now '$POST_DRY_TITLE')"
-pass "dry-run --pull left DB untouched"
+[[ $CHECK_RC2 -ne 0 ]] || fail "expected non-zero (case1 yaml-only still drifted); got 0"
+echo "$CHECK_OUT2" | grep -q '"drift_count":1' || fail "expected exactly 1 drift entry: $CHECK_OUT2"
+echo "$CHECK_OUT2" | grep -q 'INFRA-9101' || fail "case1 should remain as yaml-only drift: $CHECK_OUT2"
+echo "$CHECK_OUT2" | grep -q 'yaml-only' || fail "case1 drift kind should be yaml-only: $CHECK_OUT2"
+pass "post-push check: only case1 (yaml-only, never imported) remains"
 
 printf '\n[ALL PASS] test-gap-sync.sh\n'

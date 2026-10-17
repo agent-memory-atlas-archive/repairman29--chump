@@ -20,6 +20,13 @@
 #   CHUMP_A2A_DEAD_LETTER_REAPER_INTERVAL_S  — cadence in seconds (default 1800 = 30 min)
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Resolve main worktree so the plist path survives worktree reaping (INFRA-451).
@@ -110,7 +117,7 @@ cat > "$PLIST" <<PLISTEOF
         <key>HOME</key>
         <string>${HOME}</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>${BREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin</string>
         <!-- CHUMP_AMBIENT_PATH: explicit absolute path to ambient.jsonl (META-248). -->
         <key>CHUMP_AMBIENT_PATH</key>
         <string>${ROOT}/.chump-locks/ambient.jsonl</string>

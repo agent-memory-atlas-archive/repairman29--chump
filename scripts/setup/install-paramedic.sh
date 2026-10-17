@@ -15,6 +15,11 @@
 # AC §2: idempotent installer; AC §3: chump-fleet-bootstrap.sh integration.
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): __BREW_PREFIX__ in the plist template resolves
+# through the host resolver (chump_brew_prefix, the shell mirror of
+# chump_provision::brew_prefix) instead of a baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -132,6 +137,7 @@ mkdir -p "$LAUNCH_AGENTS_DIR" "$LOG_DIR"
 
 # Substitute placeholders in plist template.
 sed \
+    -e "s|__BREW_PREFIX__|$(chump_brew_prefix)|g" \
     -e "s|CHUMP_BIN_PLACEHOLDER|${CHUMP_BIN}|g" \
     -e "s|CHUMP_LOG_DIR_PLACEHOLDER|${LOG_DIR}|g" \
     "$PLIST_TEMPLATE" > "$INSTALLED_PLIST"

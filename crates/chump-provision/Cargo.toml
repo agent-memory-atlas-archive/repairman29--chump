@@ -1,0 +1,18 @@
+[package]
+name = "chump-provision"
+version = "0.1.0"
+edition = "2021"
+description = "Typed host provisioning for ChumpOS nodes (INFRA-8194, Phase R R5): a Host enum, a detector, and a unit/plist renderer that refuses host-literal templates."
+repository = "https://github.com/repairman29/chump"
+homepage = "https://github.com/repairman29/chump/tree/main/crates/chump-provision"
+license = "AGPL-3.0-only"
+
+[lib]
+name = "chump_provision"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = "1.0"
+
+[lints]
+workspace = true

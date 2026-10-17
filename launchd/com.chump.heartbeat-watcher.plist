@@ -8,10 +8,8 @@
   launchd will restart it automatically if it exits (KeepAlive true).
 
   INSTALLATION (manual — not auto-installed):
-    1. Edit this file: replace /path/to/Chump with your actual repo path,
-       e.g. /Users/jeff/Projects/Chump
-    2. Copy to ~/Library/LaunchAgents/:
-         cp launchd/com.chump.heartbeat-watcher.plist ~/Library/LaunchAgents/
+    1. Render the placeholders for this host (INFRA-8194; no hand edits):
+    2. chump node render-unit launchd/com.chump.heartbeat-watcher.plist --out ~/Library/LaunchAgents/com.chump.heartbeat-watcher.plist
     3. Load the agent:
          launchctl load ~/Library/LaunchAgents/com.chump.heartbeat-watcher.plist
     4. Verify it loaded:
@@ -22,14 +20,14 @@
          launchctl unload ~/Library/LaunchAgents/com.chump.heartbeat-watcher.plist
 
   LOGS:
-    daemon log:  /path/to/Chump/.chump-locks/.heartbeat-watcher.log
-    stdout:      /path/to/Chump/logs/heartbeat-watcher.out.log
-    stderr:      /path/to/Chump/logs/heartbeat-watcher.err.log
+    daemon log:  __REPO_ROOT__/.chump-locks/.heartbeat-watcher.log
+    stdout:      __REPO_ROOT__/logs/heartbeat-watcher.out.log
+    stderr:      __REPO_ROOT__/logs/heartbeat-watcher.err.log
 
   MANUAL TEST (without installing):
-    /path/to/Chump/scripts/dev/heartbeat-watcher.sh start
-    /path/to/Chump/scripts/dev/heartbeat-watcher.sh status
-    /path/to/Chump/scripts/dev/heartbeat-watcher.sh stop
+    __REPO_ROOT__/scripts/dev/heartbeat-watcher.sh start
+    __REPO_ROOT__/scripts/dev/heartbeat-watcher.sh status
+    __REPO_ROOT__/scripts/dev/heartbeat-watcher.sh stop
 
   NOTE: heartbeat-watcher.sh also prevents duplicate instances via a PID file
   at .chump-locks/.heartbeat-watcher.pid. launchd's KeepAlive provides an
@@ -42,12 +40,12 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/path/to/Chump/scripts/dev/heartbeat-watcher.sh</string>
+    <string>__REPO_ROOT__/scripts/dev/heartbeat-watcher.sh</string>
     <string>start</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- INFRA-819: Conditional KeepAlive — restart ONLY on crash (non-zero exit),
        NOT on clean exit (e.g. disk-preflight exit-0 path on graceful stop).
@@ -65,15 +63,15 @@
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/heartbeat-watcher.out.log</string>
+  <string>__REPO_ROOT__/logs/heartbeat-watcher.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/heartbeat-watcher.err.log</string>
+  <string>__REPO_ROOT__/logs/heartbeat-watcher.err.log</string>
 
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
+    <string>/usr/local/bin:/usr/bin:/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin</string>
     <!-- git must be on PATH for REPO_ROOT resolution inside the script. -->
   </dict>
 

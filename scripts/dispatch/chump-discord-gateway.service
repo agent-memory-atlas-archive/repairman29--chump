@@ -7,10 +7,12 @@
 # the exact drift class TREK-18 exists to kill. helsinki's decommission left the
 # two-way operator channel dark with nothing to revive it.
 #
-# HOST-AGNOSTIC: paths use /root/; install-helsinki-atc.sh host-rewrites `/root/`
-# -> the repo-owner's HOME and inserts `User=<owner>` under [Service]. The beat
-# additionally fixes HOME from the run-user at runtime (the sed only rewrites
-# `/root/` WITH a trailing slash, so a bare Environment=HOME=/root would survive).
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
+# The beat also re-derives HOME from the run user at runtime.
 [Unit]
 Description=Chump Discord receive gateway (serenity-free, two-way operator channel) — RESILIENT-370
 After=network-online.target
@@ -18,13 +20,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=HOME=/root
-Environment=CHUMP_REPO=/root/Projects/chump
-WorkingDirectory=/root/Projects/chump
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO=__REPO_ROOT__
+WorkingDirectory=__REPO_ROOT__
 # Source providers.env (export-format) for DISCORD_TOKEN + CHUMP_READY_DM_USER_ID
 # — the SAME creds notify-operator.sh uses for the outbound half. The beat
 # re-resolves and degrades gracefully (idles, never crash-loops) if absent.
-ExecStart=/bin/bash -c 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/dispatch/discord-gateway-beat.sh'
+ExecStart=/bin/bash -c 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/dispatch/discord-gateway-beat.sh'
 Restart=always
 RestartSec=10
 

@@ -7,6 +7,11 @@
 # Force fire: launchctl start dev.chump.farmer
 # Dry-run:    FARMER_DRY_RUN=1 bash scripts/coord/farmer.sh
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the tracked plist is a placeholder template
+# (__REPO_ROOT__ __HOME__ __BIN_DIR__ __BREW_PREFIX__), rendered for THIS host by
+# chump_render_template (typed `chump node render-unit`, sed mirror fallback).
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # resolve-main-worktree: resolves linked worktrees back to main repo root
@@ -22,10 +27,7 @@ echo "[install-farmer] dest=$DEST"
 mkdir -p "$HOME/Library/LaunchAgents"
 
 # Write the plist with real paths substituted
-sed \
-    -e "s|/path/to/Chump|$REPO|g" \
-    -e "s|/path/to/HOME|$HOME|g" \
-    "$PLIST_SRC" > "$DEST"
+chump_render_template "$PLIST_SRC" "$DEST" "$REPO"
 
 echo "[install-farmer] plist written"
 

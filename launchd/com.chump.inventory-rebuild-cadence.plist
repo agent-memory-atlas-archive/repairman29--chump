@@ -14,22 +14,22 @@
     <array>
         <string>/bin/bash</string>
         <string>-lc</string>
-        <string>cd REPO_ROOT &amp;&amp; exec bash scripts/coord/inventory-rebuild-cadence.sh</string>
+        <string>cd __REPO_ROOT__ &amp;&amp; exec bash scripts/coord/inventory-rebuild-cadence.sh</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>REPO_ROOT</string>
+    <string>__REPO_ROOT__</string>
     <!-- Weekly (604800s) — tier-0 findings are review-only and accumulate -->
     <!-- slowly; this is a gardener cadence, not a real-time watchdog. -->
     <key>StartInterval</key>
     <integer>604800</integer>
     <key>StandardOutPath</key>
-    <string>REPO_ROOT/.chump-locks/inventory-rebuild-cadence.log</string>
+    <string>__REPO_ROOT__/.chump-locks/inventory-rebuild-cadence.log</string>
     <key>StandardErrorPath</key>
-    <string>REPO_ROOT/.chump-locks/inventory-rebuild-cadence.log</string>
+    <string>__REPO_ROOT__/.chump-locks/inventory-rebuild-cadence.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/Users/jeffadkins/.cargo/bin:/Users/jeffadkins/.local/bin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:__BREW_PREFIX__/bin:__HOME__/.cargo/bin:__HOME__/.local/bin</string>
     </dict>
     <key>RunAtLoad</key>
     <false/>

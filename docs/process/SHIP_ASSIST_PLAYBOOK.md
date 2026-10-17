@@ -90,6 +90,7 @@ Today's evidence: 3 occurrences (cycle 5, 6, 13 of today's loop). Trailer `Bot-M
 | `gh pr merge N --auto --squash` | Manual auto-merge arm | Fallback when bot-merge wedges (Class 4) |
 | `scripts/coord/auto-merge-armer.sh` | Bulk arm auto-merge across queue | When multiple PRs need re-arming after rebase |
 | `rm -f .chump-locks/claim-<gap>-*.json` | Manual lease release | When bot-merge didn't release; cleaner than `chump --release` for orphaned leases |
+| `bash scripts/coord/pr-cut.sh N --reason "..."` (RESILIENT-1607) | Close a fleet PR on purpose; the `chump pr cut` verb in shell form | The ONLY sanctioned way to cut a duplicate or superseded fleet PR (see "Closing a fleet PR on purpose") |
 
 ### Tier 2 — Wedge response (you'll use these when something is stuck)
 | Tool | Wedge class | Today's evidence |
@@ -333,6 +334,16 @@ gh pr edit <N> --add-label no-auto-merge && gh pr merge <N> --disable-auto
 **Release.** Remove the label (`gh pr edit <N> --remove-label no-auto-merge`) or edit the marker line out; the next armer tick re-arms.
 **How it is enforced.** `scripts/coord/lib/arm-policy.sh` `arm_policy_allows <pr> [armer] [repo]` is called by every shell armer (gate: `scripts/ci/test-arm-policy.sh`, allowlist `scripts/ci/arm-policy-allowlist.txt`, shrink-only). Legacy labels `hold`, `do-not-merge` and `CHUMP_HOLD` are honored too. A blocked arm emits `kind=pr_arm_skipped_hold`; an arm that undoes a disarm emits `kind=pr_rearmed` naming the armer (`auto-merge-armer.sh<-<caller>`), so `grep pr_rearmed .chump-locks/ambient.jsonl` names the next re-arm war's source.
 
+## Class 14 — recovery mode: when the normal bot-merge path is wedged
+
+**Symptom.** A bot-merge run wedged (`kind=botmerge_wedged`, a stage past budget, `bot_merge_crashed`) after the branch already passed rebase/lint/test, and only the push + PR + arm leg needs retrying.
+**Ship it.** Re-run in recovery mode from the gap's worktree; it skips rebase/lint/test and does push, PR create/update, arm:
+```bash
+CHUMP_BOT_MERGE_RECOVERY_MODE=1 bash scripts/coord/bot-merge.sh --gap <GAP-ID> --auto-merge
+```
+No `CHUMP_BOT_MERGE_IN_PROGRESS=1` prefix and no Guard 4 bypass env var and no `Bot-Merge-Bypass` trailer are needed (INFRA-8208): the recovery block exports the marker itself before its push, so pre-push Guard 4 (INFRA-719) accepts a first push of a `chump/<gap>-*` branch. If the PR is missing, recovery creates it with `gh pr create --base --head --title --body` and reads the number from the printed URL (INFRA-8209); a gh failure prints the reason and emits `kind=botmerge_recovery_pr_create_failed` (RESILIENT-217).
+**Do not reap it.** A recovery ship takes no lease and idles the git index during clippy, so the worktree reapers could not see it (2026-10-16 18:46Z, `infra-8180` removed mid-push, `kind=bot_merge_crashed`). bot-merge now touches `.chump-locks/bot-merge-<pid>.steps` at every step and heartbeat tick, and the reapers skip any worktree named by a steps file younger than `CHUMP_REAPER_BOT_MERGE_GRACE_MIN` (default 15) or used as the cwd of a live process: `kind=worktree_reaper_skipped_active` with `reason=bot_merge_live` (RESILIENT-1609). Gates: `scripts/ci/test-reaper-bot-merge-live.sh`, `test-bot-merge-recovery-in-progress.sh`, `test-bot-merge-recovery-pr-create.sh`.
+
 ## Running scripts/ci tests from a Mac lane (CREDIBLE-1511)
 
 The Mac implementation lane runs `scripts/ci/test-*.sh` locally before pushing. Notes from
@@ -366,6 +377,24 @@ to hide them. Real reds as of `origin/main` eef8a96c3:
 
 Treat these as known-red until their owning lane fixes them; do not let them gate a Mac push.
 
+## Closing a fleet PR on purpose — `pr-cut`
+
+**The rule.** The only sanctioned way to close a fleet PR on purpose is `bash scripts/coord/pr-cut.sh <N> --reason "<text>"` (the shell form of `chump pr cut`; the Rust arm follows under Phase R R6). A bare `gh pr close`, or `gh pr close` plus a hand-applied `rot-reaped` label, is not sanctioned: two organs police closed fleet PRs and both will fight it.
+
+**What the verb does, in order.** Creates the `pr-cut` label if missing, adds it BEFORE closing (so an organ polling the close window already sees it), closes with a comment carrying your reason, emits `kind=pr_cut`, and appends a note to the PR's gap (if the gap store is not reachable it prints the `chump gap set ... --notes` command instead of failing). It refuses a merged PR and a missing `--reason`; `--dry-run` shows the plan.
+
+**The two labels, one meaning each.**
+
+| Label | Meaning | Who sets it | Organs' behavior |
+|---|---|---|---|
+| `rot-reaped` | The no-abandon janitor closed it: a reaper VICTIM. Revivable. | `scripts/ops/rot-reaper.sh` only (with a `kind=pr_reaped` ambient event) | `post-push-integrity-watch.sh` leaves it closed; `trunk-recovery-reviver.sh` may revive it, but only when a `kind=pr_reaped` event exists for that PR (the label alone is not proof) and it is green-underneath after a trunk recovery |
+| `pr-cut` | Closed DELIBERATELY by a human or architect. TERMINAL. | `scripts/coord/pr-cut.sh` only | Nothing reopens or revives it: the watch skips it, the reviver skips it even if it also carries `rot-reaped` or a `pr_reaped` event |
+
+Never apply `rot-reaped` by hand: it is a claim that the janitor closed the PR, and the reviver will take you at your word.
+
+**Also covered (RESILIENT-1606).** `post-push-integrity-watch.sh` additionally leaves a close alone when a non-bot actor commented within 60s of the close (tunable: `CHUMP_POST_PUSH_WATCH_COMMENT_S`, `CHUMP_POST_PUSH_WATCH_AUTOMATION_LOGINS`). GitHub's stale-push auto-close posts no comment, so the original INFRA-2026 incident (a close right after a force-push, no comment) is still reopened.
+
+**Receipt.** 2026-10-16: the architect's deliberate duplicate cuts of #5478 and #5483 were reopened by the watch within 15s of each close (ambient `post_push_auto_close_recovered` 13:35:12Z and 13:35:15Z; also 05:59Z and 10:41Z), then revived by the reviver at 14:31Z after being labeled `rot-reaped` by hand at 14:02Z. Four reopens, two PRs, one verb missing. Test: `scripts/ci/test-pr-cut-honored.sh` and `scripts/ci/test-trunk-recovery-reviver.sh`.
 **Clippy must use the pinned toolchain, not Homebrew's rust (INFRA-8225).** `rust-toolchain.toml`
 pins the compiler to a single patch (today `channel = "1.96.0"`) so local and CI agree on the lint
 set. A **Homebrew `rust`** (`brew install rust`) is a stand-alone toolchain, *not* a rustup proxy — it

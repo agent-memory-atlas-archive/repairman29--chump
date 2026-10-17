@@ -21,7 +21,7 @@ automatically, keeping PRs green without human intervention.
 | `web/v2/index.html` | `union` (git built-in) | Unique-line union |
 | `scripts/git-hooks/pre-commit` | `pre-commit-add-guard` | Append guard blocks |
 | `docs/gaps/*.yaml` | `gap-yaml-add-line` | Take ours (newest state) |
-| `.chump/state.sql` | `chump-state-sql-regen` | Regenerate from canonical SQLite |
+| ~~`.chump/state.sql`~~ | ~~`chump-state-sql-regen`~~ | Retired by INFRA-8193 (the file left git) |
 | `Cargo.toml` | `cargo-toml-append` (→ `merge-driver-append-only.sh`) | Pure-append + dedup |
 | `web/v2/app.js` | `js-append` (→ `merge-driver-append-only.sh`) | Pure-append + dedup |
 | `src/main.rs` | `rust-main-append` (→ `merge-driver-append-only.sh`) | Pure-append + dedup |

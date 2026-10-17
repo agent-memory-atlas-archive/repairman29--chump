@@ -4,15 +4,15 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 T=$(mktemp -d -t noderegtest); trap 'rm -rf "$T"' EXIT
-mkdir -p "$T/root/docs/fleet/nodes" "$T/root/scripts/dispatch" "$T/bin"
-cp "$HERE/node-registry-refresh.sh" "$T/root/scripts/dispatch/"
-REG="$T/root/docs/fleet/nodes"
+mkdir -p "$T/repo/docs/fleet/nodes" "$T/repo/scripts/dispatch" "$T/bin"
+cp "$HERE/node-registry-refresh.sh" "$T/repo/scripts/dispatch/"
+REG="$T/repo/docs/fleet/nodes"
 # The refresher defaults to the operator's REAL registry (~/.chump/fleet/nodes). Pin it to the
 # fixture, or this test overwrites live node records with fake ones.
 export CHUMP_NODE_REGISTRY_DIR="$REG"
 
 # A describe script that just echoes a valid profile for whatever host it runs on.
-cat > "$T/root/scripts/dispatch/node-describe.sh" <<'DESC'
+cat > "$T/repo/scripts/dispatch/node-describe.sh" <<'DESC'
 #!/usr/bin/env bash
 echo "{\"node_id\":\"probed\",\"probed_at\":\"2026-01-01T00:00:00Z\",\"hardware\":{\"cpu_cores\":9}}"
 DESC
@@ -24,7 +24,7 @@ cat > "$T/bin/ssh" <<FAKE
 args="\$*"
 echo "\$args" >> "$T/ssh-calls.log"
 case "\$args" in
-  *up*) cat >/dev/null; bash "$T/root/scripts/dispatch/node-describe.sh" ;;
+  *up*) cat >/dev/null; bash "$T/repo/scripts/dispatch/node-describe.sh" ;;
   *)    cat >/dev/null; exit 255 ;;
 esac
 FAKE
@@ -36,7 +36,7 @@ printf '{"node_id":"up","hardware":{"cpu_cores":1},"role_pin":"brain","role_pin_
 printf '{"node_id":"down","hardware":{"cpu_cores":2},"services_running":["important"]}\n' > "$REG/down.json"
 printf '{"node_id":"odd","ssh_target":"droid@1.2.3.4 -p 8022"}\n' > "$REG/odd.json"
 
-out=$(cd "$T/root" && bash scripts/dispatch/node-registry-refresh.sh 2>&1)
+out=$(cd "$T/repo" && bash scripts/dispatch/node-registry-refresh.sh 2>&1)
 pass=0; fail=0
 ck(){ if eval "$2"; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1 :: $out"; fail=$((fail+1)); fi; }
 
@@ -57,7 +57,7 @@ ck "N7b the run reports counts" 'echo "$out" | grep -q "1 probed, 2 unreachable"
 # Dry run must not write.
 printf '{"node_id":"down","hardware":{"cpu_cores":2}}\n' > "$REG/down.json"
 before=$(md5 -q "$REG/down.json" 2>/dev/null || md5sum "$REG/down.json" | cut -d" " -f1)
-out=$(cd "$T/root" && DRY_RUN=1 bash scripts/dispatch/node-registry-refresh.sh 2>&1)
+out=$(cd "$T/repo" && DRY_RUN=1 bash scripts/dispatch/node-registry-refresh.sh 2>&1)
 after=$(md5 -q "$REG/down.json" 2>/dev/null || md5sum "$REG/down.json" | cut -d" " -f1)
 ck "N8 DRY_RUN writes nothing" '[ "$before" = "$after" ]'
 

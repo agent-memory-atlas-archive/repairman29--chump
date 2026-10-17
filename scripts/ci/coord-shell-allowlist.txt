@@ -16,3 +16,4 @@
 # Example (hypothetical):
 #   # reason: pure operator recovery wrapper around `chump worktree repair`
 #   scripts/coord/recover-worktree-by-hand.sh
+scripts/coord/pr-cut.sh   # reason: gh glue for the sanctioned deliberate-close verb (close + label + comment + gap note is GitHub state); the Rust `chump pr cut` arm follows (Phase R R6, RESILIENT-1607)

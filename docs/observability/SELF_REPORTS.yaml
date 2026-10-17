@@ -1,0 +1,345 @@
+# docs/observability/SELF_REPORTS.yaml — CREDIBLE-1493 (Phase R R7, slice 1)
+#
+# Every operational self-report the fleet reads about itself, paired with a
+# ground-truth probe and a comparison rule. `chump calibrate` runs both sides
+# and emits one kind=self_report_calibration ambient event; fleet-brief and
+# `chump kpi report` print "calibration: N/M instruments agree (last run <ts>)".
+#
+# WHY: the instruments have lied, by large factors, for days at a time.
+#   - CREDIBLE-149: fleet_status counted 189 active leases vs ~1 real.
+#   - CREDIBLE-146: auth-status served a stale cached verdict for 6 days.
+#   - 2026-10-01: the ship gauge read ~6x the real merge count.
+#   - 2026-10-15: the scoreboard read a stale root binary and said deploy STALE
+#     while the organs ran the fresh one.
+#   - 2026-10-15: src/floor_temp.rs said admin_merge_executed=0 the day #5466
+#     merged with `verified` red through pr-shepherd-daemon.sh --admin.
+#   - fleet-brief printed "fleet looks healthy" while two organs had been
+#     failed for days.
+#
+# Schema (validated by scripts/ci/test-self-reports-registry.sh and the unit
+# tests in src/commands/calibrate.rs):
+#
+#   instruments:            named, memoized commands (run once per calibration)
+#     <name>: { source: <tree path>, cmd: <bash>, requires: [...], timeout_secs: N }
+#   pairs:
+#     - id:          unique, kebab-case
+#       description: one line
+#       receipt:     the incident that motivated the pair (optional)
+#       self_report: { instrument: <name>, extract: <bash reading stdin> }
+#                  | { source: <tree path>, cmd: <bash> }
+#       probe:       { cmd: <bash>, requires: [...] }  (source optional)
+#       compare:     { rule: equal }
+#                  | { rule: within, abs: N, rel: F }     |a-b| <= max(abs, rel*max)
+#                  | { rule: same_bucket, thresholds: [..] }
+#
+# A side's value is the last non-empty stdout line. Exit codes are ignored; a
+# side that prints nothing, times out, or has an unmet `requires` makes the
+# pair UNPROBED, never "agree". requires: bin:<name> | file:<path> | os:<linux|macos>
+# | env:<VAR> | systemd.
+#
+# Commands run under bash with cwd = repo root and these exported:
+#   CHUMP_CALIBRATE_REPO_ROOT  CHUMP_CALIBRATE_LOCKS_DIR  CHUMP_CALIBRATE_GH_REPO
+#   CHUMP_CALIBRATE_NOW_EPOCH  CHUMP_CALIBRATE_SINCE_1H   CHUMP_CALIBRATE_SINCE_24H
+#   CHUMP_CALIBRATE_SINCE_7D   (ISO-8601 UTC; no BSD/GNU `date` arithmetic needed)
+
+version: 1
+
+instruments:
+  fleet-brief:
+    source: src/main.rs
+    cmd: chump fleet brief --json 2>/dev/null
+    requires: ["bin:chump", "bin:jq"]
+  mission-scoreboard:
+    source: scripts/dev/mission-scoreboard.sh
+    cmd: bash scripts/dev/mission-scoreboard.sh 2>/dev/null
+    requires: ["bin:gh", "bin:git"]
+    timeout_secs: 300
+  fleet-doctor:
+    source: scripts/coord/fleet-doctor-strict.sh
+    cmd: bash scripts/coord/fleet-doctor-strict.sh --json 2>/dev/null
+    requires: ["bin:python3", "bin:jq"]
+    timeout_secs: 300
+  floor-temp:
+    source: src/floor_temp.rs
+    cmd: chump health --temp --json 2>/dev/null
+    requires: ["bin:chump", "bin:jq"]
+  kpi-report:
+    source: crates/chump-kpi-report/src/kpi_report.rs
+    cmd: chump kpi report --json 2>/dev/null
+    requires: ["bin:chump", "bin:jq"]
+
+pairs:
+  # ── floor-temp ────────────────────────────────────────────────────────────
+  - id: floor-temp-admin-merges
+    description: floor-temp admin_merge_executed (24h) vs merged PRs whose `verified` check was not green
+    receipt: "#5466 merged with verified red via --admin while floor_temp reported admin_merge_executed=0 (2026-10-15)"
+    self_report:
+      instrument: floor-temp
+      extract: jq '[.components[]? | select(.kind=="admin_merge_executed") | .count] | add // 0'
+    probe:
+      requires: ["bin:gh"]
+      cmd: >-
+        gh pr list --repo "$CHUMP_CALIBRATE_GH_REPO" --state merged
+        --search "merged:>=$CHUMP_CALIBRATE_SINCE_24H" --limit 300 --json statusCheckRollup
+        --jq '[.[] | select([.statusCheckRollup[]? | select(.name=="verified") | select(.conclusion != "SUCCESS")] | length > 0)] | length'
+    compare: { rule: equal }
+
+  # ── fleet-brief ───────────────────────────────────────────────────────────
+  - id: brief-ships-24h
+    description: fleet brief ships_24h (local origin/main, no fetch) vs PRs merged on GitHub in 24h
+    self_report:
+      instrument: fleet-brief
+      extract: jq '.ships_24h // empty'
+    probe:
+      requires: ["bin:gh"]
+      cmd: >-
+        gh pr list --repo "$CHUMP_CALIBRATE_GH_REPO" --state merged
+        --search "merged:>=$CHUMP_CALIBRATE_SINCE_24H" --limit 500 --json number --jq length
+    compare: { rule: within, abs: 2, rel: 0.2 }
+
+  - id: brief-ships-1h
+    description: fleet brief ships_1h (the STALLED leading indicator) vs PRs merged on GitHub in 1h
+    self_report:
+      instrument: fleet-brief
+      extract: jq '.ships_1h // empty'
+    probe:
+      requires: ["bin:gh"]
+      cmd: >-
+        gh pr list --repo "$CHUMP_CALIBRATE_GH_REPO" --state merged
+        --search "merged:>=$CHUMP_CALIBRATE_SINCE_1H" --limit 100 --json number --jq length
+    compare: { rule: within, abs: 1, rel: 0 }
+
+  - id: brief-healthy-vs-failed-organs
+    description: fleet brief "fleet looks healthy" vs failed chump-* systemd units (system + user scope)
+    receipt: fleet-brief said healthy while two organs failed for days
+    self_report:
+      instrument: fleet-brief
+      extract: >-
+        jq -r 'if ([.suggestions[]? | select(startswith("✓") | not)] | length) == 0
+        then "healthy" else "attention" end'
+    probe:
+      requires: ["bin:systemctl", "systemd"]
+      cmd: |
+        n=$( { systemctl list-units --state=failed --no-legend --plain 'chump-*' 2>/dev/null
+               systemctl --user list-units --state=failed --no-legend --plain 'chump-*' 2>/dev/null; } | grep -c 'chump-')
+        if [ "$n" -eq 0 ]; then echo healthy; else echo attention; fi
+    compare: { rule: equal }
+
+  # ── mission scoreboard ────────────────────────────────────────────────────
+  - id: scoreboard-deploy-freshness
+    description: scoreboard deploy FRESH/STALE (reads `command -v chump`) vs the binary organs actually run
+    receipt: 2026-10-15 scoreboard read a stale root binary and reported deploy-STALE while organs ran the fresh one
+    self_report:
+      instrument: mission-scoreboard
+      extract: >-
+        awk '/③ Deploy/{getline; if ($0 ~ /STALE/) print "STALE"; else if ($0 ~ /within freshness/) print "FRESH"; exit}'
+    probe:
+      requires: ["bin:git"]
+      cmd: |
+        b="${CHUMP_CALIBRATE_ORGAN_BIN:-$HOME/.cargo/bin/chump}"
+        [ -x "$b" ] || exit 0
+        be=$(stat -L -c %Y "$b" 2>/dev/null || stat -L -f %m "$b" 2>/dev/null) || exit 0
+        me=$(git -C "$CHUMP_CALIBRATE_REPO_ROOT" log -1 --format=%ct origin/main 2>/dev/null) || exit 0
+        sla="${MISSION_SCOREBOARD_DEPLOY_SLA_SECONDS:-1800}"
+        if [ "$be" -ge "$me" ] || [ $((CHUMP_CALIBRATE_NOW_EPOCH - me)) -le "$sla" ]; then echo FRESH; else echo STALE; fi
+    compare: { rule: equal }
+
+  - id: scoreboard-merges-24h
+    description: scoreboard "merges last 24h" (date-granular search) vs PRs merged in the last 24h exactly
+    self_report:
+      instrument: mission-scoreboard
+      extract: grep -oE 'merges last 24h:[[:space:]]*[0-9]+' | grep -oE '[0-9]+$'
+    probe:
+      requires: ["bin:gh"]
+      cmd: >-
+        gh pr list --repo "$CHUMP_CALIBRATE_GH_REPO" --state merged
+        --search "merged:>=$CHUMP_CALIBRATE_SINCE_24H" --limit 500 --json number --jq length
+    compare: { rule: within, abs: 2, rel: 0.2 }
+
+  - id: scoreboard-last-merge-age
+    description: scoreboard "last merge Nm ago" vs the committer time of main's tip on GitHub
+    self_report:
+      instrument: mission-scoreboard
+      extract: grep -oE 'last merge -?[0-9]+m ago' | grep -oE -- '-?[0-9]+'
+    probe:
+      requires: ["bin:gh", "bin:python3"]
+      cmd: |
+        ts=$(gh api "repos/$CHUMP_CALIBRATE_GH_REPO/commits/main" --jq .commit.committer.date 2>/dev/null) || exit 0
+        [ -n "$ts" ] || exit 0
+        python3 -c 'import sys,datetime; t=datetime.datetime.fromisoformat(sys.argv[1].replace("Z","+00:00")); print(int((int(sys.argv[2]) - t.timestamp()) // 60))' "$ts" "$CHUMP_CALIBRATE_NOW_EPOCH"
+    compare: { rule: within, abs: 15, rel: 0.1 }
+
+  - id: scoreboard-beast-merges-7d
+    description: scoreboard ① BEAST merges last 7d vs PRs merged into repairman29/BEAST-MODE in 7d
+    self_report:
+      instrument: mission-scoreboard
+      extract: >-
+        grep -A1 '① THE BINARY' | tail -1
+        | grep -oE '[0-9]+ BEAST merge|BEAST merges last 7d: [0-9]+' | grep -oE '[0-9]+' | tail -1
+    probe:
+      requires: ["bin:gh"]
+      cmd: >-
+        gh pr list --repo repairman29/BEAST-MODE --state merged
+        --search "merged:>=$CHUMP_CALIBRATE_SINCE_7D" --limit 500 --json number --jq length
+    compare: { rule: within, abs: 1, rel: 0.15 }
+
+  # ── fleet-doctor ──────────────────────────────────────────────────────────
+  - id: doctor-disk
+    description: fleet-doctor disk check pass/fail vs df on the repo filesystem at the same thresholds
+    self_report:
+      instrument: fleet-doctor
+      extract: jq -r '.checks[]? | select(.name=="disk") | .status'
+    probe:
+      cmd: >-
+        df -k "$CHUMP_CALIBRATE_REPO_ROOT" | awk -v min="${DISK_MIN_GB:-5}" -v pct="${DISK_PRESSURE_PCT:-90}"
+        'NR==2 { gb=int($4/1024/1024); u=$5; gsub(/%/,"",u); print ((gb>=min && u+0<pct) ? "pass" : "fail") }'
+    compare: { rule: equal }
+
+  - id: doctor-p0-budget
+    description: fleet-doctor p0-budget pass/fail (greps `gap list` text) vs sqlite3 count of open P0s in the canonical store
+    self_report:
+      instrument: fleet-doctor
+      extract: jq -r '.checks[]? | select(.name=="p0-budget") | .status'
+    probe:
+      source: scripts/coord/lib/state-store.sh
+      requires: ["bin:sqlite3"]
+      cmd: |
+        . "$CHUMP_CALIBRATE_REPO_ROOT/scripts/coord/lib/state-store.sh" 2>/dev/null || exit 0
+        db=$(CHUMP_REPO="$CHUMP_CALIBRATE_REPO_ROOT" chump_state_db 2>/dev/null) || exit 0
+        [ -f "$db" ] || exit 0
+        n=$(sqlite3 "$db" "SELECT COUNT(*) FROM gaps WHERE status='open' AND priority='P0'" 2>/dev/null) || exit 0
+        [ -n "$n" ] || exit 0
+        if [ "$n" -le "${P0_MAX:-5}" ]; then echo pass; else echo fail; fi
+    compare: { rule: equal }
+
+  - id: doctor-dirty-prs
+    description: fleet-doctor dirty-prs (reads the github_cache.db mirror) vs GitHub's own mergeStateStatus
+    self_report:
+      instrument: fleet-doctor
+      extract: jq -r '.checks[]? | select(.name=="dirty-prs") | .status'
+    probe:
+      requires: ["bin:gh"]
+      cmd: |
+        n=$(gh pr list --repo "$CHUMP_CALIBRATE_GH_REPO" --state open --limit 300 \
+              --json mergeStateStatus,updatedAt \
+              --jq "[.[] | select(.mergeStateStatus==\"DIRTY\" and .updatedAt < \"$CHUMP_CALIBRATE_SINCE_24H\")] | length" 2>/dev/null) || exit 0
+        [ -n "$n" ] || exit 0
+        if [ "$n" -eq 0 ]; then echo pass; else echo fail; fi
+    compare: { rule: equal }
+
+  - id: doctor-organ-roll-call
+    description: fleet-doctor organ-live failures vs failed chump-* units systemd reports (zero vs nonzero)
+    receipt: fleet-brief said healthy while two organs failed for days
+    self_report:
+      instrument: fleet-doctor
+      extract: jq '[.checks[]? | select((.name | startswith("organ-live:")) and .status == "fail")] | length'
+    probe:
+      requires: ["bin:systemctl", "systemd"]
+      cmd: |
+        { systemctl list-units --state=failed --no-legend --plain 'chump-*' 2>/dev/null
+          systemctl --user list-units --state=failed --no-legend --plain 'chump-*' 2>/dev/null; } | grep -c 'chump-'
+    compare: { rule: same_bucket, thresholds: [1] }
+
+  # ── auth-status ───────────────────────────────────────────────────────────
+  - id: auth-status-cached-vs-fresh
+    description: auth-status default verdict (TTL cache) vs a forced real `claude -p` probe (exit 0 ok / 1 broken / 2 trap)
+    receipt: CREDIBLE-146 stale cached auth verdict froze the fleet for 6 days
+    self_report:
+      source: scripts/coord/auth-status.sh
+      requires: ["bin:claude"]
+      cmd: bash scripts/coord/auth-status.sh --quiet >/dev/null 2>&1; echo $?
+    probe:
+      source: scripts/coord/auth-status.sh
+      requires: ["bin:claude"]
+      cmd: bash scripts/coord/auth-status.sh --probe --quiet >/dev/null 2>&1; echo $?
+    compare: { rule: equal }
+
+  # ── fleet-status lease counter ────────────────────────────────────────────
+  - id: fleet-status-active-leases
+    description: fleet-status "Active leases" vs lease files in the main checkout whose expires_at is still in the future
+    receipt: CREDIBLE-149 fleet_status reported 189 active leases vs ~1 real
+    self_report:
+      source: src/fleet_status.rs
+      requires: ["bin:chump"]
+      cmd: chump fleet-status 2>/dev/null | grep -oE 'Active leases:[[:space:]]+[0-9]+' | grep -oE '[0-9]+$'
+    probe:
+      requires: ["bin:python3"]
+      cmd: |
+        python3 - "$CHUMP_CALIBRATE_LOCKS_DIR" <<'PY'
+        import datetime, glob, json, os, sys
+        now = datetime.datetime.now(datetime.timezone.utc)
+        n = 0
+        for p in glob.glob(os.path.join(sys.argv[1], "*.json")):
+            try:
+                d = json.load(open(p))
+            except Exception:
+                continue
+            e = d.get("expires_at") if isinstance(d, dict) else None
+            if e in (None, ""):
+                continue
+            try:
+                if isinstance(e, (int, float)):
+                    t = datetime.datetime.fromtimestamp(e, datetime.timezone.utc)
+                else:
+                    t = datetime.datetime.fromisoformat(str(e).replace("Z", "+00:00"))
+                    if t.tzinfo is None:
+                        t = t.replace(tzinfo=datetime.timezone.utc)
+            except Exception:
+                continue
+            n += t > now
+        print(n)
+        PY
+    compare: { rule: within, abs: 1, rel: 0 }
+
+  # ── kpi ship gauge ────────────────────────────────────────────────────────
+  - id: kpi-ships-1d
+    description: kpi report ship_rate 1d total (gaps closed in the store) vs PRs merged on GitHub in 24h
+    receipt: 2026-10-01 the ship gauge read ~6x the real merge count
+    self_report:
+      instrument: kpi-report
+      extract: jq '.ship_rate.windows[]? | select(.label=="1d") | .total'
+    probe:
+      requires: ["bin:gh"]
+      cmd: >-
+        gh pr list --repo "$CHUMP_CALIBRATE_GH_REPO" --state merged
+        --search "merged:>=$CHUMP_CALIBRATE_SINCE_24H" --limit 500 --json number --jq length
+    compare: { rule: within, abs: 2, rel: 0.5 }
+
+  # ── Phase R R6 gauge ──────────────────────────────────────────────────────
+  - id: invariant-boundary-shell-writers
+    description: shell_invariant_writers (the R6.1 gate's single-line regex count) vs an independent multi-line reading of scripts/
+    self_report:
+      source: scripts/ci/test-invariant-boundary.sh
+      cmd: >-
+        CHUMP_BOUNDARY_GATE=shadow bash scripts/ci/test-invariant-boundary.sh 2>/dev/null
+        | awk '/No violations detected/{print 0} /Total violators:/{print $3}'
+    probe:
+      requires: ["bin:python3"]
+      cmd: |
+        python3 - "$CHUMP_CALIBRATE_REPO_ROOT/scripts" <<'PY'
+        import os, re, sys
+        mut = re.compile(r"\b(UPDATE|INSERT|DELETE|REPLACE)\b")
+        lock = re.compile(r"(>>?|\btee\b|\bmv\b|\bcp\b|open\().{0,160}\.chump-locks/[^\s\"']*\.json")
+        status_sql = re.compile(r"SET\s+status\s*=\s*'(done|shipped|open|blocked|in_progress)'", re.I)
+        n = 0
+        for root, _, files in os.walk(sys.argv[1]):
+            for f in files:
+                if not f.endswith((".sh", ".py")) or f.startswith("test-"):
+                    continue
+                try:
+                    lines = open(os.path.join(root, f), errors="replace").read().splitlines()
+                except OSError:
+                    continue
+                code = [l for l in lines if not l.lstrip().startswith("#")]
+                hit = False
+                for i, l in enumerate(code):
+                    if "sqlite3" in l and any(mut.search(x) for x in code[i:i + 8]):
+                        hit = True
+                    elif lock.search(l) or status_sql.search(l):
+                        hit = True
+                    if hit:
+                        break
+                n += hit
+        print(n)
+        PY
+    compare: { rule: within, abs: 2, rel: 0.25 }

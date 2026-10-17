@@ -12,7 +12,13 @@
 #   2. its git index was touched within CHUMP_REAPER_INDEX_MIN (default 5)
 #      minutes — an in-flight `git add` / commit / checkout;
 #   3. it has uncommitted changes OR unpushed commits — work not yet safe on a
-#      remote, so reaping it destroys real work.
+#      remote, so reaping it destroys real work;
+#   4. (RESILIENT-1609) a bot-merge ship is live in it: a fresh
+#      .chump-locks/bot-merge-*.steps file names it, or a live process has it
+#      as its cwd. Reported as reason=bot_merge_live. A recovery-mode ship
+#      (CHUMP_BOT_MERGE_RECOVERY_MODE=1) takes no lease and leaves the git
+#      index idle during clippy, so checks 1-3 alone let the reaper remove
+#      infra-8180 mid-push on 2026-10-16.
 #
 # WHY (the INFRA-1074 bug): the critical-mode cargo target reaper used the
 # active lease as its ONLY guard. A worktree created via `git worktree add`
@@ -36,6 +42,11 @@
 # Returns 0 = ACTIVE (protect/skip), 1 = safe to reap.
 # On protect, emits kind=worktree_reaper_skipped_active to ambient.jsonl.
 
+# RESILIENT-1609: wt_has_live_bot_merge lives in the shared reaper lib.
+# shellcheck source=../../lib/worktree-iter.sh
+# shellcheck disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]:-$0}")/../../lib/worktree-iter.sh" 2>/dev/null || true
+
 # Returns 0 (active) / 1 (reapable). Never deletes anything.
 worktree_is_active() {
   local wt="$1"
@@ -56,6 +67,12 @@ worktree_is_active() {
     repo_root="$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null || pwd)"
   fi
   local lock_dir="$repo_root/.chump-locks"
+
+  # ── 0. Live bot-merge ship (RESILIENT-1609) ────────────────────────────────
+  if declare -F wt_has_live_bot_merge >/dev/null 2>&1 \
+     && wt_has_live_bot_merge "$wt" "$lock_dir"; then
+    reason="bot_merge_live"
+  fi
 
   # ── 1. Fresh lease referencing this worktree ───────────────────────────────
   # RESILIENT-218: `chump claim` writes worktrees at the deterministic path

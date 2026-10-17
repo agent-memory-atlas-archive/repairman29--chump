@@ -23,7 +23,7 @@
 #   git config --get-regexp '^merge\.' | grep -E 'driver|name'
 #
 # Drivers registered (INFRA-310):
-#   chump-state-sql-regen: regenerates .chump/state.sql from .chump/state.db on conflict
+#   (chump-state-sql-regen retired by INFRA-8193 — .chump/state.sql left git)
 #   ci-yml-add-row: merges .github/workflows/ci.yml step additions
 #   pre-commit-add-guard: merges scripts/git-hooks/pre-commit guard additions
 #   gap-yaml-add-line: resolves docs/gaps/*.yaml conflicts by using ours (newest state)
@@ -37,16 +37,13 @@ if [[ -z "$REPO_ROOT" ]]; then
 fi
 cd "$REPO_ROOT"
 
-# ── Register state.sql regeneration driver ────────────────────────────────────
-DRIVER_SCRIPT_REL="scripts/git/merge-driver-state-sql-regen.sh"
-DRIVER_NAME="chump-state-sql-regen"
-
-if [[ -x "$DRIVER_SCRIPT_REL" ]]; then
-    git config "merge.${DRIVER_NAME}.name" "Regenerate .chump/state.sql from .chump/state.db on conflict (INFRA-310)"
-    git config "merge.${DRIVER_NAME}.driver" "${DRIVER_SCRIPT_REL} %O %A %B %L"
-    echo "[install-merge-drivers] OK: ${DRIVER_NAME} registered"
-else
-    echo "[install-merge-drivers] SKIP: ${DRIVER_SCRIPT_REL} not found" >&2
+# ── INFRA-8193: retire the state.sql regeneration driver ─────────────────────
+# .chump/state.sql is no longer tracked (state.db is the only truth), so the
+# chump-state-sql-regen driver has nothing to merge. Drop a stale registration
+# left in .git/config by older installs (idempotent; absent section is fine).
+if git config --get "merge.chump-state-sql-regen.driver" >/dev/null 2>&1; then
+    git config --remove-section "merge.chump-state-sql-regen" 2>/dev/null || true
+    echo "[install-merge-drivers] OK: retired chump-state-sql-regen (INFRA-8193)"
 fi
 
 # ── Register CI YAML add-row driver ──────────────────────────────────────────
@@ -104,19 +101,25 @@ for alias_name in cargo-toml-append js-append rust-main-append; do
   fi
 done
 
-# ── Register generic 'union' driver (INFRA-1419) ─────────────────────────────
-# Line-level union merge via `git merge-file`, for paths where a custom
-# append-only/YAML-aware driver isn't warranted. No script file needed — the
-# driver command is the literal `git merge-file` invocation.
+# ── Register generic 'union' driver (INFRA-1419, rewritten INFRA-8223) ────────
+# `merge=union` in .gitattributes resolves to THIS registration, not git's
+# built-in (a config entry named `union` shadows the built-in). The original
+# INFRA-1419 command was `git merge-file -p ... %A %O %B > %A`: the shell
+# truncated %A before git read it and -p wrote conflict markers instead of a
+# union, so every rebase of EVENT_REGISTRY.yaml / env-vars-internal.txt came out
+# wrapped in LEFT/RIGHT markers with the upstream side gone (PRs #5536 #5529
+# #5527, 2026-10-17). The script reads %O %A %B into temp files first and moves
+# the result into place; it is list-item aware for EVENT_REGISTRY.yaml.
 DRIVER_NAME="union"
-git config "merge.${DRIVER_NAME}.name" "Line-level union merge via git merge-file (INFRA-1419)"
-git config "merge.${DRIVER_NAME}.driver" "git merge-file -p -L LEFT -L BASE -L RIGHT %A %O %B > %A"
+UNION_DRIVER_SCRIPT_REL="scripts/git/merge-driver-union.sh"
+git config "merge.${DRIVER_NAME}.name" "Union merge: both sides kept, no in-place truncation (INFRA-1419/INFRA-8223)"
+git config "merge.${DRIVER_NAME}.driver" "${UNION_DRIVER_SCRIPT_REL} %O %A %B %L %P"
 echo "[install-merge-drivers] OK: ${DRIVER_NAME} registered"
 
 # Verify .gitattributes wiring
 if [[ -f .gitattributes ]]; then
     echo "[install-merge-drivers] .gitattributes wiring check:"
-    for pattern in ".chump/state.sql" ".github/workflows/ci.yml" "scripts/git-hooks/pre-commit" \
+    for pattern in ".github/workflows/ci.yml" "scripts/git-hooks/pre-commit" \
                    "Cargo.toml" "web/v2/app.js" "src/main.rs"; do
         if grep -qF "$pattern" .gitattributes 2>/dev/null; then
             echo "[install-merge-drivers]   ✓ $pattern configured"

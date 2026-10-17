@@ -1,0 +1,15 @@
+# PRODUCT-382: Olive post-launch monitor service — reports new sign-ups, stores, cart pushes, feedback daily.
+# Paired with olive-post-launch-monitor.timer (daily, for 14 days after 2026-10-10).
+# Requires: SUPABASE_URL + SUPABASE_ANON_KEY in .env or env; DISCORD_TOKEN for board notifications.
+[Unit]
+Description=Olive post-launch monitor — daily sign-up/store/cart/feedback report (PRODUCT-382)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=__HOME__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/ops/olive-post-launch-monitor.sh'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=olive-monitor

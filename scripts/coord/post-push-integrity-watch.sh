@@ -32,8 +32,20 @@
 #   kind=post_push_integrity_watch_ok   — scan ran, no incidents found
 #   kind=post_push_integrity_watch_err  — gh API call failed or script error
 #
+# Deliberate closes are NOT incidents (RESILIENT-1606): a PR carrying the `pr-cut`
+# label (scripts/coord/pr-cut.sh, the sanctioned deliberate-close verb), or whose
+# close has a comment by a non-bot, non-reaper actor within +-60s of the close, is
+# a human/architect decision and is left closed. A close with NO such comment
+# (GitHub's stale-push auto-close posts none) is still reopened.
+#
 # Environment:
 #   CHUMP_POST_PUSH_WATCH_WINDOW_S  — how far back to look for closed PRs (default 120)
+#   CHUMP_POST_PUSH_WATCH_COMMENT_S — +-seconds around the close in which a human comment
+#                                     marks it deliberate (default 60)
+#   CHUMP_POST_PUSH_WATCH_AUTOMATION_LOGINS — comma list of logins whose comments do NOT
+#                                     count as a human decision (default
+#                                     github-actions,chump-fleet-bot; any login ending in
+#                                     [bot] is always automation)
 #   CHUMP_POST_PUSH_WATCH_BRANCH_RE — branch prefix pattern (default 'chump/')
 #   CHUMP_REPO                      — repo root (default: git rev-parse --show-toplevel)
 #
@@ -191,6 +203,19 @@ while IFS= read -r pr_json; do
         continue
     fi
 
+    # DELIBERATE-CLOSE LABEL guard (RESILIENT-1606/1607). `pr-cut` is what
+    # scripts/coord/pr-cut.sh stamps on a PR a human or architect closed on
+    # purpose (duplicate cut, superseded slice). Terminal: never reopen. On
+    # 2026-10-16 this watch reopened the architect's cuts of #5478 and #5483
+    # fifteen seconds after each close (ambient post_push_auto_close_recovered
+    # 13:35:12Z and 13:35:15Z), because only rot-reaped / shipped-gap closes
+    # were exempt.
+    CUT_LABEL="pr-cut"
+    if [[ ",$labels_csv," == *",$CUT_LABEL,"* ]]; then
+        log "SKIP reopen PR #$pr_num — labeled '$CUT_LABEL' (deliberate close by a human or architect via pr-cut.sh; terminal, RESILIENT-1606)."
+        continue
+    fi
+
     # Check if closed within our window.
     if [[ -z "$closed_at" ]]; then
         continue
@@ -207,6 +232,44 @@ except Exception as e:
     if (( CLOSED_EPOCH < CUTOFF_EPOCH )); then
         # Closed before our window; skip.
         continue
+    fi
+
+    # COMMENTED-CLOSE guard (RESILIENT-1606). A person who closes a PR on purpose
+    # usually says why. GitHub's stale-push auto-close posts NO comment, so a
+    # comment from a non-automation actor within +-COMMENT_S of the close means
+    # the close was a decision, not the INFRA-2026 incident. Fail-open: if the
+    # comment lookup fails we fall through to the original reopen behaviour.
+    COMMENT_S="${CHUMP_POST_PUSH_WATCH_COMMENT_S:-60}"
+    AUTOMATION_LOGINS="${CHUMP_POST_PUSH_WATCH_AUTOMATION_LOGINS:-github-actions,chump-fleet-bot}"
+    _comments_json="$(gh pr view "$pr_num" --repo "$REPO_SLUG" --json comments </dev/null 2>/dev/null || true)"
+    if [[ -n "$_comments_json" ]]; then
+        _human_commenter="$(CLOSED_EPOCH="$CLOSED_EPOCH" COMMENT_S="$COMMENT_S" AUTOMATION_LOGINS="$AUTOMATION_LOGINS" \
+            python3 -c "
+import datetime, json, os, sys
+try:
+    comments = json.load(sys.stdin).get('comments') or []
+except Exception:
+    comments = []
+closed = int(os.environ['CLOSED_EPOCH'])
+span = int(os.environ['COMMENT_S'])
+auto = set(x.strip().lower() for x in os.environ['AUTOMATION_LOGINS'].split(',') if x.strip())
+for c in comments:
+    login = ((c.get('author') or {}).get('login') or '').lower()
+    if not login or login.endswith('[bot]') or login in auto:
+        continue
+    ts = c.get('createdAt') or ''
+    try:
+        t = int(datetime.datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp())
+    except Exception:
+        continue
+    if abs(t - closed) <= span:
+        print(login)
+        break
+" <<<"$_comments_json" 2>/dev/null || true)"
+        if [[ -n "$_human_commenter" ]]; then
+            log "SKIP reopen PR #$pr_num — closed with a comment by '$_human_commenter' within ${COMMENT_S}s of the close (deliberate close, not a stale-push auto-close; RESILIENT-1606). Use scripts/coord/pr-cut.sh to make this explicit."
+            continue
+        fi
     fi
 
     # ZERO-WASTE-027 follow-up: do NOT reopen a PR whose gap already SHIPPED.

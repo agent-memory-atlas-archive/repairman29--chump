@@ -82,13 +82,16 @@ while true; do
   NOW=$(date +%s)
 
   # Periodic state refresh (INFRA-3628): the node's local registry drifts from
-  # origin/main. Reconcile every REFRESH_S by pulling fresh docs/gaps and syncing
-  # state.db from the per-file mirror (fresher than the committed state.sql).
+  # origin/main. Every REFRESH_S pull fresh docs/gaps and insert any gap the
+  # local store has never seen. INFRA-8193: `gap sync --pull` (YAML overwrites
+  # the store) is retired; `gap import` is insert-only, so status changes made
+  # elsewhere no longer flow in from the mirror — `chump store reconcile`
+  # (INFRA-8222) is the replacement for that half.
   if [ $(( NOW - LAST_REFRESH )) -ge "$REFRESH_S" ]; then
     echo "[pixel-worker] refreshing state from origin/main..."
     git -C "$CHUMP_REPO" fetch origin main --depth 1 >/dev/null 2>&1 \
       && git -C "$CHUMP_REPO" reset --hard origin/main >/dev/null 2>&1
-    "$BIN" gap sync --pull >/dev/null 2>&1 || true
+    CHUMP_GAP_IMPORT_NO_SIMILARITY=1 "$BIN" gap import --yaml "$CHUMP_REPO/docs/gaps" >/dev/null 2>&1 || true
     LAST_REFRESH="$NOW"
     echo "[pixel-worker] state refreshed"
   fi

@@ -1,0 +1,30 @@
+# RESILIENT-1366 — auto-close decomposed umbrella gaps when all child slices are done.
+# One-shot service that runs chump gap close-decomposed to walk the gap store and
+# close parent umbrellas whose decomposed children have all shipped.
+# Paired with chump-gap-close-decomposed.timer (every 10 minutes).
+#
+# INFRA-8194 (Phase R R5): this is a PLACEHOLDER TEMPLATE. It used to live in
+# contrib/systemd/ shaped for one machine (a hardcoded user, that user's /home
+# paths), and scripts/install_chump_gap_timer.sh copied it verbatim into a
+# systemd --user manager. On cuphead, where the run user is ubuntu, the unit
+# died with exit 217/USER every ten minutes (RESILIENT-1601): a user manager
+# cannot switch identity, and the baked user did not even exist there.
+# Now there is NO User= line and no host path. __HOME__ / __REPO_ROOT__ /
+# __BIN_DIR__ / __NODE_ENV__ are resolved per host by `chump node render-unit`
+# (crates/chump-provision) or its shell mirror organ_unit_host_rewrite
+# (scripts/ops/lib/organ-unit-install-lib.sh). User= is injected only for a
+# system-scope (root, /etc/systemd/system) install.
+[Unit]
+Description=Chump gap close-decomposed — auto-close umbrellas when children are done (RESILIENT-1366)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=HOME=__HOME__
+Environment=PATH=__BIN_DIR__:__REPO_ROOT__/target/release:/usr/local/bin:/usr/bin:/bin
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+EnvironmentFile=-__NODE_ENV__
+WorkingDirectory=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'exec chump gap close-decomposed'
+TimeoutStartSec=300

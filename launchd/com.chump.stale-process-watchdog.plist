@@ -29,11 +29,11 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/ops/stale-process-watchdog.sh</string>
+    <string>__REPO_ROOT__/scripts/ops/stale-process-watchdog.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- Run every 30 minutes (1800s). Less frequent than the claude-reaper
        (5min) because the long-tail leaks (rustc/cargo/health) accumulate
@@ -57,7 +57,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
+    <string>/usr/local/bin:/usr/bin:/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin</string>
   </dict>
 </dict>
 </plist>

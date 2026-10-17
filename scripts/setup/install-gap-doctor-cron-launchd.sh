@@ -21,6 +21,13 @@
 # Disable:    launchctl unload ~/Library/LaunchAgents/ai.openclaw.chump-gap-doctor-cron.plist
 # Manual fire: launchctl start ai.openclaw.chump-gap-doctor-cron
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 # INFRA-451: resolve to the *main* worktree (not the linked worktree this
 # install script may be running from), so the plist absolute path survives
@@ -44,7 +51,7 @@ cat >"$DEST" <<EOF
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd "$REPO" && (test -x /opt/homebrew/bin/python3 && /opt/homebrew/bin/python3 scripts/coord/gap-doctor.py safe-sweep) || (test -x /usr/local/bin/python3 && /usr/local/bin/python3 scripts/coord/gap-doctor.py safe-sweep) || python3 scripts/coord/gap-doctor.py safe-sweep</string>
+    <string>cd "$REPO" && (test -x ${BREW_PREFIX}/bin/python3 && ${BREW_PREFIX}/bin/python3 scripts/coord/gap-doctor.py safe-sweep) || (test -x /usr/local/bin/python3 && /usr/local/bin/python3 scripts/coord/gap-doctor.py safe-sweep) || python3 scripts/coord/gap-doctor.py safe-sweep</string>
   </array>
   <!-- Every 15 minutes (900s). Auto-fixes safe drift buckets in-place;
        emits ALERT kind=gap_drift_orphan / gap_drift_yaml_only into
@@ -65,7 +72,7 @@ cat >"$DEST" <<EOF
     <key>HOME</key>
     <string>$HOME</string>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:/usr/bin:/bin</string>
+    <string>/usr/local/bin:${BREW_PREFIX}/bin:$HOME/.cargo/bin:/usr/bin:/bin</string>
   </dict>
 </dict>
 </plist>

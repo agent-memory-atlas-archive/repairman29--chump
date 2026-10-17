@@ -13,8 +13,11 @@
 # chump-next-best-action.timer; rostered in scripts/ops/organ-manifest.txt so
 # organ-reconcile + organ-deploy keep it alive (RESILIENT-366 / RESILIENT-374).
 #
-# CJ-native form (User=jeff, /home/jeff paths), mirroring chump-gap-drain.service;
-# install-helsinki-atc.sh host-rewrites paths per node if ever run elsewhere.
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
 [Unit]
 Description=Chump next-best-action — recompute the EV-ranked advisory action list + emit kind=next_best_action (recommend-only)
 After=network-online.target
@@ -22,14 +25,13 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=jeff
-Environment=HOME=/home/jeff
-Environment=PATH=/home/jeff/.cargo/bin:/home/jeff/Projects/chump/target/release:/usr/local/bin:/usr/bin:/bin
-Environment=CHUMP_REPO_ROOT=/home/jeff/Projects/chump
-WorkingDirectory=/home/jeff/Projects/chump
+Environment=HOME=__HOME__
+Environment=PATH=__HOME__/.cargo/bin:__REPO_ROOT__/target/release:/usr/local/bin:/usr/bin:/bin
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+WorkingDirectory=__REPO_ROOT__
 # Source providers.env + cj.env for parity with the other CJ organs (gh token,
 # per-node config). The NBA router itself makes no LLM call — it only reads
 # already-computed fleet state (pr-book, faculty, gaps, failed organs) — so it
 # is cheap and cannot contend the model cascade.
-ExecStart=/bin/bash -lc 'set -a; source /home/jeff/.chump/providers.env 2>/dev/null; source /home/jeff/.chump/cj.env 2>/dev/null; set +a; cd /home/jeff/Projects/chump; exec bash scripts/coord/next-best-action.sh'
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; source __HOME__/.chump/cj.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/coord/next-best-action.sh'
 TimeoutStartSec=300

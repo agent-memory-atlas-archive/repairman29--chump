@@ -1141,6 +1141,9 @@ fn discover_test_scripts(repo_root: &std::path::Path) -> Vec<std::path::PathBuf>
         // pure local (fifo + subshell, no network).
         "scripts/ci/test-parse-token-usage-dead-writer-timeout.sh",
         "scripts/ci/test-event-registry-coverage.sh",
+        // CREDIBLE-1493: SELF_REPORTS.yaml shape + every self-report's source
+        // and command exist in the tree (mirrors the ci.yml step). ~1s, local.
+        "scripts/ci/test-self-reports-registry.sh",
         // INFRA-3579: integrations.yml pull_request concurrency group must stay
         // keyed on github.sha (not pull_request.number) — regression of this
         // guard reintroduces the 0-step CANCELLED self-hosted checkout class
@@ -2352,6 +2355,14 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-git-identity-guard.sh"],
             GateKind::Scripts,
         ));
+        // INFRA-8211: proves the pre-commit gap guards batch their reads
+        // (one `git cat-file --batch`, not one `git show` per gap file) and
+        // stay under a 10s budget on a one-line gap edit with 4,000 gaps.
+        steps.push(step(
+            "pre-commit-gap-guard-perf",
+            &["bash", "scripts/ci/test-pre-commit-gap-guard-perf.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "hardcoded-date-guard",
             &["bash", "scripts/ci/test-hardcoded-date-guard.sh"],
@@ -2564,9 +2575,30 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-capabilities-registry.sh"],
             GateKind::Scripts,
         ));
+        // INFRA-8194 (Phase R R5): no new host literal (User=<name>,
+        // /home/<name>, /root/, /opt/homebrew) in provisioning dirs; shrink-only
+        // allowlist. Hermetic, <2s, mirrors the ci.yml fast-checks step.
+        steps.push(step(
+            "provision-no-host-literals",
+            &["bash", "scripts/ci/test-provision-no-host-literals.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "organ-manifest-run-scope",
+            &["bash", "scripts/ci/test-organ-manifest-run-scope.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "no-verify-audit",
             &["bash", "scripts/ci/test-no-verify-audit.sh"],
+            GateKind::Scripts,
+        ));
+        // CREDIBLE-1514: scripts/ci census shrink-only gate. A new test is
+        // wired or deleted; red/unwired census counts only shrink. Hermetic
+        // fixture self-test + a classification-only compare (<1s).
+        steps.push(step(
+            "census-shrink-only",
+            &["bash", "scripts/ci/test-census-shrink-only.sh"],
             GateKind::Scripts,
         ));
         steps.push(step(
@@ -2585,6 +2617,87 @@ pub fn run(argv: &[String]) -> i32 {
         steps.push(step(
             "gap-ship-single-source",
             &["bash", "scripts/ci/test-gap-ship-single-source.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "auto-merge-armer-credible-1511",
+            &["bash", "scripts/ci/test-auto-merge-armer.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "bot-merge-rest-direct-credible-1511",
+            &["bash", "scripts/ci/test-bot-merge-rest-direct.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "bot-merge-portability-credible-1511",
+            &["bash", "scripts/ci/test-bot-merge-portability.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "event-registry-effect-metric-credible-1511",
+            &["bash", "scripts/ci/test-event-registry-effect-metric.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "lease-lib-credible-1511",
+            &["bash", "scripts/ci/test-lease-lib.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "stale-worktree-reaper-stash-credible-1511",
+            &["bash", "scripts/ci/test-stale-worktree-reaper-stash.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "merge-driver-union-smoke",
+            &["bash", "scripts/ci/test-merge-driver-union.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "reaper-bot-merge-live-smoke",
+            &["bash", "scripts/ci/test-reaper-bot-merge-live.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "bot-merge-recovery-in-progress-smoke",
+            &["bash", "scripts/ci/test-bot-merge-recovery-in-progress.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "bot-merge-recovery-pr-create-smoke",
+            &["bash", "scripts/ci/test-bot-merge-recovery-pr-create.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "cargo-target-no-worktree-default",
+            &[
+                "bash",
+                "scripts/ci/test-cargo-target-no-worktree-default.sh",
+            ],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "workflow-concurrency-groups",
+            &["bash", "scripts/ci/test-workflow-concurrency-groups.sh"],
+            GateKind::Scripts,
+        ));
+        // RESILIENT-1606/1607 + RESILIENT-1611: wired by the 2026-10-17 Phase R train.
+        steps.push(step(
+            "pr-cut-honored",
+            &["bash", "scripts/ci/test-pr-cut-honored.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "load-aware-deadman",
+            &["bash", "scripts/ci/test-load-aware-deadman.sh"],
+            GateKind::Scripts,
+        ));
+        // INFRA-8193: docs/gaps/*.yaml is an export-only mirror of state.db;
+        // fail when a new script or Rust path writes it outside the export.
+        steps.push(step(
+            "gap-yaml-export-only",
+            &["bash", "scripts/ci/test-gap-yaml-export-only.sh"],
             GateKind::Scripts,
         ));
         steps.push(step(
@@ -2645,11 +2758,6 @@ pub fn run(argv: &[String]) -> i32 {
         steps.push(step(
             "merge-driver-pre-commit",
             &["bash", "scripts/ci/test-merge-driver-pre-commit.sh"],
-            GateKind::Scripts,
-        ));
-        steps.push(step(
-            "merge-driver-state-sql",
-            &["bash", "scripts/ci/test-merge-driver-state-sql.sh"],
             GateKind::Scripts,
         ));
         steps.push(step(
@@ -2754,6 +2862,96 @@ pub fn run(argv: &[String]) -> i32 {
         steps.push(step(
             "pick-and-claim-lockdir",
             &["bash", "scripts/ci/test-pick-and-claim-lockdir.sh"],
+            GateKind::Scripts,
+        ));
+        // INFRA-8176: soft skill filter + open-PR anti-spin (pr_state honoured,
+        // gh fallback through github_cache.sh with a stubbed gh). Pure
+        // bash/python fixtures, no network.
+        steps.push(step(
+            "picker-soft-skill-open-pr",
+            &["bash", "scripts/ci/test-picker-soft-skill-open-pr.sh"],
+            GateKind::Scripts,
+        ));
+        // CREDIBLE-1513: picker tests that were red on main and unwired in CI.
+        steps.push(step(
+            "inbox-first-picker",
+            &["bash", "scripts/ci/test-inbox-first-picker.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-and-claim-atomic",
+            &["bash", "scripts/ci/test-pick-and-claim-atomic.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-and-claim-dep-resolution",
+            &["bash", "scripts/ci/test-pick-and-claim-dep-resolution.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-and-claim-exclusion-reasons",
+            &[
+                "bash",
+                "scripts/ci/test-pick-and-claim-exclusion-reasons.sh",
+            ],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-gap-cooldown",
+            &["bash", "scripts/ci/test-pick-gap-cooldown.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-gap-open-only",
+            &["bash", "scripts/ci/test-pick-gap-open-only.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-gap-skips-linked-pr",
+            &["bash", "scripts/ci/test-pick-gap-skips-linked-pr.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-gap-skips-merged",
+            &["bash", "scripts/ci/test-pick-gap-skips-merged.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-gap-skips-shipped",
+            &["bash", "scripts/ci/test-pick-gap-skips-shipped.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-gap-sync-overhead",
+            &["bash", "scripts/ci/test-pick-gap-sync-overhead.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "pick-gap-worker-stagger",
+            &["bash", "scripts/ci/test-pick-gap-worker-stagger.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "picker-p0-mission-effort-bypass",
+            &["bash", "scripts/ci/test-picker-p0-mission-effort-bypass.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "picker-pillar-starved-junk-filter",
+            &[
+                "bash",
+                "scripts/ci/test-picker-pillar-starved-junk-filter.sh",
+            ],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "picker-pivot-lock-cleanup",
+            &["bash", "scripts/ci/test-picker-pivot-lock-cleanup.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "r1-inflight-no-repick",
+            &["python3", "-I", "scripts/ci/test-r1-inflight-no-repick.py"],
             GateKind::Scripts,
         ));
         steps.push(step(

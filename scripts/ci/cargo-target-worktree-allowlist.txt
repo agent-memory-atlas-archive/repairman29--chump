@@ -1,0 +1,14 @@
+# scripts/ci/cargo-target-worktree-allowlist.txt — ZERO-WASTE-134
+#
+# Files that still point a cargo target dir INSIDE a worktree/repo root.
+# Read by scripts/ci/test-cargo-target-no-worktree-default.sh.
+#
+# SHRINK-ONLY. Every line is a debt with a reason; delete the line in the same
+# PR that moves the file onto scripts/ci/lib/resolve-cargo-target-dir.sh
+# (chump_export_cargo_target_dir). Never add an entry to make the gate green:
+# source the resolver instead. A stale entry (file no longer matches) fails the
+# gate so the list can only get shorter.
+#
+# Format: <repo-relative path>   # reason: <why>
+scripts/git-hooks/pre-push   # reason: INFRA-1138 cargo-test gate keeps a per-worktree .cargo-test-target on purpose (phantom-fingerprint isolation, locked by test-shared-target-phantom-ref.sh); follow-up: key a subdir of the shared target per worktree instead
+scripts/setup/deploy-android-adb.sh   # reason: manual Pixel deploy tool; pins CARGO_TARGET_DIR=$REPO_ROOT/target and reads $REPO_ROOT/target/aarch64-linux-android/release/chump back to adb push; never runs from a fleet worktree

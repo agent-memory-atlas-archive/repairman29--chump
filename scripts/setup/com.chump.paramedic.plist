@@ -45,7 +45,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/usr/local/bin:__BREW_PREFIX__/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 
     <!-- Logs -->

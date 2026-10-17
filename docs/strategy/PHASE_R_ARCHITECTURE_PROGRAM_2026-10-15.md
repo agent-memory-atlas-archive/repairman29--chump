@@ -46,9 +46,9 @@ to live.
 | **R3** | Honest ship gate: every check is required-and-green or deleted; admin bypass needs a PASSED consensus; `enforce_admins` and `strict` on; admin merges counted. | Red checks carrying no information; invisible `--admin` merges | CREDIBLE-1492 | P1 |
 | **R3 measurement** (CREDIBLE-1512, hosted-runner starvation) | The honest ship gate is only honest if a green check is *reachable* — under `strict=true` every main merge requeues every armed PR, and the hosted-runner pool could not keep up. Measured 2026-10-17 04:58Z: **22 runs queued, 1 job running, ubuntu-latest pickup 20-40 min, GitHub status clean**; re-measured 12:38Z: **32 queued**; and again ~13:11Z via `chump kpi report --ci-pickup`: **62 runs queued, pickup p95=543s (9m), max=1011s (16m), p50=0** (survivorship — fast jobs complete, starved jobs still queued; `ci_runs_queued` is the leading signal). Fix shipped: PR-event CI runs cut cargo-test shards 4→2, audit shards path-filtered per lane, pwa e2e gated to its own paths; `kind=ci_runner_starved` fires when trailing-30m p50 pickup > 10m. Capacity options A/B/C + recommendation: [`docs/process/CI_RUNNER_CAPACITY.md`](../process/CI_RUNNER_CAPACITY.md). | ubuntu-latest `runner=none` for 20-40m while status reads green; landings gated on runner pickup | CREDIBLE-1512 | P1 |
 | **R6** | The invariant boundary. Rust owns invariants (store, leases, gap status, the ship transition, admission); shell owns glue and may stay shell. A CI gate fails any shell that writes an invariant directly; `chump` verbs are the shortest path; agent matched to layer. Metric: shell files that write invariants, target zero. | Picker sprawl (MISSION-028); 9 scripts writing the store and a dozen writing leases on main (2026-10-17 baseline); Rust-first honored by a bypass trailer | INFRA-8195 (slices R6.1 gate, R6.2 `chump admit`, R6.3 layer-aware dispatch, R6.4 gauge) | P1 |
-| **R4** | One canonical store. `state.sql` and `gap_store.db` leave git; the YAML mirror is export-only; the swamp is archived, never deleted. | Split-brain drift; the 9,223-file swamp; `sync --push` blast radius | INFRA-8193; INFRA-8190 landed: one resolver (`crates/chump-store-path` + `scripts/coord/lib/state-store.sh`: `CHUMP_STATE_DB` > main checkout's `.chump/state.db` > root), hard single-source gate (`gap-store-single-source-check.sh` check C); INFRA-8222: `chump store reconcile` merges a node's stale home store into the live one before the pin flips (newest-wins, terminal-status guard) | P2 |
-| **R5** | Host provisioning is a typed enum; units are rendered from it; no `User=`, `/home`, `/root`, `/opt/homebrew` literals ship. | 217/USER failures, HOME=/root, the abandoned second install, brew-only bootstrap | INFRA-8194 | P2 |
-| **R7** | The eval harness points inward. Every self-report has a ground-truth probe and a calibration score; chronic liars auto-file a gap. | Dashboards off by 6x to 100x; "healthy" while organs fail for days | CREDIBLE-1493 | P2 |
+| **R4** | One canonical store. `state.sql` and `gap_store.db` leave git; the YAML mirror is export-only; the swamp is archived, never deleted. | Split-brain drift; the 9,223-file swamp; `sync --push` blast radius | INFRA-8193; INFRA-8190 landed: one resolver (`crates/chump-store-path` + `scripts/coord/lib/state-store.sh`: `CHUMP_STATE_DB` > main checkout's `.chump/state.db` > root), hard single-source gate (`gap-store-single-source-check.sh` check C); INFRA-8222: `chump store reconcile` merges a node's stale home store into the live one before the pin flips (newest-wins, terminal-status guard). INFRA-8193 slice 1 landed: `state.sql`, `state.sql.lz4`, `gap_store.db` out of git; claim/preflight state.sql self-heal and the state.sql merge driver removed; reserve's canonical max reads the private registry only; `gap sync --pull` is a hard error; export-only gate `test-gap-yaml-export-only.sh` (allowlist may only shrink). Slice 2: archive the YAML tree on cuphead + reconcile stores (INFRA-8222). Slice 3: retire the postgrest backend code paths. | P2 |
+| **R5** | Host provisioning is a typed enum; units are rendered from it; no `User=`, `/home`, `/root`, `/opt/homebrew` literals ship. | 217/USER failures, HOME=/root, the abandoned second install, brew-only bootstrap | INFRA-8194 (slice 1 landed: `Host` enum + detector + `chump node host`/`render-unit` in crates/chump-provision; 39 dispatch units incl. gap-close-decomposed and organ-watchdog are placeholder templates with no `User=`; manifest `run-scope=`; no-host-literal CI gate with a dated shrink-only allowlist of 188 files. Slice 2 landed: allowlist 188 -> 3. All 23 dispatch files, 33 launchd/ plists, 24 scripts/plists and 105 of 108 setup files are clean: every unit and plist is a placeholder template, every installer that places one renders it (`chump_render_template`, scripts/lib/host-paths.sh), a fifth placeholder `__BREW_PREFIX__` plus `chump node host --field brew-prefix` replaces the baked Apple Silicon prefix, the gate and `find_host_literals` skip comment lines (not shebangs), and root-only organs are declared by name (`KEEP_ROOT_UNITS`) instead of a baked `User=root`. Setup classification: (a) resolver/env 102, (b) doc/comment 3, (c) named-host 3. Remains: the (c) set (claude-proot-guest.sh on pixel, install/uninstall-do-droplet-runner.sh on the DO droplet, each with a reason on its allowlist line); slice 3 retires the legacy source-home sed path in `organ_unit_host_rewrite`/converge now that no tracked unit needs it; run-scope tags beyond organ-deploy) | P2 |
+| **R7** | The eval harness points inward. Every self-report has a ground-truth probe and a calibration score; chronic liars auto-file a gap. **Slice 1 landed (2026-10-17):** `docs/observability/SELF_REPORTS.yaml` (16 pairs), `chump calibrate` (`src/commands/calibrate.rs`, emits `kind=self_report_calibration`), the score line in `fleet brief` and `kpi report`, nightly `chump-self-calibrate.timer` (role=trust). **Slice 2:** auto-file a CREDIBLE gap after 3 consecutive nights of disagreement on one pair; replay the 2026-10-15 cases as fixtures. | Dashboards off by 6x to 100x; "healthy" while organs fail for days | CREDIBLE-1493 | P2 |
 
 **Why this order (revised 2026-10-16).** R1 and R3 first because until a merge means
 "tested and landed," nothing else the fleet reports can be trusted, and nothing it builds can
@@ -66,9 +66,35 @@ host). R7 is how we know the first six are true without a human reading logs.
 and `strict` on with a baseline and drift gate (#5479), and at 06:20Z the first gap filed, built,
 merged and closed by the fleet with no human terminal (INFRA-8204, #5481). Zero admin merges.
 
+**R3 receipt, 2026-10-17 14:25Z (ZERO-WASTE-135).** During a hosted-runner stall (0 jobs running,
+47 non-completed runs) the queue held 14 queued `verified-recompute` runs on main, 3
+`pr-triage-bot` and 2 CI Flake Rerun; the architect cancelled 15 duplicates by hand and the queue
+fell to 33. Of the 19 workflows triggered by `workflow_run` or `schedule`, 18 already declared a
+`concurrency:` block, so the defect was the group key (per-run or per-upstream-sha keys never
+dedupe), not a missing block. Fixed in the same gap: stable keys on `verified-recompute`,
+`pr-triage-bot`, `repo-health`, `ftue-cold-install`, `integrations` (schedule leg), a block on
+`coverage-nightly`, and `scripts/ci/test-workflow-concurrency-groups.sh` (fast-checks and
+`chump preflight`) so a per-run key on any `workflow_run`/`schedule` workflow fails CI. Depth:
+structural only; it checks the key is stable, not that it is the right one.
+
 **The honest metric for the whole program.** One gap filed, dispatched, built, merged
 and flipped to shipped by the fleet with zero admin merges and zero human terminal.
 Until that happens once, the factory is not running. R1 plus R3 is the gate to it.
+
+## R7 slice 1: what the first calibration said (2026-10-17, Mac observer)
+
+`chump calibrate` on the operator's Mac: **12/16 agree, 2 disagree, 2 unprobed** (score 0.75).
+The two disagreements were real on that host: fleet-doctor's `dirty-prs` reads the
+`github_cache.db` mirror and said pass while GitHub had DIRTY PRs older than 24h, and the kpi
+ship gauge read 0 ships in 1d against 31 merges (the Mac's store is stale). The run also found
+`chump kpi report --json` emitting invalid JSON (unescaped `depends_on` arrays in the dependency-count
+section), fixed in the same PR. The two unprobed pairs need systemd (organ failures); they run
+on the Linux nodes. Unprobed pairs stay in the denominator and never count as agreement.
+
+Slice 2 (not landed): a pair that disagrees three nights running files a CREDIBLE gap naming the
+instrument and its receipt; the 2026-10-15 cases (floor-temp admin merges vs #5466, the
+stale-root-binary deploy reading, fleet-brief healthy over failed organs) replay as fixtures so
+the calibration itself is regression-tested against the incidents that motivated it.
 
 ## Rules while Phase R runs
 
@@ -111,6 +137,19 @@ shell dispatches landed. Agents take the shortest path to green. So R6 now force
    the store (`bot-merge.sh`, `gap-reserve.sh`, `gap-doctor.py`, `gap-normalize-domains.sh`,
    `backfill-opened-dates.sh`, both stale reapers, a demo, a CI fixture lib), about 12 write lease
    files, 2 set status by raw SQL.
+
+   **Gauge (CREDIBLE-1509, R6.4):** `chump kpi report` carries a
+   `shell_invariant_writers` section, also shown alone by `chump kpi report
+   --shell-invariant-writers` and in the `fleet-brief` banner. It prints the
+   gate's violator file count (`count` on the `kind=invariant_boundary_violation`
+   line that `scripts/ci/test-invariant-boundary.sh` prints and records in
+   ambient) plus the reading date. A reading under 24h old is reused; otherwise
+   the report runs the gate (~20s); the banner never runs it.
+   **Baseline 2026-10-17:** 9 store-writing files (enumerated above). The gate
+   itself, run in shadow mode on `main` at 40ba8db02 the same day, flags **39
+   files**: the store writers plus lease-file and status writers and some
+   broad-pattern hits (installers). The gauge reports the gate's number, so 39
+   is its starting reading; target 0 for seven days.
 
 ## Explicitly not in Phase R
 

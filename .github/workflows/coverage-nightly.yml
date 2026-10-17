@@ -13,6 +13,13 @@ on:
 permissions:
   contents: read
 
+# ZERO-WASTE-135: this was the one schedule-triggered workflow with no concurrency
+# block, so a stalled nightly stacked a second 45-min llvm-cov run behind it.
+# Pure compute + artifact upload, nothing mutated: safe to cancel and restart.
+concurrency:
+  group: coverage-nightly
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 

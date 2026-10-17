@@ -24,6 +24,13 @@
 # plist changes, then loads fresh (idempotent pattern from INFRA-1779).
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/../lib/resolve-main-worktree.sh"
@@ -81,7 +88,7 @@ cat > "$PLIST_DEST" <<PLISTEOF
         <key>HOME</key>
         <string>${HOME}</string>
         <key>PATH</key>
-        <string>/Users/${USER}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>/Users/${USER}/.local/bin:${BREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin</string>
         <!-- META-248: explicit absolute path so the daemon does not compute
              it relative to a /tmp worktree under launchd's execution context. -->
         <key>CHUMP_AMBIENT_PATH</key>

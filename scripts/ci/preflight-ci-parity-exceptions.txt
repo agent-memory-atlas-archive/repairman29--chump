@@ -257,6 +257,7 @@ test-cli-output-format.sh  # reason: audit-job test script requiring a compiled 
 test-orchestrate-session-summary.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
 test-fleet-brief.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
 test-fleet-brief-ship-count-unavailable.sh  # reason: audit-job test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; corresponding step-name entry (with per-gate reason) is allowlisted below under "Multi-line run: block steps"
+test-dispatch-open-pr-repair.sh  # reason: INFRA-8199 fast-checks test script requiring a compiled CHUMP_BIN + cargo build; exceeds preflight's <60s fast-feedback budget; step-name entry allowlisted below under "Multi-line run: block steps"
 
 # ── Standalone build steps (not a test gate) ─────────────────────────────────
 apalis-poc                 # reason: standalone example workspace build; not a functional gate
@@ -270,6 +271,7 @@ docs/gaps.yaml must not exist          # reason: inline shell check (no script p
 fleet brief subcommand                  # reason: needs cargo build + CHUMP_BIN; test-fleet-brief.sh allowlisted above
 fleet brief ship-count unavailable      # reason: needs cargo build + CHUMP_BIN; test-fleet-brief-ship-count-unavailable.sh allowlisted above
 orchestrate session-summary             # reason: needs cargo build + CHUMP_BIN; test-orchestrate-session-summary.sh above
+dispatch open-PR refuse/repair          # reason: needs cargo build + CHUMP_BIN; test-dispatch-open-pr-repair.sh allowlisted above
 bot-merge auto-close handshake          # reason: needs CHUMP_BIN env var; test-bot-merge-auto-close.sh above
 CLI fleet + health + coord              # reason: needs CHUMP_BIN env var; test-cli-fleet-coord.sh above
 chump gap list domain summary           # reason: needs cargo build + CHUMP_BIN; test-gap-list-domain-summary.sh above
@@ -474,3 +476,4 @@ test-gap-decompose-reslice-guard.sh   # reason: RESILIENT-1437 — builds/uses c
 test-preflight-ci-parity-auto-recognize.sh       # reason: synthetic-PR regression for parity auto-recognition; runs in CI, slow clone not mirrored in preflight [gap: RESILIENT-550]
 Re-run verified for this SHA  # reason: verified-recompute.yml rerun-verified job (RESILIENT-1562, #5282) — re-runs the `verified` check for a SHA via the GitHub workflow_run API on Audit/ACP-integration completion; a GitHub-Actions / merge-queue-only gate that structurally cannot run in local preflight (Tier-D-class).
 gap list --json seed consistency — fixture produces ≥5 gaps (CREDIBLE-061)  # reason: audit.yml audit-shard step — runs a CI-only gap-store seed-fixture consistency audit against a built chump binary + isolated state.db; exceeds preflight fast-feedback budget and depends on the CI audit harness (Tier-D-class).
+test-r1-inflight-no-repick.py   # reason: CREDIBLE-1513 python test; the parity matcher only parses scripts/ci/*.sh paths, but it IS mirrored in preflight.rs

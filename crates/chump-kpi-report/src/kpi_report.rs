@@ -618,7 +618,11 @@ impl LeverageSection {
             .map(|e| {
                 format!(
                     r#"{{"gap_id":"{}","depended_by_count":{}}}"#,
-                    e.gap_id, e.depended_by_count
+                    // CREDIBLE-1493: depends_on can hold a JSON array string
+                    // (`["META-086"]`); unescaped it broke `kpi report --json`
+                    // for every consumer (found by the first calibration run).
+                    json_escape(&e.gap_id),
+                    e.depended_by_count
                 )
             })
             .collect();
@@ -1094,6 +1098,236 @@ pub fn build_gate_false_positive_section(repo_root: &Path) -> GateFalsePositiveS
     section
 }
 
+// ── Shell Invariant Writers Section (CREDIBLE-1509, R6.4 gauge) ──────────────
+
+/// The R6.4 gauge: how many shell/Python files under `scripts/` the
+/// invariant-boundary gate (`scripts/ci/test-invariant-boundary.sh`,
+/// INFRA-8218) flags for writing an invariant (the store, a lease file, a gap
+/// status) directly. Target zero for seven clean days. See
+/// docs/strategy/PHASE_R_ARCHITECTURE_PROGRAM_2026-10-15.md §R6.
+///
+/// The gate's last stdout line is the `kind=invariant_boundary_violation`
+/// event it also appends to `.chump-locks/ambient.jsonl`, carrying `count`.
+/// One gate run takes ~20s, so a reading under 24h old in the ambient stream
+/// is reused instead of re-running it; no reading at all is reported as
+/// unavailable, never as a fabricated zero.
+#[derive(Debug, Default, Clone)]
+pub struct ShellInvariantWritersSection {
+    /// Violator file count. `None` when no reading is available.
+    pub file_count: Option<u64>,
+    /// Date of the reading, `YYYY-MM-DD` (UTC): the event's `ts` date.
+    pub reading_date: Option<String>,
+    /// Where the reading came from: "gate" (ran now), "ambient" (a recorded
+    /// gate reading), or "unavailable".
+    pub source: String,
+}
+
+impl ShellInvariantWritersSection {
+    pub fn render_text(&self) -> String {
+        let mut out = String::from("═══ Shell Invariant Writers (R6.4) ═══\n");
+        match self.file_count {
+            Some(n) => {
+                out.push_str(&format!("  shell_invariant_writers: {n}  (target 0)\n"));
+                out.push_str(&format!(
+                    "  read {} from {}\n",
+                    self.reading_date.as_deref().unwrap_or("?"),
+                    self.source,
+                ));
+            }
+            None => out.push_str(
+                "  No reading: scripts/ci/test-invariant-boundary.sh not run and no invariant_boundary_violation event recorded.\n",
+            ),
+        }
+        out
+    }
+
+    pub fn render_json(&self) -> String {
+        let count = self
+            .file_count
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "null".to_string());
+        let date = self
+            .reading_date
+            .as_deref()
+            .map(|d| format!(r#""{}""#, json_escape(d)))
+            .unwrap_or_else(|| "null".to_string());
+        format!(
+            r#"{{"shell_invariant_writers":{},"reading_date":{},"source":"{}","target":0}}"#,
+            count,
+            date,
+            json_escape(&self.source),
+        )
+    }
+}
+
+/// A gate reading parsed from one `invariant_boundary_violation` JSON line:
+/// (count, ts as unix seconds if parseable, `YYYY-MM-DD` date).
+fn parse_invariant_boundary_reading(line: &str) -> Option<(u64, Option<i64>, Option<String>)> {
+    let v = serde_json::from_str::<serde_json::Value>(line.trim()).ok()?;
+    if v.get("kind").and_then(|k| k.as_str()) != Some("invariant_boundary_violation") {
+        return None;
+    }
+    let count = v.get("count").and_then(|x| x.as_u64())?;
+    let ts = v.get("ts").and_then(|t| t.as_str());
+    let unix = ts.and_then(|t| {
+        chrono::DateTime::parse_from_rfc3339(t)
+            .ok()
+            .map(|d| d.timestamp())
+    });
+    let date = ts.map(|t| t.chars().take(10).collect::<String>());
+    Some((count, unix, date))
+}
+
+/// Max age of a recorded gate reading that is reused instead of re-running
+/// the ~20s gate.
+const SHELL_INVARIANT_WRITERS_FRESH_SECS: i64 = 24 * 3600;
+
+/// Build the R6.4 `shell_invariant_writers` gauge (CREDIBLE-1509).
+///
+/// Order: (1) the latest `invariant_boundary_violation` reading in the ambient
+/// stream if it is under 24h old; (2) a live run of the gate in shadow mode
+/// (it records a fresh reading as a side effect); (3) the latest recorded
+/// reading of any age (its date shows the staleness); (4) unavailable.
+/// `run_gate = false` skips step 2, for callers that must stay fast (the
+/// fleet-brief banner, via `kpi report --shell-invariant-writers --no-gate`).
+/// A CLI flag, not an env var: the R6 gauge must not ship a bypass var of its
+/// own (INFRA-2429 debt ceiling).
+pub fn build_shell_invariant_writers_section(repo_root: &Path) -> ShellInvariantWritersSection {
+    build_shell_invariant_writers_section_with(repo_root, true)
+}
+
+/// [`build_shell_invariant_writers_section`] with the live gate run made
+/// explicit (`run_gate`).
+pub fn build_shell_invariant_writers_section_with(
+    repo_root: &Path,
+    run_gate: bool,
+) -> ShellInvariantWritersSection {
+    let ambient = repo_root.join(".chump-locks/ambient.jsonl");
+    let contents = std::fs::read_to_string(&ambient).unwrap_or_default();
+    let latest = contents
+        .lines()
+        .filter_map(parse_invariant_boundary_reading)
+        .next_back();
+    let now = chrono::Utc::now().timestamp();
+    let from_ambient =
+        |(n, _, date): (u64, Option<i64>, Option<String>)| ShellInvariantWritersSection {
+            file_count: Some(n),
+            reading_date: date,
+            source: "ambient".to_string(),
+        };
+
+    if let Some(r) = latest.clone() {
+        if r.1
+            .is_some_and(|t| now - t < SHELL_INVARIANT_WRITERS_FRESH_SECS)
+        {
+            return from_ambient(r);
+        }
+    }
+
+    let script = repo_root.join("scripts/ci/test-invariant-boundary.sh");
+    if run_gate && script.is_file() {
+        if let Ok(out) = std::process::Command::new("bash")
+            .arg(&script)
+            .env("CHUMP_BOUNDARY_GATE", "shadow")
+            .current_dir(repo_root)
+            .output()
+        {
+            // The gate prints the violator list first; the reading is the
+            // last line that parses as an invariant_boundary_violation event.
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if let Some((n, _, date)) = stdout
+                .lines()
+                .rev()
+                .find_map(parse_invariant_boundary_reading)
+            {
+                return ShellInvariantWritersSection {
+                    file_count: Some(n),
+                    reading_date: date
+                        .or_else(|| Some(chrono::Utc::now().format("%Y-%m-%d").to_string())),
+                    source: "gate".to_string(),
+                };
+            }
+        }
+    }
+
+    if let Some(r) = latest {
+        return from_ambient(r);
+    }
+
+    ShellInvariantWritersSection {
+        file_count: None,
+        reading_date: None,
+        source: "unavailable".to_string(),
+    }
+}
+
+// ── CI Test Census (CREDIBLE-1514) ──────────────────────────────────────────
+
+/// `ci_tests_unwired` / `ci_tests_red` from docs/observability/ci-test-census.json,
+/// written by scripts/ci/census.sh (nightly via ci-test-census.yml). `None`
+/// when the census file is absent or unreadable.
+#[derive(Debug, Default, Clone)]
+pub struct CiCensusSection {
+    pub unwired: Option<u64>,
+    pub red: Option<u64>,
+    pub total: Option<u64>,
+    pub run_date: String,
+    pub mode: String,
+}
+
+impl CiCensusSection {
+    pub fn render_text(&self) -> String {
+        match (self.unwired, self.red) {
+            (Some(u), Some(r)) => format!(
+                "═══ CI Test Census (CREDIBLE-1514) ═══\n  ci_tests_unwired: {u}\n  ci_tests_red: {r}\n  of {} scripts/ci tests; census {} ({})\n",
+                self.total.unwrap_or(0),
+                self.run_date,
+                self.mode,
+            ),
+            _ => "═══ CI Test Census (CREDIBLE-1514) ═══\n  No docs/observability/ci-test-census.json (run scripts/ci/census.sh).\n".to_string(),
+        }
+    }
+
+    pub fn render_json(&self) -> String {
+        let n = |v: Option<u64>| v.map_or("null".to_string(), |x| x.to_string());
+        format!(
+            r#"{{"ci_tests_unwired":{},"ci_tests_red":{},"ci_tests_total":{},"run_date":"{}"}}"#,
+            n(self.unwired),
+            n(self.red),
+            n(self.total),
+            json_escape(&self.run_date),
+        )
+    }
+}
+
+pub fn build_ci_census_section(repo_root: &Path) -> CiCensusSection {
+    let path = repo_root.join("docs/observability/ci-test-census.json");
+    let Some(json) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+    else {
+        return CiCensusSection::default();
+    };
+    let count = |k: &str| {
+        json.get("counts")
+            .and_then(|c| c.get(k))
+            .and_then(|v| v.as_u64())
+    };
+    let text = |k: &str| {
+        json.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    CiCensusSection {
+        unwired: count("unwired"),
+        red: count("red"),
+        total: count("total"),
+        run_date: text("run_date"),
+        mode: text("mode"),
+    }
+}
+
 // ── Combined KPI Report ──────────────────────────────────────────────────────
 
 /// Full KPI report wrapping all sections.
@@ -1109,8 +1343,10 @@ pub struct KpiReport {
     pub green_first_try: GreenFirstTrySection,
     pub time_to_land: TimeToLandSection,
     pub gate_false_positive: GateFalsePositiveSection,
+    pub shell_invariant_writers: ShellInvariantWritersSection,
     /// CREDIBLE-1512: CI runner pickup-latency (p50/p95 per hour) + queued count.
     pub ci_pickup: crate::ci_pickup::CiPickupReport,
+    pub ci_census: CiCensusSection,
 }
 
 impl KpiReport {
@@ -1139,13 +1375,17 @@ impl KpiReport {
         out.push('\n');
         out.push_str(&self.gate_false_positive.render_text());
         out.push('\n');
+        out.push_str(&self.shell_invariant_writers.render_text());
+        out.push('\n');
         out.push_str(&self.ci_pickup.render_text());
+        out.push('\n');
+        out.push_str(&self.ci_census.render_text());
         out
     }
 
     pub fn render_json(&self) -> String {
         format!(
-            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"ci_pickup":{}}}"#,
+            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"shell_invariant_writers":{},"ci_pickup":{},"ci_census":{}}}"#,
             self.ship_rate.render_json(),
             self.mission_history.render_json(),
             self.cost_savings.render_json(),
@@ -1156,7 +1396,9 @@ impl KpiReport {
             self.green_first_try.render_json(),
             self.time_to_land.render_json(),
             self.gate_false_positive.render_json(),
+            self.shell_invariant_writers.render_json(),
             self.ci_pickup.render_json(),
+            self.ci_census.render_json(),
         )
     }
 }
@@ -1398,8 +1640,10 @@ pub fn build_full_report(repo_root: &Path, window_days: u64) -> KpiReport {
         green_first_try: build_green_first_try_section(repo_root),
         time_to_land: build_time_to_land_section(repo_root),
         gate_false_positive: build_gate_false_positive_section(repo_root),
+        shell_invariant_writers: build_shell_invariant_writers_section(repo_root),
         // CREDIBLE-1512: default 24h window for the embedded CI-pickup section.
         ci_pickup: crate::ci_pickup::build_ci_pickup_report(repo_root, 24),
+        ci_census: build_ci_census_section(repo_root),
     }
 }
 
@@ -3804,6 +4048,29 @@ mod tests {
     }
 
     #[test]
+    fn credible1514_ci_census_reads_counts() {
+        let tmp = tempdir();
+        let dir = tmp.join("docs/observability");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(build_ci_census_section(&tmp)
+            .render_text()
+            .contains("No docs/observability"));
+        std::fs::write(
+            dir.join("ci-test-census.json"),
+            r#"{"run_date":"2026-10-17","mode":"no-run","counts":{"total":1611,"unwired":1231,"red":12},"tests":[]}"#,
+        )
+        .unwrap();
+        let section = build_ci_census_section(&tmp);
+        assert_eq!(section.unwired, Some(1231));
+        assert_eq!(section.red, Some(12));
+        assert!(section.render_text().contains("ci_tests_unwired: 1231"));
+        assert!(section
+            .render_json()
+            .contains(r#""ci_tests_unwired":1231,"ci_tests_red":12"#));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn credible1115_gate_fp_rate_zero_when_no_signals() {
         let tmp = tempdir();
         let section = build_gate_false_positive_section(&tmp);
@@ -3812,6 +4079,100 @@ mod tests {
         assert!(section
             .render_text()
             .contains("No duty_officer_action events found"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn credible1509_shell_invariant_writers_unavailable_when_no_source() {
+        let tmp = tempdir();
+        let section = build_shell_invariant_writers_section(&tmp);
+        assert_eq!(section.file_count, None);
+        assert_eq!(section.source, "unavailable");
+        assert!(section.render_text().contains("No reading"));
+        assert!(section
+            .render_json()
+            .contains(r#""shell_invariant_writers":null"#));
+        assert!(section.render_json().contains(r#""target":0"#));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Writes a stub gate that prints a violator list then the reading line,
+    /// mirroring scripts/ci/test-invariant-boundary.sh's real output.
+    fn write_stub_gate(root: &std::path::Path, count: u64) {
+        let ci = root.join("scripts/ci");
+        std::fs::create_dir_all(&ci).unwrap();
+        let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+        std::fs::write(
+            ci.join("test-invariant-boundary.sh"),
+            format!(
+                "#!/usr/bin/env bash\necho '  • bot-merge.sh'\necho 'Total violators: {count}'\necho '{{\"ts\":\"{ts}\",\"kind\":\"invariant_boundary_violation\",\"count\":{count},\"mode\":\"shadow\"}}'\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn credible1509_shell_invariant_writers_stale_ambient_without_gate() {
+        let tmp = tempdir();
+        write_ambient(
+            &tmp,
+            &[
+                // Earlier reading, then a later one: latest must win.
+                r#"{"ts":"2026-10-16T00:00:00Z","kind":"invariant_boundary_violation","count":41,"mode":"shadow"}"#,
+                r#"{"ts":"2026-10-17T00:00:00Z","kind":"invariant_boundary_violation","count":39,"mode":"shadow"}"#,
+                r#"{"ts":"2026-10-17T01:00:00Z","kind":"gap_shipped","gap_id":"X-1"}"#,
+            ],
+        );
+        // No gate script in this tree: the stale recorded reading is reported
+        // with its own date.
+        let section = build_shell_invariant_writers_section(&tmp);
+        assert_eq!(section.file_count, Some(39));
+        assert_eq!(section.source, "ambient");
+        assert_eq!(section.reading_date.as_deref(), Some("2026-10-17"));
+        assert!(section
+            .render_text()
+            .contains("shell_invariant_writers: 39"));
+        assert!(section
+            .render_json()
+            .contains(r#""shell_invariant_writers":39"#));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn credible1509_shell_invariant_writers_runs_gate_when_reading_stale() {
+        let tmp = tempdir();
+        write_ambient(
+            &tmp,
+            &[
+                r#"{"ts":"2026-01-01T00:00:00Z","kind":"invariant_boundary_violation","count":99,"mode":"shadow"}"#,
+            ],
+        );
+        write_stub_gate(&tmp, 7);
+        let section = build_shell_invariant_writers_section(&tmp);
+        assert_eq!(section.file_count, Some(7));
+        assert_eq!(section.source, "gate");
+        assert!(section.reading_date.is_some());
+
+        // --no-gate: the stale recorded reading is used instead of the gate.
+        let cached = build_shell_invariant_writers_section_with(&tmp, false);
+        assert_eq!(cached.file_count, Some(99));
+        assert_eq!(cached.source, "ambient");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn credible1509_shell_invariant_writers_reuses_fresh_reading() {
+        let tmp = tempdir();
+        let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
+        let fresh = format!(
+            r#"{{"ts":"{ts}","kind":"invariant_boundary_violation","count":5,"mode":"shadow"}}"#
+        );
+        write_ambient(&tmp, &[fresh.as_str()]);
+        // A gate that would say 7 must not run while the reading is fresh.
+        write_stub_gate(&tmp, 7);
+        let section = build_shell_invariant_writers_section(&tmp);
+        assert_eq!(section.file_count, Some(5));
+        assert_eq!(section.source, "ambient");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -25,7 +25,7 @@ file below.
 One directive per line in `scripts/ops/organ-manifest.txt`:
 
 ```
-<state>  <unit>  [role=ROLE] [requires=SPEC,SPEC,...] [platforms=SUPERVISOR,...] [housekeeping=<script>|<cadence>|<args>]
+<state>  <unit>  [role=ROLE] [requires=SPEC,SPEC,...] [platforms=SUPERVISOR,...] [run-scope=user|system|any] [housekeeping=<script>|<cadence>|<args>]
 ```
 
 Blank lines and lines starting with `#` are ignored. Full field-by-field
@@ -39,6 +39,7 @@ place it can go stale:
 | `role=` | `brain\|muscle\|data\|janitor\|trust` — scopes `--role` bring-up | `brain` |
 | `requires=` | Comma-separated preconditions (`bin:`, `env:`, `dep:`, `file:`) gating applicability | none |
 | `platforms=` | Comma-separated `systemd\|launchd\|runit` — which supervisor(s) this organ applies to (INFRA-7764) | `systemd` |
+| `run-scope=` | `user\|system\|any` — the systemd manager scope the organ can work in; installers skip a mismatch with a logged reason, the host's scope comes from the typed Host enum (`chump node host --field run-scope`, INFRA-8194) | `any` |
 | `housekeeping=` | `<script>|<cadence>|<args>` — marks this organ as one of `install-node-housekeeping.sh`'s supervised loop-services (INFRA-7766) | not a housekeeping organ |
 
 ## The three consumers (one manifest, one filter each)

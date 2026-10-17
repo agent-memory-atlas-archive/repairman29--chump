@@ -36,8 +36,11 @@ export USER="${USER:-root}"
 # the auth-status.sh free-tier probe (curl -> 000 -> false RED) and every other
 # coreutils call on the Pixel node. Lead with $PREFIX/bin + $HOME/.cargo/bin when
 # present, keep the Linux-root defaults as fallback, and preserve any inherited
-# PATH. On Helsinki (PREFIX unset) the root paths still win first — unchanged.
-export PATH="${PREFIX:+$PREFIX/bin:}$HOME/.cargo/bin:$HOME/.local/bin:/root/.local/bin:/root/.cargo/bin:/root/bin:/usr/local/bin:/usr/bin:/bin${PATH:+:$PATH}"
+# PATH. INFRA-8194 (R5 slice 2): the run-user's own dirs come from $HOME (set by
+# the rendered unit), not a baked root home: on helsinki HOME is root's home so
+# the lookup order is unchanged, and on an owned node the old literal root-home
+# entries were unreadable dead weight.
+export PATH="${PREFIX:+$PREFIX/bin:}$HOME/.cargo/bin:$HOME/.local/bin:$HOME/bin:/usr/local/bin:/usr/bin:/bin${PATH:+:$PATH}"
 
 # Derive the repo root from this script's OWN location — it lives at
 # <repo>/scripts/dispatch/chump-farmer-run.sh — instead of a hardcoded

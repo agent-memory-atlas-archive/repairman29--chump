@@ -16,6 +16,13 @@
 #                                that). Capped clamp to 5 with a warning.
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 # INFRA-451: resolve to the *main* worktree so the plist path survives
 # worktree reaping.
@@ -79,7 +86,7 @@ cat > "$PLIST" <<PLISTEOF
         <key>HOME</key>
         <string>${HOME}</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>${BREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>

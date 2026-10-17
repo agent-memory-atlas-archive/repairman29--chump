@@ -9,9 +9,12 @@
 #   WS  /api/live       GET /healthz
 # postgrest already holds :3000 on every node; 7070 is the crate default and free.
 #
-# HOST-AGNOSTIC (TREK-18): the /root/ path prefixes and User=root are
-# host-rewritten by scripts/setup/install-helsinki-atc.sh to the repo-owner
-# HOME/user, which also injects User=/HOME=/PATH=/WorkingDirectory= when absent.
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
+# The renderer also injects HOME=/PATH=/WorkingDirectory= when absent.
 # Declared `enabled ... role=data` in scripts/ops/organ-manifest.txt AND added to
 # the SYSTEM_UNITS roster in install-helsinki-atc.sh so the unit file is actually
 # cp'd into /etc/systemd/system — RESILIENT-376: a manifest-only `enabled` line
@@ -25,14 +28,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
 Environment=CHUMP_FLEET_SERVER_PORT=7070
 Environment=RUST_LOG=info
-WorkingDirectory=/root/Projects/chump
+WorkingDirectory=__REPO_ROOT__
 # Source provider + node creds (GH_TOKEN for the count_today_ships gh fallback).
 # set -a exports the bare (non-export) CLAUDE_CODE_OAUTH_TOKEN line in cj.env too.
-ExecStart=/bin/bash -c 'set -a; source /root/.chump/providers.env 2>/dev/null; source /root/.chump/cj.env 2>/dev/null; set +a; exec /root/Projects/chump/target/release/chump-fleet-server'
+ExecStart=/bin/bash -c 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; source __HOME__/.chump/cj.env 2>/dev/null; set +a; exec __REPO_ROOT__/target/release/chump-fleet-server'
 Restart=always
 RestartSec=10
 

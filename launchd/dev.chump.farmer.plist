@@ -26,10 +26,10 @@
 
   Manual installation:
     1. Run: scripts/setup/install-farmer-launchd.sh
-       (it replaces /path/to/Chump with your actual repo path)
+       (it replaces __REPO_ROOT__ with your actual repo path)
     OR:
     1. Copy: cp launchd/dev.chump.farmer.plist ~/Library/LaunchAgents/
-    2. Edit: replace /path/to/Chump and /path/to/HOME with real paths
+    2. Edit: replace __REPO_ROOT__ and __HOME__ with real paths
     3. Load: launchctl load ~/Library/LaunchAgents/dev.chump.farmer.plist
 
   STATUS:
@@ -53,11 +53,11 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/path/to/Chump/scripts/coord/farmer.sh</string>
+    <string>__REPO_ROOT__/scripts/coord/farmer.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- KeepAlive=true: launchd restarts the process unconditionally on exit.
        Combined with StartInterval=60, this means: run every 60s AND restart
@@ -89,13 +89,13 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/path/to/HOME</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin:/usr/bin:/bin</string>
     <!-- Deliberately excludes ~/.cargo/bin — farmer must not depend on
          cargo-installed binaries that may be absent during a binary failure. -->
     <key>CHUMP_REPO_ROOT</key>
-    <string>/path/to/Chump</string>
+    <string>__REPO_ROOT__</string>
   </dict>
 </dict>
 </plist>

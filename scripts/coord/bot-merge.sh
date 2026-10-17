@@ -291,6 +291,17 @@ _bm_steps_append() {
     _BM_LAST_STEP_TRANSITION="$transition"
 }
 
+# RESILIENT-1609: keep the steps file's mtime fresh. The worktree reapers read
+# a fresh .chump-locks/bot-merge-*.steps as "a ship is live in this worktree"
+# (wt_has_live_bot_merge). A recovery-mode ship holds no lease and idles the
+# git index during clippy, so without this the reaper removed infra-8180
+# mid-push. Called at every named step / stage transition and every heartbeat
+# tick, in both normal and recovery mode. Touch only; never appends.
+_bm_steps_touch() {
+    [[ -n "${_BM_STEPS_FILE:-}" && -f "${_BM_STEPS_FILE}" ]] || return 0
+    touch "$_BM_STEPS_FILE" 2>/dev/null || true
+}
+
 _bm_cleanup() {
     local _bm_exit_code=$?
     [[ "$_BM_CLEANUP_DONE" == "1" ]] && return
@@ -479,6 +490,7 @@ _bm_ms_now() {
 _bm_step_start() {
     local step="$1"
     _BM_NAMED_STEP="$step"
+    _bm_steps_touch   # RESILIENT-1609
     _BM_NAMED_STEP_T0_MS="$(_bm_ms_now)"
     # RESILIENT-140: the heartbeat prints the step file, which only stage_start
     # used to update — so a phase without a stage_start (or a stall between
@@ -501,6 +513,7 @@ _bm_step_start() {
 
 _bm_step_done() {
     local step="${1:-${_BM_NAMED_STEP:-unknown}}" rc="${2:-0}"
+    _bm_steps_touch   # RESILIENT-1609
     local now_ms duration_ms ts gap_label ambient
     now_ms="$(_bm_ms_now)"
     duration_ms=$(( now_ms - _BM_NAMED_STEP_T0_MS ))
@@ -1519,8 +1532,12 @@ _bm_health_init() {
     # tick doesn't compute a bogus (since-epoch) elapsed-since-change value.
     date +%s > "${_BM_STEP_FILE}.changed_at" 2>/dev/null || true
     # INFRA-1035: seed the steps log with a session-start entry
-    printf '{"ts":"%s","step":"session","transition":"start","elapsed_s":0,"pid":%d}\n' \
-        "$_BM_STARTED_AT" "$_BM_PID" > "$_BM_STEPS_FILE" 2>/dev/null || true
+    # RESILIENT-1609: the session line also names the worktree, branch and gap
+    # so the worktree reapers can tie this steps file to the worktree it lives
+    # in (wt_has_live_bot_merge) — the file is otherwise keyed only by PID.
+    printf '{"ts":"%s","step":"session","transition":"start","elapsed_s":0,"pid":%d,"worktree":"%s","branch":"%s","gap_ids":"%s"}\n' \
+        "$_BM_STARTED_AT" "$_BM_PID" "${REPO_ROOT:-}" "${BRANCH:-}" "${GAP_IDS[*]:-}" \
+        > "$_BM_STEPS_FILE" 2>/dev/null || true
     _bm_health_write
 
     # Background heartbeat: rewrite the health file AND (INFRA-2455) print a
@@ -1555,6 +1572,7 @@ _bm_health_init() {
         while true; do
             sleep "$_hb_interval"
             _hb_elapsed=$(( _hb_elapsed + _hb_interval ))
+            _bm_steps_touch   # RESILIENT-1609: a live ship keeps its steps file fresh
             local step now
             step="$(cat "$sf" 2>/dev/null || echo unknown)"
             now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -2002,6 +2020,14 @@ if [[ "${CHUMP_BOT_MERGE_RECOVERY_MODE:-0}" == "1" ]]; then
         fi
     fi
 
+    # INFRA-8208: tell the pre-push hook this push is bot-merge-initiated, as the
+    # normal path does (line "export CHUMP_BOT_MERGE_IN_PROGRESS=1" in the push
+    # step). Without it pre-push Guard 4 (INFRA-719) refuses a recovery push of
+    # a never-pushed chump/<gap>-* branch, and the operator had to prefix the
+    # command by hand. Recovery mode already skips rebase/lint/test because the
+    # branch passed the full pipeline before wedging, so the hook's bot-merge
+    # skips (preflight/clippy/test re-runs) are the intended behaviour here too.
+    export CHUMP_BOT_MERGE_IN_PROGRESS=1
     stage_start "recovery: push"
     run git push -u origin "$BRANCH" --force-with-lease
     stage_done
@@ -2012,13 +2038,25 @@ if [[ "${CHUMP_BOT_MERGE_RECOVERY_MODE:-0}" == "1" ]]; then
     _recover_pr_create_out=""
     _recover_pr_create_rc=0
     if [[ -z "$_recover_pr_num" ]]; then
-        _recover_pr_create_out="$(gh pr create --base main --head "$BRANCH" \
+        # INFRA-8209: `gh pr create` has no --json flag (that is `gh pr
+        # list|view`), so the old call always failed with "unknown flag", and
+        # because it was a bare `x="$(gh ...)"; rc=$?` the failure died in the
+        # RESILIENT-052 ERR trap before the RESILIENT-217 handler below could
+        # report it. Create the PR with the flags gh pr create really has, take
+        # the number from the URL it prints (fallback: gh pr list --head), and
+        # capture the exit code with `|| rc=$?` — a `||` list is exempt from
+        # both errexit and the ERR trap, so a gh failure reaches RESILIENT-217.
+        _recover_pr_create_out="$(gh pr create --base "${BASE_BRANCH:-main}" --head "$BRANCH" \
             --title "$(git log -1 --pretty=%s)" \
             --body "Recovery push — INFRA-1422 stage-budget circuit breaker retry." \
-            --json number 2>&1)"
-        _recover_pr_create_rc=$?
+            2>&1)" || _recover_pr_create_rc=$?
         if [[ $_recover_pr_create_rc -eq 0 ]]; then
-            _recover_pr_num="$(printf '%s' "$_recover_pr_create_out" | jq -r '.number // empty' 2>/dev/null || true)"
+            _recover_pr_url="$(printf '%s\n' "$_recover_pr_create_out" | grep -Eo 'https?://[^[:space:]]+/pull/[0-9]+' | tail -1 || true)"
+            _recover_pr_num="${_recover_pr_url##*/}"
+            [[ "$_recover_pr_num" =~ ^[0-9]+$ ]] || _recover_pr_num=""
+            if [[ -z "$_recover_pr_num" ]]; then
+                _recover_pr_num="$(gh pr list --head "$BRANCH" --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+            fi
         fi
     fi
     stage_done
@@ -3010,30 +3048,21 @@ fi
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 info "cargo parallelism: CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS} (override via env)"
 
-# INFRA-1063: per-worktree CARGO_TARGET_DIR to eliminate cargo build-dir lock
-# contention when multiple bot-merge runs execute in parallel across
-# /tmp/chump-*/ worktrees.  Without this, all worktrees resolve to the same
-# shared target/ (either $CARGO_HOME/registry or the root workspace target/),
-# causing "Blocking waiting for file lock on build directory" timeouts (observed:
-# two parallel clippy runs each waited 240 s in 2026-05-13).
-#
-# Strategy: option (a) — per-worktree target dir.
-#   - If CARGO_TARGET_DIR is already set externally (e.g. CI), respect it.
-#   - Otherwise, pin it to <worktree>/target/ so each gap gets its own build
-#     cache.  The dir is under /tmp/ and cleaned up when the worktree is reaped.
-#   - When the wait exceeds 60 s, cargo emits "Blocking waiting for file lock"
-#     to stderr; we capture that and emit kind=cargo_lock_wait to ambient.jsonl.
-if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
-    # INFRA-1374: use a hidden .cargo-build-target dir so the per-worktree
-    # isolation doesn't collide with the workspace `target/` name that cargo
-    # also uses by default (and which .cargo/config.toml may override globally
-    # to the main repo path). Using a distinct name ensures each worktree at
-    # /tmp/chump-* gets its own, unambiguous build cache regardless of any
-    # global config.toml target-dir override from install-sccache.sh (INFRA-481).
-    export CARGO_TARGET_DIR="${REPO_ROOT}/.cargo-build-target"
-    info "INFRA-1374: CARGO_TARGET_DIR pinned to ${CARGO_TARGET_DIR} (per-worktree mutex isolation)"
-else
-    info "INFRA-1063: CARGO_TARGET_DIR already set to ${CARGO_TARGET_DIR} (respecting caller)"
+# INFRA-1063: cargo build-dir lock contention ("Blocking waiting for file lock on
+# build directory") is detected by the wrapper below, which emits
+# kind=cargo_lock_wait to ambient.jsonl when a wait exceeds 60 s.
+# ZERO-WASTE-134: the per-worktree .cargo-build-target default (INFRA-1374) is gone:
+# it grew a private 2.4-3 GB build dir in every worktree. Resolve via the one
+# shared resolver instead ($CARGO_TARGET_DIR > $CHUMP_CARGO_TARGET >
+# ~/.cargo/chump-shared-target). Lock contention is still detected + reported by
+# the cargo_lock_wait wrapper below.
+_BM_RESOLVER="${REPO_ROOT}/scripts/ci/lib/resolve-cargo-target-dir.sh"
+if [[ -f "$_BM_RESOLVER" ]]; then
+    # shellcheck source=../ci/lib/resolve-cargo-target-dir.sh
+    # shellcheck disable=SC1091
+    source "$_BM_RESOLVER"
+    chump_export_cargo_target_dir
+    info "ZERO-WASTE-134: CARGO_TARGET_DIR=${CARGO_TARGET_DIR} (shared resolver)"
 fi
 
 # INFRA-1063 AC #5: wrapper for cargo invocations that detects build-dir lock

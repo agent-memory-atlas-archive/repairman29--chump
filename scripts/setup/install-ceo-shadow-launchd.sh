@@ -3,6 +3,13 @@
 # Idempotent. The shadow log feeds the AC-3 shadow-vs-ATC diff report; the
 # driver never executes routed commands in v0, so this daemon is read-and-log.
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 # INFRA-2365: prefer the explicit env override, else resolve the MAIN
 # worktree (not whatever worktree this installer runs from — see
@@ -30,7 +37,7 @@ cat > "$PLIST" <<EOF
   <key>WorkingDirectory</key><string>$REPO</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>$HOME/.local/bin:${BREW_PREFIX}/bin:/usr/bin:/bin</string>
     <key>CHUMP_CEO_MODE</key><string>${CHUMP_CEO_MODE:-shadow}</string>
   </dict>
   <key>StartInterval</key><integer>3600</integer>

@@ -1,0 +1,14 @@
+# ZERO-WASTE-135: workflows exempt from scripts/ci/test-workflow-concurrency-groups.sh.
+#
+# SHRINK-ONLY. Never add a line to this file. A workflow triggered by
+# workflow_run or schedule MUST declare a top-level `concurrency:` block whose
+# group key is stable per workflow (+ branch/PR), never per run: keys built from
+# github.run_id / run_number / run_attempt / workflow_run.id / workflow_run.head_sha
+# never dedupe, so a runner stall queues one run per upstream completion
+# (2026-10-17 14:25Z: 14 queued verified-recompute runs on main).
+#
+# Format: <workflow-file>.yml   # reason + owner gap
+# The test also fails on an entry that is no longer needed, so fixing a
+# workflow forces its line to be deleted here.
+#
+# (empty: all 19 workflow_run/schedule workflows comply as of ZERO-WASTE-135)

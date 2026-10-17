@@ -10,6 +10,11 @@
 #   scripts/setup/install-chump-fleet-daemon.sh --uninstall
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the tracked plist is a placeholder template
+# (__REPO_ROOT__ __HOME__ __BIN_DIR__ __BREW_PREFIX__), rendered for THIS host by
+# chump_render_template (typed `chump node render-unit`, sed mirror fallback).
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PLIST_SRC="$REPO_ROOT/launchd/com.chump.fleet-daemon.plist"
@@ -27,15 +32,10 @@ fi
 [[ -f "$PLIST_SRC" ]] || { echo "FAIL: missing $PLIST_SRC"; exit 1; }
 
 # Resolve runtime paths and substitute them into the plist before install.
-CARGO_BIN_DIR="$HOME/.cargo/bin"
 mkdir -p "$HOME/Library/LaunchAgents"
 
 # Substitute placeholders.
-sed \
-  -e "s|/path/to/Chump|$REPO_ROOT|g" \
-  -e "s|/path/to/HOME|$HOME|g" \
-  -e "s|/path/to/.cargo/bin|$CARGO_BIN_DIR|g" \
-  "$PLIST_SRC" > "$PLIST_DST"
+chump_render_template "$PLIST_SRC" "$PLIST_DST" "$REPO_ROOT"
 
 echo "[install-chump-fleet-daemon] wrote $PLIST_DST"
 

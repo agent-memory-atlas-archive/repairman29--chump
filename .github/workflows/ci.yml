@@ -1111,6 +1111,13 @@ jobs:
         # `Auto-merge: hold`); mirrored in chump preflight (arm-policy-native).
         run: bash scripts/ci/test-arm-policy-native.sh
 
+      - name: self-reports registry gate (CREDIBLE-1493)
+        # Phase R R7: docs/observability/SELF_REPORTS.yaml pairs every fleet
+        # self-report with a ground-truth probe for `chump calibrate`. Fails on
+        # a malformed registry, a self-report whose source or command is not
+        # in the tree, or a missing receipt pair. Pure local, ~1s.
+        run: bash scripts/ci/test-self-reports-registry.sh
+
       - name: capabilities registry gate (CREDIBLE-240)
         # docs/CAPABILITIES_REGISTRY.json is indexed by almanac, so a stale or
         # broken catalog gets served to agents with a file:line receipt. This
@@ -1121,6 +1128,22 @@ jobs:
         # backdated timestamp. Content drift is reported as WARN — the on-merge
         # regenerator in capabilities-registry.yml is what fixes that on main.
         run: bash scripts/ci/test-capabilities-registry.sh
+
+      - name: no host literals in provisioning (INFRA-8194, Phase R R5)
+        # Every host-assumption incident is one bug: a shipped unit hardcodes
+        # one machine (User=jeff on cuphead -> 217/USER, RESILIENT-1601;
+        # HOME=/root on an owned node, INFRA-3647). Fails on a NEW User=<name>,
+        # /home/<name>, /root/ or /opt/homebrew under scripts/dispatch,
+        # launchd, scripts/plists, scripts/setup; today's offenders sit in a
+        # dated, shrink-only allowlist. Hermetic, <2s, mirrored in preflight.
+        run: bash scripts/ci/test-provision-no-host-literals.sh
+
+      - name: organ manifest run-scope filter (INFRA-8194, Phase R R5)
+        # run-scope=user|system|any: installers place only what the typed Host
+        # enum's manager scope allows (root-only organ-deploy is skipped by a
+        # --user bring-up; organ-reconcile skips user-only organs). Hermetic
+        # stub-systemctl test, <2s, mirrored in preflight.
+        run: bash scripts/ci/test-organ-manifest-run-scope.sh
 
       - name: capabilities freshness report (CREDIBLE-240, advisory)
         # Says the catalog's age out loud in the CI log. Advisory for the same
@@ -1240,9 +1263,6 @@ jobs:
 
       - name: docs-delta trailer validation (INFRA-124)
         run: bash scripts/ci/test-infra-124-docs-delta-trailer.sh
-
-      - name: state.sql merge driver smoke (INFRA-310)
-        run: bash scripts/ci/test-merge-driver-state-sql.sh
 
       - name: branch-protection gate (CREDIBLE-1502)
         run: bash scripts/ci/test-branch-protection-gate.sh
@@ -1440,6 +1460,9 @@ jobs:
       - name: gap-divergence guard (INFRA-783)
         run: bash scripts/ci/test-gap-divergence-guard.sh
 
+      - name: pre-commit gap-guard perf (INFRA-8211)
+        run: bash scripts/ci/test-pre-commit-gap-guard-perf.sh
+
       - name: flake-autorerun harness fixture (INFRA-764)
         run: bash scripts/ci/test-flake-autorerun.sh
 
@@ -1457,6 +1480,17 @@ jobs:
         run: |
           cargo build --bin chump 2>&1 | tail -3
           CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-orchestrate-session-summary.sh
+
+      - name: dispatch open-PR refuse/repair (INFRA-8199)
+        run: |
+          cargo build --bin chump 2>&1 | tail -3
+          CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-dispatch-open-pr-repair.sh
+
+      - name: pr-cut honored by watch and reviver (RESILIENT-1606/1607)
+        run: bash scripts/ci/test-pr-cut-honored.sh
+
+      - name: load-aware dead-man smoke (RESILIENT-1611)
+        run: bash scripts/ci/test-load-aware-deadman.sh
 
       - name: pre-push cargo-test full-suite gate (INFRA-761)
         run: bash scripts/ci/test-pre-push-test-gate.sh
@@ -1507,6 +1541,9 @@ jobs:
 
       - name: pick-and-claim lock-dir resolves to main repo from linked worktree (INFRA-466/467)
         run: bash scripts/ci/test-pick-and-claim-lockdir.sh
+
+      - name: picker soft skill filter + open-PR anti-spin fallback (INFRA-8176)
+        run: bash scripts/ci/test-picker-soft-skill-open-pr.sh
 
       - name: corrective-keyword waste-SLO-pause exception (META-937/META-823)
         run: bash scripts/ci/test-corrective-keyword-exception.sh
@@ -1727,11 +1764,109 @@ jobs:
         # repairs in-diff detection. Sanctioned INFRA-1869 demotion ceremony.
         continue-on-error: true
 
+      - name: scripts/ci census shrink-only gate (CREDIBLE-1514)
+        # A new scripts/ci test is wired or it is deleted: fails when a test is
+        # unwired that is not on origin/main's docs/observability/ci-test-census.json
+        # unwired list, or when the committed red/unwired counts grew. The nightly
+        # census PR (census/* branch, ci-test-census.yml) publishes the truth, so
+        # count growth there is reported, not failed.
+        env:
+          CHUMP_CENSUS_ALLOW_GROWTH: ${{ startsWith(github.head_ref, 'census/') && '1' || '0' }}
+        run: bash scripts/ci/test-census-shrink-only.sh
+
       - name: CSS token-discipline smoke (INFRA-1590)
         run: bash scripts/ci/test-css-token-discipline.sh
 
+      - name: test-auto-merge-armer (CREDIBLE-1511)
+        run: bash scripts/ci/test-auto-merge-armer.sh
+
+      - name: test-bot-merge-rest-direct (CREDIBLE-1511)
+        run: bash scripts/ci/test-bot-merge-rest-direct.sh
+
+      - name: test-bot-merge-portability (CREDIBLE-1511)
+        run: bash scripts/ci/test-bot-merge-portability.sh
+
+      - name: test-event-registry-effect-metric (CREDIBLE-1511)
+        run: bash scripts/ci/test-event-registry-effect-metric.sh
+
+      - name: test-lease-lib (CREDIBLE-1511)
+        run: bash scripts/ci/test-lease-lib.sh
+
+      - name: test-stale-worktree-reaper-stash (CREDIBLE-1511)
+        run: bash scripts/ci/test-stale-worktree-reaper-stash.sh
+
+      - name: merge-driver union smoke (INFRA-8223)
+        run: bash scripts/ci/test-merge-driver-union.sh
+
       - name: Arm policy honored by every armer (RESILIENT-1613 / INFRA-8221)
         run: bash scripts/ci/test-arm-policy.sh
+
+      - name: picker test INFRA-1254 inbox-first picker (CREDIBLE-1513)
+        run: bash scripts/ci/test-inbox-first-picker.sh
+
+      - name: picker test atomic picker+claimer (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-and-claim-atomic.sh
+
+      - name: picker test dep-resolution picker+claimer (RESILIENT-1114) (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-and-claim-dep-resolution.sh
+
+      - name: picker test claimer exclusion-reason dump (RESILIENT-1509) (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-and-claim-exclusion-reasons.sh
+
+      - name: picker test rc=1 cooldown (INFRA-361) (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-gap-cooldown.sh
+
+      - name: picker test open-only filter (INFRA-397) (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-gap-open-only.sh
+
+      - name: picker test skips linked-PR gaps (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-gap-skips-linked-pr.sh
+
+      - name: picker test skips merged gaps (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-gap-skips-merged.sh
+
+      - name: picker test skips shipped gaps (EFFECTIVE-1543) (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-gap-skips-shipped.sh
+
+      - name: picker test sync-overhead guard (CREDIBLE-167) (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-gap-sync-overhead.sh
+
+      - name: picker test worker stagger (INFRA-340) (CREDIBLE-1513)
+        run: bash scripts/ci/test-pick-gap-worker-stagger.sh
+
+      - name: picker test P0-MISSION effort-gate bypass (MISSION-047) (CREDIBLE-1513)
+        run: bash scripts/ci/test-picker-p0-mission-effort-bypass.sh
+
+      - name: picker test pillar-starved junk filter (RESILIENT-272) (CREDIBLE-1513)
+        run: bash scripts/ci/test-picker-pillar-starved-junk-filter.sh
+
+      - name: picker test pivot-lock cleanup (CREDIBLE-1513)
+        run: bash scripts/ci/test-picker-pivot-lock-cleanup.sh
+
+      - name: picker test R1 in-flight no-repick (CREDIBLE-1513)
+        run: python3 -I scripts/ci/test-r1-inflight-no-repick.py
+
+      - name: reaper spares live bot-merge ship smoke (RESILIENT-1609)
+        run: bash scripts/ci/test-reaper-bot-merge-live.sh
+
+      - name: bot-merge recovery push passes pre-push Guard 4 smoke (INFRA-8208)
+        run: bash scripts/ci/test-bot-merge-recovery-in-progress.sh
+
+      - name: bot-merge recovery mode opens a missing PR smoke (INFRA-8209)
+        run: bash scripts/ci/test-bot-merge-recovery-pr-create.sh
+
+      - name: Cargo target dir - no worktree-local default (ZERO-WASTE-134)
+        run: bash scripts/ci/test-cargo-target-no-worktree-default.sh
+
+      - name: workflow_run/schedule concurrency groups are stable (ZERO-WASTE-135)
+        run: bash scripts/ci/test-workflow-concurrency-groups.sh
+
+      - name: gap YAML mirror is export-only (INFRA-8193)
+        # Phase R R4: state.db is the only truth; docs/gaps/*.yaml is written
+        # only by the export path (chump gap dump --per-file / sync --push /
+        # ship's single-gap sync). Grep inventory of other writers against
+        # scripts/ci/gap-yaml-writer-allowlist.txt, which may only shrink.
+        run: bash scripts/ci/test-gap-yaml-export-only.sh
 
       - name: grep -c || echo 0 idiom guard smoke (RESILIENT-281)
         run: bash scripts/ci/test-grep-c-echo0-guard.sh

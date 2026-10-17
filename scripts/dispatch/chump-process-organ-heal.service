@@ -10,13 +10,15 @@
 # the script's default $HOME/Projects/Chump is capital-C and does not exist on
 # case-sensitive Linux (docs/process/LINUX_NODE_ONBOARDING.md).
 #
-# HOST-AGNOSTIC MECHANISM: helsinki-shaped (/root/... + User=root) ON PURPOSE;
-# install-helsinki-atc.sh rewrites "/root/" -> the run-user's $HOME and
-# "User=root" -> "User=<run-user>" at copy time. DO NOT use the systemd %h
-# specifier (reverts INFRA-3647/TREK-21): on a SYSTEM-scope unit %h ignores
-# User= and always resolves to /root, so on an owned node (CJ=jeff) it exec'd
-# /root/Projects/chump/... as jeff and failed with "Permission denied" — see
-# chump-organ-watchdog.service for the full write-up.
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
+# DO NOT use the systemd %h specifier (INFRA-3647/TREK-21): on a SYSTEM-scope
+# unit %h ignores User= and always resolves to the root home, so on an owned
+# node it exec'd root's checkout as the run user ("Permission denied"). The
+# renderer refuses %h at system scope.
 [Unit]
 Description=Chump process-organ heal loop — revive unsupervised bash procs (INFRA-3650)
 After=network-online.target
@@ -24,7 +26,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/ops/process-organ-heal.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/ops/process-organ-heal.sh'

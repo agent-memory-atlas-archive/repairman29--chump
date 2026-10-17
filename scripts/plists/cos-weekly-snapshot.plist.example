@@ -8,10 +8,10 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/eval/generate-cos-weekly-snapshot.sh</string>
+    <string>__REPO_ROOT__/scripts/eval/generate-cos-weekly-snapshot.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>RunAtLoad</key>
   <false/>
   <!-- Monday 08:00 (Weekday: 0=Sun … 1=Mon per launchd). Edit Hour/Minute/Weekday if needed. -->
@@ -25,13 +25,13 @@
     <integer>0</integer>
   </dict>
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/cos-weekly-launchd.out.log</string>
+  <string>__REPO_ROOT__/logs/cos-weekly-launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/cos-weekly-launchd.err.log</string>
+  <string>__REPO_ROOT__/logs/cos-weekly-launchd.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/Users/you/.local/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:/usr/bin:/bin:__HOME__/.local/bin</string>
   </dict>
 </dict>
 </plist>

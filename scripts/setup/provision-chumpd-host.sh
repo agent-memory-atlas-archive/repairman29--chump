@@ -393,17 +393,16 @@ else
     log "OK: installed chump -> $HOME/.local/bin/chump"
   fi
 
-  # RESILIENT-191: materialize the local gap DB from the tracked YAML mirror
-  # (state.db is gitignored; the registry travels as .chump/state.sql). Best-effort
-  # + time-bounded: `chump restore --from-sql` currently probes a model endpoint at
-  # startup, so it can fail on a node whose backend secrets aren't filled yet — the
-  # runbook (docs/process/ADD_A_FLEET_NODE.md §2) covers the post-secrets re-run.
-  if [[ ! -s "$CHUMPD_PROVISION_DIR/.chump/state.db" && -f "$CHUMPD_PROVISION_DIR/.chump/state.sql" ]]; then
-    if ( cd "$CHUMPD_PROVISION_DIR" && timeout 60 "$HOME/.local/bin/chump" restore --from-sql >/dev/null 2>&1 ); then
-      log "OK: materialized state.db from state.sql ($(sqlite3 "$CHUMPD_PROVISION_DIR/.chump/state.db" "SELECT COUNT(*) FROM gaps WHERE status='open'" 2>/dev/null) open gaps)"
+  # RESILIENT-191: seed an EMPTY local gap DB on a fresh host. INFRA-8193:
+  # .chump/state.sql is no longer tracked, so the seed is the insert-only
+  # `chump gap import` from the exported docs/gaps/*.yaml mirror (it never
+  # overwrites existing rows). Best-effort + time-bounded.
+  if [[ ! -s "$CHUMPD_PROVISION_DIR/.chump/state.db" && -d "$CHUMPD_PROVISION_DIR/docs/gaps" ]]; then
+    if ( cd "$CHUMPD_PROVISION_DIR" && CHUMP_GAP_IMPORT_NO_SIMILARITY=1 timeout 120 "$HOME/.local/bin/chump" gap import --yaml "$CHUMPD_PROVISION_DIR/docs/gaps" >/dev/null 2>&1 ); then
+      log "OK: seeded state.db from docs/gaps ($(sqlite3 "$CHUMPD_PROVISION_DIR/.chump/state.db" "SELECT COUNT(*) FROM gaps WHERE status='open'" 2>/dev/null) open gaps)"
     else
-      warn "could not materialize state.db yet (restore needs a reachable backend) —" \
-           "fill secrets then re-run: cd $CHUMPD_PROVISION_DIR && chump restore --from-sql"
+      warn "could not seed state.db yet —" \
+           "re-run: cd $CHUMPD_PROVISION_DIR && chump gap import --yaml $CHUMPD_PROVISION_DIR/docs/gaps"
     fi
   fi
 fi
@@ -532,9 +531,11 @@ ENVEOF
       log "wrote $CHUMPD_ENV template (CHUMP_REPO=$CHUMPD_PROVISION_DIR) — fill in TODO_ secrets before starting chumpd"
     fi
     run "mkdir -p $UNIT_DIR" mkdir -p "$UNIT_DIR"
-    sed -e "s|__REPO_ROOT__|$CHUMPD_PROVISION_DIR|g" -e "s|__HOME__|$HOME|g" \
-      -e "s|__RUN_USER__|$(id -un)|g" \
-      "$TEMPLATE" > "$UNIT_DST"
+    # INFRA-8194 (R5 slice 2): render through the typed host renderer (user
+    # manager: never a User= line, RESILIENT-1571), sed mirror as fallback.
+    # shellcheck source=../lib/host-paths.sh
+    source "$CHUMPD_PROVISION_DIR/scripts/lib/host-paths.sh"
+    chump_render_template "$TEMPLATE" "$UNIT_DST" "$CHUMPD_PROVISION_DIR" linux-systemd-user
     log "wrote $UNIT_DST"
     # RESILIENT-191: workers spawned by the --user service inherit a minimal PATH
     # that lacks ~/.local/bin (chump, claude) and ~/.cargo/bin. Drop in a PATH so

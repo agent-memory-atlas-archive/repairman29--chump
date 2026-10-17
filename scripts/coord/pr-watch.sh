@@ -95,7 +95,9 @@ write_heartbeat() {
 
 # INFRA-387: attempt to auto-resolve a rebase conflict using the recipe
 # proven during the 2026-05-03 batch-unstick (7/8 PRs auto-recovered):
-#   .chump/state.sql        — regenerate via `chump gap dump --out`
+#   .chump/state.sql        — untracked since INFRA-8193: a conflict can only
+#                             be an old branch touching the deleted file, so
+#                             resolve by keeping it out of git (git rm)
 #   docs/gaps/<ID>.yaml     — take ours (the per-file mirror; conflict
 #                             usually means two parallel reserves both
 #                             chose the same ID-shape, but mirrors are
@@ -121,13 +123,12 @@ attempt_auto_resolve_conflicts() {
     while IFS= read -r f; do
         [[ -z "$f" ]] && continue
         case "$f" in
-            .chump/state.sql)
-                say "  auto-resolve: regenerating $f via chump gap dump"
-                if ! chump gap dump --out "$f" >/dev/null 2>&1; then
-                    say "  ✗ chump gap dump failed for $f — bail"
-                    return 1
-                fi
-                git add "$f" 2>/dev/null
+            .chump/state.sql|.chump/state.sql.lz4|.chump/gap_store.db)
+                # INFRA-8193: these left git; never regenerate or re-add them.
+                say "  auto-resolve: $f is untracked since INFRA-8193 — removing from the index"
+                git rm -q --cached -- "$f" >/dev/null 2>&1 \
+                    || git update-index --force-remove -- "$f" 2>/dev/null \
+                    || { say "  ✗ could not drop $f from the index"; return 1; }
                 ;;
             docs/gaps/*.yaml)
                 say "  auto-resolve: take ours for $f"

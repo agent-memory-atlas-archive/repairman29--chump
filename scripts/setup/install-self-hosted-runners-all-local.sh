@@ -24,6 +24,13 @@
 #   CHUMP_RUNNER_GH_REPO     gh api repo (default: repairman29/chump)
 
 set -uo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DRY_RUN=0
@@ -88,7 +95,7 @@ say "step 3/5: inject env vars into each runner's .env"
 ENV_MARKER="# INFRA-1540 cache env"
 PATH_MARKER="# INFRA-1540 PATH (brew coreutils for timeout/jq/etc.)"
 # Default PATH includes Homebrew + system. Override via CHUMP_RUNNER_PATH.
-RUNNER_PATH="${CHUMP_RUNNER_PATH:-/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
+RUNNER_PATH="${CHUMP_RUNNER_PATH:-${BREW_PREFIX}/bin:${BREW_PREFIX}/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
 for rdir in "${RUNNER_DIRS[@]}"; do
     envfile="$rdir/.env"
     cache_done=0

@@ -21,6 +21,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-Environment=HOME=/root
-Environment=CHUMP_REPO=/root/Projects/chump
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; cd /root/Projects/chump; exec bash scripts/coord/race-control.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/coord/race-control.sh'

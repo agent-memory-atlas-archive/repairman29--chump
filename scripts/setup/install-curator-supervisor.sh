@@ -10,6 +10,11 @@
 #   bash scripts/setup/install-curator-supervisor.sh --uninstall # remove plist + unload
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): __BREW_PREFIX__ in the plist template resolves
+# through the host resolver (chump_brew_prefix, the shell mirror of
+# chump_provision::brew_prefix) instead of a baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
 
 LABEL="com.chump.curator-supervisor"
 REPO_ROOT="${CHUMP_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo /Users/jeffadkins/Projects/Chump)}"
@@ -136,6 +141,7 @@ log "supervisor binary: $BIN_PATH"
 
 # Substitute placeholders.
 sed \
+    -e "s|__BREW_PREFIX__|$(chump_brew_prefix)|g" \
     -e "s|CHUMP_REPO_ROOT_PLACEHOLDER|${REPO_ROOT}|g" \
     -e "s|CHUMP_LOG_DIR_PLACEHOLDER|${LOG_DIR}|g" \
     -e "s|CHUMP_HOME_PLACEHOLDER|${HOME}|g" \

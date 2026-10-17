@@ -34,7 +34,7 @@
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- Daily at 03:00 local time — low-traffic window, safe to remove stale trees. -->
 
@@ -58,9 +58,9 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/path/to/HOME</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/path/to/.cargo/bin:/usr/bin:/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin:__BIN_DIR__:/usr/bin:/bin</string>
   </dict>
 
   <!-- Avoid hammering if launchd restarts mid-prune. -->

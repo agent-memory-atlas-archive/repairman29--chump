@@ -14,6 +14,13 @@
 # Right-click → Open (Gatekeeper) until Apple notarizes a distribution build.
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 [[ "$(uname -s)" == "Darwin" ]] || {
   echo "This script is macOS-only."
   exit 2
@@ -21,7 +28,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CHUMP_HOME="${CHUMP_HOME:-$ROOT}"
-export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${PATH}"
+export PATH="${HOME}/.local/bin:${BREW_PREFIX}/bin:/usr/local/bin:${PATH}"
 
 command -v cargo >/dev/null 2>&1 || {
   echo "cargo not found"
@@ -66,7 +73,7 @@ for key in CHUMP_HOME CHUMP_REPO CHUMP_BINARY PATH; do
   /usr/libexec/PlistBuddy -c "Delete :LSEnvironment:${key}" "$PLIST" 2>/dev/null || true
 done
 /usr/libexec/PlistBuddy -c "Add :LSEnvironment:CHUMP_BINARY string ${MACOS}/chump" "$PLIST"
-PATH_EXPORT="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+PATH_EXPORT="${HOME}/.local/bin:${BREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 /usr/libexec/PlistBuddy -c "Add :LSEnvironment:PATH string ${PATH_EXPORT}" "$PLIST"
 if [[ "${CHUMP_BUNDLE_RETAIL:-}" == "1" ]]; then
   echo "Retail OOTB: LSEnvironment has no CHUMP_HOME (sidecar cwd comes from Application Support after wizard)."

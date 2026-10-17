@@ -24,8 +24,13 @@
 #
 # VICTIM SELECTION (all must hold — conservative on purpose):
 #   1. Closed (state=CLOSED, mergedAt empty) within the red window (± margin).
-#   2. Reaper-closed: bears the `rot-reaped` label OR has a pr_reaped ambient
-#      event. NEVER a human-close (those carry no such marker).
+#   2. Reaper-closed: a kind=pr_reaped ambient event exists for the PR (the
+#      reaper's own receipt). The `rot-reaped` label ALONE is not enough
+#      (RESILIENT-1607): a human can stamp that label by hand, and on 2026-10-16
+#      a hand-labeled architect cut (#5478/#5483) was revived at 14:31Z. NEVER a
+#      human-close (those carry no reaper receipt).
+#   2b. NEVER a PR labeled `pr-cut` (scripts/coord/pr-cut.sh): deliberate,
+#      terminal, even if it also carries rot-reaped or a pr_reaped event.
 #   3. NOT genuinely dead NOW: re-classified via classify-blocked-pr.py against
 #      the PR's CURRENT statusCheckRollup + mergeable. A verdict of hard_fail or
 #      conflict => the PR's OWN work is broken (not a trunk victim) => SKIP. Any
@@ -65,7 +70,6 @@
 #                                         long-past recovery never re-revives (default 180)
 #   CHUMP_TRUNK_REVIVE_STATE_FILE         state path (default $REPO_ROOT/.chump-locks/trunk-recovery-reviver-state.json)
 #   CHUMP_TRUNK_REVIVE_MOCK_PRS_JSON      test: closed-PR fixture (array) instead of gh
-#   CHUMP_ROT_REAPER_LABEL                terminal-close label (default rot-reaped)
 #   CHUMP_AMBIENT_PATH / CHUMP_AMBIENT_LOG  ambient.jsonl override (META-248)
 #   CHUMP_TRUNK_REVIVE_REPO               owner/repo (default repairman29/chump)
 
@@ -83,7 +87,6 @@ STATE_FILE="${CHUMP_TRUNK_REVIVE_STATE_FILE:-$REPO_ROOT/.chump-locks/trunk-recov
 mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null || true
 
 CLASSIFIER="$REPO_ROOT/scripts/ops/lib/classify-blocked-pr.py"
-LABEL="${CHUMP_ROT_REAPER_LABEL:-rot-reaped}"
 REPO="${CHUMP_TRUNK_REVIVE_REPO:-repairman29/chump}"
 
 MAX_PER_RUN="${CHUMP_TRUNK_REVIVE_MAX_PER_RUN:-5}"
@@ -263,7 +266,13 @@ if ce is None:
 if not (lo <= ce <= hi):
     print("skip:out_of_window"); sys.exit(0)
 
-# Reaper-closed (label or ambient pr_reaped event). A human close has neither.
+# Deliberate close (RESILIENT-1607): `pr-cut` is terminal, whatever else it carries.
+labels = [(l.get("name") if isinstance(l, dict) else l) for l in (pr.get("labels") or [])]
+if "pr-cut" in labels:
+    print("skip:pr_cut"); sys.exit(0)
+
+# Reaper-closed (a pr_reaped ambient event; the label alone is not proof). A
+# human close has no reaper receipt.
 if not reaper_marked:
     print("skip:not_reaper_closed"); sys.exit(0)
 
@@ -386,16 +395,13 @@ main_beat() {
             continue
         fi
 
-        # Reaper-marker: label on the PR, OR a pr_reaped ambient event for it.
+        # Reaper-marker (RESILIENT-1607): the reaper's own receipt, a
+        # kind=pr_reaped ambient event for THIS PR (rot-reaper.sh emits it right
+        # after the close). The rot-reaped label alone no longer counts: it is a
+        # label a person can apply by hand, and a hand-labeled deliberate cut
+        # must not be revived. pr-cut is handled in _decide_one (terminal).
         local reaper_marked=0
-        if printf '%s' "$pr_json" | python3 -c "
-import json,sys
-d=json.load(sys.stdin)
-labels=[ (l.get('name') if isinstance(l,dict) else l) for l in (d.get('labels') or []) ]
-sys.exit(0 if '$LABEL' in labels else 1)
-" 2>/dev/null; then
-            reaper_marked=1
-        elif grep -q "\"kind\":\"pr_reaped\".*\"pr\":$num\b" "$AMBIENT" 2>/dev/null; then
+        if grep -qE "\"kind\":\"pr_reaped\".*\"pr\":${num}([^0-9]|\$)" "$AMBIENT" 2>/dev/null; then
             reaper_marked=1
         fi
 

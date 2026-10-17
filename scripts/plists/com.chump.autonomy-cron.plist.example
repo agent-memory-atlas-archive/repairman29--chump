@@ -8,23 +8,23 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/dev/autonomy-cron.sh</string>
+    <string>__REPO_ROOT__/scripts/dev/autonomy-cron.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>RunAtLoad</key>
   <false/>
   <!-- Run every hour. Reaps expired leases then attempts one autonomy task. -->
   <key>StartInterval</key>
   <integer>3600</integer>
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/autonomy-cron.out.log</string>
+  <string>__REPO_ROOT__/logs/autonomy-cron.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/autonomy-cron.err.log</string>
+  <string>__REPO_ROOT__/logs/autonomy-cron.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/Users/you/.local/bin:/Users/you/.cargo/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__HOME__/.local/bin:__HOME__/.cargo/bin</string>
   </dict>
 </dict>
 </plist>

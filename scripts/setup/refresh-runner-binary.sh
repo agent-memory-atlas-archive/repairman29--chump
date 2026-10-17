@@ -24,6 +24,13 @@
 # Gracefully degrades to standard rustc if sccache is unavailable.
 
 set -uo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 REPO_ROOT="${CHUMP_REPO_ROOT:-/Users/jeffadkins/Projects/Chump}"
 # INFRA-8098: OS-aware default install target. Linux fleet nodes install to
@@ -34,7 +41,7 @@ REPO_ROOT="${CHUMP_REPO_ROOT:-/Users/jeffadkins/Projects/Chump}"
 if [ -n "${CHUMP_RUNNER_BIN:-}" ]; then
     TARGET_BIN="$CHUMP_RUNNER_BIN"
 elif [ "$(uname -s)" = "Darwin" ]; then
-    TARGET_BIN="/opt/homebrew/bin/chump"
+    TARGET_BIN="${BREW_PREFIX}/bin/chump"
 else
     TARGET_BIN="$HOME/.cargo/bin/chump"
 fi

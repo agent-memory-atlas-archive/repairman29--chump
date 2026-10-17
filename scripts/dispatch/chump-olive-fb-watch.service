@@ -11,7 +11,7 @@ Wants=network-online.target
 Type=oneshot
 # Source providers.env for DISCORD_TOKEN + OLIVE_RPC_URL credentials.
 # The script uses minted tokens (holler_drain_inbox pattern) for Olive access.
-Environment=HOME=/root
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/overnight/olive-fb-watch.sh'
+Environment=HOME=__HOME__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/overnight/olive-fb-watch.sh'
 StandardOutput=journal
 StandardError=journal

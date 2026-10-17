@@ -104,6 +104,27 @@
 #                            a unit name that only ever existed as a launchd
 #                            plist.
 #
+# INFRA-8194 (Phase R R5, typed host provisioning): `enabled` lines may also
+# carry
+#
+#   run-scope=user|system|any
+#                            The systemd manager scope this organ can work in.
+#                            Omitted means "any" (every line before this field
+#                            existed), so nothing regresses. `system` = the
+#                            organ needs root (chump-organ-deploy writes
+#                            /etc/systemd/system); `user` = it only exists in a
+#                            systemd --user manager. The host's own scope comes
+#                            from the typed Host enum (`chump node host --field
+#                            run-scope`, crates/chump-provision: root ->
+#                            linux-systemd-system, anyone else ->
+#                            linux-systemd-user). chump-node-install.sh (which
+#                            places into the --user manager) and
+#                            organ-reconcile.sh (root, system scope) skip a
+#                            unit whose run-scope does not match, with a logged
+#                            reason, instead of installing a unit that can only
+#                            fail there. platforms= (above) scopes by
+#                            supervisor; run-scope= scopes by manager.
+#
 # INFRA-7766 (docs/strategy/ONE_COMMAND_INSTALL.md section 1, same slice):
 # `enabled` lines may also carry
 #
@@ -468,6 +489,7 @@ enabled     chump-almanac-liveness.timer  role=data requires=bin:git
 enabled     chump-jeff-bus-ingest.timer  role=data requires=bin:python3  # META-900: conversation-bus inbound ingester (Claude Code transcripts -> chump_web_messages)
 enabled     chump-faculty-collector.timer  role=data requires=bin:gh,bin:jq
 enabled     chump-pr-book-settle.timer     role=trust requires=bin:gh,bin:jq
+enabled     chump-self-calibrate.timer  role=trust requires=bin:chump,bin:jq  # CREDIBLE-1493 (Phase R R7): nightly `chump calibrate`, self-reports vs ground-truth probes; unit files scripts/dispatch/chump-self-calibrate.{service,timer}, host-rewritten by place_role_unit_files
 # CREDIBLE-296: chump-race-control.timer — hourly merge-mix board (user-value%
 # / self-maintenance% / reconcile-waste%). Emits kind=race_control_mix every
 # tick and kind=race_control_waste_alarm (non-zero exit) when reconcile-waste%
@@ -487,7 +509,10 @@ enabled     chump-race-control.timer  role=data requires=bin:gh
 # organ exempt from the host de-privilege rewrite. Declared here so Roll-Call
 # (scripts/ci/test-resilient-366-organ-roll-call.sh) sees a manifest line for
 # the tracked unit files and organ-watchdog re-arms it if it drifts.
-enabled     chump-organ-deploy.timer  role=janitor requires=bin:git
+# INFRA-8194: run-scope=system. In a --user manager it can never write
+# /etc/systemd/system, so a user-scope bring-up skips it instead of placing a
+# root-only organ that fails every tick.
+enabled     chump-organ-deploy.timer  role=janitor requires=bin:git run-scope=system
 
 # chump-gap-drain.timer: EFFECTIVE-464 — the DRAIN LOOP. GATE 2 toward the
 # ribbon. The cheap DeepSeek floor (EFFECTIVE-445) lands SURGICAL single-change

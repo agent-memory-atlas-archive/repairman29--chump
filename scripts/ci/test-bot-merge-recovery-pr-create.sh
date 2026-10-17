@@ -1,17 +1,26 @@
 #!/usr/bin/env bash
-# test-bot-merge-recovery-pr-create.sh — RESILIENT-217
+# test-bot-merge-recovery-pr-create.sh — RESILIENT-217 + INFRA-8209
 #
-# bot-merge.sh's recovery-mode "pr create/update" stage used to swallow
-# `gh pr create` failures with a bare `|| true`, leaving _recover_pr_num
-# empty while still logging "pr create/update done" and falling through to
-# exit 0 — reporting success when no PR was ever created.
+# bot-merge.sh's recovery-mode "pr create/update" stage (CHUMP_BOT_MERGE_RECOVERY_MODE=1)
+# had two stacked defects:
+#   RESILIENT-217: a failed `gh pr create` was swallowed (`|| true`), leaving the
+#     PR number empty while the stage still logged done and exited 0.
+#   INFRA-8209: it called `gh pr create ... --json number`, a flag gh pr create
+#     does not have, so it ALWAYS failed; and the failure was captured with a
+#     bare `x="$(gh ...)"; rc=$?`, so the RESILIENT-052 ERR trap fired before
+#     the RESILIENT-217 handler ever ran.
 #
 # This test extracts the REAL production block verbatim from
-# scripts/coord/bot-merge.sh (not a hand-reimplementation, so it can't drift
-# from the shipped logic) and drives it against a stubbed `gh`/`jq`/`git`
-# in two scenarios:
-#   1. gh pr create fails -> must exit 1 + emit botmerge_recovery_pr_create_failed
-#   2. gh pr create succeeds -> must exit 0, no failure event, PR number captured
+# scripts/coord/bot-merge.sh (not a reimplementation, so it cannot drift) and
+# runs it under `set -e` with an ERR trap installed, against a stub `gh` that
+# behaves like the real one (rejects --json, prints the PR URL on success):
+#   1. gh pr create fails      -> exit 1, RESILIENT-217 reason printed,
+#                                 kind=botmerge_recovery_pr_create_failed emitted,
+#                                 ERR trap NOT fired
+#   2. gh pr create succeeds   -> exit 0, number parsed from the printed URL,
+#                                 called with --base/--head/--title/--body, no --json
+#   3. PR already exists       -> gh pr create not invoked, exit 0
+#   4. gh prints no URL        -> number resolved via `gh pr list --head`
 
 set -euo pipefail
 
@@ -22,7 +31,7 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$REPO_ROOT/scripts/coord/bot-merge.sh"
 
-echo "=== RESILIENT-217 recovery-mode PR-create failure handling ==="
+echo "=== RESILIENT-217 / INFRA-8209 recovery-mode PR-create handling ==="
 echo
 
 START_LINE="$(grep -n 'stage_start "recovery: pr create/update"' "$SCRIPT" | head -1 | cut -d: -f1)"
@@ -39,23 +48,31 @@ END_LINE=$((END_MARKER_LINE - 1))
 BLOCK="$(sed -n "${START_LINE},${END_LINE}p" "$SCRIPT")"
 
 if ! printf '%s\n' "$BLOCK" | grep -q 'botmerge_recovery_pr_create_failed'; then
-    fail "extracted block missing botmerge_recovery_pr_create_failed emit -- fix not present"
+    fail "extracted block missing botmerge_recovery_pr_create_failed emit"
     echo
     echo "=== Results: $PASS passed, $FAIL failed ==="
     exit 1
 fi
 ok "extracted real production block contains the RESILIENT-217 failure path"
 
+if printf '%s\n' "$BLOCK" | grep -E '^[^#]*gh pr create' | grep -q -- '--json'; then
+    fail "production block still passes --json to gh pr create (INFRA-8209)"
+else
+    ok "production block does not pass --json to gh pr create (INFRA-8209)"
+fi
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# ── Harness: sources the extracted block with stubbed collaborators ─────────
 build_harness() {
-    local gh_mode="$1"   # "fail" | "succeed" | "existing"
-    local harness="$TMP/harness_${gh_mode}.sh"
+    local mode="$1"   # fail | succeed | existing | nourl
+    local harness="$TMP/harness_${mode}.sh"
+    local calls="$TMP/gh_calls_${mode}.log"
     cat > "$harness" <<HARNESS_HEAD
 #!/usr/bin/env bash
-set -uo pipefail
+# Same shell options + class of ERR trap as production bot-merge.sh.
+set -euo pipefail
+trap 'echo ERR_TRAP_FIRED > "$TMP/err_trap_${mode}.flag"' ERR
 stage_start() { :; }
 stage_done()  { :; }
 red() { printf '%s\n' "\$*" >&2; }
@@ -63,135 +80,97 @@ git() {
     if [[ "\$1" == "log" ]]; then echo "fake commit subject"; return 0; fi
     command git "\$@"
 }
+GH_MODE="$mode"
+GH_CALLS="$calls"
+CREATED_FLAG="$TMP/created_${mode}.flag"
 gh() {
+    echo "gh \$*" >> "\$GH_CALLS"
     if [[ "\$1 \$2" == "pr list" ]]; then
-HARNESS_HEAD
-
-    case "$gh_mode" in
-        existing)
-            cat >> "$harness" <<'HARNESS_LIST'
-        echo "4242"
+        case "\$GH_MODE" in
+            existing) echo "4242" ;;
+            nourl)    [[ -f "\$CREATED_FLAG" ]] && echo "7777" ;;
+        esac
         return 0
-HARNESS_LIST
-            ;;
-        *)
-            cat >> "$harness" <<'HARNESS_LIST'
-        return 0
-HARNESS_LIST
-            ;;
-    esac
-
-    cat >> "$harness" <<'HARNESS_MID'
     fi
-    if [[ "$1 $2" == "pr create" ]]; then
-HARNESS_MID
-
-    case "$gh_mode" in
-        fail)
-            cat >> "$harness" <<'HARNESS_CREATE'
-        echo "HttpError: rate limit exceeded" >&2
-        return 1
-HARNESS_CREATE
-            ;;
-        succeed)
-            cat >> "$harness" <<'HARNESS_CREATE'
-        echo '{"number": 9001}'
-        return 0
-HARNESS_CREATE
-            ;;
-        existing)
-            cat >> "$harness" <<'HARNESS_CREATE'
-        echo "should not be called in existing-PR mode" >&2
-        return 1
-HARNESS_CREATE
-            ;;
-    esac
-
-    cat >> "$harness" <<HARNESS_TAIL
+    if [[ "\$1 \$2" == "pr create" ]]; then
+        # Real gh: --json is not a flag of 'gh pr create'.
+        case " \$* " in *" --json "*) echo "unknown flag: --json" >&2; return 1 ;; esac
+        case "\$GH_MODE" in
+            fail)    echo "HttpError: rate limit exceeded" >&2; return 1 ;;
+            succeed) echo "https://github.com/repairman29/chump/pull/9001"; return 0 ;;
+            nourl)   touch "\$CREATED_FLAG"; echo "Creating pull request for x into main"; return 0 ;;
+            existing) echo "should not be called in existing-PR mode" >&2; return 1 ;;
+        esac
     fi
     return 0
 }
 
-BRANCH="chump/resilient-217-test-claim"
-_gap_lbl="RESILIENT-217"
-_bm_recover_amb="$TMP/ambient_${gh_mode}.jsonl"
+BRANCH="chump/infra-8209-test"
+BASE_BRANCH="main"
+_gap_lbl="INFRA-8209"
+_bm_recover_amb="$TMP/ambient_${mode}.jsonl"
 
 $BLOCK
 
-echo "REACHED_END rc=\$?"
-HARNESS_TAIL
-
-    chmod +x "$harness"
+echo "REACHED_END pr=\${_recover_pr_num:-none}"
+HARNESS_HEAD
     printf '%s' "$harness"
 }
 
-echo "--- Test 1: gh pr create fails -> exit 1, no false success ---"
-H1="$(build_harness fail)"
-set +e
-OUT1="$(bash "$H1" 2>&1)"
-RC1=$?
-set -e
-if [[ "$RC1" -eq 1 ]]; then
-    ok "Test 1: exit code 1 on gh pr create failure"
-else
-    fail "Test 1: expected exit 1, got $RC1 (output: $OUT1)"
-fi
-if ! printf '%s\n' "$OUT1" | grep -q "REACHED_END"; then
-    ok "Test 1: script exited before falling through to success path"
-else
-    fail "Test 1: script fell through past the failure branch (REACHED_END seen)"
-fi
-if [[ -f "$TMP/ambient_fail.jsonl" ]] && grep -q "botmerge_recovery_pr_create_failed" "$TMP/ambient_fail.jsonl"; then
-    ok "Test 1: botmerge_recovery_pr_create_failed emitted to ambient"
-else
-    fail "Test 1: botmerge_recovery_pr_create_failed NOT emitted"
-fi
-if [[ -f "$TMP/ambient_fail.jsonl" ]] && grep -q "rate limit exceeded" "$TMP/ambient_fail.jsonl"; then
-    ok "Test 1: gh's actual error text captured in the reason field"
-else
-    fail "Test 1: gh error text not propagated into the ambient event"
-fi
+run_mode() {
+    local mode="$1" h
+    h="$(build_harness "$mode")"
+    set +e
+    OUT="$(bash "$h" 2>&1)"
+    RC=$?
+    set -e
+}
+
+echo "--- Test 1: gh pr create fails -> RESILIENT-217 handler, not the ERR trap ---"
+run_mode fail
+[[ "$RC" -eq 1 ]] && ok "T1: exit 1 on gh pr create failure" || fail "T1: expected exit 1, got $RC ($OUT)"
+printf '%s\n' "$OUT" | grep -q "REACHED_END" \
+    && fail "T1: fell through past the failure branch" || ok "T1: exited before the success path"
+printf '%s\n' "$OUT" | grep -q "RESILIENT-217.*rate limit exceeded" \
+    && ok "T1: RESILIENT-217 reason (gh's error text) printed" || fail "T1: reason not printed ($OUT)"
+grep -q "botmerge_recovery_pr_create_failed" "$TMP/ambient_fail.jsonl" 2>/dev/null \
+    && ok "T1: botmerge_recovery_pr_create_failed emitted" || fail "T1: failure event not emitted"
+grep -q "rate limit exceeded" "$TMP/ambient_fail.jsonl" 2>/dev/null \
+    && ok "T1: gh error text captured in the event reason" || fail "T1: error text missing from event"
+[[ ! -f "$TMP/err_trap_fail.flag" ]] \
+    && ok "T1: ERR trap did NOT fire (failure reached the RESILIENT-217 handler)" \
+    || fail "T1: ERR trap fired before the RESILIENT-217 handler"
 
 echo
-echo "--- Test 2: gh pr create succeeds -> exit 0, PR number captured ---"
-H2="$(build_harness succeed)"
-set +e
-OUT2="$(bash "$H2" 2>&1)"
-RC2=$?
-set -e
-if [[ "$RC2" -eq 0 ]]; then
-    ok "Test 2: exit code 0 on gh pr create success"
-else
-    fail "Test 2: expected exit 0, got $RC2 (output: $OUT2)"
-fi
-if printf '%s\n' "$OUT2" | grep -q "REACHED_END"; then
-    ok "Test 2: script reached the end of the block (no premature exit)"
-else
-    fail "Test 2: script did not reach end of block; output: $OUT2"
-fi
-if [[ ! -f "$TMP/ambient_succeed.jsonl" ]] || ! grep -q "botmerge_recovery_pr_create_failed" "$TMP/ambient_succeed.jsonl" 2>/dev/null; then
-    ok "Test 2: no failure event emitted on success"
-else
-    fail "Test 2: failure event wrongly emitted on success"
-fi
+echo "--- Test 2: gh pr create succeeds -> number parsed from the printed URL ---"
+run_mode succeed
+[[ "$RC" -eq 0 ]] && ok "T2: exit 0" || fail "T2: expected exit 0, got $RC ($OUT)"
+printf '%s\n' "$OUT" | grep -q "REACHED_END pr=9001" \
+    && ok "T2: PR number 9001 resolved from the URL" || fail "T2: PR number not resolved ($OUT)"
+CREATE_CALL="$(grep '^gh pr create' "$TMP/gh_calls_succeed.log" || true)"
+for f in --base --head --title --body; do
+    case "$CREATE_CALL" in *" $f "*) ok "T2: gh pr create passed $f" ;; *) fail "T2: gh pr create missing $f ($CREATE_CALL)" ;; esac
+done
+case "$CREATE_CALL" in *--json*) fail "T2: --json passed to gh pr create" ;; *) ok "T2: no --json passed" ;; esac
+[[ ! -s "$TMP/ambient_succeed.jsonl" ]] && ok "T2: no failure event on success" || fail "T2: failure event on success"
+[[ ! -f "$TMP/err_trap_succeed.flag" ]] && ok "T2: ERR trap did not fire" || fail "T2: ERR trap fired"
 
 echo
-echo "--- Test 3: PR already exists -> gh pr create not invoked, exit 0 ---"
-H3="$(build_harness existing)"
-set +e
-OUT3="$(bash "$H3" 2>&1)"
-RC3=$?
-set -e
-if [[ "$RC3" -eq 0 ]]; then
-    ok "Test 3: exit code 0 when PR already exists"
-else
-    fail "Test 3: expected exit 0, got $RC3 (output: $OUT3)"
-fi
-if ! printf '%s\n' "$OUT3" | grep -q "should not be called"; then
-    ok "Test 3: gh pr create skipped when an existing PR is found"
-else
-    fail "Test 3: gh pr create was invoked despite an existing PR"
-fi
+echo "--- Test 3: PR already exists -> gh pr create not invoked ---"
+run_mode existing
+[[ "$RC" -eq 0 ]] && ok "T3: exit 0" || fail "T3: expected exit 0, got $RC ($OUT)"
+grep -q '^gh pr create' "$TMP/gh_calls_existing.log" \
+    && fail "T3: gh pr create invoked despite an existing PR" || ok "T3: gh pr create skipped"
+printf '%s\n' "$OUT" | grep -q "REACHED_END pr=4242" && ok "T3: existing PR 4242 used" || fail "T3: existing PR not used"
+
+echo
+echo "--- Test 4: gh prints no URL -> number resolved via gh pr list --head ---"
+run_mode nourl
+[[ "$RC" -eq 0 ]] && ok "T4: exit 0" || fail "T4: expected exit 0, got $RC ($OUT)"
+printf '%s\n' "$OUT" | grep -q "REACHED_END pr=7777" \
+    && ok "T4: PR number 7777 resolved via gh pr list --head" || fail "T4: fallback lookup failed ($OUT)"
+grep -c '^gh pr list' "$TMP/gh_calls_nourl.log" | grep -q '^2$' \
+    && ok "T4: gh pr list consulted before and after create" || fail "T4: unexpected gh pr list call count"
 
 echo
 echo "=== Results: $PASS passed, $FAIL failed ==="

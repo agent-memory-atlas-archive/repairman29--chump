@@ -34,12 +34,16 @@ run() {
 }
 
 # All candidates excluded for distinct, attributable reasons: one P2 (fails
-# priority filter), one with unresolved deps, one superseded.
+# priority filter), one with unresolved deps, one superseded. INFRA-200's
+# blocker INFRA-999 must EXIST as genuine open work: a dangling dep id is
+# treated as resolved (RESILIENT-1114), which would let INFRA-200 be picked.
+# INFRA-999 itself is excluded by the domain filter (DOC, not INFRA).
 cat > "$TMP/gaps.json" <<JSON
 [
   {"id":"INFRA-100","status":"open","priority":"P2","effort":"s","domain":"INFRA","depends_on":"[]","acceptance_criteria":"$AC"},
   {"id":"INFRA-200","status":"open","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[\"INFRA-999\"]","acceptance_criteria":"$AC"},
-  {"id":"INFRA-300","status":"open","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]","acceptance_criteria":"$AC","notes":"SUPERSEDED by INFRA-301"}
+  {"id":"INFRA-300","status":"open","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]","acceptance_criteria":"$AC","notes":"SUPERSEDED by INFRA-301"},
+  {"id":"INFRA-999","status":"open","priority":"P1","effort":"s","domain":"DOC","depends_on":"[]","acceptance_criteria":"$AC"}
 ]
 JSON
 
@@ -47,7 +51,7 @@ stderr_file="$TMP/stderr"
 out="$(run 2>"$stderr_file" || true)"
 err="$(cat "$stderr_file")"
 
-[[ -z "$out" ]] && pass "no gap claimed (all 3 excluded)" \
+[[ -z "$out" ]] && pass "no gap claimed (all 4 excluded)" \
     || fail "expected no pick, got '$out'"
 
 [[ -n "$err" ]] && pass "stderr is non-empty on the empty cycle (not silently swallowed)" \
@@ -69,7 +73,11 @@ echo "$err" | grep -q '"superseded": 1' \
     && pass "superseded reason counted for INFRA-300" \
     || fail "superseded count missing/wrong: $err"
 
-echo "$err" | grep -q '"total_gaps": 3' \
+echo "$err" | grep -q '"domain_filter": 1' \
+    && pass "domain_filter reason counted for INFRA-999 (DOC excluded by INFRA filter)" \
+    || fail "domain_filter count missing/wrong: $err"
+
+echo "$err" | grep -q '"total_gaps": 4' \
     && pass "total_gaps reflects full input size" \
     || fail "total_gaps missing/wrong: $err"
 

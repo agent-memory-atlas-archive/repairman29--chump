@@ -18,7 +18,7 @@
 //! chump has no per-call token/cost metering hook at the dispatch layer, so
 //! the enforced budget is wall-clock (`--budget-secs`).
 
-use crate::dispatch::{self, DispatchOptions, ShipResult, WorkBackend};
+use crate::dispatch::{self, DispatchMode, DispatchOptions, ShipResult, WorkBackend};
 use crate::repo_path;
 use std::process::Command;
 
@@ -289,6 +289,7 @@ pub fn run(args: &[String]) -> i32 {
         skip_tests: false,
         paths: parsed.paths.as_deref(),
         repo_root,
+        mode: DispatchMode::Work,
     };
 
     let (outcome, detail, exit_code) = match dispatch::run(opts) {

@@ -142,8 +142,8 @@ fn main() -> ExitCode {
     if !has_yamls {
         eprintln!(
             "[chump-gap-doctor] post-INFRA-498: docs/gaps/*.yaml deleted — \
-             no drift to detect. state.db is canonical, .chump/state.sql \
-             is the tracked mirror. Use 'chump gap show <ID>' for \
+             no drift to detect. state.db is the only truth (INFRA-8193). \
+             Use 'chump gap show <ID>' for \
              human-readable per-gap inspection."
         );
         return ExitCode::SUCCESS;

@@ -1,6 +1,7 @@
-//! Admission check against the concurrency ceiling (RESILIENT-1426, RESILIENT-1427).
+//! Admission check against the concurrency ceiling (RESILIENT-1426, RESILIENT-1427, RESILIENT-1611).
 //!
 //! Counts current active cargo/rustc jobs across workers, agents, and installs.
+//! Includes cargo fix, cargo clippy, cargo test, cargo build, and generic cargo_job.
 //! Rejects new job scheduling if the count would exceed max_concurrent_cargo_jobs.
 
 use anyhow::Result;
@@ -14,23 +15,40 @@ pub fn get_max_concurrent_cargo_jobs() -> i32 {
 }
 
 /// Count active cargo/rustc jobs (status = 'running' or 'pending').
+/// This includes: cargo_job, cargo_fix, cargo_clippy, cargo_test, cargo_build.
 pub fn count_active_cargo_jobs() -> Result<i32> {
     let conn = crate::db_pool::get()?;
     let active_statuses = ["running", "pending"];
+    let cargo_job_types = [
+        "cargo_job",
+        "cargo_fix",
+        "cargo_clippy",
+        "cargo_test",
+        "cargo_build",
+    ];
     let placeholders = active_statuses
         .iter()
         .map(|_| "?")
         .collect::<Vec<_>>()
         .join(",");
+    let job_type_placeholders = cargo_job_types
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
     let query = format!(
-        "SELECT COUNT(*) FROM chump_async_jobs WHERE job_type = 'cargo_job' AND status IN ({})",
-        placeholders
+        "SELECT COUNT(*) FROM chump_async_jobs WHERE job_type IN ({}) AND status IN ({})",
+        job_type_placeholders, placeholders
     );
     let mut stmt = conn.prepare(&query)?;
-    let count: i32 = stmt.query_row(
-        rusqlite::params![active_statuses[0], active_statuses[1]],
-        |row| row.get(0),
-    )?;
+    let mut params: Vec<&dyn rusqlite::ToSql> = Vec::new();
+    for job_type in &cargo_job_types {
+        params.push(job_type);
+    }
+    for status in &active_statuses {
+        params.push(status);
+    }
+    let count: i32 = stmt.query_row(rusqlite::params_from_iter(params), |row| row.get(0))?;
     Ok(count)
 }
 
@@ -48,9 +66,27 @@ pub fn check_admission(max_concurrent_jobs: i32) -> Result<()> {
     Ok(())
 }
 
-/// Insert a cargo job record into the async jobs log.
+/// Determine the specific cargo job type from a command string.
+/// Returns one of: cargo_fix, cargo_clippy, cargo_test, cargo_build, or cargo_job (generic).
+fn get_cargo_job_type(cmd: &str) -> &'static str {
+    let lower = cmd.to_lowercase();
+    if lower.contains("cargo fix") {
+        "cargo_fix"
+    } else if lower.contains("cargo clippy") {
+        "cargo_clippy"
+    } else if lower.contains("cargo test") {
+        "cargo_test"
+    } else if lower.contains("cargo build") || lower.contains("cargo check") {
+        "cargo_build"
+    } else {
+        "cargo_job"
+    }
+}
+
+/// Insert a cargo job record into the async jobs log, determining the specific type.
 pub fn insert_cargo_job(status: &str, detail: Option<&str>) -> Result<()> {
-    crate::job_log::insert_job("cargo_job", status, None, None, detail, None)
+    let job_type = detail.map(|d| get_cargo_job_type(d)).unwrap_or("cargo_job");
+    crate::job_log::insert_job(job_type, status, None, None, detail, None)
 }
 
 #[cfg(test)]

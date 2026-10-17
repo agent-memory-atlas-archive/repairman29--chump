@@ -111,6 +111,14 @@ for wt in "${CANDIDATE_DIRS[@]+"${CANDIDATE_DIRS[@]}"}"; do
         continue
     fi
 
+    # RESILIENT-1609: never reap the target/ of a worktree with a live bot-merge ship.
+    if [[ "$REAPER_SAFETY_CHECK" == "1" ]] && declare -F wt_has_live_bot_merge >/dev/null 2>&1 && wt_has_live_bot_merge "$wt"; then
+        echo "SKIP $wt — live bot-merge ship (${WT_LIVE_BOT_MERGE_DETAIL:-?})"
+        emit_reaper_event "worktree_reaper_skipped_active" "$wt" "bot_merge_live"
+        SKIPPED=$((SKIPPED + 1))
+        continue
+    fi
+
     # INFRA-1124/1211: Active-lease check via shared lib — wt_has_active_lease
     # checks heartbeat freshness and handles /private/tmp macOS aliasing.
     if [[ "$REAPER_SAFETY_CHECK" == "1" ]] && wt_has_active_lease "$wt" "${CHUMP_LEASE_HEARTBEAT_TTL_S:-600}"; then

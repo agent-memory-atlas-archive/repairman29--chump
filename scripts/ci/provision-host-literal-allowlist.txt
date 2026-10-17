@@ -1,0 +1,25 @@
+# scripts/ci/provision-host-literal-allowlist.txt — INFRA-8194 (Phase R, R5)
+#
+# Baseline taken 2026-10-16: every file under scripts/dispatch, launchd,
+# scripts/plists and scripts/setup that still carries a host literal
+# (User=<name>, /home/<name>, /root/, /opt/homebrew) on the day the
+# no-host-literal gate landed. Gate: scripts/ci/test-provision-no-host-literals.sh.
+# (226 offenders on origin/main before slice 1; slice 1 migrated 38 of them plus
+# the contrib/ gap-close-decomposed unit to placeholders.)
+#
+# 2026-10-17, slice 2: 188 -> 3. Every unit and plist is a placeholder template
+# (__HOME__ __REPO_ROOT__ __BIN_DIR__ __NODE_ENV__ __BREW_PREFIX__) rendered by
+# `chump node render-unit` or its shell mirrors; installers resolve the Homebrew
+# prefix through chump_brew_prefix (scripts/lib/host-paths.sh); comment lines no
+# longer count (shebangs still do). What remains is the named-host set: scripts
+# that only ever run on ONE named machine and describe THAT machine's layout, so
+# a placeholder would be a lie. Each line says which machine and why.
+#
+# THIS LIST MAY ONLY SHRINK. Adding a line, or raising baseline-count, fails the
+# gate. A new named-host script still has to argue its way in through review.
+#
+# baseline-count is the ceiling; lower it in the same commit that deletes lines.
+# baseline-count: 3
+scripts/setup/claude-proot-guest.sh  # pixel: runs INSIDE the Termux proot-distro guest (HOME is the guest root); the Termux home is the fixed Android path /data/data/com.termux/files/home and env does not cross the proot boundary
+scripts/setup/install-do-droplet-runner.sh  # do-droplet: the remote GitHub Actions runner lives in the runner user's home this script creates on the droplet (quoted remote heredoc, never this host)
+scripts/setup/uninstall-do-droplet-runner.sh  # do-droplet: removes the runner at the path install-do-droplet-runner.sh created on the droplet (remote ssh command, never this host)

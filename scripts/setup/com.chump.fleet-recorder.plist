@@ -49,7 +49,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:CARGO_BIN_PLACEHOLDER:/usr/bin:/bin</string>
+        <string>/usr/local/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin:CARGO_BIN_PLACEHOLDER:/usr/bin:/bin</string>
         <key>HOME</key>
         <string>HOME_PLACEHOLDER</string>
         <key>RUST_LOG</key>

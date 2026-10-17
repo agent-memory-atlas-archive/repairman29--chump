@@ -19,7 +19,7 @@
 #                           launchd daemon has last exit code != 0 → emit
 #                           kind=silent_fleet_death; optional auto-heal via
 #                           CHUMP_DOCTOR_AUTOHEAL=1
-#   9. backlog-sync    — CREDIBLE-292: origin/main's .chump/state.sql must not be
+#   9. backlog-sync    — CREDIBLE-292: registry/main's .chump/state.sql must not be
 #                        >CHUMP_BACKLOG_SYNC_STALE_HOURS (default 24) stale — a
 #                        dead backlog-sync --writer is the registry split-brain
 #                        precursor.
@@ -737,26 +737,30 @@ check_almanac_freshness() {
     register_check "almanac-freshness" "pass" "registry ok, refresh ${age}h fresh, smoke query ${hits} hits" ""
 }
 
-#   9. backlog-sync    — CREDIBLE-292: origin/main's .chump/state.sql (the
+#   9. backlog-sync    — CREDIBLE-292: the registry's .chump/state.sql (the
 #                         backlog-sync --writer's published truth) must not go
 #                         stale >24h. A dead writer is exactly how the
 #                         2026-08-15 registry split-brain went undetected for
 #                         21 days — this makes it RED within hours instead.
+#                         INFRA-8193: origin/main no longer tracks the file, so
+#                         only the private `registry` remote is measured.
 check_backlog_sync_freshness() {
     local max_h="${CHUMP_BACKLOG_SYNC_STALE_HOURS:-24}"
-    local last_epoch reg_ref="origin/main"
+    local last_epoch reg_ref="registry/main"
     # Registry privacy: the writer publishes to the private `registry` remote.
-    # Measure freshness THERE when it is configured; origin/main only carries
-    # the legacy (pre-cutover) file. A configured-but-unfetchable registry is a
-    # FAIL, never a quiet fallback to the frozen legacy copy.
-    if git -C "$REPO_ROOT" remote get-url registry >/dev/null 2>&1; then
-        reg_ref="registry/main"
-        if ! git -C "$REPO_ROOT" fetch --quiet registry main 2>/dev/null; then
-            register_check "backlog-sync-freshness" "fail" \
-                "registry remote is configured but could not be fetched — cannot prove the registry is fresh" \
-                "check the node's registry deploy key / network: git -C $REPO_ROOT fetch registry main"
-            return
-        fi
+    # A configured-but-unfetchable registry is a FAIL. With no registry remote
+    # there is nothing published to measure (origin/main stopped tracking
+    # .chump/state.sql in INFRA-8193), so the check is skipped, not failed.
+    if ! git -C "$REPO_ROOT" remote get-url registry >/dev/null 2>&1; then
+        register_check "backlog-sync-freshness" "skip" \
+            "no 'registry' remote — origin/main no longer tracks .chump/state.sql (INFRA-8193); nothing published to measure" ""
+        return
+    fi
+    if ! git -C "$REPO_ROOT" fetch --quiet registry main 2>/dev/null; then
+        register_check "backlog-sync-freshness" "fail" \
+            "registry remote is configured but could not be fetched — cannot prove the registry is fresh" \
+            "check the node's registry deploy key / network: git -C $REPO_ROOT fetch registry main"
+        return
     fi
     last_epoch="$(git -C "$REPO_ROOT" log -1 --format='%ct' "$reg_ref" -- .chump/state.sql 2>/dev/null)"
     if [[ -z "$last_epoch" ]]; then

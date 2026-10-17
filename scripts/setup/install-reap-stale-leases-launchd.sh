@@ -34,10 +34,15 @@ echo "[install-reap]   Source: $PLIST_SRC"
 echo "[install-reap]   Dest:   $PLIST_DEST"
 
 # Substitute paths in the plist
-PLIST_CONTENT=$(cat "$PLIST_SRC")
-PLIST_CONTENT="${PLIST_CONTENT//\/path\/to\/Chump/$REPO_ROOT}"
-PLIST_CONTENT="${PLIST_CONTENT//\/path\/to\/HOME/$HOME}"
-PLIST_CONTENT="${PLIST_CONTENT//\/path\/to\/.cargo\/bin/$HOME\/.cargo\/bin}"
+# INFRA-8194 (R5 slice 2): the tracked plist is a placeholder template
+# (__REPO_ROOT__ __HOME__ __BIN_DIR__ __BREW_PREFIX__), rendered for THIS host by
+# chump_render_template (typed `chump node render-unit`, sed mirror fallback).
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+_RENDERED="$(mktemp)"
+chump_render_template "$PLIST_SRC" "$_RENDERED" "$REPO_ROOT"
+PLIST_CONTENT=$(cat "$_RENDERED")
+rm -f "$_RENDERED"
 
 if [ "$DRY_RUN" = 1 ]; then
     echo "[install-reap] DRY RUN (pass --apply to install)"

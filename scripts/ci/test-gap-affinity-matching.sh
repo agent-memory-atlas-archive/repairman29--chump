@@ -40,17 +40,19 @@ else
   fail "unexpected result: '$result' (expected INFRA-314-A)"
 fi
 
-# Test 2: Worker without required skills gets nothing (hard filter).
+# Test 2: Worker without required skills gets nothing when it opts into the
+# hard filter (WORKER_SKILLS_HARD=1, INFRA-8176). The default is soft: see
+# scripts/ci/test-picker-soft-skill-open-pr.sh.
 cat > "$tmp" <<'JSON'
 [
   {"id":"INFRA-314-C","status":"open","priority":"P2","effort":"s","domain":"INFRA","depends_on":"[]","skills_required":"[\"macos\",\"syspolicyd\"]","preferred_backend":"","preferred_machine":"","created_at":1000}
 ]
 JSON
 
-result=$(FLEET_PRIORITY_FILTER=P2 FLEET_EFFORT_FILTER=s WORKER_SKILLS="rust,sqlite" run_picker)
+result=$(FLEET_PRIORITY_FILTER=P2 FLEET_EFFORT_FILTER=s WORKER_SKILLS="rust,sqlite" WORKER_SKILLS_HARD=1 run_picker)
 
 if [ -z "$result" ]; then
-  pass "worker without required skills gets nothing (hard filter)"
+  pass "worker without required skills gets nothing (WORKER_SKILLS_HARD=1)"
 else
   fail "worker without required skills picked gap: '$result'"
 fi

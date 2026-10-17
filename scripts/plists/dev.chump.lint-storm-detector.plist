@@ -8,7 +8,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/Users/jeffadkins/Projects/Chump/scripts/ops/lint-storm-detector.sh</string>
+    <string>__REPO_ROOT__/scripts/ops/lint-storm-detector.sh</string>
   </array>
   <!-- Run once per hour. Detects when 3+ open PRs fail the same clippy lint
        and files an INFRA gap to relax it at workspace.lints.clippy (INFRA-672). -->
@@ -21,14 +21,14 @@
   <key>StandardErrorPath</key>
   <string>/tmp/chump-lint-storm-detector.err.log</string>
   <key>WorkingDirectory</key>
-  <string>/Users/jeffadkins/Projects/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>EnvironmentVariables</key>
   <dict>
     <!-- gh CLI needs HOME to find the auth token. -->
     <key>HOME</key>
-    <string>/Users/jeffadkins</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:/usr/bin:/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:$HOME/.cargo/bin:/usr/bin:/bin</string>
   </dict>
 </dict>
 </plist>

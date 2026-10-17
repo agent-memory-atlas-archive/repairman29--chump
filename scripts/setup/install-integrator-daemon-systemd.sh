@@ -38,8 +38,20 @@ TIMER_UNIT="chump-integrator.timer"
 UNIT_DIR="/etc/systemd/system"
 DROPIN_DIR="${UNIT_DIR}/${SERVICE_UNIT}.d"
 LIVE_DROPIN="${DROPIN_DIR}/live.conf"
-CARGO_BIN="${CARGO_BIN:-/root/.cargo/bin}"
-LOG_DIR="/root/.chump/logs"
+# INFRA-8194 (R5 slice 2): the tracked units are placeholder templates
+# (__HOME__ / __REPO_ROOT__, no User=); render them for this host through the
+# shared shell mirror (organ_unit_host_rewrite, the same placer
+# install-helsinki-atc.sh uses) instead of copying them verbatim, which would
+# install a unit full of unresolved placeholders. The run identity is the
+# checkout's owner (or CHUMP_RUN_USER), so paths follow that user's home, not a
+# baked root home.
+# shellcheck source=../ops/lib/organ-unit-install-lib.sh
+source "$REPO_ROOT/scripts/ops/lib/organ-unit-install-lib.sh"
+RUN_USER="${CHUMP_RUN_USER:-$(stat -c %U "$REPO_ROOT" 2>/dev/null || id -un)}"
+RUN_HOME="$(getent passwd "$RUN_USER" 2>/dev/null | cut -d: -f6 || true)"
+[[ -z "$RUN_HOME" ]] && RUN_HOME="$HOME"
+CARGO_BIN="${CARGO_BIN:-${RUN_HOME%/}/.cargo/bin}"
+LOG_DIR="${RUN_HOME%/}/.chump/logs"
 
 _need_root() {
     if [[ "$(id -u)" != "0" ]]; then
@@ -144,8 +156,9 @@ for u in "$SERVICE_UNIT" "$TIMER_UNIT"; do
         echo "ERROR: tracked unit not found: $src" >&2
         exit 1
     fi
-    cp -f "$src" "${UNIT_DIR}/$u"
-    echo "[install-integrator-systemd] installed ${UNIT_DIR}/$u"
+    organ_unit_host_rewrite "$src" "${UNIT_DIR}/$u" "$RUN_USER" "$RUN_HOME" 0 "$REPO_ROOT" \
+        || { echo "ERROR: could not render $src" >&2; exit 1; }
+    echo "[install-integrator-systemd] rendered ${UNIT_DIR}/$u (run user $RUN_USER)"
 done
 
 mkdir -p "$LOG_DIR"

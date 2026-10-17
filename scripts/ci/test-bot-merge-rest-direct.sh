@@ -9,7 +9,7 @@
 #  5. bot-merge.sh contains REST-direct path logic (gh api .../merge -X PUT)
 #  6. bot-merge.sh contains CHUMP_BOT_MERGE_REST_DIRECT guard
 #  7. bot-merge.sh emits bot_merge_rest_direct kind string
-#  8. bot-merge.sh emits bot_merge_auto_armed kind string
+#  8. arm fallback delegates to auto-merge-armer.sh (emits auto_merge_armed)
 #  9. bot-merge.sh has _rest_direct_merged guard variable
 # 10. REQUIRED_CHECKS is passed into python3 check
 
@@ -79,11 +79,26 @@ else
     fail "bot_merge_rest_direct kind string missing from bot-merge.sh"
 fi
 
-# ── Test 8: bot_merge_auto_armed kind emitted ────────────────────────────────
-if grep -q '"kind":"bot_merge_auto_armed"' "$BOT_MERGE" 2>/dev/null; then
-    ok "bot_merge_auto_armed kind string emitted in bot-merge.sh"
+# ── Test 8: arm fallback goes through the central armer (CREDIBLE-1511) ─────
+# bot_merge_auto_armed is no longer emitted by bot-merge.sh: INFRA-1113 moved the
+# arm step into auto-merge-armer.sh, which emits auto_merge_armed (the registry
+# lists bot_merge_auto_armed as reserved: "duplicate of auto_merge_armed").
+# Assert the current contract instead of the removed emit.
+ARMER="$(dirname "$BOT_MERGE")/auto-merge-armer.sh"
+if grep -q 'auto-merge-armer.sh" --pr "\$TARGET_PR"' "$BOT_MERGE" 2>/dev/null; then
+    ok "bot-merge.sh arms auto-merge via auto-merge-armer.sh"
 else
-    fail "bot_merge_auto_armed kind string missing from bot-merge.sh"
+    fail "bot-merge.sh does not delegate the arm step to auto-merge-armer.sh"
+fi
+if grep -q 'emit_ambient "auto_merge_armed"' "$ARMER" 2>/dev/null; then
+    ok "auto-merge-armer.sh emits auto_merge_armed"
+else
+    fail "auto-merge-armer.sh does not emit auto_merge_armed"
+fi
+if grep -q '"kind":"bot_merge_auto_armed"' "$BOT_MERGE" 2>/dev/null; then
+    fail "bot_merge_auto_armed is emitted again in bot-merge.sh; update the reserved list and this test"
+else
+    ok "bot_merge_auto_armed not emitted by bot-merge.sh (reserved; armer emits auto_merge_armed)"
 fi
 
 # ── Test 9: _rest_direct_merged guard variable ───────────────────────────────
@@ -94,15 +109,15 @@ else
 fi
 
 # ── Test 10: python3 check receives REQUIRED_CHECKS ──────────────────────────
-if grep -A3 "RDPYEOF\|rdpyeof\|python3.*REQUIRED_CHECKS\|sys.argv.*required" "$BOT_MERGE" 2>/dev/null | grep -q "argv\|required_raw\|REQUIRED_CHECKS"; then
-    ok "python3 check receives REQUIRED_CHECKS in bot-merge.sh"
+# INFRA-1278 switched the fast path to `python3 -c '...' "$REQUIRED_CHECKS" <<< json`
+# (argv[1] = required list). Accept either that form or the older `python3 - "$REQUIRED_CHECKS"`.
+if grep -qF "' \"\$REQUIRED_CHECKS\" <<<" "$BOT_MERGE" 2>/dev/null \
+   && grep -q 'required_raw = sys.argv\[1\]' "$BOT_MERGE" 2>/dev/null; then
+    ok "python3 check receives REQUIRED_CHECKS as argv[1] in bot-merge.sh"
+elif grep -q 'python3 - "\$REQUIRED_CHECKS"' "$BOT_MERGE" 2>/dev/null; then
+    ok "python3 check receives REQUIRED_CHECKS (\$REQUIRED_CHECKS arg)"
 else
-    # Alternative: check that REQUIRED_CHECKS is passed to the python3 block
-    if grep -q 'python3 - "\$REQUIRED_CHECKS"' "$BOT_MERGE" 2>/dev/null; then
-        ok "python3 check receives REQUIRED_CHECKS (\$REQUIRED_CHECKS arg)"
-    else
-        fail "python3 check does not pass REQUIRED_CHECKS to bot-merge.sh fast path"
-    fi
+    fail "python3 check does not pass REQUIRED_CHECKS to bot-merge.sh fast path"
 fi
 
 echo

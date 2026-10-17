@@ -17,6 +17,13 @@
 #   bash scripts/setup/install-discord-gateway.sh --no-build # install/load only
 #   bash scripts/setup/install-discord-gateway.sh --uninstall
 set -uo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -161,9 +168,9 @@ cat > "$PLIST" <<PLISTEOF
              reported a parse error. Never put backticks in this heredoc.
              ~/.cargo/bin goes FIRST because discover-chump-bin.sh shells out
              to cargo metadata, and under rustup cargo lives in ~/.cargo/bin,
-             not /opt/homebrew/bin — omitting it breaks binary discovery under
+             not ${BREW_PREFIX}/bin — omitting it breaks binary discovery under
              launchd while working fine in an interactive shell. -->
-        <string>${HOME}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>${HOME}/.cargo/bin:${BREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>CHUMP_HOME</key>
         <string>${REPO_ROOT}</string>
         <!-- PRODUCT-014 opt-in, required IN ADDITION to the discord cargo

@@ -33,6 +33,22 @@ if [[ ! -x "$BOT_MERGE" ]]; then
     exit 2
 fi
 
+# CREDIBLE-1511: bot-merge.sh has an AUTONOMY_LEVEL kill switch (RESILIENT-073)
+# that exits 10 when ~/.chump/AUTONOMY_LEVEL is missing or 0, and it is inside the
+# awk-extracted ranges below. Run against a fixture HOME with AUTONOMY_LEVEL=5 so
+# the test never reads or writes the real ~/.chump, and send ambient appends to a
+# fixture file so the repo's .chump-locks/ambient.jsonl is never touched.
+_fixture_home="$(mktemp -d)"
+mkdir -p "$_fixture_home/.chump"
+printf '5\n' > "$_fixture_home/.chump/AUTONOMY_LEVEL"
+# Keep the caller's git identity/config available despite the HOME swap.
+if [[ -z "${GIT_CONFIG_GLOBAL:-}" && -f "$HOME/.gitconfig" ]]; then
+    export GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
+fi
+export HOME="$_fixture_home"
+export CHUMP_AMBIENT_LOG="$_fixture_home/ambient.jsonl"
+trap 'rm -rf "$_fixture_home"' EXIT
+
 echo "=== INFRA-632 bot-merge.sh portability unit tests ==="
 echo
 
@@ -103,7 +119,7 @@ _chk=$(echo "$_flags_out" | grep '^CHECKS:' | sed 's/^CHECKS://')
 # ── Test 4: --pr-template placeholder substitution ────────────────────────────
 echo "--- Test 4: --pr-template placeholder substitution ---"
 _tmpdir=$(mktemp -d)
-trap 'rm -rf "$_tmpdir"' EXIT
+trap 'rm -rf "$_tmpdir" "$_fixture_home"' EXIT
 
 cat > "$_tmpdir/pr-template.md" <<'TMPL'
 ## Summary

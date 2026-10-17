@@ -502,6 +502,15 @@ process_worktree() {
         SKIPPED=$((SKIPPED+1)); return 0
     fi
 
+    # RESILIENT-1609: a live bot-merge ship (fresh bot-merge-*.steps naming this
+    # worktree, or a live process whose cwd is it) is never reapable — a
+    # recovery-mode ship holds no lease and idles the git index during clippy.
+    if [[ "${REAPER_SAFETY_CHECK}" == "1" ]] && declare -F wt_has_live_bot_merge >/dev/null 2>&1 && wt_has_live_bot_merge "$wt_path" "$LOCKS_DIR"; then
+        info "  live bot-merge ship (${WT_LIVE_BOT_MERGE_DETAIL:-?}) — keeping"
+        _emit_reaper_skipped "$wt_path" "bot_merge_live"
+        KEPT=$((KEPT+1)); return 0
+    fi
+
     if is_active_lease "$wt_name" && _is_dead_session_lease "$wt_path"; then
         # RESILIENT-205: the lease is unexpired but the session behind it is
         # dead (no process activity, no git-index/log writes within

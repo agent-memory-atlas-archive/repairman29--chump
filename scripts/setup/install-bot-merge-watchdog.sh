@@ -5,6 +5,11 @@
 # Idempotent: safe to re-run.
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the tracked plist is a placeholder template
+# (__REPO_ROOT__ __HOME__ __BIN_DIR__ __BREW_PREFIX__), rendered for THIS host by
+# chump_render_template (typed `chump node render-unit`, sed mirror fallback).
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 SCRIPT="$REPO_ROOT/scripts/coord/bot-merge-watchdog.sh"
@@ -20,7 +25,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
     fi
     mkdir -p "$HOME/Library/LaunchAgents"
     # Patch plist to use absolute repo path.
-    sed "s|REPO_ROOT|$REPO_ROOT|g" "$PLIST_SRC" > "$PLIST_DEST"
+    chump_render_template "$PLIST_SRC" "$PLIST_DEST" "$REPO_ROOT"
     launchctl unload "$PLIST_DEST" 2>/dev/null || true
     launchctl load -w "$PLIST_DEST"
     echo "[install-bot-merge-watchdog] launchd agent loaded: com.chump.bot-merge-watchdog"

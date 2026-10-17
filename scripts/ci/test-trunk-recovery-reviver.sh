@@ -14,6 +14,8 @@
 #   C. End-to-end DRY_RUN beat over a mock closed-PR list:
 #      - a true trunk-red victim → pr_revived_post_trunk_recovery emitted
 #      - a human-closed / hard-fail / out-of-window PR → NOT revived
+#      - RESILIENT-1607: the rot-reaped label ALONE (no kind=pr_reaped event) → NOT
+#        revived; a pr_reaped event → revived; pr-cut label (+ event) → NOT revived
 #      - idempotent: a second beat does NOT re-emit for the same PR+recovery
 #      - MAX_PER_RUN cap honored
 #   D. Wiring: manifest + install roster + event registry + scanner-anchors.
@@ -48,7 +50,8 @@ cat > "$TMP/decide.json" <<'EOF'
  {"number":105,"state":"CLOSED","closedAt":"1970-01-01T05:00:00Z","mergedAt":"","reaper_marked":1,"gap_status":"","classify_verdict":"pending"},
  {"number":106,"state":"CLOSED","closedAt":"1970-01-01T00:25:00Z","mergedAt":"1970-01-01T00:26:00Z","reaper_marked":1,"gap_status":"","classify_verdict":"pending"},
  {"number":107,"state":"CLOSED","closedAt":"1970-01-01T00:25:00Z","mergedAt":"","reaper_marked":1,"gap_status":"done","classify_verdict":"pending"},
- {"number":108,"state":"CLOSED","closedAt":"1970-01-01T00:25:00Z","mergedAt":"","reaper_marked":1,"gap_status":"","classify_verdict":"blocked_no_failure"}
+ {"number":108,"state":"CLOSED","closedAt":"1970-01-01T00:25:00Z","mergedAt":"","reaper_marked":1,"gap_status":"","classify_verdict":"blocked_no_failure"},
+ {"number":109,"state":"CLOSED","closedAt":"1970-01-01T00:25:00Z","mergedAt":"","labels":[{"name":"pr-cut"},{"name":"rot-reaped"}],"reaper_marked":1,"gap_status":"","classify_verdict":"pending"}
 ]}
 EOF
 D="$(bash "$REVIVER" --decide "$TMP/decide.json")"
@@ -65,6 +68,7 @@ check_decision 105 skip:out_of_window
 check_decision 106 skip:merged
 check_decision 107 skip:gap_done
 check_decision 108 revive
+check_decision 109 skip:pr_cut
 
 # ── B. Window derivation from ambient ─────────────────────────────────────────
 AMB="$TMP/ambient.jsonl"
@@ -109,9 +113,19 @@ cat > "$PRS" <<EOF
  {"number":201,"headRefName":"chump/infra-9001-fix","state":"CLOSED","closedAt":"$CLOSED_IN","mergedAt":"","labels":[{"name":"rot-reaped"}],"classify_verdict":"pending"},
  {"number":202,"headRefName":"chump/infra-9002-fix","state":"CLOSED","closedAt":"$CLOSED_IN","mergedAt":"","labels":[],"classify_verdict":"pending"},
  {"number":203,"headRefName":"chump/infra-9003-fix","state":"CLOSED","closedAt":"$CLOSED_IN","mergedAt":"","labels":[{"name":"rot-reaped"}],"classify_verdict":"hard_fail"},
- {"number":204,"headRefName":"chump/infra-9004-fix","state":"CLOSED","closedAt":"$CLOSED_OUT","mergedAt":"","labels":[{"name":"rot-reaped"}],"classify_verdict":"pending"}
+ {"number":204,"headRefName":"chump/infra-9004-fix","state":"CLOSED","closedAt":"$CLOSED_OUT","mergedAt":"","labels":[{"name":"rot-reaped"}],"classify_verdict":"pending"},
+ {"number":205,"headRefName":"chump/infra-9005-fix","state":"CLOSED","closedAt":"$CLOSED_IN","mergedAt":"","labels":[{"name":"rot-reaped"}],"classify_verdict":"pending"},
+ {"number":206,"headRefName":"chump/infra-9006-fix","state":"CLOSED","closedAt":"$CLOSED_IN","mergedAt":"","labels":[{"name":"rot-reaped"},{"name":"pr-cut"}],"classify_verdict":"pending"},
+ {"number":207,"headRefName":"chump/infra-9007-fix","state":"CLOSED","closedAt":"$CLOSED_IN","mergedAt":"","labels":[],"classify_verdict":"pending"}
 ]
 EOF
+# RESILIENT-1607: the reaper's own receipts. 201/206/207 were reaper-closed (a
+# pr_reaped event exists); 205 carries the rot-reaped LABEL but has no event (a
+# person stamped it by hand, like the architect's #5478/#5483 cuts); 202/203
+# have none. 206 was reaper-closed and then deliberately cut: pr-cut wins.
+for n in 201 203 204 206 207; do
+  printf '{"ts":"%s","kind":"pr_reaped","source":"rot-reaper","pr":%s,"label":"rot-reaped"}\n' "$(_iso 700)" "$n" >> "$AMB"
+done
 
 STATE="$TMP/reviver-state.json"
 run_beat() {
@@ -127,11 +141,17 @@ n_201="$(cnt '"kind":"pr_revived_post_trunk_recovery".*"pr":201' "$AMB")"
 n_202="$(cnt '"kind":"pr_revived_post_trunk_recovery".*"pr":202' "$AMB")"
 n_203="$(cnt '"kind":"pr_revived_post_trunk_recovery".*"pr":203' "$AMB")"
 n_204="$(cnt '"kind":"pr_revived_post_trunk_recovery".*"pr":204' "$AMB")"
+n_205="$(cnt '"kind":"pr_revived_post_trunk_recovery".*"pr":205' "$AMB")"
+n_206="$(cnt '"kind":"pr_revived_post_trunk_recovery".*"pr":206' "$AMB")"
+n_207="$(cnt '"kind":"pr_revived_post_trunk_recovery".*"pr":207' "$AMB")"
 
 [[ "$n_201" -eq 1 ]] && ok "C: victim PR #201 revived (event emitted)" || bad "C: PR #201 not revived (n=$n_201)"
 [[ "$n_202" -eq 0 ]] && ok "C: human-closed PR #202 NOT revived" || bad "C: PR #202 wrongly revived (n=$n_202)"
 [[ "$n_203" -eq 0 ]] && ok "C: hard-fail PR #203 NOT revived" || bad "C: PR #203 wrongly revived (n=$n_203)"
 [[ "$n_204" -eq 0 ]] && ok "C: out-of-window PR #204 NOT revived" || bad "C: PR #204 wrongly revived (n=$n_204)"
+[[ "$n_205" -eq 0 ]] && ok "C: rot-reaped LABEL alone (no pr_reaped event) NOT revived (RESILIENT-1607)" || bad "C: label-only PR #205 wrongly revived (n=$n_205)"
+[[ "$n_206" -eq 0 ]] && ok "C: pr-cut labeled PR #206 NOT revived even with a pr_reaped event" || bad "C: pr-cut PR #206 wrongly revived (n=$n_206)"
+[[ "$n_207" -eq 1 ]] && ok "C: pr_reaped event without the label still revived (receipt is the proof)" || bad "C: event-only PR #207 not revived (n=$n_207)"
 
 # Idempotency: a second beat must not re-emit for #201.
 run_beat
@@ -150,6 +170,8 @@ AMB2="$TMP/ambient2.jsonl"
 {
   printf '{"ts":"%s","kind":"trunk_state_change","from":"TRUNK_GREEN","to":"TRUNK_RED"}\n' "$ONSET_ISO"
   printf '{"ts":"%s","kind":"trunk_recovered","closed_gaps_count":1}\n' "$REC_ISO"
+  printf '{"ts":"%s","kind":"pr_reaped","source":"rot-reaper","pr":301,"label":"rot-reaped"}\n' "$(_iso 700)"
+  printf '{"ts":"%s","kind":"pr_reaped","source":"rot-reaper","pr":302,"label":"rot-reaped"}\n' "$(_iso 700)"
 } > "$AMB2"
 CHUMP_AMBIENT_PATH="$AMB2" CHUMP_TRUNK_REVIVE_MOCK_PRS_JSON="$PRS2" \
   CHUMP_TRUNK_REVIVE_DRY_RUN=1 CHUMP_TRUNK_REVIVE_STATE_FILE="$TMP/state2.json" \

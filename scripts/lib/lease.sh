@@ -114,8 +114,13 @@ lease_heartbeat_age_s() {
 # Mirrors the INFRA-1074 reaper safety threshold.
 lease_is_fresh() {
     local path="$1" grace="${2:-900}"
+    # CREDIBLE-1511: distinguish "no heartbeat" from "fresh heartbeat" by field
+    # presence, not by age. A heartbeat written in the current second has age 0,
+    # which the old `age -gt 0` check misread as missing.
+    local hb; hb="$(lease_field "$path" heartbeat_at)"
+    [[ "$hb" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2} ]] || return 1   # absent/unparseable == not fresh
     local age; age="$(lease_heartbeat_age_s "$path")"
-    [[ "$age" -gt 0 ]] || return 1   # no heartbeat == not fresh
+    [[ "$age" -ge 0 ]] || return 1
     [[ "$age" -le "$grace" ]]
 }
 

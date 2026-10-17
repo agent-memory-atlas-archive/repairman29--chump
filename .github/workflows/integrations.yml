@@ -40,10 +40,13 @@ permissions:
 # branch spawned a fresh ~11min run while the old one kept a self-hosted runner
 # busy — a major contributor to the runner-saturation that stalls the merge queue.
 # DEADLOCK-SAFE (the INFRA-2452 class): only pull_request runs share a cancellable
-# group; push, merge_group, and schedule runs key on the unique run_id so they are
-# NEVER cancelled. This matters because the required check "ACP protocol smoke
-# test" runs in this workflow on merge_group — cancelling a merge-queue run would
-# fail the required check and wedge every merge.
+# group; push, merge_group, and dispatch runs key on their own commit sha (unique
+# per event, never shared with another event type) so they are NEVER cancelled by
+# a different run. (ZERO-WASTE-135: schedule runs previously keyed on the unique
+# run_id, which never deduped a stalled nightly; they now share one stable key.)
+# This matters because the required check "ACP protocol smoke test" runs in this
+# workflow on merge_group — cancelling a merge-queue run would fail the required
+# check and wedge every merge.
 #
 # INFRA-3579 (2026-08-11, INFRA-1655 root-cause fix): the pull_request group was
 # keyed on github.event.pull_request.number, so two pushes to the same PR within
@@ -58,7 +61,7 @@ permissions:
 # group, so a fixup push no longer cancels the prior commit's in-flight self-hosted
 # run.
 concurrency:
-  group: integrations-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.sha || github.run_id }}
+  group: integrations-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'schedule' && 'nightly' || github.sha }}
   cancel-in-progress: true
 
 env:

@@ -298,16 +298,6 @@ impl GapStore {
         Ok(())
     }
 
-    /// INFRA-2053 sync-module accessor — direct connection reference so
-    /// `sync_pull` can issue INSERT/UPDATE that bypass the integrity
-    /// guards (recycled-ID, title-hijack) in `set_fields`. Those guards
-    /// would refuse legitimate sync operations like recovering a TODO-AC
-    /// overwrite from a clean YAML. Scoped `pub(crate)` so external
-    /// callers cannot reach it — `sync::sync_pull` is the only consumer.
-    pub(crate) fn conn_for_sync(&self) -> &Connection {
-        &self.conn
-    }
-
     /// INFRA-1435: append an audit row to `gap_dup_archive_audit` (creates
     /// the table on first call). Used by `chump gap consolidate --apply`
     /// to record a dup-archive decision: which ID was kept, which was
@@ -1643,6 +1633,18 @@ impl GapStore {
         // via this path on 2026-05-03 (status=done, closed_pr absent).
         // Bypass: CHUMP_BYPASS_CLOSED_PR_GUARD=1 — for the legitimate
         // import / migration cases where closed_pr is genuinely unknown.
+        //
+        // CREDIBLE-1496 (reconciled with CREDIBLE-1508): the rule is "no
+        // status=done without a receipt", NOT "no status=done via set_fields".
+        // set_fields delegates the done flip to the single receipt-gated
+        // writer (finalize_status_done) below, so a done write here is legal
+        // only when it can carry one of the 1508 receipt variants:
+        //   * a LandingReceipt keyed on a numeric closed_pr (supplied in this
+        //     call or already on the row), or
+        //   * an explicit ImportedReceipt("gap_set_bypass") when the operator
+        //     sets the INFRA-402 bypass env var for a genuine migration.
+        // Anything else (no PR, no bypass) has nothing to key a receipt on
+        // and is refused here, before any field is written.
         if let Some(s) = fields.status.as_deref() {
             if s == "done" && std::env::var("CHUMP_BYPASS_CLOSED_PR_GUARD").as_deref() != Ok("1") {
                 // closed_pr must either be in this update OR already on the row.
@@ -1657,7 +1659,9 @@ impl GapStore {
                         .flatten();
                     if existing_pr.unwrap_or(0) == 0 {
                         bail!(
-                            "INFRA-402: refusing to flip {gap_id} to status=done without a numeric closed_pr. \
+                            "INFRA-402/CREDIBLE-1496: refusing to flip {gap_id} to status=done without a receipt: \
+                             no numeric closed_pr (in this call or on the row) to key a LandingReceipt on. \
+                             Close via `chump gap ship` (a bypass close stamps an ImportedReceipt). \
                              Pass --closed-pr <N>, or set CHUMP_BYPASS_CLOSED_PR_GUARD=1 for genuine migration cases."
                         );
                     }
@@ -1920,12 +1924,31 @@ impl GapStore {
         // this path can no longer produce a done row with no receipt. LeaseCleanup
         // ::All because `chump gap set` carries no claiming-session context.
         if closing_done {
-            let receipt = chump_ship::LandingReceipt::new(gap_id.to_string(), effective_closed_pr);
-            receipt
-                .validate()
-                .map_err(|e| anyhow::anyhow!("CREDIBLE-1508: invalid landing receipt: {e}"))?;
-            let receipt_json = serde_json::to_string(&receipt)
-                .context("CREDIBLE-1508: failed to serialize landing receipt")?;
+            // CREDIBLE-1496: pick the receipt variant that matches what backs
+            // this close. A real PR -> LandingReceipt. No PR (only reachable
+            // through the audited INFRA-402 bypass escape hatch,
+            // the guard at the top refuses it otherwise) -> an explicit
+            // ImportedReceipt("gap_set_bypass"), never a PR-less LandingReceipt
+            // that would read like a landing with the PR field merely missing.
+            let receipt_json = match effective_closed_pr.filter(|pr| *pr > 0) {
+                Some(pr) => {
+                    let receipt = chump_ship::LandingReceipt::new(gap_id.to_string(), Some(pr));
+                    receipt.validate().map_err(|e| {
+                        anyhow::anyhow!("CREDIBLE-1508: invalid landing receipt: {e}")
+                    })?;
+                    serde_json::to_string(&receipt)
+                        .context("CREDIBLE-1508: failed to serialize landing receipt")?
+                }
+                None => {
+                    let receipt =
+                        chump_ship::ImportedReceipt::new(gap_id.to_string(), "gap_set_bypass");
+                    receipt.validate().map_err(|e| {
+                        anyhow::anyhow!("CREDIBLE-1496: invalid imported receipt: {e}")
+                    })?;
+                    serde_json::to_string(&receipt)
+                        .context("CREDIBLE-1496: failed to serialize imported receipt")?
+                }
+            };
             let transitioned = self.finalize_status_done(
                 gap_id,
                 effective_closed_pr,
@@ -2159,12 +2182,20 @@ impl GapStore {
         //   home for the reconciliation pass, not the hot reserve path.
 
         // INFRA-3687, parts 1+2 of the stale-checkout collision fix: consult
-        // origin/main's canonical state.sql BEFORE touching the local
-        // counter, and fail closed if this checkout is genuinely behind
-        // origin/main AND canonical truth is unverifiable. Computed up
-        // front (outside the BEGIN IMMEDIATE write-lock below) since both
-        // are pure git shell-outs with no state.db interaction — no reason
-        // to hold the write lock across them.
+        // the canonical registry dump BEFORE touching the local counter, and
+        // fail closed if this checkout is genuinely behind origin/main AND a
+        // configured canonical registry is unreadable. Computed up front
+        // (outside the BEGIN IMMEDIATE write-lock below) since both are pure
+        // git shell-outs with no state.db interaction.
+        //
+        // INFRA-8193: the canonical dump lives ONLY on the private `registry`
+        // remote. origin/main no longer tracks .chump/state.sql (and its last
+        // copy was frozen at 2026-09-24, so it under-reported anyway). With no
+        // registry remote there is no cross-node dump to verify against —
+        // `git pull` cannot fix that — so the gate only fires when a registry
+        // remote IS configured but unreadable. Without one, the floor is the
+        // local store + open-PR/lease ids + git-history skip + the
+        // RESILIENT-1570 PK guard below.
         //
         // Existing test fixtures (`test_store()`) use a bare `TempDir` with
         // no `.git` at all, so both calls return `None` for them and this
@@ -2172,13 +2203,13 @@ impl GapStore {
         let canonical_max = self.canonical_max_id(&domain_upper);
         let behind = behind_origin_main_count(&self.repo_root).unwrap_or(0);
         let allow_stale = std::env::var("CHUMP_RESERVE_ALLOW_STALE").as_deref() == Ok("1");
-        if behind > 0 && canonical_max.is_none() {
+        if behind > 0 && canonical_max.is_none() && self.registry_remote_configured() {
             if !allow_stale {
                 bail!(
                     "refusing to reserve {domain_upper}: checkout is {behind} commit(s) behind \
-                     origin/main and canonical state.sql is unreadable — cannot guarantee a \
-                     unique ID. Run `git pull` (or restore state.db from state.sql) and retry. \
-                     Emergency escape hatch: CHUMP_RESERVE_ALLOW_STALE=1 (audited)."
+                     origin/main and the canonical registry (registry/main:.chump/state.sql) is \
+                     unreadable — cannot guarantee a unique ID. Run `git fetch registry main` \
+                     and retry. Emergency escape hatch: CHUMP_RESERVE_ALLOW_STALE=1 (audited)."
                 );
             }
             // CHUMP_RESERVE_ALLOW_STALE=1 audit trail — same ambient-event
@@ -2222,7 +2253,7 @@ impl GapStore {
             // pending leases (sources the DB cannot see). The counter must
             // start above the max of (DB max, external max).
             let extra_max = extra_used.iter().copied().max().unwrap_or(0);
-            // INFRA-3687: also bump past origin/main's canonical state.sql
+            // INFRA-3687: also bump past the canonical registry state.sql
             // max (computed above, before the transaction started) — the
             // fix for the stale-checkout collision class. A checkout behind
             // origin/main has a stale `existing_max` here; folding in
@@ -2788,76 +2819,49 @@ impl GapStore {
         Ok(out)
     }
 
-    /// INFRA-3687: read origin/main's tracked `.chump/state.sql` — the
-    /// canonical, git-tracked dump of every gap ever reserved or merged —
-    /// and return the highest `<DOMAIN>-N` id number found for
-    /// `domain_upper`.
+    /// INFRA-3687: read the canonical registry dump
+    /// (`registry/main:.chump/state.sql`) and return the highest
+    /// `<DOMAIN>-N` id number found for `domain_upper`.
     ///
     /// This closes the stale-checkout ID collision class documented in
     /// `docs/process/CANONICAL_STATE_CONTRACT.md` § Drift Mode G: a
-    /// checkout N commits behind `origin/main` has a stale local `gaps`
-    /// table, so `existing_max` (local state.db) and `extra_max`
-    /// (`.chump-locks/*.json` leases + open-PR titles) can BOTH under-count,
-    /// and `reserve_with_external` re-issues an ID that canonically already
-    /// belongs to a merged gap (real repro: a checkout 177 commits behind
-    /// reserved `INFRA-3680`, canonically a merged "parse_verdict" gap).
-    /// Folding this method's result into `combined_max` in
-    /// `reserve_with_external` makes that physically impossible whenever
-    /// origin refs are reachable.
+    /// checkout N commits behind has a stale local `gaps` table, so
+    /// `existing_max` (local state.db) and `extra_max` (`.chump-locks/*.json`
+    /// leases + open-PR titles) can BOTH under-count. Folding this method's
+    /// result into `combined_max` in `reserve_with_external` makes
+    /// re-issuing a canonically-owned ID impossible whenever the registry is
+    /// reachable.
     ///
-    /// Best-effort `git fetch origin main --quiet` first (mirrors the
-    /// INFRA-2423 `ship()` auto-fetch pattern; non-fatal offline/no-remote —
-    /// falls through to whatever `origin/main` this checkout already knows
-    /// about). Then reads `origin/main:.chump/state.sql` via `git show` and
-    /// delegates to [`Self::max_id_num_in_gaps`] — the SAME id-column-only
-    /// extraction the local allocator uses, deliberately NOT a raw
-    /// text/regex scan over the whole dump (see that method's docs for why:
-    /// state.sql is known to carry `<DOMAIN>-N`-shaped junk substrings
-    /// outside the `id` column, e.g. `INFRA-9999999` quoted in a note).
+    /// INFRA-8193: the registry is published ONLY to the private `registry`
+    /// git remote (scripts/coord/lib/registry-remote.sh). The legacy
+    /// `origin/main:.chump/state.sql` fallback is gone: the public repo no
+    /// longer tracks the file, and its last copy was frozen, so reading it
+    /// would under-report the max and hand out colliding IDs.
     ///
-    /// Returns `None` — "could not verify canonical truth" — ONLY when
-    /// there is no `.git`, the `git show` itself fails (offline,
-    /// unreachable ref, or the file does not exist at `origin/main`'s
-    /// current tip), or the YAML fails to parse. Deliberately distinct from
-    /// "the file was read successfully but this domain has zero canonical
-    /// gaps" — that case is verified truth (a fresh domain's canonical max
-    /// really is 0) and returns `Some(0)`, not `None`. Collapsing the two
-    /// would make `reserve_with_external`'s fail-closed gate refuse every
-    /// first-ever reserve for a new domain on a checkout that happens to be
-    /// behind, which is not a staleness risk at all. Callers MUST treat
-    /// `None` as "unverifiable" — see the fail-closed gate in
-    /// `reserve_with_external`.
+    /// Best-effort `git fetch registry main --quiet` first (non-fatal
+    /// offline), then `git show registry/main:.chump/state.sql`, delegating
+    /// to [`Self::max_id_num_in_gaps`] — id-column-only extraction,
+    /// deliberately NOT a raw text scan (the dump carries `<DOMAIN>-N`-shaped
+    /// junk in notes, e.g. `INFRA-9999999`).
+    ///
+    /// Returns `None` — "no verified canonical truth" — when there is no
+    /// `.git`, no `registry` remote, the `git show` fails, or the YAML fails
+    /// to parse. A successful read with zero matches for the domain is
+    /// verified truth and returns `Some(0)`. The fail-closed gate in
+    /// `reserve_with_external` refuses only when a registry remote IS
+    /// configured and this returns `None` (see [`Self::registry_remote_configured`]).
     pub fn canonical_max_id(&self, domain_upper: &str) -> Option<i64> {
-        if !self.repo_root.join(".git").exists() {
+        if !self.repo_root.join(".git").exists() || !self.registry_remote_configured() {
             return None;
         }
-        // Registry privacy: the canonical registry is published to the
-        // private `registry` git remote, not to the public code repo. When
-        // that remote is configured it is the ONLY source consulted: a
-        // configured-but-unreadable registry returns `None` (unverifiable,
-        // fail-closed gate) rather than quietly falling back to a frozen
-        // legacy copy on origin/main, which would under-report the max ID
-        // and hand out colliding IDs. `origin/main` is consulted only when
-        // no registry remote exists (the legacy, pre-cutover layout).
-        let has_registry_remote = std::process::Command::new("git")
-            .args(["remote", "get-url", "registry"])
-            .current_dir(&self.repo_root)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-        let (remote, spec) = if has_registry_remote {
-            ("registry", "registry/main:.chump/state.sql")
-        } else {
-            ("origin", "origin/main:.chump/state.sql")
-        };
         // Best-effort refresh; non-fatal if offline (mirrors the INFRA-2423
         // auto-fetch already used by ship()'s proof-of-merge check).
         let _ = std::process::Command::new("git")
-            .args(["fetch", remote, "main", "--quiet"])
+            .args(["fetch", "registry", "main", "--quiet"])
             .current_dir(&self.repo_root)
             .output();
         let output = std::process::Command::new("git")
-            .args(["show", spec])
+            .args(["show", "registry/main:.chump/state.sql"])
             .current_dir(&self.repo_root)
             .output()
             .ok()?;
@@ -2870,6 +2874,20 @@ impl GapStore {
         // when the domain has zero matches there (a brand-new domain's
         // canonical max legitimately is 0 — see the doc comment above).
         Some(Self::max_id_num_in_gaps(&file.gaps, domain_upper).unwrap_or(0))
+    }
+
+    /// INFRA-8193: true when this checkout has a `registry` git remote — the
+    /// only place the canonical gap-registry dump is published.
+    pub fn registry_remote_configured(&self) -> bool {
+        if !self.repo_root.join(".git").exists() {
+            return false;
+        }
+        std::process::Command::new("git")
+            .args(["remote", "get-url", "registry"])
+            .current_dir(&self.repo_root)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
 
     /// Public wrapper around [`behind_origin_main_count`] for CLI callers
@@ -5098,8 +5116,9 @@ impl GapStore {
         Ok((inserted, skipped, backfilled + status_backfilled))
     }
 
-    /// INFRA-538 — rebuild state.db from `.chump/state.sql` (the tracked YAML
-    /// mirror). Reads the YAML dump at `sql_path`, clears the `gaps` table,
+    /// INFRA-538 — rebuild state.db from a local `.chump/state.sql` YAML dump
+    /// (untracked since INFRA-8193; written by `chump gap dump --out` or the
+    /// registry reader). Reads the dump at `sql_path`, clears the `gaps` table,
     /// and re-inserts all rows. Preserves every field including `closed_pr`,
     /// `closed_date`, `notes`, and affinity columns.
     ///
@@ -5122,29 +5141,6 @@ impl GapStore {
         Ok(inserted)
     }
 
-    /// INFRA-3002 — targeted single-gap sync from `.chump/state.sql` into
-    /// state.db, without touching any other row. Used by `chump claim` to
-    /// self-heal the "gap {id} not found in state.db" failure mode: a
-    /// worktree's local state.db is a snapshot taken at `chump claim`
-    /// worktree-creation time, so a gap reserved/imported on `origin/main`
-    /// afterward is invisible until someone manually runs
-    /// `chump gap restore --from-sql` (a full-table rebuild). This lets
-    /// `claim` repair just the one row it needs, in-place.
-    ///
-    /// Returns `Ok(true)` if `gap_id` was found in state.sql and
-    /// inserted/replaced, `Ok(false)` if state.sql has no such gap.
-    pub fn sync_gap_from_state_sql(&self, sql_path: &Path, gap_id: &str) -> Result<bool> {
-        let file = Self::load_state_sql(sql_path)?;
-        match file.gaps.iter().find(|g| g.id == gap_id) {
-            Some(g) => {
-                self.insert_or_replace_gap_row(g)
-                    .with_context(|| format!("inserting gap {gap_id} during single-gap sync"))?;
-                Ok(true)
-            }
-            None => Ok(false),
-        }
-    }
-
     fn load_state_sql(sql_path: &Path) -> Result<YamlGapsFile> {
         let text = std::fs::read_to_string(sql_path)
             .with_context(|| format!("reading state.sql at {}", sql_path.display()))?;
@@ -5155,7 +5151,7 @@ impl GapStore {
     /// Parse the YAML body of a `.chump/state.sql` dump (despite the `.sql`
     /// extension it is a YAML gaps list, not SQL — see [`Self::load_state_sql`])
     /// from an in-memory string. Split out of `load_state_sql` so
-    /// [`Self::canonical_max_id`] can parse `git show origin/main:.chump/state.sql`
+    /// [`Self::canonical_max_id`] can parse `git show registry/main:.chump/state.sql`
     /// output directly, without a temp-file round trip.
     fn parse_state_sql_yaml(text: &str) -> Result<YamlGapsFile> {
         serde_yaml::from_str(text).context("parsing state.sql YAML")
@@ -7486,23 +7482,14 @@ mod auto_fetch_tests {
             .ok();
         git(repo, &["push", "--quiet", "origin", "main"]);
 
-        // Advance origin (via scratch clone) so local is behind. Also
-        // commit a (real-world-realistic) `.chump/state.sql` so
-        // INFRA-3687's canonical_max_id() can verify canonical truth here —
-        // this scenario is exercising ship()'s dirty-tree guard, not the
-        // stale-checkout reserve() guard, so canonical must be readable or
-        // the new fail-closed gate below would (correctly, but not what
-        // this test is about) refuse the reserve() call before ship() is
-        // ever reached.
+        // Advance origin (via scratch clone) so local is behind. No registry
+        // remote is configured, so INFRA-3687's fail-closed reserve() gate
+        // stays off (INFRA-8193) and this scenario exercises ship()'s
+        // dirty-tree guard only.
         let scratch_dir = tempdir().unwrap();
         non_bare_clone(origin_dir.path().to_str().unwrap(), scratch_dir.path());
         std::fs::write(scratch_dir.path().join("extra.txt"), b"extra").ok();
-        std::fs::create_dir_all(scratch_dir.path().join(".chump")).ok();
-        std::fs::write(scratch_dir.path().join(".chump/state.sql"), b"gaps: []\n").ok();
-        git(
-            scratch_dir.path(),
-            &["add", "extra.txt", ".chump/state.sql"],
-        );
+        git(scratch_dir.path(), &["add", "extra.txt"]);
         git(
             scratch_dir.path(),
             &["commit", "--quiet", "-m", "chore: origin-ahead"],
@@ -7589,44 +7576,71 @@ mod auto_fetch_tests {
         );
     }
 
-    /// INFRA-3687 regression lock, part 1: the exact stale-checkout drift
-    /// from the real repro (a checkout 177 commits behind reserved
-    /// INFRA-3680, canonically a merged "parse_verdict" gap). Local
-    /// state.db only ever sees a low max (INFRA-1xx-ish); origin/main's
-    /// canonical `.chump/state.sql` already records a much higher gap
-    /// (INFRA-3866). `reserve()` must fold in the canonical max and must
-    /// NOT hand back an ID at or below it.
-    #[test]
-    fn canonical_max_id_reads_origin_state_sql_and_reserve_beats_stale_local() {
-        let dir = tempdir().unwrap();
-        let repo = dir.path();
-        init_repo(repo);
+    /// Test helper: a bare "registry" repo (unrelated history) whose
+    /// `.chump/state.sql` carries `body`, or no state.sql when `None`.
+    fn registry_bare(body: Option<&[u8]>) -> (tempfile::TempDir, tempfile::TempDir) {
+        let src = tempdir().unwrap();
+        init_repo(src.path());
+        if let Some(b) = body {
+            std::fs::create_dir_all(src.path().join(".chump")).ok();
+            std::fs::write(src.path().join(".chump/state.sql"), b).ok();
+            git(src.path(), &["add", ".chump/state.sql"]);
+            git(src.path(), &["commit", "--quiet", "-m", "registry"]);
+        }
+        let bare = tempdir().unwrap();
+        bare_clone(src.path(), bare.path());
+        (src, bare)
+    }
 
-        // Origin starts in sync with local (no state.sql yet).
+    /// Test helper: local repo with an `origin` that is one commit ahead.
+    /// When `origin_state_sql` is set, origin's extra commit tracks a legacy
+    /// `.chump/state.sql` with that body (the pre-INFRA-8193 layout).
+    fn repo_behind_origin(
+        origin_state_sql: Option<&[u8]>,
+    ) -> (tempfile::TempDir, tempfile::TempDir, tempfile::TempDir) {
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
         let origin_dir = tempdir().unwrap();
-        bare_clone(repo, origin_dir.path());
-        std::process::Command::new("git")
-            .args([
+        bare_clone(dir.path(), origin_dir.path());
+        git(
+            dir.path(),
+            &[
                 "remote",
                 "add",
                 "origin",
                 origin_dir.path().to_str().unwrap(),
-            ])
-            .current_dir(repo)
-            .status()
-            .ok();
-        git(repo, &["push", "--quiet", "origin", "main"]);
+            ],
+        );
+        git(dir.path(), &["push", "--quiet", "origin", "main"]);
+        let scratch = tempdir().unwrap();
+        non_bare_clone(origin_dir.path().to_str().unwrap(), scratch.path());
+        std::fs::write(scratch.path().join("extra.txt"), b"extra").ok();
+        git(scratch.path(), &["add", "extra.txt"]);
+        if let Some(b) = origin_state_sql {
+            std::fs::create_dir_all(scratch.path().join(".chump")).ok();
+            std::fs::write(scratch.path().join(".chump/state.sql"), b).ok();
+            git(scratch.path(), &["add", ".chump/state.sql"]);
+        }
+        git(
+            scratch.path(),
+            &["commit", "--quiet", "-m", "chore: origin-ahead"],
+        );
+        git(scratch.path(), &["push", "--quiet", "origin", "main"]);
+        (dir, origin_dir, scratch)
+    }
 
-        // Advance origin (via scratch clone) with a canonical state.sql
-        // recording INFRA-3866 as an already-merged gap — this checkout's
-        // local state.db has never seen it. Also plant a junk
-        // `INFRA-9999999`-shaped substring in the notes field of the SAME
-        // row to prove the id-column-only extraction isn't fooled by it.
-        let scratch_dir = tempdir().unwrap();
-        non_bare_clone(origin_dir.path().to_str().unwrap(), scratch_dir.path());
-        std::fs::create_dir_all(scratch_dir.path().join(".chump")).ok();
-        std::fs::write(
-            scratch_dir.path().join(".chump/state.sql"),
+    /// INFRA-3687 regression lock, part 1 (registry form since INFRA-8193):
+    /// the exact stale-checkout drift from the real repro (a checkout 177
+    /// commits behind reserved INFRA-3680, canonically a merged
+    /// "parse_verdict" gap). Local state.db only ever sees a low max; the
+    /// canonical registry dump already records INFRA-3866. `reserve()` must
+    /// fold in the canonical max (id column only, ignoring the junk
+    /// INFRA-9999999 in notes) and must NOT hand back an ID at or below it.
+    #[test]
+    fn canonical_max_id_reads_registry_state_sql_and_reserve_beats_stale_local() {
+        let (dir, _origin, _scratch) = repo_behind_origin(None);
+        let repo = dir.path();
+        let (_reg_src, reg_bare) = registry_bare(Some(
             b"gaps:\n\
               - id: INFRA-3866\n\
               \x20 domain: INFRA\n\
@@ -7635,24 +7649,21 @@ mod auto_fetch_tests {
               \x20 priority: P2\n\
               \x20 effort: s\n\
               \x20 notes: \"see also junk id INFRA-9999999 mentioned in an old incident writeup\"\n",
-        )
-        .ok();
-        git(scratch_dir.path(), &["add", ".chump/state.sql"]);
+        ));
         git(
-            scratch_dir.path(),
+            repo,
             &[
-                "commit",
-                "--quiet",
-                "-m",
-                "chore: canonical state.sql with INFRA-3866",
+                "remote",
+                "add",
+                "registry",
+                reg_bare.path().to_str().unwrap(),
             ],
         );
-        git(scratch_dir.path(), &["push", "--quiet", "origin", "main"]);
 
-        // Local checkout never pulled this — reproduces the "N commits
-        // behind" drift. Seed local state.db with a low max (INFRA-1) so
-        // existing_max alone would naively pick INFRA-2.
         let store = open_store(repo);
+        unsafe {
+            std::env::remove_var("CHUMP_RESERVE_ALLOW_STALE");
+        }
         store
             .reserve("INFRA", "local-only seed, stale checkout", "P2", "xs")
             .unwrap();
@@ -7661,7 +7672,7 @@ mod auto_fetch_tests {
         assert_eq!(
             canonical,
             Some(3866),
-            "canonical_max_id must read origin/main's state.sql id column \
+            "canonical_max_id must read registry/main's state.sql id column \
              only (3866), ignoring the junk INFRA-9999999 substring in \
              notes; got {canonical:?}"
         );
@@ -7680,60 +7691,29 @@ mod auto_fetch_tests {
         );
     }
 
-    /// Registry privacy: when a `registry` git remote is configured, the
-    /// canonical max ID comes from `registry/main:.chump/state.sql` and the
-    /// code repo (`origin`) is never consulted, even if a frozen legacy copy
-    /// still sits there with a LOWER max. A configured registry that carries
-    /// no state.sql is "unverifiable" (`None`), not a fallback to origin.
+    /// INFRA-8193: origin/main's legacy tracked `.chump/state.sql` is never
+    /// read again. With a frozen copy still on origin (max 100) and no
+    /// registry remote, canonical truth is `None`; with a registry remote the
+    /// registry is canonical; a configured registry without state.sql is
+    /// unverifiable (`None`), never a fallback to origin.
     #[test]
-    fn canonical_max_id_prefers_registry_remote_over_origin() {
-        let dir = tempdir().unwrap();
-        let repo = dir.path();
-        init_repo(repo);
-
-        // origin = the code repo, carrying a frozen legacy state.sql (max 100).
-        let origin_dir = tempdir().unwrap();
-        bare_clone(repo, origin_dir.path());
-        git(
-            repo,
-            &[
-                "remote",
-                "add",
-                "origin",
-                origin_dir.path().to_str().unwrap(),
-            ],
-        );
-        git(repo, &["push", "--quiet", "origin", "main"]);
-        let scratch = tempdir().unwrap();
-        non_bare_clone(origin_dir.path().to_str().unwrap(), scratch.path());
-        std::fs::create_dir_all(scratch.path().join(".chump")).ok();
-        std::fs::write(
-            scratch.path().join(".chump/state.sql"),
+    fn canonical_max_id_never_reads_origin_legacy_copy() {
+        let (dir, _origin, _scratch) = repo_behind_origin(Some(
             b"gaps:\n- id: INFRA-100\n  domain: INFRA\n  title: frozen legacy\n  status: done\n  priority: P2\n  effort: s\n",
-        )
-        .ok();
-        git(scratch.path(), &["add", ".chump/state.sql"]);
-        git(scratch.path(), &["commit", "--quiet", "-m", "legacy copy"]);
-        git(scratch.path(), &["push", "--quiet", "origin", "main"]);
-
-        // registry = a separate, unrelated-history repo with the live max 4200.
-        let reg_src = tempdir().unwrap();
-        init_repo(reg_src.path());
-        std::fs::create_dir_all(reg_src.path().join(".chump")).ok();
-        std::fs::write(
-            reg_src.path().join(".chump/state.sql"),
-            b"gaps:\n- id: INFRA-4200\n  domain: INFRA\n  title: live registry\n  status: open\n  priority: P2\n  effort: s\n",
-        )
-        .ok();
-        git(reg_src.path(), &["add", ".chump/state.sql"]);
-        git(reg_src.path(), &["commit", "--quiet", "-m", "registry"]);
-        let reg_bare = tempdir().unwrap();
-        bare_clone(reg_src.path(), reg_bare.path());
-
+        ));
+        let repo = dir.path();
+        git(repo, &["fetch", "--quiet", "origin", "main"]);
         let store = open_store(repo);
-        // No registry remote yet: legacy path reads origin/main.
-        assert_eq!(store.canonical_max_id("INFRA"), Some(100));
+        assert!(!store.registry_remote_configured());
+        assert_eq!(
+            store.canonical_max_id("INFRA"),
+            None,
+            "origin/main's legacy state.sql must not be consulted (INFRA-8193)"
+        );
 
+        let (_reg_src, reg_bare) = registry_bare(Some(
+            b"gaps:\n- id: INFRA-4200\n  domain: INFRA\n  title: live registry\n  status: open\n  priority: P2\n  effort: s\n",
+        ));
         git(
             repo,
             &[
@@ -7743,18 +7723,14 @@ mod auto_fetch_tests {
                 reg_bare.path().to_str().unwrap(),
             ],
         );
+        assert!(store.registry_remote_configured());
         assert_eq!(
             store.canonical_max_id("INFRA"),
             Some(4200),
             "with a registry remote configured the registry is canonical"
         );
 
-        // A configured registry with NO state.sql is unverifiable: must not
-        // fall back to the frozen origin copy (which would under-report).
-        let empty_src = tempdir().unwrap();
-        init_repo(empty_src.path());
-        let empty_bare = tempdir().unwrap();
-        bare_clone(empty_src.path(), empty_bare.path());
+        let (_empty_src, empty_bare) = registry_bare(None);
         git(
             repo,
             &[
@@ -7775,55 +7751,39 @@ mod auto_fetch_tests {
         );
     }
 
-    /// INFRA-3687 regression lock, part 2: fail-closed when this checkout
-    /// is genuinely behind origin/main AND canonical truth is unreadable
-    /// (origin/main advanced but never touched `.chump/state.sql`, so `git
-    /// show origin/main:.chump/state.sql` fails). `reserve()` must refuse
-    /// rather than silently trust a possibly-stale local counter.
-    /// `CHUMP_RESERVE_ALLOW_STALE=1` must bypass the refusal.
+    /// INFRA-3687 regression lock, part 2 (narrowed by INFRA-8193): fail
+    /// closed when this checkout is behind origin/main AND a CONFIGURED
+    /// registry is unreadable. `CHUMP_RESERVE_ALLOW_STALE=1` bypasses. With
+    /// NO registry remote there is no cross-node dump to verify against, so
+    /// a behind checkout reserves normally (origin/main no longer tracks
+    /// state.sql; refusing would block every behind node with no fix).
     #[test]
     fn reserve_fails_closed_when_behind_and_canonical_unreadable_bypass_works() {
-        let dir = tempdir().unwrap();
+        let (dir, _origin, _scratch) = repo_behind_origin(None);
         let repo = dir.path();
-        init_repo(repo);
-
-        let origin_dir = tempdir().unwrap();
-        bare_clone(repo, origin_dir.path());
-        std::process::Command::new("git")
-            .args([
-                "remote",
-                "add",
-                "origin",
-                origin_dir.path().to_str().unwrap(),
-            ])
-            .current_dir(repo)
-            .status()
-            .ok();
-        git(repo, &["push", "--quiet", "origin", "main"]);
-
-        // Advance origin with a commit that does NOT touch .chump/state.sql
-        // — canonical_max_id's `git show origin/main:.chump/state.sql` will
-        // fail (the file has never existed at that ref), simulating
-        // "canonical truth unreadable" while genuinely behind.
-        let scratch_dir = tempdir().unwrap();
-        non_bare_clone(origin_dir.path().to_str().unwrap(), scratch_dir.path());
-        std::fs::write(scratch_dir.path().join("extra.txt"), b"extra").ok();
-        git(scratch_dir.path(), &["add", "extra.txt"]);
-        git(
-            scratch_dir.path(),
-            &[
-                "commit",
-                "--quiet",
-                "-m",
-                "chore: origin-ahead, no state.sql ever committed",
-            ],
-        );
-        git(scratch_dir.path(), &["push", "--quiet", "origin", "main"]);
-
         let store = open_store(repo);
         unsafe {
             std::env::remove_var("CHUMP_RESERVE_ALLOW_STALE");
         }
+
+        // No registry remote: behind, but nothing to verify against — proceed.
+        let no_registry = store.reserve("INFRA", "behind, no registry remote", "P3", "xs");
+        assert!(
+            no_registry.is_ok(),
+            "behind + no registry remote must reserve (INFRA-8193); got {no_registry:?}"
+        );
+
+        // Registry configured but carrying no state.sql: unverifiable.
+        let (_reg_src, reg_bare) = registry_bare(None);
+        git(
+            repo,
+            &[
+                "remote",
+                "add",
+                "registry",
+                reg_bare.path().to_str().unwrap(),
+            ],
+        );
         let result = store.reserve(
             "INFRA",
             "should refuse — unverifiable staleness",
@@ -7832,7 +7792,7 @@ mod auto_fetch_tests {
         );
         assert!(
             result.is_err(),
-            "expected Err when behind + canonical-unreadable; got {result:?}"
+            "expected Err when behind + registry unreadable; got {result:?}"
         );
         let msg = format!("{:?}", result.unwrap_err());
         assert!(
@@ -9654,6 +9614,13 @@ mod tests {
             err.to_string().contains("INFRA-402"),
             "error must reference INFRA-402, got: {err}"
         );
+        // CREDIBLE-1496: the refusal names the rule it enforces — no done
+        // without a receipt — and the field the receipt would key on.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("CREDIBLE-1496") && msg.contains("receipt") && msg.contains("closed_pr"),
+            "error must reference CREDIBLE-1496 / receipt / closed_pr, got: {err}"
+        );
 
         // DB row should still be 'open' — write was rejected.
         let status: String = store
@@ -9661,6 +9628,50 @@ mod tests {
             .query_row("SELECT status FROM gaps WHERE id=?", [&id], |r| r.get(0))
             .unwrap();
         assert_eq!(status, "open", "DB must not have been mutated");
+    }
+
+    /// CREDIBLE-1496: a refused done write leaves no audit trail claiming a
+    /// done transition — no receipt on the row, no gap_status_done_written.
+    #[test]
+    #[serial_test::serial(closed_pr_guard_env)]
+    fn set_fields_done_without_receipt_writes_no_receipt_or_event() {
+        let (store, dir) = test_store();
+        let id = store.reserve("INFRA", "no receipt", "P1", "s").unwrap();
+        assert!(store
+            .set_fields(
+                &id,
+                GapFieldUpdate {
+                    status: Some("done".into()),
+                    notes: Some("piggy-backed field must not land either".into()),
+                    ..Default::default()
+                },
+            )
+            .is_err());
+        let (receipt, notes): (Option<String>, String) = store
+            .conn
+            .query_row(
+                "SELECT landing_receipt_json, notes FROM gaps WHERE id=?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(
+            receipt.unwrap_or_default().is_empty(),
+            "refused done must not stamp a receipt"
+        );
+        assert!(
+            !notes.contains("piggy-backed"),
+            "refusal must happen before any field is written"
+        );
+        let amb = dir.path().join(".chump-locks").join("ambient.jsonl");
+        let stream = std::fs::read_to_string(&amb).unwrap_or_default();
+        assert!(
+            !stream.lines().any(|l| {
+                l.contains("\"kind\":\"gap_status_done_written\"")
+                    && l.contains(&format!("\"gap_id\":\"{id}\""))
+            }),
+            "refused done must not emit gap_status_done_written"
+        );
     }
 
     #[test]
@@ -9690,6 +9701,8 @@ mod tests {
         assert_eq!(closed_pr, Some(1234));
     }
 
+    /// CREDIBLE-1496 allowed path: set_fields WITH a receipt (closed_pr ->
+    /// LandingReceipt) is the sanctioned non-ship done write.
     /// CREDIBLE-1508: the single done-writer invariant. A `gap set --status
     /// done` (the set_fields path) must now (a) stamp a validated receipt onto
     /// landing_receipt_json and (b) emit exactly one gap_status_done_written
@@ -9805,7 +9818,7 @@ mod tests {
         unsafe {
             std::env::set_var("CHUMP_BYPASS_CLOSED_PR_GUARD", "1");
         }
-        let (store, _dir) = test_store();
+        let (store, dir) = test_store();
         let id = store.reserve("INFRA", "bypass test", "P1", "s").unwrap();
         let result = store.set_fields(
             &id,
@@ -9818,6 +9831,39 @@ mod tests {
             std::env::remove_var("CHUMP_BYPASS_CLOSED_PR_GUARD");
         }
         result.expect("bypass env should allow status=done without closed_pr");
+
+        // CREDIBLE-1496: the bypass close still carries a receipt — an
+        // explicit ImportedReceipt naming the bypass, not a PR-less
+        // LandingReceipt — and still emits gap_status_done_written.
+        let receipt_json: String = store
+            .conn
+            .query_row(
+                "SELECT landing_receipt_json FROM gaps WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&receipt_json).unwrap();
+        assert_eq!(
+            v.get("source").and_then(|x| x.as_str()),
+            Some("gap_set_bypass"),
+            "bypass close must stamp ImportedReceipt(gap_set_bypass), got: {receipt_json}"
+        );
+        assert!(
+            v.get("closed_pr").is_none(),
+            "bypass close must not masquerade as a LandingReceipt: {receipt_json}"
+        );
+        let amb = dir.path().join(".chump-locks").join("ambient.jsonl");
+        let stream = std::fs::read_to_string(&amb).unwrap_or_default();
+        assert_eq!(
+            stream
+                .lines()
+                .filter(|l| l.contains("\"kind\":\"gap_status_done_written\"")
+                    && l.contains(&format!("\"gap_id\":\"{id}\"")))
+                .count(),
+            1,
+            "bypass close must emit exactly one gap_status_done_written"
+        );
     }
 
     // ── INFRA-456: recycled-ID + hijack guards at the DB write layer ──────
@@ -12927,119 +12973,12 @@ mod quarantine_tests {
         assert_eq!(store.get_artifact_type(&id).unwrap(), "code");
     }
 
-    // ── INFRA-3002 AC #3: claim self-heals a gap missing from the local
-    //    worktree's state.db by syncing the single row from state.sql ────────
+    // ── INFRA-8193: claim on a gap absent from the one store fails fast
+    //    (the INFRA-3002 state.sql self-heal left with the tracked dump) ──
 
     #[test]
-    fn sync_gap_from_state_sql_inserts_missing_row() {
-        let (store, dir) = test_store();
-        let sql_path = dir.path().join("state.sql");
-        std::fs::write(
-            &sql_path,
-            r#"gaps:
-  - id: INFRA-9001
-    domain: INFRA
-    title: a gap that only exists on origin/main
-    priority: P1
-    effort: s
-    status: open
-"#,
-        )
-        .unwrap();
-
-        // Not present in this worktree's freshly-opened state.db.
-        assert!(store.get("INFRA-9001").unwrap().is_none());
-
-        let found = store
-            .sync_gap_from_state_sql(&sql_path, "INFRA-9001")
-            .unwrap();
-        assert!(found, "gap present in state.sql should be found+synced");
-
-        let row = store.get("INFRA-9001").unwrap().expect("row now present");
-        assert_eq!(row.title, "a gap that only exists on origin/main");
-        assert_eq!(row.status, "open");
-    }
-
-    #[test]
-    fn sync_gap_from_state_sql_returns_false_when_absent() {
-        let (store, dir) = test_store();
-        let sql_path = dir.path().join("state.sql");
-        std::fs::write(
-            &sql_path,
-            r#"gaps:
-  - id: INFRA-9002
-    domain: INFRA
-    title: unrelated gap
-    priority: P1
-    effort: s
-    status: open
-"#,
-        )
-        .unwrap();
-
-        let found = store
-            .sync_gap_from_state_sql(&sql_path, "INFRA-NONEXISTENT")
-            .unwrap();
-        assert!(!found, "gap absent from state.sql must not be synthesized");
-        assert!(store.get("INFRA-NONEXISTENT").unwrap().is_none());
-    }
-
-    #[test]
-    fn sync_gap_from_state_sql_does_not_touch_other_rows() {
-        let (store, dir) = test_store();
-        let id_existing = store
-            .reserve("INFRA", "pre-existing gap", "P1", "s")
-            .unwrap();
-
-        let sql_path = dir.path().join("state.sql");
-        std::fs::write(
-            &sql_path,
-            format!(
-                r#"gaps:
-  - id: {id_existing}
-    domain: INFRA
-    title: CLOBBERED — should never be written
-    priority: P1
-    effort: s
-    status: open
-  - id: INFRA-9003
-    domain: INFRA
-    title: the only gap claim actually needs
-    priority: P1
-    effort: s
-    status: open
-"#
-            ),
-        )
-        .unwrap();
-
-        store
-            .sync_gap_from_state_sql(&sql_path, "INFRA-9003")
-            .unwrap();
-
-        // Targeted sync must leave the unrelated pre-existing row untouched,
-        // unlike restore_from_state_sql's full-table replace.
-        let untouched = store.get(&id_existing).unwrap().unwrap();
-        assert_eq!(untouched.title, "pre-existing gap");
-
-        let synced = store.get("INFRA-9003").unwrap().unwrap();
-        assert_eq!(synced.title, "the only gap claim actually needs");
-    }
-
-    #[test]
-    fn claim_fails_fast_when_gap_and_state_sql_both_lack_it() {
-        // Regression guard for the "genuine missing gap" case (AC #6): if the
-        // gap truly does not exist anywhere, sync_gap_from_state_sql must
-        // report false and claim() must still fail — the self-heal path must
-        // never silently fabricate a claimable row.
-        let (store, dir) = test_store();
-        let sql_path = dir.path().join("state.sql");
-        std::fs::write(&sql_path, "gaps: []\n").unwrap();
-
-        let found = store
-            .sync_gap_from_state_sql(&sql_path, "INFRA-GHOST")
-            .unwrap();
-        assert!(!found);
+    fn claim_fails_fast_when_gap_absent_from_store() {
+        let (store, _dir) = test_store();
         let err = store
             .claim("INFRA-GHOST", "session-x", "wt-x", 3600)
             .unwrap_err();

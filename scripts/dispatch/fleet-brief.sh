@@ -286,8 +286,28 @@ if [ "${#stalls_4h[@]}" -gt "0" ]; then
     suggestions+=("triage stalls: ${stalls_4h[*]}")
 fi
 
+# ── CREDIBLE-1493 (Phase R R7): calibration score from the last
+# kind=self_report_calibration event (written by `chump calibrate`). Reads the
+# tail of the live ambient log, then the first rotated slot. Never guesses: no
+# event prints "never run".
+_calibration_line() {
+    local f line=""
+    for f in "$AMBIENT_LOG" "$AMBIENT_LOG.1"; do
+        [[ -f "$f" ]] || continue
+        line="$(tail -c 33554432 "$f" 2>/dev/null | grep '"kind":"self_report_calibration"' | tail -1)"
+        [[ -n "$line" ]] && break
+    done
+    if [[ -z "$line" ]]; then
+        echo "calibration: never run (chump calibrate)"
+        return
+    fi
+    printf '%s' "$line" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print("calibration: %d/%d instruments agree (last run %s)" % (d.get("agree",0), d.get("total",0), d.get("ts","?")))' 2>/dev/null \
+        || echo "calibration: last event unreadable"
+}
+
 # ── Render ───────────────────────────────────────────────────────────────
 echo "═══ Fleet brief (last 24h) ═══"
+_calibration_line
 # INFRA-2013: show 1h ships as leading indicator alongside 24h rolling average
 echo "Ships: $ships_24h (≈${rate_per_hr}/hr) | last 6h: $ships_6h | last 1h: $ships_1h"
 # INFRA-2040: silent-fleet-death banner — takes priority over STALLED (more severe)
@@ -442,5 +462,27 @@ if [[ -x "$_chump" ]]; then
         fi
     fi
     unset _slo_json _slo_breaches _slo_ids
+
+    # CREDIBLE-1509: R6.4 gauge — invariant-boundary gate violator count
+    # (shell/Python files under scripts/ still writing an invariant directly;
+    # target 0). Source: `chump kpi report --shell-invariant-writers`, reading
+    # the last invariant_boundary_violation event recorded by
+    # scripts/ci/test-invariant-boundary.sh (INFRA-8218). --no-gate keeps the
+    # brief fast: the ~20s gate never runs from here; the date shows staleness.
+    # An older binary without the flag would fall through to the full (slow)
+    # kpi report, so only ask a binary whose help lists it.
+    _siw_json=""
+    _siw_help="$("$_chump" --help 2>/dev/null || true)"
+    if [[ "$_siw_help" == *--shell-invariant-writers* ]]; then
+        _siw_json="$("$_chump" kpi report --shell-invariant-writers --no-gate --json 2>/dev/null || true)"
+    fi
+    _siw_count=$(echo "$_siw_json" | grep -o '"shell_invariant_writers":[0-9]*' | head -1 | cut -d: -f2)
+    _siw_source=$(echo "$_siw_json" | grep -o '"source":"[^"]*"' | head -1 | cut -d'"' -f4)
+    _siw_date=$(echo "$_siw_json" | grep -o '"reading_date":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [[ -n "$_siw_count" ]]; then
+        echo ""
+        echo "Shell invariant writers (R6.4): ${_siw_count} (target 0) — read ${_siw_date:-?} from ${_siw_source:-?}"
+    fi
+    unset _siw_json _siw_help _siw_count _siw_source _siw_date
 fi
 unset _chump

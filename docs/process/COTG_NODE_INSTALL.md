@@ -32,11 +32,12 @@ chump-node-install.sh --role brain|muscle|all [--home DIR] [--self-test-only]
    requested) the cockpit remain available while the worker is deliberately stopped.
 4. **BINARY** — a working `chump` binary at `$NODE_DIR/bin/chump` that passes a WARM smoke
    (answers a prompt). Termux builds on-device or via `deploy-pixel-node.sh` cross-compile.
-4b. **SEED** (INFRA-3633) — one-shot `chump gap sync --pull` loading the canonical
+4b. **SEED** (INFRA-3633) — one-shot insert-only `chump gap import --yaml <repo>/docs/gaps`
+   (INFRA-8193: replaced the retired `chump gap sync --pull`) loading the canonical
    `$CHUMP_STATE_DB` (pinned at `$NODE_DIR`'s `$STATE_DIR/state.db`, never a repo-local
    `.chump/state.db`) from the git-tracked `docs/gaps/*.yaml` backlog, so a fresh box boots
-   with the real gap queue instead of an empty store. Idempotent — respects the INFRA-3606
-   terminal-status guard on re-run; no-op with a warning if no binary is installed yet or the
+   with the real gap queue instead of an empty store. Idempotent — never touches a row that
+   already exists; no-op with a warning if no binary is installed yet or the
    store is unreachable.
 5. **ORGANS** — install the role's organ set under the host supervisor, from a manifest.
    *brain*: heartbeat, node-describe-register, discord-gateway, coordination.

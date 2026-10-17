@@ -8,25 +8,25 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/ci/check-heartbeat-health.sh</string>
+    <string>__REPO_ROOT__/scripts/ci/check-heartbeat-health.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>RunAtLoad</key>
   <true/>
   <key>StartInterval</key>
   <integer>1200</integer>
   <!-- 1200 = 20 min. Checks heartbeat logs and recommends interval adjustments for peak performance. -->
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/heartbeat-health.log</string>
+  <string>__REPO_ROOT__/logs/heartbeat-health.log</string>
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/heartbeat-health.err.log</string>
+  <string>__REPO_ROOT__/logs/heartbeat-health.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin</string>
     <key>CHUMP_HOME</key>
-    <string>/path/to/Chump</string>
+    <string>__REPO_ROOT__</string>
   </dict>
 </dict>
 </plist>

@@ -4,12 +4,8 @@
 # That installer is auto-run by scripts/setup/install-hooks.sh, so a fresh
 # checkout / linked worktree gets them after the first hook installation.
 
-# .chump/state.sql is a regenerated artifact of .chump/state.db — chronic
-# textual conflicts after parallel `chump gap reserve` calls (observed
-# 1400/2400-line diffs on PRs #972 #990 on 2026-05-03). On conflict, the
-# driver runs `chump gap dump --out` to produce the canonical dump from
-# the local SQLite store. INFRA-367.
-.chump/state.sql merge=chump-state-sql-regen
+# INFRA-8193: .chump/state.sql is no longer tracked (state.db is the only
+# truth), so the chump-state-sql-regen merge driver (INFRA-310/367) is gone.
 
 # .github/workflows/ci.yml collects append-only step additions. The ci-yml-add-row driver
 # merges concurrent additions by unioning the new steps without requiring manual resolution.
@@ -32,15 +28,15 @@ docs/gaps/*.yaml merge=gap-yaml-add-line
 # each add a new entry produce textual conflicts even though the changes
 # don't actually conflict semantically.
 #
-# git's built-in `merge=union` resolver concatenates unique lines from
-# both sides automatically. No custom driver script needed — `union` is
-# part of git core. Verified on synthetic two-branch additive scenario
-# (2026-05-13: `git merge feat-b` after both branches appended events
-# produced the expected combined file with zero conflict markers).
+# `merge=union` resolves to the `union` driver registered by
+# scripts/setup/install-merge-drivers.sh (scripts/git/merge-driver-union.sh),
+# which keeps both sides and is list-item aware for EVENT_REGISTRY.yaml.
+# INFRA-8223: the original INFRA-1419 registration (`git merge-file -p ... > %A`)
+# truncated its own input and wrote LEFT/RIGHT markers; if a checkout still has
+# it, re-run `bash scripts/setup/install-merge-drivers.sh`.
 #
 # History: this conflict pattern bit five PRs today (#1597/#1605/#1609/
 # #1648/#1670) requiring manual union-merge resolution via Python regex.
-# Letting git do it once-and-for-all.
 docs/observability/EVENT_REGISTRY.yaml merge=union
 scripts/ci/env-vars-internal.txt merge=union
 

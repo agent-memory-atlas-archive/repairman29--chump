@@ -7,11 +7,14 @@
 # --auto AS ROOT (install + enable --now + reconcile) so a merged organ actually
 # RUNS on the target. Paired with chump-organ-deploy.timer.
 #
-# Host convention: tracked helsinki-shaped (/root paths); install-helsinki-atc.sh
-# host-rewrites "/root/" -> the run-user's HOME per node. UNLIKE every other
-# organ it must stay User=root (its whole job is the privileged system-unit
-# write), so it is listed in that installer's _KEEP_ROOT_ORGANS set: the
-# User=root -> run-user rewrite is skipped for it while paths are still rewritten.
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE (__HOME__ / __REPO_ROOT__,
+# rendered per host by `chump node render-unit` or organ_unit_host_rewrite).
+# UNLIKE every other organ it must run as root (its whole job is the privileged
+# system-unit write). That is declared by NAME, not by a baked User= line: it is
+# in install-helsinki-atc.sh's _KEEP_ROOT_ORGANS, chump-node-install.sh's
+# _KEEP_ROOT and chump_provision::KEEP_ROOT_UNITS, so both renderers write
+# User=root for it at system scope while its paths still resolve to the run
+# user's home. The manifest tags its timer run-scope=system.
 [Unit]
 Description=Chump organ-deploy — root-privileged self-deploy: install+enable+reconcile every merged organ so merged==running (RESILIENT-374)
 After=network-online.target
@@ -19,8 +22,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
-Environment=CARGO_BIN_DIR=/root/.cargo/bin
-ExecStart=/bin/bash -lc 'exec /root/Projects/chump/scripts/ops/organ-deploy.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+Environment=CARGO_BIN_DIR=__HOME__/.cargo/bin
+ExecStart=/bin/bash -lc 'exec __REPO_ROOT__/scripts/ops/organ-deploy.sh'

@@ -10,6 +10,11 @@
 #   scripts/setup/install-fleet-server.sh --uninstall
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): __BREW_PREFIX__ in the plist template resolves
+# through the host resolver (chump_brew_prefix, the shell mirror of
+# chump_provision::brew_prefix) instead of a baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -39,6 +44,7 @@ mkdir -p "$LOG_DIR" "$HOME/Library/LaunchAgents"
 
 # Substitute placeholders in the plist.
 sed \
+  -e "s|__BREW_PREFIX__|$(chump_brew_prefix)|g" \
   -e "s|CHUMP_FLEET_SERVER_BIN_PLACEHOLDER|$CARGO_BIN|g" \
   -e "s|CHUMP_REPO_ROOT_PLACEHOLDER|$REPO_ROOT|g" \
   -e "s|CHUMP_LOG_DIR_PLACEHOLDER|$LOG_DIR|g" \

@@ -55,6 +55,7 @@ members = [
     "crates/chump-storage",
     "crates/chump-comprehension-organ",
     "crates/chump-idea-drop",
+    "crates/chump-provision",
     "workspace-hack",
 ]
 resolver = "2"
@@ -160,6 +161,7 @@ chump-ambient-cli = { path = "crates/ambient-cli", version = "0.1.0" }
 chump-preflight = { path = "crates/chump-preflight", version = "0.1.0" }
 chump-verify = { path = "crates/chump-verify", version = "0.1.0" }
 chump-paramedic = { path = "crates/chump-paramedic", version = "0.1.0" }
+chump-provision = { path = "crates/chump-provision", version = "0.1.0" }
 chump-team = { path = "crates/chump-team", version = "0.1.0" }
 chump-ast-crawler = { path = "crates/ast-crawler", version = "0.1.0" }
 chump-handoff = { path = "crates/chump-handoff", version = "0.1.0" } # INFRA-2108: external-repo schema

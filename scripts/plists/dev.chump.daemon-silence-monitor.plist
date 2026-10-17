@@ -8,7 +8,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd /Users/jeffadkins/Projects/Chump &amp;&amp; bash scripts/coord/daemon-silence-monitor.sh</string>
+    <string>cd __REPO_ROOT__ &amp;&amp; bash scripts/coord/daemon-silence-monitor.sh</string>
   </array>
   <!-- INFRA-2352: every 5 min. monitor:
        - reads scripts/coord/daemon-expectations.yaml
@@ -25,13 +25,13 @@
   <key>StandardErrorPath</key>
   <string>/tmp/chump-daemon-silence-monitor.err.log</string>
   <key>WorkingDirectory</key>
-  <string>/Users/jeffadkins/Projects/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/Users/jeffadkins</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>__BREW_PREFIX__/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
 </dict>
 </plist>

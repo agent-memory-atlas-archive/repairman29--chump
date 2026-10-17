@@ -215,7 +215,7 @@ installers:
     adds: ~/Library/LaunchAgents/com.chump.quartermaster-audit.plist + 5-min shelfware-audit tick
 
   - id: auto-deploy-launchd
-    why: "MISSION-012 — 20-min auto-deploy daemon that ensures /opt/homebrew/bin/chump tracks origin/main. Without this, merged fixes are inert until a manual rebuild. Delegates to refresh-runner-binary.sh which builds in an isolated detached worktree (main checkout never touched). Emits kind=binary_auto_deployed on each successful deploy."
+    why: "MISSION-012 — 20-min auto-deploy daemon that ensures the installed chump binary (in the Homebrew prefix on macOS) tracks origin/main. Without this, merged fixes are inert until a manual rebuild. Delegates to refresh-runner-binary.sh which builds in an isolated detached worktree (main checkout never touched). Emits kind=binary_auto_deployed on each successful deploy."
     priority: P0
     organ: chump-auto-deploy.timer  # INFRA-7765: pointer into scripts/ops/organ-manifest.txt's unified roster (docs/ops/ORGAN_ROSTER_AUDIT.md)
     install: bash scripts/setup/install-auto-deploy-launchd.sh

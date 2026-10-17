@@ -1,0 +1,14 @@
+# CREDIBLE-1493 (Phase R R7, slice 1) — fire the self-report calibration once a
+# night (03:17 UTC, off the :00 crowd) plus a boot catch-up. Persistent=true so
+# a node that slept through the window still calibrates on wake.
+[Unit]
+Description=Run the Chump self-report calibration nightly (CREDIBLE-1493)
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 UTC
+RandomizedDelaySec=600
+OnBootSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

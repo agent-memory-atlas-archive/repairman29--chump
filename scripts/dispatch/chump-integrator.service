@@ -24,25 +24,25 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-Environment=HOME=/root
+Environment=HOME=__HOME__
 # DRY-RUN default. Operator flips to LIVE only after trunk is confirmed GREEN —
 # see docs/process/SCALING.md. Do NOT change this to 1 here; use the --live drop-in.
 Environment=CHUMP_INTEGRATOR_LIVE=0
 # Conservative v1 batch cap. Raise only after observing stable cycles.
 Environment=CHUMP_INTEGRATOR_BATCH_MAX=5
 Environment=RUST_LOG=info
-ExecStartPre=/bin/mkdir -p /root/.chump/logs
+ExecStartPre=/bin/mkdir -p __HOME__/.chump/logs
 # Source providers.env (export-format, so source it in a shell rather than
 # systemd EnvironmentFile which can't parse `export KEY=val`) for NATS/GH creds.
 # NATS is OPTIONAL — the daemon falls back to an advisory file lock + state.db
 # when the bus is absent. --once runs a single cycle then exits (launchd handled
 # cadence via StartInterval; here the paired .timer does).
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; cd /root/Projects/chump; exec /root/.cargo/bin/chump-integrator --once'
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec __HOME__/.cargo/bin/chump-integrator --once'
 # Preflight can take up to CHUMP_INTEGRATOR_PREFLIGHT_TIMEOUT_S (default 480s)
 # plus branch-build time; give a generous ceiling so a cycle is never killed
 # mid-preflight. Still well under the 15-min timer cadence for the common case.
 TimeoutStartSec=1200
 # Mirror the launchd log paths referenced in docs/process/SCALING.md so the
 # operator's `tail ~/.chump/logs/integrator-daemon.err` works on Linux too.
-StandardOutput=append:/root/.chump/logs/integrator-daemon.out
-StandardError=append:/root/.chump/logs/integrator-daemon.err
+StandardOutput=append:__HOME__/.chump/logs/integrator-daemon.out
+StandardError=append:__HOME__/.chump/logs/integrator-daemon.err

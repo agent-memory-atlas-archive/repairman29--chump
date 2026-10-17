@@ -23,12 +23,12 @@ trap 'rm -rf "$TMP"' EXIT
 # Six P1 INFRA xs/s gaps — top-4 should be returned for workers 1..4.
 cat >"$TMP/gaps.json" <<'EOF'
 [
-  {"id":"INFRA-100","domain":"INFRA","priority":"P1","effort":"xs","created_at":1000,"depends_on":"","status":"open"},
-  {"id":"INFRA-101","domain":"INFRA","priority":"P1","effort":"xs","created_at":1001,"depends_on":"","status":"open"},
-  {"id":"INFRA-102","domain":"INFRA","priority":"P1","effort":"s", "created_at":1002,"depends_on":"","status":"open"},
-  {"id":"INFRA-103","domain":"INFRA","priority":"P1","effort":"s", "created_at":1003,"depends_on":"","status":"open"},
-  {"id":"INFRA-104","domain":"INFRA","priority":"P1","effort":"m", "created_at":1004,"depends_on":"","status":"open"},
-  {"id":"INFRA-105","domain":"INFRA","priority":"P1","effort":"m", "created_at":1005,"depends_on":"","status":"open"}
+  {"id":"INFRA-100","domain":"INFRA","priority":"P1","effort":"xs","created_at":1000,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior"},
+  {"id":"INFRA-101","domain":"INFRA","priority":"P1","effort":"xs","created_at":1001,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior"},
+  {"id":"INFRA-102","domain":"INFRA","priority":"P1","effort":"s", "created_at":1002,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior"},
+  {"id":"INFRA-103","domain":"INFRA","priority":"P1","effort":"s", "created_at":1003,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior"},
+  {"id":"INFRA-104","domain":"INFRA","priority":"P1","effort":"m", "created_at":1004,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior"},
+  {"id":"INFRA-105","domain":"INFRA","priority":"P1","effort":"m", "created_at":1005,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior"}
 ]
 EOF
 
@@ -98,9 +98,9 @@ fi
 echo "Test 5: gap with notes starting with SUPERSEDED is skipped"
 cat >"$TMP/gaps_with_superseded.json" <<'EOF'
 [
-  {"id":"INFRA-200","domain":"INFRA","priority":"P0","effort":"xs","created_at":900,"depends_on":"","status":"open","notes":"SUPERSEDED 2026-05-02 by INFRA-314 — auto-skip"},
-  {"id":"INFRA-201","domain":"INFRA","priority":"P1","effort":"xs","created_at":901,"depends_on":"","status":"open","notes":""},
-  {"id":"INFRA-202","domain":"INFRA","priority":"P1","effort":"s", "created_at":902,"depends_on":"","status":"open","notes":"SUPERSEDED by INFRA-999 do not pick"}
+  {"id":"INFRA-200","domain":"INFRA","priority":"P0","effort":"xs","created_at":900,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior","notes":"SUPERSEDED 2026-05-02 by INFRA-314 — auto-skip"},
+  {"id":"INFRA-201","domain":"INFRA","priority":"P1","effort":"xs","created_at":901,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior","notes":""},
+  {"id":"INFRA-202","domain":"INFRA","priority":"P1","effort":"s", "created_at":902,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior","notes":"SUPERSEDED by INFRA-999 do not pick"}
 ]
 EOF
 P_SKIP=$(GAP_JSON_FILE="$TMP/gaps_with_superseded.json" FLEET_PRIORITY_FILTER="P0,P1" \
@@ -118,8 +118,8 @@ fi
 echo "Test 6: SUPERSEDED filter is case-insensitive"
 cat >"$TMP/gaps_superseded_lower.json" <<'EOF'
 [
-  {"id":"INFRA-300","domain":"INFRA","priority":"P0","effort":"xs","created_at":900,"depends_on":"","status":"open","notes":"superseded by INFRA-400"},
-  {"id":"INFRA-301","domain":"INFRA","priority":"P1","effort":"xs","created_at":901,"depends_on":"","status":"open","notes":""}
+  {"id":"INFRA-300","domain":"INFRA","priority":"P0","effort":"xs","created_at":900,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior","notes":"superseded by INFRA-400"},
+  {"id":"INFRA-301","domain":"INFRA","priority":"P1","effort":"xs","created_at":901,"depends_on":"","status":"open","acceptance_criteria":"Implement the change and verify the behavior","notes":""}
 ]
 EOF
 P_LOWER=$(GAP_JSON_FILE="$TMP/gaps_superseded_lower.json" FLEET_PRIORITY_FILTER="P0,P1" \

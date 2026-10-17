@@ -23,11 +23,11 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/ci/test-gap-closure-consistency.sh --strict --emit-alert</string>
+    <string>__REPO_ROOT__/scripts/ci/test-gap-closure-consistency.sh --strict --emit-alert</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- Run every 15 minutes (900 seconds). -->
   <key>StartInterval</key>
@@ -42,15 +42,15 @@
   <false/>
 
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/premature-closure-watch.out.log</string>
+  <string>__REPO_ROOT__/logs/premature-closure-watch.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/premature-closure-watch.err.log</string>
+  <string>__REPO_ROOT__/logs/premature-closure-watch.err.log</string>
 
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
+    <string>/usr/local/bin:/usr/bin:/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin</string>
   </dict>
 </dict>
 </plist>

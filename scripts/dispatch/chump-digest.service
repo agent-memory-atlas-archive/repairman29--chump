@@ -5,9 +5,12 @@
 # chump-board-ceo-briefing.service (the Sonnet STRATEGY layer); this is the
 # cheap HUMAN-INTERFACE pulse. Paired with chump-digest.timer.
 #
-# Node paths default to CJ (user jeff, HOME=/home/jeff, creds in
-# ~/.chump/providers.env). On root nodes (helsinki) adjust User + the two paths
-# per LINUX_NODE_ONBOARDING.md.
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
+# Creds come from __HOME__/.chump/providers.env.
 [Unit]
 Description=Chump Discord digest — twice-daily phone-readable factory pulse to the operator (RESILIENT-376)
 After=network-online.target
@@ -15,8 +18,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=jeff
-Environment=HOME=/home/jeff
+Environment=HOME=__HOME__
 # Source providers.env for DISCORD_TOKEN + CHUMP_READY_DM_USER_ID (export
 # format, so source it in a shell rather than systemd EnvironmentFile).
-ExecStart=/bin/bash -lc 'set -a; source /home/jeff/.chump/providers.env 2>/dev/null; set +a; exec /home/jeff/Projects/chump/scripts/dispatch/digest-beat.sh'
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/dispatch/digest-beat.sh'

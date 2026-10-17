@@ -8,23 +8,23 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/dev/heartbeat-shepherd.sh</string>
+    <string>__REPO_ROOT__/scripts/dev/heartbeat-shepherd.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>RunAtLoad</key>
   <true/>
   <key>StartInterval</key>
   <integer>900</integer>
   <!-- 900 = 15 min. Checks heartbeat-learn.log; optionally retries one quick round if last failed. -->
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/heartbeat-shepherd-launchd.out.log</string>
+  <string>__REPO_ROOT__/logs/heartbeat-shepherd-launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/heartbeat-shepherd-launchd.err.log</string>
+  <string>__REPO_ROOT__/logs/heartbeat-shepherd-launchd.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/Users/you/.local/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__HOME__/.local/bin</string>
     <!-- <key>HEARTBEAT_SHEPHERD_RETRY</key><string>1</string> -->
   </dict>
 </dict>

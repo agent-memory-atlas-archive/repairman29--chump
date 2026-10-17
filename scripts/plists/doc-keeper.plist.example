@@ -8,23 +8,23 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>/path/to/Chump/scripts/dev/doc-keeper.sh</string>
+    <string>__REPO_ROOT__/scripts/dev/doc-keeper.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
   <key>RunAtLoad</key>
   <true/>
   <!-- 21600 = 6 h. Use 86400 for daily if preferred. -->
   <key>StartInterval</key>
   <integer>21600</integer>
   <key>StandardOutPath</key>
-  <string>/path/to/Chump/logs/doc-keeper-launchd.out.log</string>
+  <string>__REPO_ROOT__/logs/doc-keeper-launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/path/to/Chump/logs/doc-keeper-launchd.err.log</string>
+  <string>__REPO_ROOT__/logs/doc-keeper-launchd.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/Users/you/.local/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__HOME__/.local/bin</string>
   </dict>
 </dict>
 </plist>

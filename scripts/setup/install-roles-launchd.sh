@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install and load launchd jobs for background roles (Farmer Brown, Heartbeat Shepherd,
 # Memory Keeper, Doc Keeper, Sentinel, Oven Tender, Restart-vLLM-if-down, Hourly-update-to-Discord, Shed-load,
-# COS weekly snapshot). Replaces /path/to/Chump with your repo path.
+# COS weekly snapshot). Renders each placeholder template for this host.
 #
 # Usage:
 #   ./scripts/setup/install-roles-launchd.sh              # use CHUMP_HOME or script dir/..
@@ -14,6 +14,8 @@ set -e
 # install script may be running from); CHUMP_HOME still overrides if set.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/../lib/resolve-main-worktree.sh"
+# shellcheck source=../lib/host-paths.sh
+source "$SCRIPT_DIR/../lib/host-paths.sh"
 ROOT="${CHUMP_HOME:-$(resolve_main_worktree "$0")}"
 ROOT="$(cd "$ROOT" && pwd)"
 LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
@@ -47,7 +49,10 @@ install_one() {
     echo "Skip (missing): $example"
     return 0
   fi
-  sed "s|/path/to/Chump|$ROOT|g" "$src" | sed "s|/Users/you|$HOME|g" > "$dest"
+  # INFRA-8194 (R5 slice 2): the .example plists are placeholder templates
+  # (__REPO_ROOT__ __HOME__ __BIN_DIR__ __BREW_PREFIX__); render them for this
+  # host instead of hand-substituting example paths.
+  chump_render_template "$src" "$dest" "$ROOT"
   echo "Installed: $dest"
   launchctl unload "$dest" 2>/dev/null || true
   launchctl load "$dest"

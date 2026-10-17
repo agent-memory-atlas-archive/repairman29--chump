@@ -152,9 +152,15 @@ ORGAN_WATCHDOG_SRC="$REPO_ROOT/scripts/dispatch/chump-organ-watchdog.service"
 # with status 126 "Permission denied" (reverts INFRA-3647/TREK-21).
 grep -Eq '^(Environment|ExecStart)=.*%h' "$ORGAN_WATCHDOG_SRC" \
     && fail "chump-organ-watchdog.service must not use %h in an active directive (system-unit %h -> /root regardless of User=; RESILIENT-200): $(grep -nE '^(Environment|ExecStart)=.*%h' "$ORGAN_WATCHDOG_SRC")"
-grep -q '/root/Projects/chump/scripts/ops/organ-watchdog.sh' "$ORGAN_WATCHDOG_SRC" \
-    || fail "chump-organ-watchdog.service should exec via the installer-rewritten /root/ path convention (RESILIENT-200), not %h"
-ok "chump-organ-watchdog.service (tracked source) uses the /root host-rewrite convention, not %h"
+# INFRA-8194 (Phase R R5): the tracked source is now a PLACEHOLDER TEMPLATE —
+# __REPO_ROOT__/__HOME__, no User= line, no /root literal. The shared rewriter
+# (organ_unit_host_rewrite) resolves the placeholders and injects User= for the
+# system scope, so the installed-copy assertions below are unchanged.
+grep -q '__REPO_ROOT__/scripts/ops/organ-watchdog.sh' "$ORGAN_WATCHDOG_SRC" \
+    || fail "chump-organ-watchdog.service should exec via the __REPO_ROOT__ placeholder (INFRA-8194), not %h or a host path"
+grep -Eq '^User=|/root/' "$ORGAN_WATCHDOG_SRC" \
+    && fail "chump-organ-watchdog.service template must carry no User= line and no /root/ literal (INFRA-8194): $(grep -nE '^User=|/root/' "$ORGAN_WATCHDOG_SRC")"
+ok "chump-organ-watchdog.service (tracked source) is a placeholder template: __REPO_ROOT__/__HOME__, no User=, no /root, no %h"
 
 mkdir -p "$TMP/cj-dest" "$TMP/cj-bins" "$TMP/cj-cargo-bin" "$TMP/cj-locks"
 cat > "$TMP/cj-bins/systemctl" <<'EOF'

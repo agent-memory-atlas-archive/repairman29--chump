@@ -11,10 +11,12 @@
 # at all and instead invokes the script by absolute path, exactly like
 # chump-organ-watchdog.service and chump-outcome-verify-heal-consumer.service.
 #
-# Host-agnostic via the systemd /root specifier (INFRA-3647): install-helsinki-
-# atc.sh inserts the per-node User= line at deploy time, so /root resolves to
-# root's home on helsinki and to the run-user's home on an owned node from this
-# SAME tracked unit. CHUMP_REPO_ROOT is REQUIRED because the script's default
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
+# CHUMP_REPO_ROOT is REQUIRED because the script's default
 # $HOME/Projects/Chump is capital-C and does not exist on case-sensitive Linux.
 [Unit]
 Description=Chump organ-success verifier — page on any organ whose last run FAILED (RESILIENT-1108)
@@ -23,7 +25,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/ops/organ-success-verifier.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/ops/organ-success-verifier.sh'

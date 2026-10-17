@@ -13,8 +13,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Environment=HOME=/root
+Environment=HOME=__HOME__
 Nice=10
 IOSchedulingClass=idle
-ExecStart=/bin/bash -lc 'exec /root/Projects/chump/scripts/ops/jeff-bus-ingest.sh'
+ExecStart=/bin/bash -lc 'exec __REPO_ROOT__/scripts/ops/jeff-bus-ingest.sh'

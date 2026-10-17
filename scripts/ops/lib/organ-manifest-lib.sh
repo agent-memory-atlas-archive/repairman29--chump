@@ -30,7 +30,7 @@
 # string so a caller can filter ENABLED to units applicable to the CURRENT
 # host (see organ_platform_matches / organ_current_platform below).
 
-# organ_manifest_parse <manifest-file> <paging_off-array-name> <enabled-array-name> <role-assoc-array-name> <requires-assoc-array-name> [<platforms-assoc-array-name>] [<node-assoc-array-name>]
+# organ_manifest_parse <manifest-file> <paging_off-array-name> <enabled-array-name> <role-assoc-array-name> <requires-assoc-array-name> [<platforms-assoc-array-name>] [<node-assoc-array-name>] [<run-scope-assoc-array-name>]
 #
 # Populates the caller-provided array names (via nameref) from the manifest
 # file. Caller must declare them first (any prior contents are cleared). The
@@ -47,6 +47,17 @@
 # RESILIENT-1057 only ever runs on the gap-substrate's host) so a hub node
 # that merely LACKS that organ's node-local binary/file does not report it
 # as an unexplained dark organ (see organ_dark_cause below).
+#
+# INFRA-8194 (Phase R R5): `enabled` lines may also carry `run-scope=user|
+# system|any`. Omitted means `any` (every pre-existing line), so nothing
+# regresses. It names the systemd manager scope an organ can actually work in:
+# `system` for organs whose job needs root (chump-organ-deploy writes
+# /etc/systemd/system), `user` for organs that only exist in a --user manager.
+# The 8th (optional) nameref receives it; installers skip a unit whose
+# run-scope does not match the scope they install into, with a logged reason
+# (organ_run_scope_matches below), instead of placing a unit that can only
+# fail there. The host's scope comes from the typed Host enum
+# (`chump node host --field run-scope`, crates/chump-provision).
 organ_manifest_parse() {
   local manifest="$1"
   local -n _omp_paging_off="$2"
@@ -65,6 +76,12 @@ organ_manifest_parse() {
     _omp_have_node=1
     _omp_node=()
   fi
+  local _omp_have_scope=0
+  if [[ $# -ge 8 && -n "${8:-}" ]]; then
+    local -n _omp_scope="$8"
+    _omp_have_scope=1
+    _omp_scope=()
+  fi
 
   _omp_paging_off=()
   _omp_enabled=()
@@ -76,11 +93,11 @@ organ_manifest_parse() {
     return 1
   fi
 
-  local state unit rest role requires platforms node tok
+  local state unit rest role requires platforms node runscope tok
   while read -r state unit rest; do
     [[ -z "${state:-}" ]] && continue
     [[ "$state" == \#* ]] && continue
-    role="" requires="" platforms="" node=""
+    role="" requires="" platforms="" node="" runscope=""
     for tok in $rest; do
       # RESILIENT-1534: a trailing `# ...` comment is NOT part of the directive.
       # Several rows quote field names in their comments (e.g. "platforms= stays
@@ -94,6 +111,7 @@ organ_manifest_parse() {
         requires=*)  requires="${tok#requires=}" ;;
         platforms=*) platforms="${tok#platforms=}" ;;
         node=*)      node="${tok#node=}" ;;
+        run-scope=*) runscope="${tok#run-scope=}" ;;
       esac
     done
     case "$state" in
@@ -107,6 +125,9 @@ organ_manifest_parse() {
         fi
         if [[ "$_omp_have_node" == 1 ]]; then
           _omp_node["$unit"]="$node"
+        fi
+        if [[ "$_omp_have_scope" == 1 ]]; then
+          _omp_scope["$unit"]="${runscope:-any}"
         fi
         ;;
       *) echo "WARN: unknown state '$state' for '$unit' in manifest; ignoring" >&2 ;;
@@ -153,6 +174,42 @@ organ_platform_matches() {
     [[ "$tok" == "$current" ]] && return 0
   done
   return 1
+}
+
+# organ_current_run_scope -> echoes this host's systemd manager scope: user|system.
+# INFRA-8194: the typed Host enum is the source of truth (`chump node host
+# --field run-scope`); the euid fallback mirrors its rule (root -> system,
+# anyone else -> user) for an installer running before the binary exists.
+organ_current_run_scope() {
+  # CHUMP_ORGAN_MANIFEST_RUN_SCOPE: explicit override for tests and for an
+  # installer that already knows which manager it writes into.
+  if [[ -n "${CHUMP_ORGAN_MANIFEST_RUN_SCOPE:-}" ]]; then
+    echo "${CHUMP_ORGAN_MANIFEST_RUN_SCOPE}"
+    return 0
+  fi
+  local _s=""
+  if command -v chump >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+      _s="$(timeout 10 chump node host --field run-scope 2>/dev/null </dev/null || true)"
+    else
+      _s="$(chump node host --field run-scope 2>/dev/null </dev/null || true)"
+    fi
+  fi
+  case "$_s" in
+    user|system) echo "$_s"; return 0;;
+  esac
+  if [[ "$(id -u 2>/dev/null)" == "0" ]]; then echo system; else echo user; fi
+}
+
+# organ_run_scope_matches <run-scope> <current-scope>
+#
+# Does a manifest run-scope (user|system|any; empty = any) allow installing at
+# <current-scope>? `any` matches everything, so every pre-INFRA-8194 line is
+# unaffected.
+organ_run_scope_matches() {
+  local want="${1:-any}" current="${2:-}"
+  [[ -z "$want" || "$want" == "any" ]] && return 0
+  [[ "$want" == "$current" ]]
 }
 
 # organ_current_node -> echoes this host's short hostname. Shared detection so

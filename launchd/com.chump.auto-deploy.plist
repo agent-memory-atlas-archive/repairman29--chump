@@ -5,7 +5,7 @@
   com.chump.auto-deploy — MISSION-012 LaunchAgent.
 
   Runs scripts/ops/auto-deploy.sh every 1200s (~20 min) to ensure the
-  installed /opt/homebrew/bin/chump binary tracks origin/main.
+  installed chump binary (in the Homebrew prefix) tracks origin/main.
 
   Build isolation: auto-deploy.sh delegates to refresh-runner-binary.sh
   which creates an isolated detached worktree in /tmp for the cargo build
@@ -17,7 +17,7 @@
 
   Manual run:
     launchctl start com.chump.auto-deploy
-    tail /path/to/Chump/.chump-locks/auto-deploy-logs/
+    tail __REPO_ROOT__/.chump-locks/auto-deploy-logs/
 
   UNINSTALL:
     launchctl unload ~/Library/LaunchAgents/com.chump.auto-deploy.plist
@@ -35,11 +35,11 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/path/to/Chump/scripts/ops/auto-deploy.sh</string>
+    <string>__REPO_ROOT__/scripts/ops/auto-deploy.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- Every 20 minutes. -->
   <key>StartInterval</key>
@@ -57,11 +57,11 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/path/to/HOME</string>
+    <string>__HOME__</string>
     <key>PATH</key>
-    <string>/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/path/to/.cargo/bin:/usr/bin:/bin</string>
+    <string>/usr/local/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin:__BIN_DIR__:/usr/bin:/bin</string>
     <key>CHUMP_REPO_ROOT</key>
-    <string>/path/to/Chump</string>
+    <string>__REPO_ROOT__</string>
   </dict>
 
   <!-- Prevent overlapping runs. -->

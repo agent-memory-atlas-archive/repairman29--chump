@@ -19,12 +19,12 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/path/to/Chump/scripts/ops/system-invariants-monitor.sh</string>
+    <string>__REPO_ROOT__/scripts/ops/system-invariants-monitor.sh</string>
     <string>--quiet</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/path/to/Chump</string>
+  <string>__REPO_ROOT__</string>
 
   <!-- Every 10 minutes (600 seconds). -->
   <key>StartInterval</key>
@@ -45,9 +45,9 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/opt/homebrew/sbin</string>
+    <string>/usr/local/bin:/usr/bin:/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin</string>
     <key>HOME</key>
-    <string>/Users/jeffadkins</string>
+    <string>__HOME__</string>
   </dict>
 </dict>
 </plist>

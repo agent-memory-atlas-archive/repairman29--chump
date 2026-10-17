@@ -13,20 +13,20 @@
     <array>
         <string>/bin/bash</string>
         <string>-lc</string>
-        <string>cd REPO_ROOT &amp;&amp; exec chump intervention-watchdog --apply</string>
+        <string>cd __REPO_ROOT__ &amp;&amp; exec chump intervention-watchdog --apply</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>REPO_ROOT</string>
+    <string>__REPO_ROOT__</string>
     <key>StartInterval</key>
     <integer>1800</integer>
     <key>StandardOutPath</key>
-    <string>REPO_ROOT/.chump-locks/intervention-watchdog.log</string>
+    <string>__REPO_ROOT__/.chump-locks/intervention-watchdog.log</string>
     <key>StandardErrorPath</key>
-    <string>REPO_ROOT/.chump-locks/intervention-watchdog.log</string>
+    <string>__REPO_ROOT__/.chump-locks/intervention-watchdog.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:__BREW_PREFIX__/bin</string>
     </dict>
     <key>RunAtLoad</key>
     <false/>

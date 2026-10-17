@@ -806,7 +806,13 @@ fn render_plist_template(label: &str, repo_path: &str, sanitized: &str) -> Resul
         .replace("{{REPO_PATH}}", repo_path)
         .replace("{{CHUMP_BIN}}", &chump_bin)
         .replace("{{LOG_OUT}}", &log_out)
-        .replace("{{LOG_ERR}}", &log_err);
+        .replace("{{LOG_ERR}}", &log_err)
+        // INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the typed
+        // host resolver, not a literal baked into the template.
+        .replace(
+            "__BREW_PREFIX__",
+            &chump_provision::local_mac_brew_prefix().to_string_lossy(),
+        );
 
     Ok(rendered)
 }

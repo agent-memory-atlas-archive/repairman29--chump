@@ -1,0 +1,13 @@
+# PRODUCT-382: Post-launch monitor for Olive — runs daily for 14 days after 2026-10-10 FB launch.
+# Reports new sign-ups, stores, cart pushes, and feedback to the board channel.
+[Unit]
+Description=Olive post-launch monitoring (PRODUCT-382) — daily report for 14 days
+
+[Timer]
+OnBootSec=5min
+OnCalendar=daily
+OnUnitInactiveSec=24h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

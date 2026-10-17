@@ -341,7 +341,9 @@ ENABLED=()
 declare -A ORGAN_ROLE
 declare -A ORGAN_REQUIRES
 declare -A ORGAN_PLATFORMS
-organ_manifest_parse "$MANIFEST" PAGING_OFF ENABLED ORGAN_ROLE ORGAN_REQUIRES ORGAN_PLATFORMS || exit 1
+declare -A ORGAN_NODE_UNUSED
+declare -A ORGAN_RUN_SCOPE
+organ_manifest_parse "$MANIFEST" PAGING_OFF ENABLED ORGAN_ROLE ORGAN_REQUIRES ORGAN_PLATFORMS ORGAN_NODE_UNUSED ORGAN_RUN_SCOPE || exit 1
 
 # INFRA-7764 (docs/strategy/ONE_COMMAND_INSTALL.md section 1): platform
 # scoping. organ-manifest.txt is becoming the single unified roster —
@@ -366,6 +368,23 @@ for unit in "${ENABLED[@]}"; do
   fi
 done
 ENABLED=("${PLATFORM_FILTERED_ENABLED[@]}")
+
+# INFRA-8194 (Phase R R5): run-scope scoping. This reconcile drives the SYSTEM
+# manager (it refuses to run as non-root further down), so a manifest line
+# tagged run-scope=user — an organ that only exists in a --user manager — is
+# skipped here with a logged reason rather than `systemctl enable`d into a
+# manager that has no such unit. run-scope omitted = any (every pre-8194 line),
+# so this is a no-op until a line opts in.
+THIS_RUN_SCOPE="${CHUMP_ORGAN_MANIFEST_RUN_SCOPE:-system}"
+SCOPE_FILTERED_ENABLED=()
+for unit in "${ENABLED[@]}"; do
+  if organ_run_scope_matches "${ORGAN_RUN_SCOPE[$unit]:-any}" "$THIS_RUN_SCOPE"; then
+    SCOPE_FILTERED_ENABLED+=("$unit")
+  else
+    echo "  skip $unit: run-scope=${ORGAN_RUN_SCOPE[$unit]} does not match this reconcile's scope ($THIS_RUN_SCOPE)"
+  fi
+done
+ENABLED=("${SCOPE_FILTERED_ENABLED[@]}")
 
 # RESILIENT-746: optional per-role scoping. chump-node-install.sh's ORGANS
 # phase (--role brain|muscle|all) sets this so a freshly-installed node only

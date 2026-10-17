@@ -88,7 +88,18 @@ chump_cargo_build() {
             | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("target_directory",""))' \
             2>/dev/null)"
     fi
-    _target_dir="${_target_dir:-${CARGO_TARGET_DIR:-$_repo_root/target}}"
+    if [ -z "$_target_dir" ]; then
+        # ZERO-WASTE-134: cargo metadata unavailable -> the one shared default,
+        # never a path inside the repo/worktree.
+        # shellcheck source=../../ci/lib/resolve-cargo-target-dir.sh
+        # shellcheck disable=SC1091
+        . "$_repo_root/scripts/ci/lib/resolve-cargo-target-dir.sh" 2>/dev/null || true
+        if command -v chump_cargo_target_dir >/dev/null 2>&1; then
+            _target_dir="$(chump_cargo_target_dir)"
+        else
+            _target_dir="${CARGO_TARGET_DIR:-}"
+        fi
+    fi
     local _bin_path="$_target_dir/$_profile/$_bin"
     local _start_ts
     _start_ts=$(date +%s)

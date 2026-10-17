@@ -3,8 +3,10 @@
 <!-- ZERO-WASTE-053: steady-state cargo-target GC. Runs scripts/ops/cargo-sweep-gc.sh
      every 30 min to hold the shared target under CHUMP_CARGO_TARGET_CAP_MB via
      cargo-sweep LRU eviction (safe mid-build). This is what lets chump run for days
-     without a disk wedge on a single-disk box. Install: sed __REPO_ROOT__ -> the
-     checkout, copy to ~/Library/LaunchAgents, then `launchctl bootstrap gui/$UID`. -->
+     without a disk wedge on a single-disk box. Install: render the placeholders for
+     this host (`chump node render-unit scripts/plists/dev.chump.cargo-sweep-gc.plist
+     --out ~/Library/LaunchAgents/dev.chump.cargo-sweep-gc.plist`, INFRA-8194), then
+     `launchctl bootstrap gui/$UID`. -->
 <plist version="1.0"><dict>
   <key>Label</key><string>dev.chump.cargo-sweep-gc</string>
   <key>ProgramArguments</key><array>
@@ -12,7 +14,7 @@
     <string>__REPO_ROOT__/scripts/ops/cargo-sweep-gc.sh</string>
   </array>
   <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>__HOME__/bin:__HOME__/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>__HOME__/bin:__HOME__/.cargo/bin:__BREW_PREFIX__/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>CHUMP_REPO</key><string>__REPO_ROOT__</string>
     <key>CHUMP_CARGO_TARGET_CAP_MB</key><string>20000</string>
   </dict>

@@ -10,6 +10,13 @@
 #   scripts/setup/install-runner-autoscale.sh --uninstall
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the Homebrew prefix comes from the host resolver
+# (chump_brew_prefix in scripts/lib/host-paths.sh, the shell mirror of
+# chump_provision::brew_prefix; `chump node host --field brew-prefix`), not a
+# baked Apple Silicon path.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
+BREW_PREFIX="$(chump_brew_prefix)"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -67,7 +74,7 @@ cmd_install() {
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>${BREW_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>CHUMP_REPO_OWNER</key>
         <string>${CHUMP_REPO_OWNER:-repairman29}</string>
         <key>CHUMP_REPO_NAME</key>

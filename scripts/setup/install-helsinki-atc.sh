@@ -505,7 +505,10 @@ done
 # fails on a missing binary. Best-effort + non-fatal: a build failure must never
 # block the rest of the ATC roster (the timer safely no-ops until the binary
 # lands). Idempotent: only builds when the binary is absent.
-INTEGRATOR_BIN_DEST="${CARGO_BIN_DIR:-/root/.cargo/bin}/chump-integrator"
+# INFRA-8194 (R5 slice 2): the rendered chump-integrator.service execs
+# __HOME__/.cargo/bin/chump-integrator, i.e. the RUN user's cargo bin, so install
+# the binary there (on helsinki RUN_HOME is root's home: unchanged).
+INTEGRATOR_BIN_DEST="${CARGO_BIN_DIR:-${RUN_HOME%/}/.cargo/bin}/chump-integrator"
 if [[ ! -x "$INTEGRATOR_BIN_DEST" ]]; then
   _staged=""
   for cand in "$REPO_ROOT/target/release/chump-integrator" "$REPO_ROOT/target/debug/chump-integrator"; do

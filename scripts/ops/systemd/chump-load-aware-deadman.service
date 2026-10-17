@@ -1,0 +1,18 @@
+[Unit]
+Description=Chump load-aware node dead-man (RESILIENT-1611)
+Documentation=https://github.com/anthropics/chump/blob/main/scripts/ops/load-aware-deadman.sh
+After=network.target
+PartOf=chump-load-aware-deadman.timer
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash %h/.local/bin/load-aware-deadman.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=load-aware-deadman
+# Avoid interfering with systemd's own operations during load thrash
+CPUQuota=25%
+MemoryLimit=64M
+
+[Install]
+WantedBy=multi-user.target

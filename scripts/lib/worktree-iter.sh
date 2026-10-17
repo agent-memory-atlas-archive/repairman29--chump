@@ -23,6 +23,11 @@
 #   wt_is_dirty <wt_path>
 #       Return 0 iff the worktree has uncommitted or untracked changes.
 #
+#   wt_has_live_bot_merge <wt_path> [<lock_dir>] [<grace_min>]   (RESILIENT-1609)
+#       Return 0 iff a bot-merge ship is live in <wt_path>: a fresh
+#       .chump-locks/bot-merge-*.steps file names it, or a live process has
+#       it as its cwd. Sets WT_LIVE_BOT_MERGE_DETAIL.
+#
 #   emit_reaper_event <kind> <wt_path> <reason> [<extra_json_fields>]
 #       Append one JSON line to .chump-locks/ambient.jsonl.
 #       <extra_json_fields>: optional extra JSON fields like "\"foo\":1"
@@ -205,6 +210,106 @@ wt_is_dirty() {
     local out
     out="$(git -C "$wt_path" status --porcelain 2>/dev/null || true)"
     [[ -n "$out" ]]
+}
+
+# _wt_live_cwds_refresh — "<pid>\t<cwd>" for every live process, cached for
+# CHUMP_WT_CWD_CACHE_S (default 15) seconds into $_WT_CWD_CACHE so a reaper sweeping hundreds of
+# worktrees runs lsof once, not once per worktree. lsof -d cwd, else /proc.
+_WT_CWD_CACHE=""
+_WT_CWD_CACHE_T=0
+_wt_live_cwds_refresh() {
+    local now; now="$(date +%s)"
+    if [[ -z "$_WT_CWD_CACHE_T" || $(( now - _WT_CWD_CACHE_T )) -ge "${CHUMP_WT_CWD_CACHE_S:-15}" || -z "$_WT_CWD_CACHE" ]]; then
+        if command -v lsof >/dev/null 2>&1; then
+            _WT_CWD_CACHE="$(lsof -a -d cwd -Fpn 2>/dev/null | awk '
+                /^p/ { p = substr($0, 2); next }
+                /^n/ { printf "%s\t%s\n", p, substr($0, 2) }')"
+        elif [[ -d /proc/self ]]; then
+            local c p
+            _WT_CWD_CACHE=""
+            for c in /proc/[0-9]*/cwd; do
+                p="${c#/proc/}"; p="${p%/cwd}"
+                _WT_CWD_CACHE+="${p}"$'\t'"$(readlink "$c" 2>/dev/null || true)"$'\n'
+            done
+        fi
+        _WT_CWD_CACHE_T="$now"
+    fi
+}
+
+# ── Public: wt_has_live_bot_merge (RESILIENT-1609) ───────────────────────────
+
+# wt_has_live_bot_merge <wt_path> [<lock_dir>] [<grace_min>]
+#
+# Return 0 iff a bot-merge ship is LIVE in <wt_path>, i.e. either:
+#   (a) a <lock_dir>/bot-merge-*.steps file modified within <grace_min>
+#       minutes (default CHUMP_REAPER_BOT_MERGE_GRACE_MIN, else
+#       CHUMP_REAPER_ACTIVE_LEASE_MIN, else 15) names this worktree in its
+#       session-start line ("worktree":"<path>"), or names the gap the
+#       worktree basename implies ("gap_ids" contains it); or
+#   (b) <wt_path> is the cwd of a live process other than this one (lsof or
+#       /proc, whichever exists).
+#
+# WHY: a CHUMP_BOT_MERGE_RECOVERY_MODE=1 ship takes no lease and leaves the git
+# index idle while clippy/tests run, so lease + index + unpushed checks all
+# said "reapable" and the reaper removed ~/chump/.claude/worktrees/infra-8180
+# mid-push (2026-10-16 18:46Z, kind=bot_merge_crashed). bot-merge now touches
+# its steps file on every step and on every heartbeat tick, so a fresh mtime
+# means a live ship.
+#
+# Sets WT_LIVE_BOT_MERGE_DETAIL ("steps_file=<name>" or "cwd_pid=<pid>").
+# Never deletes or writes anything. CHUMP_REAPER_SAFETY_CHECK=0 bypasses.
+wt_has_live_bot_merge() {
+    local wt="$1" lock_dir="${2:-}" grace_min="${3:-}"
+    WT_LIVE_BOT_MERGE_DETAIL=""
+    [[ -d "$wt" ]] || return 1
+    [[ "${CHUMP_REAPER_SAFETY_CHECK:-1}" == "0" ]] && return 1
+    [[ -z "$grace_min" ]] && grace_min="${CHUMP_REAPER_BOT_MERGE_GRACE_MIN:-${CHUMP_REAPER_ACTIVE_LEASE_MIN:-15}}"
+    [[ "$grace_min" =~ ^[0-9]+$ ]] || grace_min=15
+    [[ -z "$lock_dir" ]] && lock_dir="$(_wt_main_repo)/.chump-locks"
+
+    local wt_real base expected_gap=""
+    wt_real="$(cd -P "$wt" 2>/dev/null && pwd -P || printf '%s' "$wt")"
+    base="$(basename "$wt_real")"
+    expected_gap="$(printf '%s' "${base#chump-}" | tr '[:lower:]' '[:upper:]')"
+
+    # (a) fresh bot-merge steps file naming this worktree / its gap.
+    local sf first f_wt f_wt_real
+    if [[ -d "$lock_dir" ]]; then
+        while IFS= read -r sf; do
+            [[ -f "$sf" ]] || continue
+            first="$(head -1 "$sf" 2>/dev/null || true)"
+            f_wt="$(printf '%s' "$first" | sed -n 's/.*"worktree":"\([^"]*\)".*/\1/p')"
+            if [[ -n "$f_wt" ]]; then
+                f_wt_real="$(cd -P "$f_wt" 2>/dev/null && pwd -P || printf '%s' "$f_wt")"
+                if [[ "$f_wt" == "$wt" || "$f_wt_real" == "$wt_real" ]]; then
+                    WT_LIVE_BOT_MERGE_DETAIL="steps_file=$(basename "$sf")"
+                    return 0
+                fi
+            fi
+            if [[ -n "$expected_gap" ]] && \
+               printf '%s' "$first" | grep -q "\"gap_ids\":\"\([^\"]* \)\{0,\}${expected_gap}\( [^\"]*\)\{0,\}\""; then
+                WT_LIVE_BOT_MERGE_DETAIL="steps_file=$(basename "$sf")"
+                return 0
+            fi
+        done < <(find "$lock_dir" -maxdepth 1 -name 'bot-merge-*.steps' -type f -mmin "-${grace_min}" 2>/dev/null)
+    fi
+
+    # (b) a live process (not us) has this worktree as its cwd.
+    local pid cwd_line cwd_line_pid
+    pid=""
+    _wt_live_cwds_refresh   # not in a subshell: the cache must persist
+    while IFS=$'\t' read -r cwd_line_pid cwd_line; do
+        [[ -n "$cwd_line" ]] || continue
+        [[ "$cwd_line_pid" == "$$" ]] && continue
+        if [[ "$cwd_line" == "$wt_real" || "$cwd_line" == "$wt_real/"* ]]; then
+            pid="$cwd_line_pid"; break
+        fi
+    done <<< "$_WT_CWD_CACHE"
+    if [[ -n "$pid" ]]; then
+        WT_LIVE_BOT_MERGE_DETAIL="cwd_pid=$pid"
+        return 0
+    fi
+    return 1
 }
 
 # ── Public: emit_reaper_event ─────────────────────────────────────────────────

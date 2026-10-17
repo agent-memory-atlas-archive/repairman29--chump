@@ -9,8 +9,16 @@
 # Idempotent: if already loaded, bootout-then-bootstrap to pick up plist changes.
 
 set -euo pipefail
+# INFRA-8194 (R5 slice 2): the tracked plist is a placeholder template
+# (__REPO_ROOT__ __HOME__ __BREW_PREFIX__); render it for THIS host
+# (chump_render_template: typed `chump node render-unit`, sed mirror fallback)
+# instead of copying a file baked for one Mac.
+# shellcheck source=../lib/host-paths.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/host-paths.sh"
 
-REPO_ROOT="${CHUMP_REPO:-/Users/jeffadkins/Projects/Chump}"
+# shellcheck source=../lib/resolve-main-worktree.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/resolve-main-worktree.sh"
+REPO_ROOT="${CHUMP_REPO:-$(resolve_main_worktree "$0")}"
 LABEL="dev.chump.daemon-silence-monitor"
 SRC_PLIST="$REPO_ROOT/scripts/plists/${LABEL}.plist"
 DST_PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
@@ -22,7 +30,7 @@ if [[ ! -f "$SRC_PLIST" ]]; then
 fi
 
 mkdir -p "$HOME/Library/LaunchAgents"
-cp "$SRC_PLIST" "$DST_PLIST"
+chump_render_template "$SRC_PLIST" "$DST_PLIST" "$REPO_ROOT"
 chmod 644 "$DST_PLIST"
 
 # Bootout if currently loaded (idempotent reload).

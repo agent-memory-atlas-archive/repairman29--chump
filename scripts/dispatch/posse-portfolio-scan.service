@@ -6,8 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-Environment=HOME=/root
+Environment=HOME=__HOME__
 StandardOutput=journal
 StandardError=journal
 # Load Posse environment and execute portfolio scan
-ExecStart=/bin/bash -lc "set -a; source /root/.chump/providers.env 2>/dev/null; set +a; cd /root/Projects/posse && npm run scan"
+ExecStart=/bin/bash -lc "set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __HOME__/Projects/posse && npm run scan"

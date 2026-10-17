@@ -173,6 +173,33 @@ subagent inherits the same view of fleet state. Adapt accordingly:
 
 ---
 
+## Worker picker: soft skill filter and open-PR anti-spin (INFRA-8176)
+
+Fleet workers pick through `scripts/dispatch/_pick_and_claim_gap.py`. Two rules
+that decide what a worker is offered:
+
+- **Skills are an affinity, not a gate.** A gap's `skills_required` that is not
+  a subset of the worker's `WORKER_SKILLS` no longer excludes the gap. It sorts
+  after every matching gap *within its priority band* (priority and mission
+  rank stay authoritative; a P1 mismatch still beats a P2 match), and offering
+  it emits `kind=picker_soft_skill_demoted`. The old hard subset filter starved
+  node1 (`WORKER_SKILLS=rust,docs,shell,scripts,md`): INFRA-8174
+  (`rust,bash,vercel`) and whole tag classes were never evaluated.
+  **Specialized nodes** that must only take matching work set
+  `WORKER_SKILLS_HARD=1` to restore the hard filter (excluded gaps count as
+  `skills_mismatch` in the empty-cycle dump).
+- **A gap with an open un-merged PR is never re-offered.** The picker reads
+  `pr_state` in `.chump/github_cache.db` (closed-unmerged rows are ignored).
+  `worker.sh` calls `cache_ensure_pr_state_fresh` (scripts/coord/lib/github_cache.sh)
+  once per cycle, which REST-refills `pr_state` when the table is missing or
+  older than `CHUMP_PR_STATE_MAX_AGE_S` (600s). If the table is still absent,
+  the picker asks `cache_gap_open_prs <GAP-ID>` (`gh pr list --state open
+  --search "<GAP-ID> in:title"`, answers cached on disk for
+  `CHUMP_OPEN_PR_LOOKUP_TTL_S`, 600s) before offering a gap. Skips emit
+  `kind=picker_skipped_open_pr` (one event per cycle, `source=pr_state|gh`).
+  If gh itself is unreachable the answer is unknown and the picker fails open,
+  so an offline node keeps working.
+
 ## The 25%→80% problem
 
 Across this session's 4 dispatched subagents, 1 self-shipped a PR and 3 wrote

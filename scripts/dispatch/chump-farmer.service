@@ -14,7 +14,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-Environment=HOME=/root
+Environment=HOME=__HOME__
 # Source ALL ~/.chump/*.env (export-format creds + config) in the unit's ExecStart
 # — the same pattern chump-pr-lander.service uses — BEFORE handing off to the
 # wrapper, so the organ's env is loaded even if the wrapper's own source path ever
@@ -32,5 +32,5 @@ Environment=HOME=/root
 # reset by a login profile. The host-rewriter turns /root into the run-user's home,
 # so the glob resolves to the run-user's ~/.chump on every host. Kept short so it
 # always completes well inside the 30s timer cadence.
-ExecStart=/bin/bash -c 'set -a; for e in /root/.chump/*.env; do source "$e" 2>/dev/null; done; set +a; exec /root/Projects/chump/scripts/dispatch/chump-farmer-run.sh'
+ExecStart=/bin/bash -c 'set -a; for e in __HOME__/.chump/*.env; do source "$e" 2>/dev/null; done; set +a; exec __REPO_ROOT__/scripts/dispatch/chump-farmer-run.sh'
 TimeoutStartSec=120

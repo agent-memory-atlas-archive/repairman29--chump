@@ -9,11 +9,13 @@
 //! RESILIENT-059: durable-execution — SQLite-journaled activity wrapper + resume CLI.
 //! INFRA-2265: bootstrap — net-new product bootstrap entrypoint (empty dir → first commit + gap).
 //! INFRA-5754: registry — INFRA-1748 self-registration interface + inventory dispatch lookup.
+//! CREDIBLE-1493: calibrate — self-report calibration (Phase R R7), first self-registered command.
 
 pub mod add_env_var;
 pub mod add_path_filter;
 pub mod add_raw_gh_allowlist;
 pub mod bootstrap;
+pub mod calibrate;
 pub mod claim_lint;
 pub mod config;
 pub mod consensus;

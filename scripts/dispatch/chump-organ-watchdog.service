@@ -9,20 +9,20 @@
 # capital-C and does not exist on case-sensitive Linux (see
 # docs/process/LINUX_NODE_ONBOARDING.md).
 #
-# HOST-AGNOSTIC MECHANISM (RESILIENT-200): this tracked unit is helsinki-shaped
-# (User=root, /root/... paths) ON PURPOSE. install-helsinki-atc.sh rewrites
-# every "/root/" -> the run-user's $HOME and "User=root" -> "User=<run-user>"
-# at copy time, so the SAME tracked file wires correctly on root (helsinki) AND
-# on an owned node (CJ=jeff, /home/jeff). This matches all ~17 sibling dispatch
-# units and is the ONLY mechanism the installer host-adapts.
+# INFRA-8194 (Phase R R5): this is a PLACEHOLDER TEMPLATE, not a host-shaped
+# unit. __HOME__ / __REPO_ROOT__ are resolved per host by the typed renderer
+# (`chump node render-unit`, crates/chump-provision) or its shell mirror
+# (organ_unit_host_rewrite in scripts/ops/lib/organ-unit-install-lib.sh, used by
+# install-helsinki-atc.sh and chump-node-install.sh). There is deliberately NO
+# User= line: the renderer injects User=<run-user> only for a system-scope
+# install and never for a systemd --user manager (which cannot switch identity:
+# 216/GROUP, 217/USER). scripts/ci/test-provision-no-host-literals.sh keeps
+# every host literal (a concrete user, a home dir, the brew prefix) out of it.
 #
-# DO NOT use the systemd %h specifier here (reverts INFRA-3647/TREK-21): for a
-# SYSTEM-scope unit, %h is NOT influenced by User= — it always resolves to the
-# system manager's home (/root). On CJ (User=jeff) %h still expanded to /root,
-# so ExecStart ran /root/Projects/chump/... as jeff -> "Permission denied"
-# (status 126) and the watchdog was FAILED, leaving every merged organ running
-# stale code (the merged!=running engine). %h also has no "/root/" literal for
-# the installer's rewrite to key off, so it silently survived install.
+# DO NOT use the systemd %h specifier here (INFRA-3647/TREK-21): for a
+# SYSTEM-scope unit, %h is NOT influenced by User= and always resolves to the
+# system manager's home (/root). On an owned node it ran the root path as the run user
+# -> "Permission denied" (status 126). The renderer refuses %h for system scope.
 [Unit]
 Description=Chump organ watchdog — self-heal failed chump-* organs (INFRA-3595)
 After=network-online.target
@@ -30,9 +30,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
 Environment=CHUMP_ORGAN_WATCHDOG_CLONE_REFRESH=1
 Environment=CHUMP_ORGAN_WATCHDOG_BINARY_HEAL=1
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/ops/organ-watchdog.sh'
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/ops/organ-watchdog.sh'

@@ -5,10 +5,11 @@
 # node, not by the operator session. Every fleet node runs this same unit,
 # each watching its peers, so there is no single point of observation.
 #
-# HOST-AGNOSTIC MECHANISM (RESILIENT-200, mirrors chump-organ-watchdog.service):
-# tracked helsinki-shaped (User=root, /root/... paths) ON PURPOSE.
-# install-helsinki-atc.sh rewrites "/root/" -> the run-user's $HOME and
-# "User=root" -> "User=<run-user>" at copy time.
+# INFRA-8194 (Phase R R5): placeholder TEMPLATE. __HOME__ / __REPO_ROOT__ are
+# resolved per host by `chump node render-unit` (crates/chump-provision) or its
+# shell mirror organ_unit_host_rewrite (install-helsinki-atc.sh,
+# chump-node-install.sh). No User= line: the renderer injects User=<run-user>
+# for a system-scope install only, never for a --user manager (217/USER).
 [Unit]
 Description=Chump apex watchdog — cross-node peer heartbeat check (RESILIENT-1098)
 After=network-online.target
@@ -16,7 +17,6 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=root
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
-ExecStart=/bin/bash -lc 'set -a; source /root/.chump/providers.env 2>/dev/null; set +a; exec /root/Projects/chump/scripts/ops/apex-watchdog.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/ops/apex-watchdog.sh'

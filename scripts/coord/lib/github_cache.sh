@@ -18,6 +18,14 @@
 #     stdout: numbers of open PRs with mergeable_state='BEHIND' AND auto_merge_enabled=1,
 #     one per line, sorted ascending. Used by queue-driver.
 #
+#   cache_gap_open_prs <GAP-ID>                       (INFRA-8176)
+#     stdout: open PR numbers whose title starts "<GAP-ID>:" (empty = none)
+#     rc=0 answer known, rc=1 lookup failed. 10-minute on-disk cache.
+#
+#   cache_ensure_pr_state_fresh [max_age_s]           (INFRA-8176)
+#     calls cache_refresh_open_prs when pr_state is missing or older than
+#     max_age_s (default 600). rc=0 fresh/refreshed, rc=1 refresh failed.
+#
 # Env:
 #   CHUMP_CACHE_DB     — defaults to {repo_root}/.chump/github_cache.db
 #   CHUMP_CACHE_TTL_S  — staleness threshold (default 60)
@@ -28,6 +36,96 @@
 
 [[ -n "${_CHUMP_GITHUB_CACHE_LIB:-}" ]] && return 0
 _CHUMP_GITHUB_CACHE_LIB=1
+
+# ── INFRA-8176: open-PR anti-spin helpers (both Rust and bash paths) ─────
+# Defined before the INFRA-1999 shim so they exist under either flag value;
+# cache_ensure_pr_state_fresh calls whichever cache_refresh_open_prs is
+# defined at call time.
+
+_cache_root_dir() {
+    printf '%s' "${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+}
+
+# cache_gap_open_prs <GAP-ID>
+#   The worker picker's fallback when pr_state is absent (RESILIENT-1427 was
+#   re-picked in cycles 24/27/28 while PR #5456 sat open). Runs
+#   `gh pr list --state open --search "<GAP-ID> in:title"` and keeps PRs whose
+#   title starts with the bare "<GAP-ID>:" ship convention (a fix(X:)
+#   reference PR does not implement the gap). The answer, including "none",
+#   is cached on disk for CHUMP_OPEN_PR_LOOKUP_TTL_S (default 600) under
+#   CHUMP_OPEN_PR_LOOKUP_DIR (default <repo>/.chump/open-pr-by-gap).
+cache_gap_open_prs() {
+    local gid="${1:?cache_gap_open_prs <GAP-ID>}"
+    [[ "$gid" =~ ^[A-Z][A-Z0-9]*-[0-9]+$ ]] || return 1
+    local ttl="${CHUMP_OPEN_PR_LOOKUP_TTL_S:-600}"
+    local dir="${CHUMP_OPEN_PR_LOOKUP_DIR:-$(_cache_root_dir)/.chump/open-pr-by-gap}"
+    local f="$dir/$gid"
+    if [[ -f "$f" ]]; then
+        local mtime now
+        mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)
+        now=$(date -u +%s)
+        if [[ $((now - mtime)) -lt "$ttl" ]]; then
+            cat "$f"
+            return 0
+        fi
+    fi
+    local resp
+    resp="$(CHUMP_GH_CALL_CRITICALITY=background gh pr list --state open \
+        --search "$gid in:title" --json number,title 2>/dev/null)" || return 1
+    [[ -z "$resp" ]] && return 1
+    local nums
+    nums="$(python3 -c '
+import json, re, sys
+gid = sys.argv[1]
+try:
+    rows = json.loads(sys.stdin.read())
+except Exception:
+    sys.exit(1)
+if not isinstance(rows, list):
+    sys.exit(1)
+pat = re.compile(r"^" + re.escape(gid) + r":")
+print(" ".join(str(r.get("number")) for r in rows
+               if isinstance(r, dict) and pat.match((r.get("title") or "").lstrip())))
+' "$gid" <<<"$resp")" || return 1
+    mkdir -p "$dir" 2>/dev/null || true
+    printf '%s\n' "$nums" > "$f.tmp.$$" 2>/dev/null && mv -f "$f.tmp.$$" "$f" 2>/dev/null || true
+    printf '%s\n' "$nums"
+    return 0
+}
+
+# cache_ensure_pr_state_fresh [max_age_s]
+#   Worker calls this once per cycle so pr_state exists and is current on
+#   nodes without the webhook receiver. Fresh = the refresh stamp
+#   (<repo>/.chump/pr-state-refresh.stamp) or MAX(fetched_at_local) is newer
+#   than max_age_s (default CHUMP_PR_STATE_MAX_AGE_S or 600).
+cache_ensure_pr_state_fresh() {
+    local max_age="${1:-${CHUMP_PR_STATE_MAX_AGE_S:-600}}"
+    local root; root="$(_cache_root_dir)"
+    local db="${CHUMP_CACHE_DB:-$root/.chump/github_cache.db}"
+    local stamp; stamp="$(dirname "$db")/pr-state-refresh.stamp"
+    local now; now=$(date -u +%s)
+    local has_table=""
+    if [[ -f "$db" ]] && command -v sqlite3 >/dev/null 2>&1; then
+        has_table="$(sqlite3 "$db" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pr_state'" 2>/dev/null || true)"
+    fi
+    if [[ -f "$db" && -f "$stamp" ]] && { [[ -n "$has_table" ]] || ! command -v sqlite3 >/dev/null 2>&1; }; then
+        local smt
+        smt=$(stat -c %Y "$stamp" 2>/dev/null || stat -f %m "$stamp" 2>/dev/null || echo 0)
+        [[ $((now - smt)) -lt "$max_age" ]] && return 0
+    fi
+    if [[ -n "$has_table" ]]; then
+        local newest
+        newest="$(sqlite3 "$db" "SELECT CAST(strftime('%s', MAX(fetched_at_local)) AS INTEGER) FROM pr_state" 2>/dev/null || true)"
+        if [[ "$newest" =~ ^[0-9]+$ ]] && [[ $((now - newest)) -lt "$max_age" ]]; then
+            return 0
+        fi
+    fi
+    CHUMP_CACHE_DB="$db" cache_refresh_open_prs >/dev/null 2>&1 || return 1
+    mkdir -p "$(dirname "$stamp")" 2>/dev/null || true
+    touch "$stamp" 2>/dev/null || true
+    return 0
+}
+# ── End INFRA-8176 helpers ────────────────────────────────────────────────
 
 # ── INFRA-1999 Phase 1: feature-flagged Rust path ────────────────────────
 # CHUMP_GITHUB_CACHE_RUST=1 routes all reader-side helpers through the
@@ -620,6 +718,31 @@ for pr in prs:
         json.dumps(pr),
     ))
     written += 1
+# INFRA-8176: reconcile. When the page is complete (<100 PRs), any pr_state
+# row still marked un-merged whose PR is no longer open was closed (or merged
+# without a webhook). Mark its raw payload state=closed so the picker's
+# open-PR anti-spin stops excluding that gap (merged_at is left alone: we do
+# not know whether it merged).
+if len(prs) < 100:
+    open_nums = {pr.get("number") for pr in prs if isinstance(pr.get("number"), int)}
+    for (n, raw) in conn.execute(
+        "SELECT number, raw_payload_json FROM pr_state WHERE merged_at IS NULL"
+    ).fetchall():
+        if n in open_nums:
+            continue
+        try:
+            d = json.loads(raw) if raw else {}
+        except Exception:
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        if isinstance(d.get("pull_request"), dict):
+            d["pull_request"]["state"] = "closed"
+        else:
+            d["state"] = "closed"
+        d["_chump_reconciled"] = "INFRA-8176"
+        conn.execute("UPDATE pr_state SET raw_payload_json=? WHERE number=?",
+                     (json.dumps(d), n))
 conn.commit()
 print(written)
 PY

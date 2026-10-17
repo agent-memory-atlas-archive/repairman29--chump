@@ -138,15 +138,20 @@ if grep -q 'EnvironmentFile=' "$REPO_ROOT/scripts/setup/chumpd.service" 2>/dev/n
 else
   fail "chumpd.service does not reference EnvironmentFile= for credential material"
 fi
-if grep -qE '^User=__RUN_USER__$' "$REPO_ROOT/scripts/setup/chumpd.service" 2>/dev/null; then
-  ok "chumpd.service declares an explicit User= (MISSION-072 systemd parity)"
+# INFRA-8194 (R5 slice 2) supersedes the MISSION-072 explicit-User= check: the
+# unit is installed into a systemd --user manager, which cannot switch identity,
+# so ANY User= line kills it at spawn (216/GROUP, RESILIENT-1571; 217/USER,
+# RESILIENT-1601). The template carries no User=; the typed renderer injects one
+# only for a system-scope install.
+if grep -qE '^User=' "$REPO_ROOT/scripts/setup/chumpd.service" 2>/dev/null; then
+  fail "chumpd.service bakes a User= line (a --user unit with User= dies 216/GROUP)"
 else
-  fail "chumpd.service is missing an explicit User= directive"
+  ok "chumpd.service carries no User= (user-manager safe; renderer owns User=)"
 fi
-if grep -q '__RUN_USER__' "$REPO_ROOT/scripts/setup/provision-chumpd-host.sh" 2>/dev/null; then
-  ok "provisioner substitutes __RUN_USER__ when writing the unit file"
+if grep -q 'chump_render_template "$TEMPLATE" "$UNIT_DST" "$CHUMPD_PROVISION_DIR" linux-systemd-user' "$REPO_ROOT/scripts/setup/provision-chumpd-host.sh" 2>/dev/null; then
+  ok "provisioner renders the unit for linux-systemd-user (typed renderer, sed mirror fallback)"
 else
-  fail "provisioner does not substitute __RUN_USER__ into the unit file"
+  fail "provisioner does not render chumpd.service through chump_render_template --host linux-systemd-user"
 fi
 
 # 7. --check / --uninstall / --dry-run / --creds-file flags present (documented usage surface)
