@@ -2225,6 +2225,14 @@ pub fn run(argv: &[String]) -> i32 {
             ],
             GateKind::Scripts,
         ));
+        // RESILIENT-1604: node admission ceiling written to node.env when absent
+        // (installer + node-converge) and the fleet-doctor RED check. Stubbed
+        // nproc/pgrep, throwaway HOME; fast (<5s).
+        steps.push(step(
+            "node-admission-ceiling",
+            &["bash", "scripts/ci/test-node-admission-ceiling.sh"],
+            GateKind::Scripts,
+        ));
 
         // INFRA-1808: bootstrap-auto-install smoke. install-bootstrap-auto-
         // launchd.sh (the hourly self-install job for chump-fleet-bootstrap.sh)

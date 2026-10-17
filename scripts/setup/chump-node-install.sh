@@ -286,6 +286,11 @@ toolchain_preflight() {
 # refspec is left untouched.
 # shellcheck source=lib/refspec-repair.sh
 source "$(dirname "$0")/lib/refspec-repair.sh" 2>/dev/null || true
+# RESILIENT-1604: the node admission ceiling (CHUMP_MAX_CONCURRENT_CLAUDE /
+# CHUMP_MAX_CONCURRENT_CARGO_JOBS = max(1, nproc/2)) is pinned into node.env by
+# write_node_env() and re-asserted by node-converge through this shared lib.
+# shellcheck source=lib/node-admission-ceiling.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/node-admission-ceiling.sh" 2>/dev/null || true
 ensure_full_refspec() {
   local repo="$1"
   [ -d "$repo/.git" ] || return 0
@@ -615,6 +620,13 @@ write_node_env() {
     node_mode="work-ready"
   fi
   mkdir -p "$STATE_DIR"
+  # RESILIENT-1604: node.env is rewritten whole below; carry an existing
+  # admission ceiling (operator-tuned or written by an earlier install) across
+  # the rewrite so the ceiling keys are only ever written when absent.
+  local _ceiling_lines=""
+  if [ -f "$node_env" ]; then
+    _ceiling_lines="$(grep -E '^(export )?(CHUMP_MAX_CONCURRENT_CLAUDE|CHUMP_MAX_CONCURRENT_CARGO_JOBS)=' "$node_env" 2>/dev/null || true)"
+  fi
   ( umask 077
     {
       printf 'export CHUMP_STATE_DIR=%s\n' "$STATE_DIR"
@@ -652,12 +664,25 @@ write_node_env() {
       # workers start only after a credentialed re-install enables work mode.
       printf 'export CHUMP_NODE_WORK_ENABLED=%s\n' "$work_enabled"
       printf 'export CHUMP_NODE_MODE=%s\n' "$node_mode"
+      if [ -n "$_ceiling_lines" ]; then printf '%s\n' "$_ceiling_lines"; fi
     } > "$node_env"
   )
+  # RESILIENT-1604: write the admission ceiling when absent (max(1, nproc/2)
+  # for both claude -p and cargo; lib/node-admission-ceiling.sh documents it).
+  if command -v chump_ensure_admission_ceiling >/dev/null 2>&1; then
+    local _ceiling_written
+    _ceiling_written="$(chump_ensure_admission_ceiling "$node_env" || true)"
+    if [ -n "$_ceiling_written" ]; then
+      ok "admission ceiling written to node.env: $(printf '%s' "$_ceiling_written" | tr '\n' ' ')"
+    fi
+  else
+    no "lib/node-admission-ceiling.sh missing — node.env has no admission ceiling"
+  fi
   # Source now so subsequent phases inherit the canonical settings.
   # shellcheck disable=SC1090
   . "$node_env"
   export CHUMP_STATE_DIR CHUMP_STATE_DB CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE CHUMP_NODE_WORK_ENABLED CHUMP_NODE_MODE CHUMP_RUN_USER CHUMP_GAP_SERVER
+  export CHUMP_MAX_CONCURRENT_CLAUDE CHUMP_MAX_CONCURRENT_CARGO_JOBS 2>/dev/null || true
   ok "node.env written + sourced: $node_env (mode=$CHUMP_NODE_MODE, run-user=$CHUMP_RUN_USER)"
   install_shell_hook "$node_env"
 }

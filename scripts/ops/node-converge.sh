@@ -266,6 +266,19 @@ if command -v repair_fetch_refspec >/dev/null 2>&1; then
     fi
 fi
 
+# --- RESILIENT-1604: pin the node admission ceiling into node.env ------------
+# A node installed before the installer wrote CHUMP_MAX_CONCURRENT_CLAUDE /
+# CHUMP_MAX_CONCURRENT_CARGO_JOBS (cuphead, 2026-10-16) self-heals here: each
+# key node.env lacks is appended as max(1, nproc/2); a present key is never
+# rewritten. Same shared primitive as the installer's write_node_env().
+source "$_CONVERGE_DIR/../setup/lib/node-admission-ceiling.sh" 2>/dev/null || true
+if command -v chump_ensure_admission_ceiling >/dev/null 2>&1; then
+    _ceiling_written="$(chump_ensure_admission_ceiling "${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/node.env" || true)"
+    if [[ -n "$_ceiling_written" ]]; then
+        log "admission ceiling written to node.env: $(printf '%s' "$_ceiling_written" | tr '\n' ' ')"
+    fi
+fi
+
 # --- fetch (auth-independent: a public-repo fetch needs no credentials) -------
 if ! git fetch "$CONVERGE_REMOTE" "$CONVERGE_BRANCH" --quiet 2>>"$LOG"; then
     # Offline / transient network. Not fatal — nothing to converge to that we

@@ -68,6 +68,12 @@
 #                        feature branches never fetch — the cuphead-hub failure
 #                        mode that silently broke dispatch resume, salvage, and
 #                        rebases (kind=checkout_single_branch_refspec).
+#   19. admission-ceiling — RESILIENT-1604: RED when the live `claude -p` or
+#                        cargo/rustc count on this node exceeds its admission
+#                        ceiling (CHUMP_MAX_CONCURRENT_CLAUDE /
+#                        CHUMP_MAX_CONCURRENT_CARGO_JOBS: env > node.env >
+#                        max(1, nproc/2), the src/admit.rs precedence). Counts
+#                        with the same pgrep -f patterns `chump admit` uses.
 #
 # Thresholds (override via env)
 #   LEASE_STALE_HOURS         default 2    — leases older than N hours are flagged
@@ -1551,6 +1557,48 @@ check_fetch_refspec_single_branch() {
         "git -C $REPO_ROOT config --replace-all remote.origin.fetch '$full' && git -C $REPO_ROOT fetch origin"
 }
 
+# ── Check 19 (RESILIENT-1604): node admission ceiling ──────────────────────────
+# cuphead 2026-10-16: 9 worker.sh + 8 claude -p + 9 cargo/rustc on 4 cores
+# (load 12-16) while node.env carried no ceiling, so the 900s subagent budget
+# killed finished work. The ceiling is enforced by `chump admit` (Rust); this
+# check is the read-only observer: it reads the same ceiling and counts the
+# same processes, and goes RED when either class runs past its ceiling (a
+# spawn site that bypasses `chump admit`). It never emits or mutates.
+check_admission_ceiling() {
+    # Resolve next to this script (BASH_SOURCE), so a sourced run finds it too.
+    local lib
+    lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../setup/lib/node-admission-ceiling.sh"
+    if [[ ! -f "$lib" ]]; then
+        register_check "admission-ceiling" "skip" "scripts/setup/lib/node-admission-ceiling.sh missing" ""
+        return
+    fi
+    # shellcheck source=../setup/lib/node-admission-ceiling.sh
+    source "$lib"
+    if ! command -v pgrep >/dev/null 2>&1; then
+        register_check "admission-ceiling" "skip" "pgrep not available" ""
+        return
+    fi
+    local node_env="${CHUMP_STATE_DIR:-$HOME/.chump}/node.env"
+    local cl_ceil cg_ceil cl_n cg_n
+    cl_ceil="$(chump_admission_ceiling_for CHUMP_MAX_CONCURRENT_CLAUDE "$node_env")"
+    cg_ceil="$(chump_admission_ceiling_for CHUMP_MAX_CONCURRENT_CARGO_JOBS "$node_env")"
+    # pgrep -fc exits 1 on zero matches; capture, then sanitize.
+    cl_n="$(pgrep -fc 'claude -p' 2>/dev/null || true)"
+    cg_n="$(pgrep -fc '(^|/)(cargo|rustc)( |$)' 2>/dev/null || true)"
+    cl_n="${cl_n%%$'\n'*}"
+    cg_n="${cg_n%%$'\n'*}"
+    case "$cl_n" in '' | *[!0-9]*) cl_n=0 ;; esac
+    case "$cg_n" in '' | *[!0-9]*) cg_n=0 ;; esac
+    local summary="claude -p ${cl_n}/${cl_ceil}, cargo/rustc ${cg_n}/${cg_ceil} (ceiling: env > ${node_env} > max(1, nproc/2))"
+    if (( cl_n > cl_ceil || cg_n > cg_ceil )); then
+        register_check "admission-ceiling" "fail" \
+            "over the node admission ceiling: ${summary} — a spawn site is bypassing chump admit" \
+            "pgrep -fa 'claude -p'; pgrep -fa '(^|/)(cargo|rustc)( |$)'  # find the spawner; gate it with 'chump admit <claude|cargo> --wait-s N'"
+    else
+        register_check "admission-ceiling" "pass" "$summary" ""
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -1578,6 +1626,7 @@ check_self_healer_heartbeat
 check_tracked_config_drift
 check_checkout_parked_off_main
 check_fetch_refspec_single_branch
+check_admission_ceiling
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

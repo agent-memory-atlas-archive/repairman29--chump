@@ -880,6 +880,14 @@ jobs:
       - name: Single-branch refspec repair gate (INFRA-8210)
         run: bash scripts/ci/test-infra-8210-single-branch-refspec-repair.sh
 
+      # RESILIENT-1604: node admission ceiling. The installer + node-converge
+      # pin CHUMP_MAX_CONCURRENT_CLAUDE / CHUMP_MAX_CONCURRENT_CARGO_JOBS
+      # (max(1, nproc/2)) into node.env only when absent, and fleet-doctor goes
+      # RED when live claude -p or cargo/rustc exceed it. Stubbed nproc/pgrep,
+      # throwaway HOME; mirrored in chump preflight.
+      - name: Node admission ceiling gate (RESILIENT-1604)
+        run: bash scripts/ci/test-node-admission-ceiling.sh
+
       # INFRA-1808: bootstrap-auto-install smoke — the hourly launchd job
       # (install-bootstrap-auto-launchd.sh) that self-runs
       # chump-fleet-bootstrap.sh --install must generate a valid plist and
