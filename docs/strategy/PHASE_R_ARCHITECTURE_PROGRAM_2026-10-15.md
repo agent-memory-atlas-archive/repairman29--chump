@@ -1,7 +1,7 @@
 ---
 doc_tag: decision-record
 owner_gap: PHASE-R
-last_audited: 2026-10-16
+last_audited: 2026-10-17
 ---
 
 # Phase R: the architecture program of record (adopted 2026-10-15)
@@ -44,7 +44,7 @@ to live.
 | **R1** | Ship is one state transition gated on a landing receipt: a merge SHA reachable from `origin/main` whose PR row links the gap. One function writes `done`/`shipped`. Idempotent. | The re-ship loop (RESILIENT-1562 shipped 87 times in 2h, landing nothing); the false-close class | CREDIBLE-1491 | P1 |
 | **R2** | The gap-to-PR link is a typed FK written when the PR opens, read at ship. No title regex anywhere. | `fix(X:)` closing gap X (#5317); three regex readers drifting | INFRA-8192 | P1 |
 | **R3** | Honest ship gate: every check is required-and-green or deleted; admin bypass needs a PASSED consensus; `enforce_admins` and `strict` on; admin merges counted. | Red checks carrying no information; invisible `--admin` merges | CREDIBLE-1492 | P1 |
-| **R6** | Shell absorption. `worker.sh` moves into `chumpd`; `chump claim` is the only lease writer; no new shell organ; shell LOC is a gauge that must fall. | Picker sprawl (MISSION-028); a 3,332-line control plane nothing can type-check | INFRA-8195 | P2 |
+| **R6** | The invariant boundary. Rust owns invariants (store, leases, gap status, the ship transition, admission); shell owns glue and may stay shell. A CI gate fails any shell that writes an invariant directly; `chump` verbs are the shortest path; agent matched to layer. Metric: shell files that write invariants, target zero. | Picker sprawl (MISSION-028); 9 scripts writing the store and a dozen writing leases on main (2026-10-17 baseline); Rust-first honored by a bypass trailer | INFRA-8195 (slices R6.1 gate, R6.2 `chump admit`, R6.3 layer-aware dispatch, R6.4 gauge) | P1 |
 | **R4** | One canonical store. `state.sql` and `gap_store.db` leave git; the YAML mirror is export-only; the swamp is archived, never deleted. | Split-brain drift; the 9,223-file swamp; `sync --push` blast radius | INFRA-8193 | P2 |
 | **R5** | Host provisioning is a typed enum; units are rendered from it; no `User=`, `/home`, `/root`, `/opt/homebrew` literals ship. | 217/USER failures, HOME=/root, the abandoned second install, brew-only bootstrap | INFRA-8194 | P2 |
 | **R7** | The eval harness points inward. Every self-report has a ground-truth probe and a calibration score; chronic liars auto-file a gap. | Dashboards off by 6x to 100x; "healthy" while organs fail for days | CREDIBLE-1493 | P2 |
@@ -86,6 +86,30 @@ Until that happens once, the factory is not running. R1 plus R3 is the gate to i
    cut against the live codebase when claimed.
 7. **Measure on the node.** The Mac is an observer. Scoreboard, store and organ facts
    come from cuphead.
+
+## R6 redefined (2026-10-17): force the boundary, not the language
+
+The first day proved that "Rust-first" as a blanket rule loses to pressure: 414k lines of shell
+against 349k of Rust, the META-064 gate honored by a one-line bypass trailer, and every
+Rust-touching Sonnet dispatch on 2026-10-16 dying at the budget or in the ship step while
+shell dispatches landed. Agents take the shortest path to green. So R6 now forces the boundary:
+
+1. **Rust owns invariants, shell owns glue.** `state.db`, lease files, gap status, the ship
+   transition and the admission ceiling are Rust. Installers, `gh` plus `jq` plumbing and one-shot
+   ops may stay shell forever. META-064's criteria stand; the all-Rust aspiration is dropped.
+2. **The boundary is a CI gate (R6.1), not a doc.** Any shell or Python under `scripts/` that
+   writes the store, a lease, or a status directly fails CI. Shadow mode first with the violator
+   list; enforce once the verbs exist. The allowlist starts at the dated baseline and may only shrink.
+3. **The Rust verb is the shortest path.** `chump admit` (R6.2), `chump pr cut` (RESILIENT-1607),
+   `chump gap link-pr` (R2), one lease-writing verb (INFRA-8176). A shell organ becomes a few lines
+   calling a verb, and the shell shrinks on its own.
+4. **Agent matched to layer (R6.3).** Rust slices dispatch with Opus and a 3600 second budget into
+   a small crate; shell glue dispatches with Sonnet.
+5. **The metric is `shell_invariant_writers` (R6.4),** the gate's violator count, target zero for
+   seven days. Shell LOC is no longer the measure. Baseline 2026-10-17 on `main`: 9 scripts write
+   the store (`bot-merge.sh`, `gap-reserve.sh`, `gap-doctor.py`, `gap-normalize-domains.sh`,
+   `backfill-opened-dates.sh`, both stale reapers, a demo, a CI fixture lib), about 12 write lease
+   files, 2 set status by raw SQL.
 
 ## Explicitly not in Phase R
 
