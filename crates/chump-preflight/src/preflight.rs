@@ -2848,6 +2848,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "dispatch-agent-search-guard",
+            &["bash", "scripts/ci/test-dispatch-agent-search-guard.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "farmer-dispatch-orphan-reaper",
             &["bash", "scripts/ci/test-farmer-dispatch-orphan-reaper.sh"],
             GateKind::Scripts,

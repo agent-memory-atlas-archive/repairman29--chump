@@ -1300,6 +1300,9 @@ jobs:
       - name: dispatch child lifetime (INFRA-8198)
         run: bash scripts/ci/test-dispatch-child-lifetime.sh
 
+      - name: dispatch agent search guard + tool-call timeout env (ZERO-WASTE-133)
+        run: bash scripts/ci/test-dispatch-agent-search-guard.sh
+
       - name: farmer dispatch orphan reaper (INFRA-8198)
         run: bash scripts/ci/test-farmer-dispatch-orphan-reaper.sh
 

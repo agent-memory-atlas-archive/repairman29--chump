@@ -53,6 +53,10 @@ use std::time::Duration;
 // about all stay consistent. See [`create_dispatch_worktree`].
 use chump_orchestrator::dispatch::dispatch_paths;
 
+/// ZERO-WASTE-133: per-tool-call timeout env + stalled tool-call watchdog.
+#[path = "dispatch_tool_watch.rs"]
+mod tool_watch;
+
 /// How the actual work between claim and ship gets done.
 #[derive(Debug, Clone)]
 pub enum WorkBackend {
@@ -610,8 +614,19 @@ fn create_dispatch_worktree_from(
     // after this returns "not found in state.db (run chump gap import
     // first)" for a gap that IS open in the canonical registry.
     chump_atomic_claim::atomic_claim::nugget_prefetch::link_state_db(repo_root, &worktree_path);
+    write_worktree_search_ignore(&worktree_path);
 
     Ok(worktree_path)
+}
+
+/// ZERO-WASTE-133: every dispatch worktree carries a `.ignore` that keeps
+/// agent searches (rg / fd / ag) out of build output; the same writer runs in
+/// `chump claim`. Best-effort: a failure is logged, never fatal.
+fn write_worktree_search_ignore(worktree: &Path) {
+    use chump_atomic_claim::atomic_claim::worktree_search_ignore as wsi;
+    if let Err(e) = wsi::write_search_ignore(worktree) {
+        eprintln!("[dispatch] ZERO-WASTE-133: could not write .ignore: {e}");
+    }
 }
 
 /// INFRA-8199: check out an open PR's head branch into `worktree_path`,
@@ -681,6 +696,7 @@ fn create_repair_worktree(repo_root: &Path, worktree_path: &Path, head: &str) ->
     }
     set_dispatch_branch_upstream(worktree_path, head);
     chump_atomic_claim::atomic_claim::nugget_prefetch::link_state_db(repo_root, worktree_path);
+    write_worktree_search_ignore(worktree_path);
     eprintln!("[dispatch] repair worktree on PR head {head} (base {remote_ref}, not origin/main)");
     Ok(worktree_path.to_path_buf())
 }
@@ -1009,6 +1025,12 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    // ZERO-WASTE-133: bound every agent tool call. Background tasks off so a
+    // call that hits its timeout is killed (not auto-backgrounded) and the
+    // agent reads the error and continues; see dispatch_tool_watch.rs.
+    for (k, v) in tool_watch::headless_tool_timeout_env(tool_watch::tool_call_timeout_secs()) {
+        cmd.env(k, v);
+    }
     // INFRA-8198: tie the child's lifetime to this dispatch process — the
     // exact gap this whole gap closes: a `claude -p` headless child that
     // outlived its 1800s budget with no lease, ship phase, or supervisor.
@@ -1116,6 +1138,9 @@ struct HangConfig {
     tick: Duration,
     /// SIGTERM → SIGKILL grace window for the budget and salvage kill paths.
     grace_secs: u64,
+    /// ZERO-WASTE-133: age past which one agent tool call is stalled
+    /// (derived from CHUMP_DISPATCH_TOOL_CALL_TIMEOUT_SECS); 0 disables.
+    tool_stall_secs: u64,
 }
 
 impl HangConfig {
@@ -1147,6 +1172,7 @@ impl HangConfig {
             activity_poll: Duration::from_secs(poll_secs),
             tick: Duration::from_secs(1),
             grace_secs: 30,
+            tool_stall_secs: tool_watch::stall_threshold_secs(tool_watch::tool_call_timeout_secs()),
         }
     }
 }
@@ -1164,6 +1190,13 @@ enum HangEvent {
     /// HEAD moved since spawn, in which case the child is stopped and the
     /// dispatch proceeds to its ship step instead of aborting.
     HangKill { idle_secs: u64, committed: bool },
+    /// ZERO-WASTE-133: one agent tool call outlived every timeout the
+    /// harness allows; its subtree was killed so the agent continues.
+    ToolCallStalled {
+        pid: u32,
+        age_secs: u64,
+        cmd: String,
+    },
 }
 
 /// Directory names never walked when fingerprinting a worktree for activity:
@@ -1333,6 +1366,14 @@ fn wait_with_hang_detection(
             idle_secs,
             committed,
         } => emit_hang_alert(process_name, gap_id, cfg.hang_secs, idle_secs, committed),
+        HangEvent::ToolCallStalled { pid, age_secs, cmd } => emit_tool_call_stalled(
+            process_name,
+            gap_id,
+            cfg.tool_stall_secs,
+            pid,
+            age_secs,
+            &cmd,
+        ),
     };
     wait_with_hang_detection_cfg(child, process_name, gap_id, activity_root, &cfg, &mut sink)
 }
@@ -1361,7 +1402,7 @@ fn wait_with_hang_detection_cfg(
     // Either set to 0 disables that specific deadline.
     let no_budget = cfg.budget_secs == 0;
     let mut hang_enabled = cfg.hang_secs != 0;
-    if no_budget && !hang_enabled {
+    if no_budget && !hang_enabled && cfg.tool_stall_secs == 0 {
         return child.wait().context("waiting for child process");
     }
 
@@ -1392,6 +1433,8 @@ fn wait_with_hang_detection_cfg(
     };
     let mut last_activity = start;
     let mut last_poll = start;
+    let mut last_tool_poll = start;
+    let mut stalled_reported: Vec<u32> = Vec::new();
 
     // Re-fingerprint; true (and clock reset) when the worktree changed.
     let refresh = |last_fp: &mut Option<ActivityFingerprint>,
@@ -1449,6 +1492,30 @@ fn wait_with_hang_detection_cfg(
                 if hang_enabled && last_poll.elapsed() >= cfg.activity_poll {
                     last_poll = std::time::Instant::now();
                     refresh(&mut last_fp, &mut last_activity);
+                }
+
+                // ZERO-WASTE-133: stalled tool-call watchdog. Reported once
+                // per call; the call's subtree is killed so the agent gets an
+                // error for that one call and keeps working.
+                if cfg.tool_stall_secs > 0 && last_tool_poll.elapsed() >= cfg.activity_poll {
+                    last_tool_poll = std::time::Instant::now();
+                    let procs = tool_watch::ps_snapshot();
+                    for st in tool_watch::find_stalled(&procs, child_pid, cfg.tool_stall_secs) {
+                        if stalled_reported.contains(&st.pid) {
+                            continue;
+                        }
+                        stalled_reported.push(st.pid);
+                        eprintln!(
+                            "[dispatch] {gap_id}: tool call pid {} alive {}s (limit {}s), killing: {}",
+                            st.pid, st.age_secs, cfg.tool_stall_secs, st.cmd
+                        );
+                        tool_watch::kill_subtree(&st.subtree);
+                        on_event(HangEvent::ToolCallStalled {
+                            pid: st.pid,
+                            age_secs: st.age_secs,
+                            cmd: st.cmd,
+                        });
+                    }
                 }
 
                 // Idle hang detector (RESILIENT-1612): fires on no ACTIVITY
@@ -1810,6 +1877,41 @@ fn emit_hang_alert(
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn();
+    }
+}
+
+/// ZERO-WASTE-133: emit `kind=agent_tool_call_stalled` when one agent tool
+/// call outlived every timeout the harness allows and the watchdog killed it.
+fn emit_tool_call_stalled(
+    process_name: &str,
+    gap_id: &str,
+    limit_secs: u64,
+    pid: u32,
+    age_secs: u64,
+    cmd: &str,
+) {
+    let repo_root = crate::repo_path::runtime_base();
+    let lock_dir = repo_root.join(".chump-locks");
+    let _ = std::fs::create_dir_all(&lock_dir);
+    let ambient_path = std::env::var("CHUMP_AMBIENT_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| lock_dir.join("ambient.jsonl"));
+    let session = crate::ambient_stream::env_session_id().unwrap_or_else(|| "unknown".to_string());
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let cmd = serde_json::to_string(cmd).unwrap_or_else(|_| "\"\"".to_string());
+    // scanner anchor: "kind":"agent_tool_call_stalled"
+    let line = format!(
+        "{{\"ts\":\"{ts}\",\"session\":\"{session}\",\"kind\":\"agent_tool_call_stalled\",\
+         \"process\":\"{process_name}\",\"gap\":\"{gap_id}\",\"pid\":{pid},\
+         \"age_secs\":{age_secs},\"limit_secs\":{limit_secs},\"action\":\"killed\",\"cmd\":{cmd}}}"
+    );
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ambient_path)
+    {
+        let _ = writeln!(f, "{}", line);
     }
 }
 
@@ -3407,7 +3509,38 @@ mod tests {
             activity_poll: Duration::from_secs(1),
             tick: Duration::from_millis(100),
             grace_secs: 1,
+            tool_stall_secs: 0,
         }
+    }
+
+    /// ZERO-WASTE-133 AC1/AC3: a tool call (shell carrying the Claude Code
+    /// tool-call marker) that outlives the stall limit is killed, reported
+    /// once as ToolCallStalled, and the parent process continues to its end.
+    #[test]
+    fn zero_waste_133_stalled_tool_call_is_killed_and_agent_continues() {
+        let td = tempfile::tempdir().unwrap();
+        let cfg = HangConfig {
+            budget_secs: 0,
+            hang_secs: 0,
+            activity_poll: Duration::from_secs(1),
+            tick: Duration::from_millis(100),
+            grace_secs: 1,
+            tool_stall_secs: 1,
+        };
+        let marker = td.path().join("continued");
+        let script = format!(
+            "bash -c ': shell-snapshots; sleep 60; true'; touch '{}'",
+            marker.display()
+        );
+        let (res, events, took) = run_hang(None, td.path(), &script, &cfg);
+        assert!(res.unwrap().success());
+        assert!(took < Duration::from_secs(30), "took {took:?}");
+        assert!(marker.exists(), "agent did not continue after the kill");
+        let stalled: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, HangEvent::ToolCallStalled { .. }))
+            .collect();
+        assert_eq!(stalled.len(), 1, "{events:?}");
     }
 
     fn spawn_sh(dir: &Path, script: &str) -> Child {

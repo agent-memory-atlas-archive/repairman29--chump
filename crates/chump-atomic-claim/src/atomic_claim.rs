@@ -26,6 +26,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[path = "worktree_build_cache.rs"]
 pub mod worktree_build_cache;
 
+/// ZERO-WASTE-133: `.ignore` written into every claim/dispatch worktree so
+/// agent searches skip build output.
+#[path = "worktree_search_ignore.rs"]
+pub mod worktree_search_ignore;
+
 /// Args to atomic claim.
 #[derive(Debug, Clone)]
 pub struct ClaimArgs {
@@ -1621,6 +1626,11 @@ pub fn run_claim(mut args: ClaimArgs) -> Result<ClaimReport> {
     // fresh worktree previously got a cold cache (0% hit rate) even though
     // the main checkout's cache was warm.
     nugget_prefetch::link_github_cache(&args.repo_root, &worktree_path);
+
+    // ZERO-WASTE-133: keep agent searches out of the worktree's build dirs.
+    if let Err(e) = worktree_search_ignore::write_search_ignore(&worktree_path) {
+        eprintln!("[claim] ZERO-WASTE-133: could not write .ignore: {e}");
+    }
 
     // 6c-pre4. INFRA-3834: symlink the worktree's .chump/state.db to the
     // main checkout's copy so `chump gap reserve` run inside the worktree

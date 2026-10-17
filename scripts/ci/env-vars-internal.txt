@@ -3636,3 +3636,7 @@ CHUMP_REAPER_ACTIVE_LEASE_MIN
 CHUMP_REAPER_INDEX_MMIN
 CHUMP_TARGET_REAPER_SCAN_GLOB
 CHUMP_CARGO_TARGET_ANNOUNCED
+
+# ZERO-WASTE-133: per-tool-call timeout for headless dispatch agents (seconds;
+# default 300, 0 disables the timeout env and the stalled-call watchdog)
+CHUMP_DISPATCH_TOOL_CALL_TIMEOUT_SECS

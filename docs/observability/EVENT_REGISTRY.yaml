@@ -14361,3 +14361,17 @@ events:
     trigger: the Olive post-launch monitor could not deliver its report (chump --notify failed)
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, error]
+  - kind: agent_tool_call_stalled
+    status: active
+    effect_metric: self
+    emitter: src/dispatch.rs (chump dispatch — wait_with_hang_detection tool-call watchdog, ZERO-WASTE-133)
+    emitter_paths: [src/dispatch.rs]
+    trigger: >-
+      one Bash tool call of a headless claude -p agent (a direct child of the
+      agent carrying Claude Code's shell-snapshots marker) is still alive past
+      the longest per-call timeout the dispatch allows (BASH_MAX_TIMEOUT_MS
+      plus 60s). The watchdog kills that call's process subtree so the tool
+      call fails and the agent continues; reported once per call.
+    consumers: [fleet-brief, watchdog]
+    fields_required: [ts, session, kind, process, gap, pid, age_secs, limit_secs, action, cmd]
+
