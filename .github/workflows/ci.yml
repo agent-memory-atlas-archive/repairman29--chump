@@ -1495,6 +1495,10 @@ jobs:
       - name: load-aware dead-man smoke (RESILIENT-1611)
         run: bash scripts/ci/test-load-aware-deadman.sh
 
+      # The script builds ${CARGO_TARGET_DIR:-target}/debug/chump when absent.
+      - name: node pause invariant (RESILIENT-1614)
+        run: bash scripts/ci/test-resilient-1614-node-pause-invariant.sh
+
       - name: pre-push cargo-test full-suite gate (INFRA-761)
         run: bash scripts/ci/test-pre-push-test-gate.sh
 
