@@ -802,10 +802,20 @@ jobs:
 
       # INFRA-3632: node-install pins the canonical-store env (CHUMP_STATE_DB)
       # into node.env, wires it into every generated organ unit's
-      # EnvironmentFile=, and installs an interactive-shell hook — so no
-      # shell/organ falls back to a repo-local .chump/state.db.
+      # EnvironmentFile=, and installs an interactive-shell hook — so every
+      # shell/organ resolves the SAME store (repo-local since INFRA-8190).
       - name: Canonical-store env wiring gate (INFRA-3632)
         run: bash scripts/ci/test-infra-3632-canonical-store-env.sh
+
+      # INFRA-8190 (Phase R R4 "one canonical store"): the ONE gap-store
+      # resolver (CHUMP_STATE_DB > main checkout's .chump/state.db > root) in
+      # shell, and gap-store-single-source-check.sh --resolver-only as a HARD
+      # gate that fails when node.env / the current env / the chump binary
+      # resolve a different store than pin-less organs (fleet-server,
+      # worker.sh). Hermetic: two temp dirs (git repo + linked worktree, fake
+      # $HOME), stub binaries, no network, no sqlite3.
+      - name: Gap-store single-source gate (INFRA-8190)
+        run: bash scripts/ci/test-infra-8190-gap-store-single-source-gate.sh
 
       # INFRA-1810: installer manifest gate — every scripts/setup/install-*.sh
       # must be mapped to REQUIRED_DAEMONS, optional-installers-allowlist.txt,

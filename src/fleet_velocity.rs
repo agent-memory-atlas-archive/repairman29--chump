@@ -127,7 +127,7 @@ pub fn snapshot(repo_root: &Path) -> VelocitySnapshot {
     }
 
     // Open gap count from state.db.
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_gap_store::store_path::state_db_path(repo_root); // INFRA-8190
     if db_path.exists() {
         if let Ok(conn) = rusqlite::Connection::open_with_flags(
             &db_path,

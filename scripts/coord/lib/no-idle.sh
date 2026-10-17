@@ -26,7 +26,11 @@ if [[ "$_NO_IDLE_GIT_COMMON" == ".git" ]]; then
 else
     _NO_IDLE_REPO_ROOT="$(cd "$_NO_IDLE_GIT_COMMON/.." && pwd)"
 fi
-_NO_IDLE_STATE_DB="$_NO_IDLE_WORK_ROOT/.chump/state.db"
+# INFRA-8190: resolve the ONE canonical store (CHUMP_STATE_DB > MAIN checkout),
+# not the linked worktree's own .chump/state.db (a split-brain copy).
+# shellcheck source=state-store.sh
+. "$(dirname "${BASH_SOURCE[0]}")/state-store.sh"
+_NO_IDLE_STATE_DB="$(chump_state_db "$_NO_IDLE_WORK_ROOT" 2>/dev/null)"
 
 # Emit kind=curator_no_op_avoided — the AC4 signal the watchdog counts.
 # scanner-anchor: "kind":"curator_no_op_avoided"

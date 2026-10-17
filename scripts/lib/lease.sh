@@ -28,6 +28,10 @@
 #   by atomic_claim::write_basic_lease + write_or_merge_lease (Rust). This
 #   library is for consumers only.
 
+# INFRA-8190: the ONE gap-store path resolver (chump_state_db).
+# shellcheck source=../coord/lib/state-store.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../coord/lib/state-store.sh" 2>/dev/null || true
+
 # Idempotent guard.
 if [[ -n "${__CHUMP_LIB_LEASE_LOADED:-}" ]]; then return 0; fi
 __CHUMP_LIB_LEASE_LOADED=1
@@ -154,7 +158,8 @@ lease_session_from_statedb() {
         local repo gitdir
         gitdir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
         if [[ -n "$gitdir" ]]; then repo="$(dirname "$gitdir")"; else repo="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; fi
-        db="${CHUMP_STATE_DB:-$repo/.chump/state.db}"
+        # INFRA-8190: the ONE shell resolver (falls back to the same precedence).
+        if declare -F chump_state_db >/dev/null 2>&1; then db="$(chump_state_db "$repo" 2>/dev/null)"; else db="${CHUMP_STATE_DB:-$repo/.chump/state.db}"; fi
     fi
     [[ -f "$db" ]] || return 0
     sqlite3 "$db" "SELECT session_id FROM leases WHERE gap_id='$gap_id' LIMIT 1;" 2>/dev/null || true
@@ -251,7 +256,8 @@ lease_worktree_from_statedb() {
         local repo gitdir
         gitdir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
         if [[ -n "$gitdir" ]]; then repo="$(dirname "$gitdir")"; else repo="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"; fi
-        db="${CHUMP_STATE_DB:-$repo/.chump/state.db}"
+        # INFRA-8190: the ONE shell resolver (falls back to the same precedence).
+        if declare -F chump_state_db >/dev/null 2>&1; then db="$(chump_state_db "$repo" 2>/dev/null)"; else db="${CHUMP_STATE_DB:-$repo/.chump/state.db}"; fi
     fi
     [[ -f "$db" ]] || return 0
     sqlite3 "$db" "SELECT worktree FROM leases WHERE gap_id='$gap_id' LIMIT 1;" 2>/dev/null || true

@@ -446,7 +446,9 @@ async fn handle_socket(cfg: Config, listener: UnixListener) {
                                     RpcRequest::DbPath => RpcResponse {
                                         status: "ok".into(),
                                         db_path: Some(
-                                            cfg.repo.join(".chump/state.db").display().to_string(),
+                                            chump_store_path::state_db_path(&cfg.repo)
+                                                .display()
+                                                .to_string(),
                                         ),
                                         status_json: None,
                                     },

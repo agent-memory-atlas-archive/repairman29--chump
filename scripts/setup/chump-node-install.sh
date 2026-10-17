@@ -63,10 +63,26 @@ case "$ROLE" in brain|muscle|all|factory|data|embed) ;; *) echo "role must be br
 
 STATE_DIR="${CHUMP_STATE_DIR:-$HOME/.chump}"
 # INFRA-3633: pin the canonical gap store here, once, so every phase below
-# (and every organ this script launches) resolves the same state.db instead
-# of some falling back to a repo-local $NODE_DIR/repo/.chump/state.db that
-# would silently diverge from the machine's real gap backlog.
-STATE_DB="${CHUMP_STATE_DB:-$STATE_DIR/state.db}"
+# (and every organ this script launches) resolves the same state.db.
+# INFRA-8190 (Phase R R4): the canonical store is the REPO-LOCAL one,
+# <node repo>/.chump/state.db — the store the fleet server, the workers and
+# `chump gap preflight` resolve with no pin (crates/chump-store-path,
+# scripts/coord/lib/state-store.sh). The old default ($STATE_DIR/state.db)
+# was the live split-brain cause: shells that sourced node.env read
+# ~/.chump/state.db while pin-less organs read <repo>/.chump/state.db
+# (cuphead 2026-10-15: 8264 vs 465 gaps). CHUMP_STATE_DIR stays the
+# node-state dir (providers.env, node.env, heartbeats) and is NOT the store.
+NODE_REPO="${CHUMP_NODE_REPO:-$NODE_DIR/repo}"
+CANONICAL_REPO_STORE="$NODE_REPO/.chump/state.db"
+STATE_DB="${CHUMP_STATE_DB:-$CANONICAL_REPO_STORE}"
+# A CHUMP_STATE_DB inherited from a previously written node.env that still
+# carries the legacy home-store pin is the split itself; re-point it at the
+# repo-local store instead of perpetuating it on every re-install.
+if [ "$STATE_DB" = "$STATE_DIR/state.db" ] && [ "$STATE_DB" != "$CANONICAL_REPO_STORE" ]; then
+  printf '[STORE] INFRA-8190: replacing legacy gap-store pin %s with the repo-local canonical %s (reconcile the old store before relying on its rows)\n' \
+    "$STATE_DB" "$CANONICAL_REPO_STORE" >&2
+  STATE_DB="$CANONICAL_REPO_STORE"
+fi
 export CHUMP_STATE_DB="$STATE_DB"
 # INFRA-3707: export CANONICAL_STORE_PATH for subsequent gap store operations
 CANONICAL_STORE_PATH="${CANONICAL_STORE_PATH:-$STATE_DB}"
@@ -578,10 +594,12 @@ write_node_env() {
     {
       printf 'export CHUMP_STATE_DIR=%s\n' "$STATE_DIR"
       # INFRA-3632: pin the exact var GapStore::db_path() reads
-      # (crates/chump-gap-store/src/lib.rs) so every shell/organ that sources
-      # this file resolves the ONE canonical state.db instead of falling back
-      # to repo_root().join(".chump/state.db") — the fallback a git worktree's
-      # cwd would otherwise silently hit (split-brain store, INFRA-3632 AC2).
+      # (crates/chump-store-path, via chump-gap-store) so every shell/organ
+      # that sources this file resolves the ONE canonical state.db.
+      # INFRA-8190: the value is the REPO-LOCAL store (see STATE_DB above), so
+      # a shell that sources node.env and an organ that does not resolve the
+      # SAME file; scripts/coord/gap-store-single-source-check.sh fails hard
+      # if they ever disagree again.
       printf 'export CHUMP_STATE_DB=%s\n' "$STATE_DB"
       printf 'export CHUMP_TEAM_URL=%s\n' "$team_url"
       printf 'export CHUMP_TEAM_API_KEY=%s\n' "$team_api_key"
@@ -1655,10 +1673,17 @@ self_test() {
     return 1
   fi
 
-  # AC2: Check for local .chump/state.db in current directory
+  # AC2: Check for a stray local .chump/state.db in the current directory.
+  # INFRA-8190: the canonical store IS repo-local now, so ./.chump/state.db is
+  # only a stray copy when it is a DIFFERENT file than the pinned store.
   if [ -f "./.chump/state.db" ]; then
-    no "Error : local .chump/state.db detected; use canonical store"
-    return 1
+    local _here_db _pin_db
+    _here_db="$(cd ./.chump 2>/dev/null && pwd -P)/state.db"
+    _pin_db="$(cd "$(dirname "${CHUMP_STATE_DB:-$STATE_DB}")" 2>/dev/null && pwd -P)/state.db"
+    if [ "$_here_db" != "$_pin_db" ]; then
+      no "Error : local .chump/state.db detected ($_here_db) that is not the canonical store ($_pin_db)"
+      return 1
+    fi
   fi
 
   # AC3: Verify resolved store path matches the canonical STATE_DIR
@@ -1667,8 +1692,9 @@ self_test() {
     return 1
   fi
 
-  # AC1: Print resolved path
-  ok "canonical store resolved: $resolved_store"
+  # AC1: Print resolved path (CHUMP_STATE_DIR is the node-state dir; the gap
+  # store itself is CHUMP_STATE_DB, repo-local per INFRA-8190).
+  ok "canonical store resolved: $resolved_store (gap store: ${CHUMP_STATE_DB:-$STATE_DB})"
 
   # AC4: invoke chump gap list to complete the test
   if ! "$BIN" gap list --status open --json >/dev/null 2>&1; then

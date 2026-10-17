@@ -35,6 +35,9 @@
 # Idempotent guard.
 if [[ -n "${__CHUMP_LIB_WORKTREE_ITER_LOADED:-}" ]]; then return 0; fi
 __CHUMP_LIB_WORKTREE_ITER_LOADED=1
+# INFRA-8190: the ONE gap-store path resolver (chump_state_db).
+# shellcheck source=../coord/lib/state-store.sh
+. "$(dirname "${BASH_SOURCE[0]}")/../coord/lib/state-store.sh" 2>/dev/null || true
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -126,7 +129,9 @@ wt_has_active_lease() {
     # actively-leased worktree this way. Same canonical-store split as INFRA-2744
     # (bot-merge re-claim) / RESILIENT-103 (lease unification).
     if command -v sqlite3 >/dev/null 2>&1; then
-        local _sdb="${CHUMP_STATE_DB:-$repo/.chump/state.db}"
+        # INFRA-8190: the ONE shell resolver when loaded (same precedence otherwise).
+        local _sdb
+        if declare -F chump_state_db >/dev/null 2>&1; then _sdb="$(chump_state_db "$repo" 2>/dev/null)"; else _sdb="${CHUMP_STATE_DB:-$repo/.chump/state.db}"; fi
         if [[ -f "$_sdb" ]]; then
             local _now _hit
             _now="$(date -u +%s)"

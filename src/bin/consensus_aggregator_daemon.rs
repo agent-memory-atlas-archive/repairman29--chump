@@ -80,9 +80,8 @@ impl Cfg {
         let mut ambient_path = std::env::var("CHUMP_AMBIENT_LOG")
             .map(PathBuf::from)
             .unwrap_or_else(|_| repo_root.join(".chump-locks/ambient.jsonl"));
-        let mut state_db_path = std::env::var("CHUMP_STATE_DB")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| repo_root.join(".chump/state.db"));
+        // INFRA-8190: the ONE resolver (honors CHUMP_STATE_DB first).
+        let mut state_db_path = chump_gap_store::store_path::state_db_path(&repo_root);
 
         let args: Vec<String> = std::env::args().collect();
         let mut i = 1;

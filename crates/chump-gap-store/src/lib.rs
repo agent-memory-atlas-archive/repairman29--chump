@@ -12,6 +12,9 @@
 pub mod backend;
 pub mod maintenance;
 pub mod sync;
+/// INFRA-8190: the ONE gap-store path resolver, re-exported so every crate
+/// that already depends on chump-gap-store resolves `state.db` the same way.
+pub use chump_store_path as store_path;
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection};
@@ -203,11 +206,12 @@ pub struct GapStore {
 }
 
 impl GapStore {
+    /// The gap store path for `repo_root`. Delegates to the ONE resolver
+    /// (INFRA-8190, `chump-store-path`): `CHUMP_STATE_DB` > the main
+    /// checkout's `.chump/state.db` (linked worktrees resolve to their main
+    /// checkout) > `<repo_root>/.chump/state.db`.
     pub fn db_path(repo_root: &Path) -> PathBuf {
-        if let Ok(p) = std::env::var("CHUMP_STATE_DB") {
-            return std::path::PathBuf::from(p);
-        }
-        repo_root.join(".chump").join("state.db")
+        store_path::state_db_path(repo_root)
     }
 
     /// Test-only accessor for the underlying connection. Production callers

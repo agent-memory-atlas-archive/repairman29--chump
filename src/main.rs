@@ -9748,7 +9748,7 @@ async fn main() -> Result<()> {
             "curator-status" => {
                 let want_json = args.iter().any(|a| a == "--json");
                 let ambient_path = repo_root.join(".chump-locks/ambient.jsonl");
-                let state_db = repo_root.join(".chump/state.db");
+                let state_db = chump_gap_store::store_path::state_db_path(&repo_root); // INFRA-8190
                 let _log_dir = repo_root.join(".chump-locks/autopilot-logs");
 
                 // Supervisor config from env (mirrors crate defaults).
@@ -9994,6 +9994,29 @@ async fn main() -> Result<()> {
         }
 
         let repo_root = repo_path::repo_root();
+        // INFRA-8190 (Phase R R4): print the ONE resolved gap-store path and
+        // why, WITHOUT opening (and so creating) it. Operators and the
+        // gap-store-single-source gate compare this across processes.
+        if subcmd == "store-path" {
+            let r = gap_store::store_path::resolve(&repo_root);
+            if args.iter().any(|a| a == "--json") {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "path": r.path.display().to_string(),
+                        "source": r.source.as_str(),
+                        "reason": r.reason(),
+                        "checkout": r.checkout.as_ref().map(|c| c.display().to_string()),
+                        "repo_root": repo_root.display().to_string(),
+                        "exists": r.path.exists(),
+                    })
+                );
+            } else {
+                println!("{}", r.path.display());
+                eprintln!("source: {} ({})", r.source.as_str(), r.reason());
+            }
+            std::process::exit(0);
+        }
         // INFRA-247: per-file YAML mirrors and the .chump/.last-yaml-op
         // freshness marker are *worktree-local* artifacts — they must land
         // in the operator's branch, not the main checkout's. `repo_root`

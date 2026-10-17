@@ -10,6 +10,8 @@ keywords = ["chump", "fleet", "visualization", "axum", "websocket"]
 categories = ["web-programming::http-server"]
 
 [dependencies]
+# INFRA-8190: the ONE gap-store path resolver.
+chump-store-path = { path = "../chump-store-path", version = "0.1.0" }
 anyhow = "1.0"
 axum = { version = "0.8", features = ["macros", "json", "ws"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }

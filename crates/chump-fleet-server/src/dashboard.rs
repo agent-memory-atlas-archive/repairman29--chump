@@ -530,7 +530,7 @@ pub fn read_active_leases(repo_root: &Path) -> Vec<ActiveLease> {
 /// (authoritative empty — no active claims — do NOT resurrect stale files).
 fn read_active_leases_from_db(repo_root: &Path) -> Option<Vec<ActiveLease>> {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let db_path = repo_root.join(".chump").join("state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if !db_path.is_file() {
         return None;
     }

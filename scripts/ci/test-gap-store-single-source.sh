@@ -33,11 +33,15 @@ else
   ok "chump-gap-store declares no default features (postgres-backend stays opt-in)"
 fi
 
-# 2) The canonical store path must resolve to sqlite .chump/state.db.
-if grep -qE 'join\("\.chump"\)\.join\("state\.db"\)|\.chump/state\.db' "$LIB"; then
-  ok "gap store default path resolves to sqlite .chump/state.db"
+# 2) The canonical store path must resolve to sqlite .chump/state.db, through
+#    the ONE resolver (INFRA-8190, crates/chump-store-path) that GapStore
+#    delegates to.
+RESOLVER="crates/chump-store-path/src/lib.rs"
+if grep -qE 'join\("\.chump"\)\.join\("state\.db"\)' "$RESOLVER" \
+   && grep -qE 'store_path::state_db_path\(repo_root\)' "$LIB"; then
+  ok "gap store default path resolves to sqlite .chump/state.db via chump-store-path"
 else
-  bad "could not confirm sqlite .chump/state.db as the default gap store path in $LIB"
+  bad "could not confirm GapStore::db_path -> chump-store-path -> .chump/state.db ($LIB, $RESOLVER)"
 fi
 
 # 3) No crate may silently wire CHUMP_GAP_STORE_URL into the gap-store selection.

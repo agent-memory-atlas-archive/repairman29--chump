@@ -27,21 +27,8 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 
 fn db_path() -> PathBuf {
-    std::env::var("CHUMP_STATE_DB")
-        .ok()
-        .and_then(|p| {
-            let path = PathBuf::from(p);
-            if path.as_os_str().is_empty() {
-                None
-            } else {
-                Some(path)
-            }
-        })
-        .unwrap_or_else(|| {
-            crate::repo_path::runtime_base()
-                .join(".chump")
-                .join("state.db")
-        })
+    // INFRA-8190: the ONE resolver (CHUMP_STATE_DB > main checkout > root).
+    chump_gap_store::store_path::state_db_path(&crate::repo_path::runtime_base())
 }
 
 fn get_connection() -> Result<Connection, rusqlite::Error> {

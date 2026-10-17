@@ -526,7 +526,7 @@ async fn check_role(
     }
 
     // 4. productivity_drop_check — no state.db mutations in last N hours
-    let state_db = cfg.repo_root.join(".chump/state.db");
+    let state_db = chump_store_path::state_db_path(&cfg.repo_root); // INFRA-8190
     if state_db.exists() {
         let session_id = infer_session_id(role);
         det.productivity_drop_triggered =

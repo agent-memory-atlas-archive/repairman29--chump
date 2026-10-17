@@ -3810,7 +3810,7 @@ async fn handle_needs_judgment(headers: HeaderMap) -> Result<Json<serde_json::Va
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| repo_path::runtime_base());
 
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_gap_store::store_path::state_db_path(&repo_root); // INFRA-8190
     let ambient_path = std::env::var("CHUMP_AMBIENT_IN_PROMPT")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| repo_root.join(".chump-locks/ambient.jsonl"));
@@ -3941,7 +3941,7 @@ async fn handle_needs_judgment_ack(
     }
 
     // Persist ack to state.db so we can show "last decision N ago".
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_gap_store::store_path::state_db_path(&repo_root); // INFRA-8190
     if let Ok(conn) = rusqlite::Connection::open(&db_path) {
         let _ = conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS operator_acks \

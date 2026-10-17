@@ -89,7 +89,7 @@ fn emit(repo_root: &Path, kind: &str, fields: &[(&str, &str)]) {
 
 /// Count open P0/P1 gaps in state.db. Read-only; 0 on any error (fail-closed).
 fn pickable_p0p1(repo_root: &Path) -> i64 {
-    let db = repo_root.join(".chump/state.db");
+    let db = chump_gap_store::store_path::state_db_path(repo_root); // INFRA-8190
     match rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) {
         Ok(conn) => conn
             .query_row(

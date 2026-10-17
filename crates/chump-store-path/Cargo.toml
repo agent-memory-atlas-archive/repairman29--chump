@@ -1,0 +1,16 @@
+[package]
+name = "chump-store-path"
+version = "0.1.0"
+edition = "2021"
+description = "The ONE resolver for the Chump gap store (state.db) path: CHUMP_STATE_DB > the main checkout's .chump/state.db (linked worktrees resolve to their main checkout) > the explicit root. Zero dependencies (std only)."
+repository = "https://github.com/repairman29/chump"
+homepage = "https://github.com/repairman29/chump/tree/main/crates/chump-store-path"
+license = "Apache-2.0"
+keywords = ["chump", "sqlite", "path", "git", "worktree"]
+categories = ["development-tools"]
+readme = "README.md"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

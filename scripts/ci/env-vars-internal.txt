@@ -3514,3 +3514,6 @@ CHUMP_FLEET_DOCTOR_MIN_RUNNERS
 CHUMP_AUTO_MERGE_REST_DIRECT
 # RESILIENT-1613: arm policy re-arm audit toggle (scripts/coord/lib/arm-policy.sh)
 CHUMP_ARM_POLICY_REARM_AUDIT
+# INFRA-8190: gap-store single-source gate — node.env location override + optional Rust/shell resolver parity binary for the CI fixture test
+CHUMP_NODE_ENV_FILE
+CHUMP_STORE_PATH_PARITY_BIN

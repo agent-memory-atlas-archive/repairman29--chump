@@ -7,6 +7,8 @@ repository = "https://github.com/repairman29/chump"
 license = "AGPL-3.0-only"
 
 [dependencies]
+# INFRA-8190: the ONE gap-store path resolver.
+chump-store-path = { path = "../chump-store-path", version = "0.1.0" }
 anyhow = "1.0"
 serde = { version = "1.0.118", features = ["derive"] }
 serde_json = "1.0"

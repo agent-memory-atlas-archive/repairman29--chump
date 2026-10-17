@@ -306,7 +306,7 @@ fn cog_037_enabled() -> bool {
 /// `routing_outcomes` schema set up in both `gap_store.rs` and
 /// `monitor::write_routing_outcome`.
 pub fn load_scoreboard_signatures(repo_root: &Path) -> HashMap<String, ArmStats> {
-    let db_path = repo_root.join(".chump").join("state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if !db_path.exists() {
         return HashMap::new();
     }

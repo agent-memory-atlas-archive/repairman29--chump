@@ -35,6 +35,8 @@ mkdir -p "$FAKE_HOME"
 export HOME="$FAKE_HOME"
 export CHUMP_NODE_DIR="$TMP/node"
 export CHUMP_STATE_DIR="$FAKE_HOME/.chump"
+# Hermetic: a node shell that sourced a real node.env exports these.
+unset CHUMP_STATE_DB CHUMP_NODE_REPO
 mkdir -p "$CHUMP_NODE_DIR/repo" "$CHUMP_STATE_DIR"
 
 set --
@@ -53,6 +55,19 @@ fi
 grep -q '^export CHUMP_STATE_DB=' "$NODE_ENV_FILE" 2>/dev/null \
   && pass "node.env exports CHUMP_STATE_DB (the exact var GapStore::db_path() reads)" \
   || fail "node.env missing CHUMP_STATE_DB export — GapStore::db_path() falls back to repo-local .chump/state.db"
+
+# INFRA-8190: the pinned store is the REPO-LOCAL one (what pin-less organs —
+# chump-fleet-server, worker.sh — resolve), not $CHUMP_STATE_DIR/state.db.
+grep -qx "export CHUMP_STATE_DB=$CHUMP_NODE_DIR/repo/.chump/state.db" "$NODE_ENV_FILE" 2>/dev/null \
+  && pass "node.env pins CHUMP_STATE_DB to the repo-local canonical store (INFRA-8190)" \
+  || fail "node.env CHUMP_STATE_DB is not the repo-local store: $(grep '^export CHUMP_STATE_DB=' "$NODE_ENV_FILE" 2>/dev/null)"
+
+# INFRA-8190: a legacy home-store pin inherited from an old node.env is the
+# split itself; a re-install must re-point it, not perpetuate it.
+legacy_out="$(CHUMP_STATE_DB="$CHUMP_STATE_DIR/state.db" INSTALLER="$INSTALLER" bash -c 'set --; . "$INSTALLER" >/dev/null 2>&1; printf %s "$CHUMP_STATE_DB"' 2>/dev/null)"
+[ "$legacy_out" = "$CHUMP_NODE_DIR/repo/.chump/state.db" ] \
+  && pass "an inherited legacy \$CHUMP_STATE_DIR/state.db pin is re-pointed at the repo-local store" \
+  || fail "legacy pin not replaced (got: $legacy_out)"
 
 grep -q '^export CHUMP_STATE_DIR=' "$NODE_ENV_FILE" 2>/dev/null \
   && pass "node.env exports CHUMP_STATE_DIR" \
@@ -108,7 +123,7 @@ BASHRC_HITS_AFTER="$(grep -cF "$MARKER" "$FAKE_HOME/.bashrc" 2>/dev/null || echo
 ( unset CHUMP_STATE_DB
   # shellcheck disable=SC1090
   . "$FAKE_HOME/.bashrc" >/dev/null 2>&1
-  [ "${CHUMP_STATE_DB:-}" = "$CHUMP_STATE_DIR/state.db" ]
+  [ "${CHUMP_STATE_DB:-}" = "$CHUMP_NODE_DIR/repo/.chump/state.db" ]
 ) && pass "sourcing .bashrc actually sets CHUMP_STATE_DB to the canonical path" \
   || fail "sourcing .bashrc did not set CHUMP_STATE_DB"
 

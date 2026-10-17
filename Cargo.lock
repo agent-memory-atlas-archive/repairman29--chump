@@ -1541,6 +1541,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "chump-store-path",
  "chump-team",
  "log",
  "rusqlite",
@@ -1626,6 +1627,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "chump-store-path",
  "hex",
  "regex",
  "rusqlite",
@@ -1731,6 +1733,7 @@ dependencies = [
  "axum",
  "chrono",
  "chump-agent-lease",
+ "chump-store-path",
  "glob",
  "rusqlite",
  "serde",
@@ -1752,6 +1755,7 @@ dependencies = [
  "chrono",
  "chump-bench",
  "chump-ship",
+ "chump-store-path",
  "postgres",
  "reqwest 0.12.28",
  "rusqlite",
@@ -2008,6 +2012,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "chump-store-path",
  "rand 0.10.3",
  "rand_distr 0.6.0",
  "rusqlite",
@@ -2117,6 +2122,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "chump-store-path"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "chump-team"
 version = "0.1.0"
 dependencies = [
@@ -2186,6 +2198,7 @@ name = "chumpd"
 version = "0.1.0"
 dependencies = [
  "chump-disk-inventory",
+ "chump-store-path",
  "libc",
  "serde",
  "serde_json",

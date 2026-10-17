@@ -487,7 +487,7 @@ pub fn run_check_only(args: ClaimArgs) -> Result<CheckReport> {
     }
 
     // Gate 2: Check state.db status (gap must be open and unclaimed)
-    let db_path = args.repo_root.join(".chump/state.db");
+    let db_path = chump_store_path::state_db_path(&args.repo_root); // INFRA-8190
     if !db_path.exists() {
         gates.push(GateResult {
             gate: "state.db".to_string(),
@@ -2212,7 +2212,7 @@ fn write_db_claim(
     worktree: &str,
     ttl_secs: i64,
 ) -> Result<()> {
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if !db_path.exists() {
         return Ok(());
     }
@@ -2244,7 +2244,7 @@ fn write_db_claim(
 /// gap under a different session name). Best-effort when the DB is absent (fresh
 /// clone). Returns the number of rows deleted.
 pub fn release_db_lease(repo_root: &Path, session_id: &str, gap_id: &str) -> Result<usize> {
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if !db_path.exists() {
         return Ok(0);
     }
@@ -3262,7 +3262,7 @@ fn is_acceptance_criteria_vague(ac: &str) -> bool {
 /// truth — INFRA-470 / INFRA-460 territory).
 fn verify_or_seed_gap(repo_root: &Path, gap_id: &str) -> Result<()> {
     // Quick sqlite read.
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if !db_path.exists() {
         // No DB yet — bootstrap by running `chump gap import`. Caller
         // is presumably trying to seed too, so this is fine.
@@ -4529,7 +4529,7 @@ fn load_hot_files(yaml_path: &Path) -> Vec<String> {
 /// Read the acceptance_criteria text for `gap_id` from state.db.
 /// Returns an empty string on any error (best-effort).
 fn read_gap_ac_from_db(repo_root: &Path, gap_id: &str) -> String {
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if !db_path.exists() {
         return String::new();
     }
@@ -5234,7 +5234,7 @@ fn append_ambient_line(ambient_log: &Path, event: &serde_json::Value) {
 
 /// Check gap status in state.db (must be open and unclaimed).
 fn check_gap_status(repo_root: &Path, gap_id: &str) -> Result<String, String> {
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if !db_path.exists() {
         return Err(format!("state.db not found at {}", db_path.display()));
     }
@@ -5291,7 +5291,7 @@ fn check_hot_file_collision(repo_root: &Path, paths: &str) -> Result<String, Str
 
 /// Check acceptance criteria (must not be empty or TODO-only).
 fn check_acceptance_criteria(repo_root: &Path, gap_id: &str) -> Result<String, String> {
-    let db_path = repo_root.join(".chump/state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if !db_path.exists() {
         return Err("state.db not found".to_string());
     }
@@ -5690,7 +5690,7 @@ pub mod nugget_prefetch {
     /// from the `description` column if present; otherwise we fall back to
     /// acceptance_criteria (still richer than title alone).
     fn read_gap_title_desc(repo_root: &Path, gap_id: &str) -> (String, String) {
-        let db_path = repo_root.join(".chump/state.db");
+        let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
         if !db_path.exists() {
             return (String::new(), String::new());
         }

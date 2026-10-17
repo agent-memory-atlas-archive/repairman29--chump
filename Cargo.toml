@@ -11,6 +11,7 @@ members = [
     "crates/chump-cost-tracker",
     "crates/chump-disk-inventory",
     "crates/chump-gap-store",
+    "crates/chump-store-path",
     "crates/chump-messaging",
     "crates/chump-coord",
     "crates/chump-orchestrator",

@@ -212,10 +212,8 @@ impl GapDoctor {
 
     /// Path to the canonical state DB.
     pub fn db_path(&self) -> std::path::PathBuf {
-        if let Ok(p) = std::env::var("CHUMP_STATE_DB") {
-            return std::path::PathBuf::from(p);
-        }
-        self.repo_root.join(".chump").join("state.db")
+        // INFRA-8190: the ONE resolver.
+        crate::store_path::state_db_path(&self.repo_root)
     }
 
     /// Run one detection-and-(optional)-heal pass.

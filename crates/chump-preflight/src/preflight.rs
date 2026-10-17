@@ -2637,6 +2637,16 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-infra-250-v1-retirement.sh"],
             GateKind::Scripts,
         ));
+        // INFRA-8190 (Phase R R4): one gap-store resolver + the hard
+        // single-source gate, exercised against two temp-dir fixtures.
+        steps.push(step(
+            "infra-8190-gap-store-single-source-gate",
+            &[
+                "bash",
+                "scripts/ci/test-infra-8190-gap-store-single-source-gate.sh",
+            ],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "bot-merge-auto-commit-head-race",
             &["bash", "scripts/ci/test-bot-merge-auto-commit-head-race.sh"],

@@ -125,10 +125,8 @@ impl AuditEntry {
 /// override via `CHUMP_STATE_DB` for test isolation, mirroring
 /// `GapStore::db_path`.
 pub fn db_path(repo_root: &Path) -> PathBuf {
-    if let Ok(p) = std::env::var("CHUMP_STATE_DB") {
-        return PathBuf::from(p);
-    }
-    repo_root.join(".chump").join("state.db")
+    // INFRA-8190: delegate to the ONE resolver.
+    chump_gap_store::store_path::state_db_path(repo_root)
 }
 
 pub fn open(repo_root: &Path) -> Result<Connection> {

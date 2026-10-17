@@ -13,6 +13,8 @@ name = "chumpd"
 path = "src/main.rs"
 
 [dependencies]
+# INFRA-8190: the ONE gap-store path resolver.
+chump-store-path = { path = "../chump-store-path", version = "0.1.0" }
 serde_json = "1.0"
 libc = "0.2"
 tokio = { version = "1", features = ["full", "net"] }

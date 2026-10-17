@@ -49,7 +49,8 @@ pub fn state_db_path() -> PathBuf {
         }
         dir
     };
-    root.join(".chump").join("state.db")
+    // INFRA-8190: the ONE resolver (CHUMP_STATE_DB > main checkout > root).
+    chump_gap_store::store_path::state_db_path(&root)
 }
 
 /// Open a raw rusqlite connection to the state DB with WAL + busy-timeout.

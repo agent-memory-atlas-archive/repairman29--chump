@@ -407,7 +407,7 @@ fn write_routing_outcome(
     now_unix: u64,
     duration_s: u64,
 ) -> Result<()> {
-    let db_path = repo_root.join(".chump").join("state.db");
+    let db_path = chump_store_path::state_db_path(repo_root); // INFRA-8190
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;

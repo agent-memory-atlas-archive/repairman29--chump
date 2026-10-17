@@ -1717,7 +1717,8 @@ fn preflight(ws: &Workspace) -> Result<()> {
     // WARNs "not found in state.db" even though the gap is right there in
     // the main checkout's canonical db. Point it at the main checkout's
     // state.db explicitly (db_path() checks CHUMP_STATE_DB first).
-    let state_db = opts.repo_root.join(".chump").join("state.db");
+    // INFRA-8190: the ONE resolver (CHUMP_STATE_DB > main checkout).
+    let state_db = chump_gap_store::store_path::state_db_path(&opts.repo_root);
     let status = Command::new(&exe)
         .args(["gap", "preflight", opts.gap_id])
         // INFRA-302 blocker (3): run from the worktree so any worktree-scoped
