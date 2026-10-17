@@ -415,6 +415,44 @@ bash scripts/coord/broadcast.sh --to orchestrator-opus-$(date +%Y-%m-%d) DONE \
 
 ---
 
+## Reconciling a stale gap store
+
+INFRA-8222 (Phase R R4). Before INFRA-8190 pinned the installer to the
+repo-local store, `node.env` pinned `CHUMP_STATE_DB` to `~/.chump/state.db`
+for sourced sessions, so some nodes carry two diverged stores. Measured on
+cuphead 2026-10-17 04:30Z: live `~/chump/.chump/state.db` 13499 gaps / 499
+open / 20 PHASE-R; stale `~/.chump/state.db` 12787 gaps / 8266 open / 0
+PHASE-R (closetjunky is the other way round, 4145 vs 12779). Merge the stale
+store in **before** a full node install flips the pin:
+
+```bash
+# on cuphead, with the fleet stopped (no workers, no live claims)
+chump store reconcile --from ~/.chump/state.db --into ~/chump/.chump/state.db --dry-run
+chump store reconcile --from ~/.chump/state.db --into ~/chump/.chump/state.db \
+  --audit ~/chump/.chump/reconcile-audit-$(date -u +%Y%m%dT%H%M%SZ).json
+```
+
+Rules: merges `gaps` (which carry `notes` and the `outcome_id` link),
+`outcomes`, `gap_prs`, unexpired `leases`, and `gap_counters` (max
+`next_num` wins) by primary key. A row missing from `--into` is inserted; a
+row in both keeps the newer one (`updated_at` if both stores have it, else
+the max of `closed_at` / `waiting_since` / `created_at`); ties keep
+`--into`. **Terminal-status guard:** a row that is done / shipped / closed /
+wontfix / superseded / already_satisfied in `--into` is never reopened by a
+non-terminal `--from` row, whatever the timestamps; refusals are counted in
+the audit (`refused`). Columns merge by intersection; extras are listed.
+Nothing is deleted.
+
+Safety: refuses (exit 3) while either store has a SQLite write lock, an
+unexpired lease row, or a live `.chump-locks/claim-*.json` beside it, unless
+`--force-offline`. Writes back up `--into` to `<into>.bak-<ts>` first.
+`--skip-new-open` declines to insert non-terminal gaps absent from `--into`
+(read `inserted_nonterminal` in the dry-run first). Each run writes the audit
+JSON (default `<into>.reconcile-audit-<ts>.json`) and emits
+`kind=store_reconciled`.
+
+---
+
 ## Disk hygiene
 
 Full architecture: [`docs/strategy/DISK_AWARE_FLEET_2026-05-29.md`](../strategy/DISK_AWARE_FLEET_2026-05-29.md) (META-128).

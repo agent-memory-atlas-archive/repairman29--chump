@@ -11,6 +11,8 @@
 
 pub mod backend;
 pub mod maintenance;
+/// INFRA-8222: `chump store reconcile` (Phase R R4).
+pub mod reconcile;
 pub mod sync;
 /// INFRA-8190: the ONE gap-store path resolver, re-exported so every crate
 /// that already depends on chump-gap-store resolves `state.db` the same way.

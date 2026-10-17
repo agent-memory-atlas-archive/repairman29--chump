@@ -1554,6 +1554,15 @@ async fn main() -> Result<()> {
         std::process::exit(verify_claim_branch::run_cli(&args));
     }
 
+    // INFRA-8222 (Phase R R4): `chump store reconcile --from <db> --into <db>
+    // [--dry-run] [--audit <path>] [--force-offline] [--skip-new-open] [--json]`
+    // merges a stale gap store into the live one (newest-wins, terminal-status
+    // guard). Dispatched before any GapStore::open so the live store is never
+    // migrated or touched by this process before the active-writer check.
+    if args.get(1).map(String::as_str) == Some("store") {
+        std::process::exit(run_store_cli(&args));
+    }
+
     // INFRA-2028: every `gh` subprocess chump spawns inherits this process's
     // env, but a subprocess spawned by chump doesn't get the macOS keychain
     // entitlement an interactive shell's `gh` has — so `gh` silently falls
@@ -22666,6 +22675,73 @@ fn default_acceptance_criteria(title: &str, domain: &str) -> Vec<String> {
         "At least one test (cargo test or scripts/ci/test-*.sh) proves the new behavior and fails without the change.".to_string(),
         "cargo fmt + clippy --all-targets -D warnings + check pass; no regression to existing tests.".to_string(),
     ]
+}
+
+/// INFRA-8222: thin CLI over `chump_gap_store::reconcile`.
+fn run_store_cli(args: &[String]) -> i32 {
+    use chump_gap_store::reconcile as rc;
+    let usage = "usage: chump store reconcile --from <db> --into <db> [--dry-run] \
+                 [--audit <path>] [--force-offline] [--skip-new-open] [--json]";
+    if args.get(2).map(String::as_str) != Some("reconcile") {
+        eprintln!("{usage}");
+        return 2;
+    }
+    let val = |name: &str| -> Option<String> {
+        args.windows(2)
+            .find(|w| w[0] == name)
+            .and_then(|w| w.get(1))
+            .cloned()
+    };
+    let has = |name: &str| args.iter().any(|a| a == name);
+    let (Some(from), Some(into)) = (val("--from"), val("--into")) else {
+        eprintln!("{usage}");
+        return 2;
+    };
+    let opts = rc::ReconcileOptions {
+        from: std::path::PathBuf::from(from),
+        into: std::path::PathBuf::from(&into),
+        dry_run: has("--dry-run"),
+        force_offline: has("--force-offline"),
+        skip_new_open: has("--skip-new-open"),
+    };
+    let report = match rc::reconcile(&opts) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("chump store reconcile: {e:#}");
+            return if format!("{e}").contains("active writer") {
+                3
+            } else {
+                1
+            };
+        }
+    };
+    let audit = val("--audit")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(format!(
+                "{into}.reconcile-audit-{}.json",
+                chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+            ))
+        });
+    if let Err(e) = rc::write_audit(&report, &audit) {
+        eprintln!("chump store reconcile: {e:#}");
+        return 1;
+    }
+    rc::emit_store_reconciled(
+        &report,
+        &audit,
+        &rc::locks_dir_for(&opts.into).join("ambient.jsonl"),
+    );
+    if has("--json") {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).unwrap_or_default()
+        );
+    } else {
+        print!("{}", report.summary());
+        println!("  audit: {}", audit.display());
+    }
+    0
 }
 
 #[cfg(test)]

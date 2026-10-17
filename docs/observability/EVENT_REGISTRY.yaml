@@ -14101,3 +14101,11 @@ events:
     trigger: node-wide admission ceiling hit — a `claude -p` or cargo/rustc spawn was deferred because the live count was >= CHUMP_MAX_CONCURRENT_CLAUDE / CHUMP_MAX_CONCURRENT_CARGO_JOBS (outcome=deferred on entry, outcome=timeout when the bounded wait fails open)
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, resource, active, ceiling, waited_s, outcome]
+  - kind: store_reconciled
+    status: active
+    effect_metric: resilient
+    emitter: crates/chump-gap-store/src/reconcile.rs (emit_store_reconciled — INFRA-8222, called by `chump store reconcile`)
+    emitter_paths: [crates/chump-gap-store/src/reconcile.rs]
+    trigger: chump store reconcile merged (or dry-ran a merge of) a stale gap store into the live store; carries per-run totals and the audit JSON path
+    consumers: [ambient]
+    fields_required: [ts, kind, from, into, dry_run, inserted, updated, skipped, refused, conflicts, audit]
