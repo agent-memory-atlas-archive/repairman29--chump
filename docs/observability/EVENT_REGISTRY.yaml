@@ -3666,6 +3666,20 @@ events:
     fields_required: [ts, kind, session, gap_id, exit_code, reason, child_pid,
       child_alive_at_exit, duration_s]
 
+  - kind: dispatch_model_selected
+    effect_metric: self
+    emitter: src/dispatch_model_defaults.rs (chump dispatch — INFRA-8220)
+    trigger: a `chump dispatch <GAP>` invoked WITHOUT `--model` resolves a
+      layer-aware default by inspecting the gap's footprint (the `--paths`
+      lease scope + description path hints). Rust under src/ or crates/ →
+      opus + CHUMP_SUBAGENT_BUDGET_S=3600; shell/yaml/markdown only → sonnet +
+      1800. A concrete `model:` on the gap's matched docs/dispatch/routing.yaml
+      route overrides the heuristic (layer=routing_override). One event per
+      dispatch that applies a default; dispatches passing `--model` emit none.
+    consumers: [fleet-brief, dispatch-hygiene]
+    fields_required: [ts, kind, session, gap_id, model, budget_secs, layer,
+      reason]
+
   - kind: dispatch_orphan_reaped
     effect_metric: self
     emitter: scripts/coord/farmer.sh (reap_dispatch_orphans, INFRA-8198)
