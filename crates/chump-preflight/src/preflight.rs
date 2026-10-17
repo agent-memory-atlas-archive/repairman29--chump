@@ -2909,6 +2909,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "dispatch-work-stranded",
+            &["bash", "scripts/ci/test-dispatch-work-stranded.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-258-reaper-partial-delivery",
             &[
                 "bash",

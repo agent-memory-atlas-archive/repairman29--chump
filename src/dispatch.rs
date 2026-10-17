@@ -247,12 +247,28 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
     // happen exactly once, no matter which path was taken. This is the
     // fix for the bug where a dispatch could print nothing distinguishing
     // success/failure and exit 0 while its `claude -p` child kept running.
-    let result = if let Err(e) = do_work(&workspace) {
+    let work_result = do_work(&workspace);
+    // INFRA-8203: a work child that exited (or was killed) with its changes
+    // uncommitted and nothing committed above origin/main has stranded its
+    // work. Save it as <GAP>.stranded.patch and emit kind=dispatch_work_stranded
+    // instead of handing bot-merge a dirty tree to auto-commit.
+    let stranded = detect_stranded_work(&workspace);
+    let result = if let Err(e) = work_result {
         // Always release before propagating the error so a failed work
         // step doesn't leave a stale lease. INFRA-1243: use retry+emit path.
         release_with_retry(&workspace)?;
         ShipResult::Aborted {
             error: format!("work step failed: {e:#}"),
+        }
+    } else if let Some(s) = stranded {
+        release_with_retry(&workspace)?;
+        ShipResult::Aborted {
+            error: format!(
+                "work stranded: {} uncommitted path(s), no commit above origin/main; \
+                 patch saved to {} (INFRA-8203)",
+                s.files,
+                s.patch_path.display()
+            ),
         }
     } else {
         // Step 4: ship (calls bot-merge.sh in Phase 1; native in Phase 3).
@@ -965,6 +981,27 @@ fn spawn_local(ws: &Workspace, prompt: &str) -> Result<()> {
     Ok(())
 }
 
+/// INFRA-8203: tools a headless agent must not have. ScheduleWakeup and
+/// Monitor end the turn to wait for a later event; in `claude -p` no harness
+/// delivers it, so the process exits with the work uncommitted.
+const HEADLESS_DISALLOWED_TOOLS: &str = "ScheduleWakeup,Monitor";
+
+/// INFRA-8203: appended to every headless `claude -p` prompt, whatever built
+/// it (auto prompt, repair brief, operator `--prompt`).
+const HEADLESS_EPILOGUE: &str = "\n\n## Headless run rules (INFRA-8203)\n\
+- This is a headless `claude -p` run: ending your turn ENDS THE PROCESS and nothing will wake you. \
+ScheduleWakeup and Monitor are disabled; never wait on a background task or end a turn while work is pending.\n\
+- Wait synchronously: run the command in the foreground with a bounded timeout and read its result.\n\
+- COMMIT before any wait longer than 60 seconds (git add + commit, gap id leading the subject), \
+so a timeout or kill never strands your work.\n\
+- Bound every local build or test with a wall-clock cap (for example `timeout 900 cargo clippy ...`); \
+never start an unbounded build.\n";
+
+/// The prompt actually written to a headless child's stdin.
+fn headless_prompt(prompt: &str) -> String {
+    format!("{prompt}{HEADLESS_EPILOGUE}")
+}
+
 /// Builds the argv/stdio skeleton for a `claude -p` headless invocation,
 /// with no prompt, cwd, or credential env attached yet — split out from
 /// [`spawn_headless`] purely so the arg-construction is unit-testable
@@ -983,6 +1020,11 @@ fn spawn_local(ws: &Workspace, prompt: &str) -> Result<()> {
 fn headless_command_skeleton(model: &str) -> Command {
     let mut cmd = Command::new("claude");
     cmd.arg("-p").arg("--dangerously-skip-permissions");
+    // INFRA-8203: in `claude -p` nothing fires a wakeup — ending the turn
+    // ends the process — so the tools that end a turn to "wait" are removed.
+    // Probe on cuphead (claude 2.1.197): with this flag a haiku session lists
+    // NONE for tools named *Wakeup*/*Monitor*; without it, both are listed.
+    cmd.args(["--disallowedTools", HEADLESS_DISALLOWED_TOOLS]);
     cmd.stdin(std::process::Stdio::piped());
     if !model.is_empty() {
         cmd.args(["--model", model]);
@@ -1056,7 +1098,7 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
             .take()
             .context("claude -p stdin was not piped")?;
         stdin
-            .write_all(prompt.as_bytes())
+            .write_all(headless_prompt(prompt).as_bytes())
             .context("writing prompt to claude -p stdin")?;
         // Dropping `stdin` here closes the pipe (EOF), which is how `claude
         // -p` knows the prompt is complete and starts working.
@@ -1944,6 +1986,84 @@ fn emit_hang_detector_blind(process_name: &str, gap_id: &str, timeout_secs: u64,
     }
 }
 
+/// INFRA-8203: stranded-work detector (dirty worktree, no commit).
+#[path = "dispatch_stranded.rs"]
+mod stranded;
+
+/// INFRA-8203: run the stranded-work check for a dispatch that owns a fresh
+/// worktree (never for Interactive, which works in the caller's checkout,
+/// and never in review-only mode, which ships nothing). Emits
+/// `kind=dispatch_work_stranded` when it fires.
+fn detect_stranded_work(ws: &Workspace) -> Option<stranded::Stranded> {
+    let opts = ws.opts();
+    if matches!(opts.work, WorkBackend::Interactive) {
+        return None;
+    }
+    // A repair worktree starts at the PR head, so "no new commit" is
+    // measured against that branch rather than origin/main.
+    let base = match &opts.mode {
+        DispatchMode::Work => "origin/main".to_string(),
+        DispatchMode::Repair { head_branch } => format!("origin/{head_branch}"),
+        DispatchMode::ReviewOnly => return None,
+    };
+    match stranded::check_and_save(
+        ws.working_dir(),
+        opts.gap_id,
+        &base,
+        &stranded::dispatch_logs_dir(),
+    ) {
+        Ok(Some(s)) => {
+            eprintln!(
+                "[dispatch] {}: work stranded ({} uncommitted path(s), no commit above \
+                 origin/main); patch saved to {}",
+                opts.gap_id,
+                s.files,
+                s.patch_path.display()
+            );
+            emit_dispatch_work_stranded(opts.gap_id, &s);
+            Some(s)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            eprintln!(
+                "[dispatch] {}: INFRA-8203 stranded-work check failed: {e}",
+                opts.gap_id
+            );
+            None
+        }
+    }
+}
+
+/// INFRA-8203: emit `kind=dispatch_work_stranded`.
+fn emit_dispatch_work_stranded(gap_id: &str, s: &stranded::Stranded) {
+    let repo_root = crate::repo_path::runtime_base();
+    let lock_dir = repo_root.join(".chump-locks");
+    let _ = std::fs::create_dir_all(&lock_dir);
+    let ambient_path = std::env::var("CHUMP_AMBIENT_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| lock_dir.join("ambient.jsonl"));
+    let session = crate::ambient_stream::env_session_id().unwrap_or_else(|| "unknown".to_string());
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let stat: String = s.diffstat.chars().take(2000).collect();
+    let stat = serde_json::to_string(&stat).unwrap_or_else(|_| "\"\"".to_string());
+    let patch = serde_json::to_string(&s.patch_path.display().to_string())
+        .unwrap_or_else(|_| "\"\"".to_string());
+    // scanner anchor: "kind":"dispatch_work_stranded"
+    let line = format!(
+        "{{\"ts\":\"{ts}\",\"session\":\"{session}\",\"kind\":\"dispatch_work_stranded\",\
+         \"gap\":\"{gap_id}\",\"files\":{},\"diffstat\":{stat},\"patch\":{patch}}}",
+        s.files
+    );
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ambient_path)
+    {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+
 /// Find the `chump` binary. Tries the in-tree `target/release` and
 /// `target/debug` first (so `chump dispatch` always re-uses the same binary
 /// the user is invoking), then `$HOME/.local/bin/chump` (the cargo-install
@@ -2564,6 +2684,8 @@ mod tests {
             vec![
                 "-p",
                 "--dangerously-skip-permissions",
+                "--disallowedTools",
+                "ScheduleWakeup,Monitor",
                 "--model",
                 "claude-sonnet-4-6"
             ],
@@ -2576,7 +2698,43 @@ mod tests {
             .get_args()
             .map(|a| a.to_str().unwrap())
             .collect();
-        assert_eq!(args_no_model, vec!["-p", "--dangerously-skip-permissions"]);
+        assert_eq!(
+            args_no_model,
+            vec![
+                "-p",
+                "--dangerously-skip-permissions",
+                "--disallowedTools",
+                "ScheduleWakeup,Monitor"
+            ]
+        );
+    }
+
+    /// INFRA-8203 AC1 + AC3: headless children cannot schedule a wakeup or
+    /// monitor (flag), and the prompt epilogue forbids it, demands a commit
+    /// before any wait over 60s, and caps every local build.
+    #[test]
+    fn infra_8203_headless_disallows_wakeup_and_epilogue_says_commit_first() {
+        let args: Vec<String> = headless_command_skeleton("")
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let i = args
+            .iter()
+            .position(|a| a == "--disallowedTools")
+            .expect("--disallowedTools flag");
+        let denied: Vec<&str> = args[i + 1].split(',').collect();
+        assert!(denied.contains(&"ScheduleWakeup") && denied.contains(&"Monitor"));
+
+        let p = headless_prompt("do the gap");
+        assert!(p.starts_with("do the gap"));
+        for needle in [
+            "ending your turn ENDS THE PROCESS",
+            "ScheduleWakeup and Monitor are disabled",
+            "COMMIT before any wait longer than 60 seconds",
+            "wall-clock cap",
+        ] {
+            assert!(p.contains(needle), "epilogue missing {needle:?}");
+        }
     }
 
     #[test]

@@ -1335,6 +1335,9 @@ jobs:
       - name: farmer dispatch orphan reaper (INFRA-8198)
         run: bash scripts/ci/test-farmer-dispatch-orphan-reaper.sh
 
+      - name: dispatch headless wakeup tools disallowed + stranded work saved (INFRA-8203)
+        run: bash scripts/ci/test-dispatch-work-stranded.sh
+
       - name: commit-msg docs-delta trailer check (INFRA-1969)
         run: bash scripts/ci/test-docs-delta-commit-msg.sh
 
