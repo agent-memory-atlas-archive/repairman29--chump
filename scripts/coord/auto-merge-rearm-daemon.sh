@@ -22,6 +22,9 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 
 # github_cache.sh may not be needed for direct gh calls but source for
 # chump_gh criticality tag pattern
@@ -116,7 +119,9 @@ PYEOF
         count_armed=$((count_armed + 1))
       else
         # gh pr merge is a critical-path write — no BACKGROUND tag
-        if gh pr merge "$pr" --auto --squash >/dev/null 2>&1; then
+        if ! arm_policy_allows "$pr" "auto-merge-rearm-daemon.sh"; then
+          echo "[auto-merge-rearm-daemon] held PR #${pr} (no-auto-merge / Auto-merge: hold) — not arming" >&2
+        elif gh pr merge "$pr" --auto --squash >/dev/null 2>&1; then
           _emit "auto_merge_rearmed" "$pr" "armed"
           echo "[auto-merge-rearm-daemon] armed PR #${pr}: ${title}" >&2
           count_armed=$((count_armed + 1))

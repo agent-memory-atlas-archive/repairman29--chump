@@ -322,6 +322,17 @@ gh run list --branch <BRANCH> --json databaseId,name,conclusion \
 5. Ship normally with `scripts/coord/bot-merge.sh`.
 **Receipt.** CREDIBLE-205 / PR #3491 shipped this way. Cross-reference: the gate lives in `scripts/coord/bot-merge.sh` (INFRA-3532, regression test `scripts/ci/test-botmerge-poisoned-branch.sh`).
 
+## Class 13 — a deliberate disarm is undone by an arm sweeper
+
+**Symptom.** You run `gh pr merge <N> --disable-auto` on purpose (a PR must not land yet) and within half an hour the timeline shows `auto_squash_enabled` again, attributed to the fleet's own token. Every armer (bot-merge, the sweeper, rebasers, rescuers, revivers) used to decide on its own whether a PR was "held", and most never checked.
+**Receipt.** #5494 (CREDIBLE-1496): disarmed by the architect at 02:27Z with an explaining comment; force-pushed at 02:52:27Z and re-armed at 02:52:37Z by `scripts/ops/pr-repair-rebase.sh` (worker loop, 30-min cooldown: the same push-then-arm pair at 02:20 and 03:26). RESILIENT-1613.
+**Hold a PR (the one way).** Add the label `no-auto-merge`, or put a line `Auto-merge: hold` (case-insensitive, optional reason after it) in the PR body or any comment. Disarming alone is not enough: GitHub also disarms on every failed required check, so a bare disarm is indistinguishable from gate noise.
+```bash
+gh pr edit <N> --add-label no-auto-merge && gh pr merge <N> --disable-auto
+```
+**Release.** Remove the label (`gh pr edit <N> --remove-label no-auto-merge`) or edit the marker line out; the next armer tick re-arms.
+**How it is enforced.** `scripts/coord/lib/arm-policy.sh` `arm_policy_allows <pr> [armer] [repo]` is called by every shell armer (gate: `scripts/ci/test-arm-policy.sh`, allowlist `scripts/ci/arm-policy-allowlist.txt`, shrink-only). Legacy labels `hold`, `do-not-merge` and `CHUMP_HOLD` are honored too. A blocked arm emits `kind=pr_arm_skipped_hold`; an arm that undoes a disarm emits `kind=pr_rearmed` naming the armer (`auto-merge-armer.sh<-<caller>`), so `grep pr_rearmed .chump-locks/ambient.jsonl` names the next re-arm war's source.
+
 ## Maintenance
 
 This playbook should be **updated whenever a new wedge class is discovered** (new entry in §1), a **new ship-assist tool ships** (entry added to §2), or a **lesson-learning gap closes** (move from §4/§5 in-flight to §6 shipped + cross-link the doc to the fix's PR).

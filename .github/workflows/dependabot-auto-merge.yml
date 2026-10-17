@@ -39,6 +39,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: |
+          # RESILIENT-1613: one arm policy. A `no-auto-merge` label (or a legacy
+          # hold label) means a human disarmed this PR on purpose; never re-arm.
+          # (Mirrors scripts/coord/lib/arm-policy.sh for the label half; the
+          # `Auto-merge: hold` marker is checked in the body and comments too.)
+          held="$(gh pr view "$PR" --repo "${{ github.repository }}" --json labels,body,comments \
+            --jq '([.labels[].name | ascii_downcase | select(. == "no-auto-merge" or . == "hold" or . == "do-not-merge" or . == "chump_hold")] | length) + ([.body, .comments[].body] | map(select(. != null and test("(?im)^[ \\t]*auto-merge:[ \\t]*hold\\b"))) | length)' \
+            2>/dev/null || echo 0)"
+          if [ "${held:-0}" != "0" ]; then
+            echo "PR #$PR is held (no-auto-merge / Auto-merge: hold) — not arming."
+            exit 0
+          fi
           # Idempotent: re-running is a no-op if auto-merge is already armed.
           # `--auto` waits for required checks; `--squash` matches the
           # repo's default merge strategy (see .github/CODEOWNERS / branch

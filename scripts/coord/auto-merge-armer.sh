@@ -26,6 +26,25 @@ source "${SCRIPT_DIR}/lib/github.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/ambient-write.sh"
 export CHUMP_GH_SCRIPT="auto-merge-armer.sh"
+# RESILIENT-1613: the one arm policy — a `no-auto-merge` label (or legacy hold
+# label) or an `Auto-merge: hold` body/comment line is a decision, not a fault.
+# shellcheck source=lib/arm-policy.sh
+source "${SCRIPT_DIR}/lib/arm-policy.sh"
+
+# RESILIENT-1613: name the caller in pr_arm_skipped_hold / pr_rearmed so a
+# re-arm war is attributable to the organ that started it, not just to the
+# armer every organ routes through.
+_armer_caller() {
+    local cmd
+    cmd="$(ps -o command= -p "${PPID}" 2>/dev/null || true)"
+    cmd="$(printf '%s' "${cmd}" | tr ' ' '\n' | grep -E '\.(sh|py)$' | head -1 || true)"
+    if [[ -n "${cmd}" ]]; then
+        printf 'auto-merge-armer.sh<-%s' "$(basename "${cmd}")"
+    else
+        printf 'auto-merge-armer.sh'
+    fi
+}
+ARMER_NAME="$(_armer_caller)"
 
 # INFRA-1113: min wall-clock seconds between successive gh pr merge --auto calls.
 ARM_SPACING_S="${CHUMP_AUTO_MERGE_SPACING_S:-5}"
@@ -480,6 +499,14 @@ for PR_NUM in "${PR_NUMS[@]}"; do
         echo "[auto-merge-armer] PR #${PR_NUM} in backoff until ${_bo_until_human} (${_remaining}s remaining) — skipping."
         emit_ambient "bot_merge_backoff_skipped" "${PR_NUM}" \
             "remaining_s=${_remaining} until=${_bo_until_human} script=auto-merge-armer.sh"
+        LAST_ARM_TS="$(date -u +%s)"
+        continue
+    fi
+
+    # RESILIENT-1613: honor a deliberate hold BEFORE any arm or REST-direct
+    # merge. arm_policy_allows emits pr_arm_skipped_hold when it blocks.
+    if ! arm_policy_allows "${PR_NUM}" "${ARMER_NAME}" "${REPO}"; then
+        echo "[auto-merge-armer] PR #${PR_NUM}: held (no-auto-merge / Auto-merge: hold) — skipping."
         LAST_ARM_TS="$(date -u +%s)"
         continue
     fi

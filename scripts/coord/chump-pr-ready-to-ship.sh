@@ -14,6 +14,10 @@
 
 set -euo pipefail
 
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
+
 LIMIT="${CHUMP_READY_TO_SHIP_LIMIT:-200}"
 MODE="${1:-}"
 
@@ -69,6 +73,10 @@ _arm_all() {
     if [[ "$auto_merge" != "null" && -n "$auto_merge" ]]; then
       echo "  PR #${pr} already armed — skipping: ${title}" >&2
       already=$((already + 1))
+      continue
+    fi
+    if ! arm_policy_allows "$pr" "chump-pr-ready-to-ship.sh"; then
+      echo "  PR #${pr} held (no-auto-merge / Auto-merge: hold) — skipping: ${title}" >&2
       continue
     fi
     if gh pr merge "$pr" --auto --squash >/dev/null 2>&1; then

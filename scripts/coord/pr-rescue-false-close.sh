@@ -42,6 +42,9 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${CHUMP_HOME:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 
 repo_arg=""
@@ -114,7 +117,9 @@ comment_body="Recovered from false close via \`pr-rescue-false-close.sh\` (INFRA
 gh pr comment "$PR" $repo_arg --body "$comment_body" >/dev/null 2>&1 || true
 
 # Re-arm auto-merge via the INFRA-1439 wrapper (verifies post-arm).
-if [[ -x "$SCRIPT_DIR/arm-auto-merge.sh" ]]; then
+if ! arm_policy_allows "$PR" "pr-rescue-false-close.sh" "${REPO:-}"; then
+    echo "[pr-rescue] PR #$PR is held (no-auto-merge / Auto-merge: hold) — reopened, NOT re-armed."
+elif [[ -x "$SCRIPT_DIR/arm-auto-merge.sh" ]]; then
     arm_args=("$PR")
     [[ -n "$REPO" ]] && arm_args+=(--repo "$REPO")
     [[ "$NO_SQUASH" -eq 1 ]] && arm_args+=(--no-squash)

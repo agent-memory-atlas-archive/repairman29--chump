@@ -38,6 +38,10 @@ if [[ -z "$REPO_ROOT" ]]; then
 fi
 cd "$REPO_ROOT"
 
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../coord/lib/arm-policy.sh"
+
 command -v gh >/dev/null 2>&1 || { echo "[pr-repair] gh CLI not found" >&2; exit 1; }
 
 MAX_PRS="${PR_REPAIR_MAX_PRS:-5}"
@@ -170,9 +174,18 @@ while IFS='|' read -r pr_num branch created_at has_auto_merge; do
             # INFRA-1223: route through centralized armer (5s spacing +
             # secondary-rate-limit backoff). Repair loops are a common
             # path to user-account mutation-limit penalties.
+            # RESILIENT-1613: this push-then-arm pair is the 30-min-cooldown
+            # re-armer that undid the architect's 02:27Z disarm of #5494 at
+            # 02:52:37Z (force-push 02:52:27Z). A rebase repairs a branch; it
+            # never overrides a hold. (The armer re-checks; this keeps the log
+            # honest instead of claiming an arm that did not happen.)
             if [[ "$has_auto_merge" == "false" ]]; then
-                "${REPO_ROOT}/scripts/coord/auto-merge-armer.sh" --pr "$pr_num" 2>/dev/null || true
-                log "  armed auto-merge on #$pr_num"
+                if arm_policy_allows "$pr_num" "pr-repair-rebase.sh"; then
+                    "${REPO_ROOT}/scripts/coord/auto-merge-armer.sh" --pr "$pr_num" 2>/dev/null || true
+                    log "  armed auto-merge on #$pr_num"
+                else
+                    log "  #$pr_num held (no-auto-merge / Auto-merge: hold) — rebased, NOT armed"
+                fi
             fi
         else
             log "  FAIL: rebase succeeded but push failed for $branch"

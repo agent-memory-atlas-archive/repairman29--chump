@@ -81,6 +81,8 @@ _ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # `gh pr merge ...` line here trips the raw-gh-in-hot-paths lint gate.
 _arm_pr() {
     local num="$1"
+    # RESILIENT-1613: a resolved conflict is not a licence to undo a hold.
+    arm_policy_allows "$num" "conflict-resolution-consumer.sh" "$REPO" || return 1
     if command -v chump_gh >/dev/null 2>&1; then
         chump_gh pr merge "$num" --repo "$REPO" --auto --squash >/dev/null 2>&1
     else
@@ -196,6 +198,9 @@ git fetch origin main --quiet 2>/dev/null || true
 
 # shellcheck disable=SC1091
 . "$ROOT/scripts/coord/lib/github.sh" 2>/dev/null || true  # INFRA-1080: chump_gh throttling for the arm call
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 
 # ── candidate discovery ────────────────────────────────────────────────────
 # 1. PRs flagged via armed_pr_needs_conflict_resolution (from armed-pr-rebaser.sh)

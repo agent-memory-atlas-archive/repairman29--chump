@@ -3512,3 +3512,5 @@ CHUMP_DISPATCH_ORPHAN_GRACE_S
 # detected in: (standard input)
 CHUMP_FLEET_DOCTOR_MIN_RUNNERS
 CHUMP_AUTO_MERGE_REST_DIRECT
+# RESILIENT-1613: arm policy re-arm audit toggle (scripts/coord/lib/arm-policy.sh)
+CHUMP_ARM_POLICY_REARM_AUDIT

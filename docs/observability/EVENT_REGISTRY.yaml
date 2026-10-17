@@ -4734,6 +4734,38 @@ events:
     status: stable
     # payload: {pr: number (optional), reason: string, ts: string}
 
+  - kind: pr_arm_skipped_hold
+    effect_metric: resilient
+    emitter: scripts/coord/lib/arm-policy.sh arm_policy_allows (RESILIENT-1613)
+    trigger: >
+      An armer asked the shared arm policy for permission and was refused
+      because the PR is deliberately held: it carries the `no-auto-merge`
+      label (or a legacy hold label hold / do-not-merge / CHUMP_HOLD), or
+      its body or a comment has a line matching `^Auto-merge: hold`. A
+      human or architect disarm is a decision, not a fault (PHASE-R R3).
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, armer, reason, source]
+    expected_volume: "0-N per armer tick while a PR is held"
+    status: stable
+    # payload: {pr: number, armer: string, reason: "label:<name>"|"marker:body"|"marker:comment", source: "cache"|"gh", ts: string}
+
+  - kind: pr_rearmed
+    effect_metric: credible
+    emitter: scripts/coord/lib/arm-policy.sh arm_policy_allows (RESILIENT-1613)
+    trigger: >
+      An armer is about to enable auto-merge on a PR whose most recent
+      auto-merge timeline event is auto_merge_disabled, i.e. it is undoing a
+      disarm. Names the armer (auto-merge-armer.sh records its caller as
+      auto-merge-armer.sh<-<script>) and the disarm actor. GitHub attributes
+      check-failure disarms to the enabling token (INFRA-8178), so
+      disarm_actor alone does not prove a human disarm; this is the audit
+      trail, the no-auto-merge label is the enforcement.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, armer, disarm_actor, disarmed_at]
+    expected_volume: "0-N; routine after gate-triggered disarms, a page-worthy pattern when one PR repeats"
+    status: stable
+    # payload: {pr: number, armer: string, disarm_actor: string, disarmed_at: string, ts: string}
+
   # ── Free-tier dispatch testing ─────────────────────────────────────────
   - kind: free_tier_e2e
     effect_metric: self

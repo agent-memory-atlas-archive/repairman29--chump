@@ -1024,6 +1024,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # INFRA-6128: shared execution logging (start/end/step) to a central log.
 # shellcheck source=../lib/orchestrator-log.sh
 source "$SCRIPT_DIR/../lib/orchestrator-log.sh"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# (The main arm step routes through auto-merge-armer.sh, which applies it too.)
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$SCRIPT_DIR/lib/arm-policy.sh"
 orch_log_start "bot-merge.sh" "$@"
 
 # ── INFRA-305: hot-file rebase-loop expectation list ─────────────────────────
@@ -2036,7 +2040,9 @@ if [[ "${CHUMP_BOT_MERGE_RECOVERY_MODE:-0}" == "1" ]]; then
 
     if [[ -n "$_recover_pr_num" && "${AUTO_MERGE:-0}" == "1" ]]; then
         stage_start "recovery: arm auto-merge"
-        gh pr merge "$_recover_pr_num" --auto --squash 2>/dev/null || true
+        if arm_policy_allows "$_recover_pr_num" "bot-merge.sh(recovery)"; then
+            gh pr merge "$_recover_pr_num" --auto --squash 2>/dev/null || true
+        fi
         stage_done
         info "INFRA-1422: PR #$_recover_pr_num armed for auto-merge (recovery path)"
     fi

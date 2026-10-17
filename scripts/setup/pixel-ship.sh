@@ -74,6 +74,13 @@ if [ -z "$PR" ]; then
 fi
 
 echo "[pixel-ship] PR #$PR — arming auto-merge (squash)"
-gh pr merge "$PR" --repo "$REPO_SLUG" --auto --squash 2>&1 || true
+# RESILIENT-1613: an existing PR found by --head may have been disarmed on purpose.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "$0")/../coord/lib/arm-policy.sh"
+if arm_policy_allows "$PR" "pixel-ship.sh" "$REPO_SLUG"; then
+  gh pr merge "$PR" --repo "$REPO_SLUG" --auto --squash 2>&1 || true
+else
+  echo "[pixel-ship] PR #$PR is held (no-auto-merge / Auto-merge: hold) — not arming"
+fi
 echo "[pixel-ship] shipped gap=$GAP pr=$PR (auto-merge armed; CI gates the merge)"
 exit 0

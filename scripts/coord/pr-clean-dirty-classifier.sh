@@ -43,6 +43,9 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 LOCK_DIR="$REPO_ROOT/.chump-locks"
 mkdir -p "$LOCK_DIR" 2>/dev/null || true
 
@@ -132,7 +135,9 @@ while IFS=$'\t' read -r NUM BRANCH MSS ARMED TITLE; do
         if [[ "$DRY_RUN" == "1" ]]; then
             log "[dry-run] would run: gh pr merge $NUM --auto --squash"
         else
-            if gh pr merge "$NUM" --auto --squash >/dev/null 2>&1; then
+            if ! arm_policy_allows "$NUM" "pr-clean-dirty-classifier.sh"; then
+                log "PR #$NUM held (no-auto-merge / Auto-merge: hold) -> not arming"
+            elif gh pr merge "$NUM" --auto --squash >/dev/null 2>&1; then
                 # scanner-anchor: "kind":"pr_terminal_armed"
                 emit "pr_terminal_armed" "$NUM" "\"branch\":\"$BRANCH\""
                 ACTED=$((ACTED + 1))

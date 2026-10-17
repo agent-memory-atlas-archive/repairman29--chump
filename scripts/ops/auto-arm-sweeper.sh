@@ -68,7 +68,13 @@ ME="$(gh api user --jq '.login' 2>/dev/null || echo '')"
 
 STATE_FILE="${CHUMP_AUTOARM_STATE:-$REPO_ROOT/.chump-locks/auto-arm-state.tsv}"
 ARMER="${CHUMP_AUTOARM_ARMER:-${REPO_ROOT}/scripts/coord/auto-merge-armer.sh}"
-HOLD_LABELS_RE='^(hold|do-not-merge)$'
+# RESILIENT-1613: `no-auto-merge` is the canonical hold label; `hold`,
+# `do-not-merge` and `CHUMP_HOLD` stay honored. The shared policy
+# (scripts/coord/lib/arm-policy.sh) also reads the `Auto-merge: hold` marker
+# in the PR body/comments, which the label list here cannot see.
+HOLD_LABELS_RE='^(no-auto-merge|hold|do-not-merge|CHUMP_HOLD)$'
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../coord/lib/arm-policy.sh"
 
 ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 log() { printf '[auto-arm %s] %s\n' "$(ts)" "$*"; }
@@ -180,6 +186,12 @@ while IFS=$'\t' read -r num title is_draft merge_st has_auto labels sha; do
     # INFRA-1223: route through centralized armer so we inherit 5s spacing +
     # 60/120/240s secondary-rate-limit backoff. Sweeping in a loop without
     # the armer is the dominant agent-blowout failure mode.
+    # RESILIENT-1613: the shared policy (labels + body/comment marker).
+    if ! arm_policy_allows "$num" "auto-arm-sweeper.sh"; then
+        skipped_hold=$((skipped_hold + 1))
+        log "  PR#$num held (arm policy: no-auto-merge / Auto-merge: hold) — not arming"
+        continue
+    fi
     if "$ARMER" --pr "$num" >/dev/null 2>&1; then
         state_set "$num" "$sha" armed
         log "  PR#$num ARMED — '$title'"

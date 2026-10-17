@@ -24,6 +24,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 
 # ── Pure functions (no I/O) — testable in isolation ─────────────────────────
 
@@ -210,7 +213,9 @@ main() {
     # shellcheck disable=SC2086
     env ${env_prefix} git -C "${REPO_ROOT}" push --force-with-lease origin "HEAD:${head_ref}"
 
-    CHUMP_GH_CALL_CRITICALITY=background chump_gh pr merge "$pr_num" --auto --squash 2>/dev/null || true
+    if arm_policy_allows "$pr_num" "rescue-stale-pr.sh"; then
+        CHUMP_GH_CALL_CRITICALITY=background chump_gh pr merge "$pr_num" --auto --squash 2>/dev/null || true
+    fi
 
     elapsed_s=$(( $(date +%s) - start_ts ))
     local bypasses_json

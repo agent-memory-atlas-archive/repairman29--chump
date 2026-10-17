@@ -23,6 +23,9 @@ AMBIENT_LOG="${LOCKS_DIR}/ambient.jsonl"
 # shellcheck source=scripts/coord/lib/ambient-write.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/ambient-write.sh"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 
 RATE_PER_HOUR="${CHUMP_AM_WATCHER_RATE_PER_HOUR:-10}"
 REBASE_WINDOW_S="${CHUMP_AM_WATCHER_REBASE_WINDOW_S:-1800}"
@@ -170,6 +173,12 @@ while IFS= read -r pr_json; do
             continue
             ;;
     esac
+
+    # RESILIENT-1613: the shared policy (no-auto-merge label, legacy hold
+    # labels, Auto-merge: hold marker in body/comments).
+    if ! arm_policy_allows "${pr_num}" "auto-merge-arm-watcher.sh" "${REPO}"; then
+        continue
+    fi
 
     if ! _recent_auto_rebase "${head_sha}"; then
         log "PR #${pr_num}: no recent rebase event — skipping."

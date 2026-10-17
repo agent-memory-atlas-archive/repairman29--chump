@@ -131,6 +131,9 @@ source "$REPO_ROOT/scripts/coord/lib/github.sh"
 # another merge-mutation organ (serializer/armed-rebaser/keep-mergeable).
 # shellcheck source=scripts/coord/lib/merge-pipeline-lock.sh
 source "$REPO_ROOT/scripts/coord/lib/merge-pipeline-lock.sh"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 
 emit_tick() {
   local count="$1"
@@ -1402,6 +1405,10 @@ for p in prs:
           _emit_pr_action_taken "$pr_num" "arm_auto_merge" "" "$gap_id"
           arm_count=$((arm_count + 1))
         else
+          if ! arm_policy_allows "$pr_num" "pr-shepherd-daemon.sh"; then
+            _emit_pr_action_taken "$pr_num" "arm_auto_merge_skipped" "hold" "$gap_id"
+            continue
+          fi
           echo "[pr-shepherd-daemon] arming auto-merge PR #${pr_num} (${gap_id})" >&2
           local arm_exit=0
           chump_gh pr merge "$pr_num" --auto --squash 2>&1 || arm_exit=$?

@@ -33,6 +33,9 @@ set -uo pipefail
 
 # shellcheck source=../lib/orchestrator-log.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/orchestrator-log.sh"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 orch_log_start "pr-auto-rearm.sh" "$@"
 trap 'orch_log_end "pr-auto-rearm.sh" "$?"' EXIT
 
@@ -153,6 +156,10 @@ while IFS= read -r PR; do
     if [[ -n "$last" ]]; then
         echo "[pr-auto-rearm] SKIP #$PR — re-armed at $last (within ${THROTTLE_MIN}min throttle)"
         THROTTLED=$((THROTTLED + 1))
+        continue
+    fi
+    if ! arm_policy_allows "$PR" "pr-auto-rearm.sh"; then
+        echo "[pr-auto-rearm] SKIP #$PR — held (no-auto-merge / Auto-merge: hold)"
         continue
     fi
     echo "[pr-auto-rearm] re-arming #$PR..."

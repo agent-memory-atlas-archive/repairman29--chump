@@ -104,6 +104,9 @@ source "${SCRIPT_DIR}/lib/github.sh"
 # INFRA-1241: route ambient appends through helper (surfaces errors to stderr).
 # shellcheck source=lib/ambient-write.sh
 source "${SCRIPT_DIR}/lib/ambient-write.sh"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 export CHUMP_GH_SCRIPT="pr-rescue.sh"
 # shellcheck source=../lib/orchestrator-log.sh
 source "${SCRIPT_DIR}/../lib/orchestrator-log.sh"
@@ -320,7 +323,9 @@ This is automated and happens at most once per head SHA." \
                 # timeline shows auto_merge_disabled at the close. Re-arming is
                 # not optional: without it a stalled PR becomes a green PR that
                 # sits forever, which is a quieter failure than the original.
-                if chump_gh pr merge "${PR_NUM}" --repo "${REPO}" --auto --squash >/dev/null 2>&1; then
+                if ! arm_policy_allows "${PR_NUM}" "pr-rescue.sh" "${REPO}"; then
+                    log "PR #${PR_NUM}: re-fired; held (no-auto-merge / Auto-merge: hold) so NOT re-armed."
+                elif chump_gh pr merge "${PR_NUM}" --repo "${REPO}" --auto --squash >/dev/null 2>&1; then
                     log "PR #${PR_NUM}: re-fired and auto-merge re-armed."
                 else
                     log "PR #${PR_NUM}: re-fired, but AUTO-MERGE RE-ARM FAILED — needs a human."

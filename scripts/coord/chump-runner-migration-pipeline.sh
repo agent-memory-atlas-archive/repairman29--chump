@@ -29,6 +29,9 @@ set -euo pipefail
 
 # shellcheck source=lib/github_cache.sh
 source "$(dirname "$0")/lib/github_cache.sh"
+# RESILIENT-1613: one arm policy — honor `no-auto-merge` / `Auto-merge: hold`.
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 
 REPO_OWNER="${CHUMP_REPO_OWNER:-repairman29}"
 REPO_NAME="${CHUMP_REPO_NAME:-chump}"
@@ -153,7 +156,8 @@ Rust-First-Bypass: YAML opt-in toggle, no shell mutation." --no-verify
     --body "Auto-pushed by chump-runner-migration-pipeline.sh after stage 0 gate (fast-checks-on-self-hosted) cleared.")
   local pr_num
   pr_num=$(echo "$pr_url" | grep -oE '[0-9]+$')
-  chump_gh pr merge "$pr_num" -R "$REPO_OWNER/$REPO_NAME" --auto --squash >/dev/null 2>&1 || true
+  arm_policy_allows "$pr_num" "chump-runner-migration-pipeline.sh" "$REPO_OWNER/$REPO_NAME" \
+    && chump_gh pr merge "$pr_num" -R "$REPO_OWNER/$REPO_NAME" --auto --squash >/dev/null 2>&1 || true
   emit "stage_1_migrate_clippy" "pr_armed" "$pr_url"
   log "  stage 1 PR: $pr_url"
 }
@@ -193,7 +197,8 @@ PY
     --title "feat(INFRA-1535 stage 2): migrate cargo-test to self-hosted opt-in" \
     --body "Auto-pushed after stage 1 (clippy) cleared. Cargo test = the heaviest shard; biggest wallclock savings from M4 routing.")
   pr_num=$(echo "$pr_url" | grep -oE '[0-9]+$')
-  chump_gh pr merge "$pr_num" -R "$REPO_OWNER/$REPO_NAME" --auto --squash >/dev/null 2>&1 || true
+  arm_policy_allows "$pr_num" "chump-runner-migration-pipeline.sh" "$REPO_OWNER/$REPO_NAME" \
+    && chump_gh pr merge "$pr_num" -R "$REPO_OWNER/$REPO_NAME" --auto --squash >/dev/null 2>&1 || true
   emit "stage_2_migrate_cargo_test" "pr_armed" "$pr_url"
   log "  stage 2 PR: $pr_url"
 }
@@ -238,7 +243,8 @@ Note: M4 needs 'brew install chromedriver' before this lights up."  --no-verify
     --title "feat(INFRA-1535 stage 3): migrate ACP smoke to self-hosted opt-in" \
     --body "Auto-pushed after stage 2 (cargo-test) cleared. Requires chromedriver installed on M4.")
   pr_num=$(echo "$pr_url" | grep -oE '[0-9]+$')
-  chump_gh pr merge "$pr_num" -R "$REPO_OWNER/$REPO_NAME" --auto --squash >/dev/null 2>&1 || true
+  arm_policy_allows "$pr_num" "chump-runner-migration-pipeline.sh" "$REPO_OWNER/$REPO_NAME" \
+    && chump_gh pr merge "$pr_num" -R "$REPO_OWNER/$REPO_NAME" --auto --squash >/dev/null 2>&1 || true
   emit "stage_3_migrate_acp_smoke" "pr_armed" "$pr_url"
   log "  stage 3 PR: $pr_url"
 }

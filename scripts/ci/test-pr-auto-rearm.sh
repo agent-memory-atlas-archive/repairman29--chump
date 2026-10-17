@@ -77,6 +77,9 @@ SYN="$TMP/syn-repo"
 mkdir -p "$SYN/scripts/coord" "$SYN/scripts/dev" "$SYN/.chump-locks"
 (cd "$SYN" && git init -q)
 cp "$TARGET" "$SYN/scripts/coord/pr-auto-rearm.sh"
+# RESILIENT-1613: pr-auto-rearm.sh sources the shared arm policy.
+mkdir -p "$SYN/scripts/coord/lib"
+cp "$(dirname "$TARGET")/lib/arm-policy.sh" "$SYN/scripts/coord/lib/arm-policy.sh"
 
 # Mock ambient-emit too (so the real version isn't called)
 cat > "$SYN/scripts/dev/ambient-emit.sh" <<'MOCK'

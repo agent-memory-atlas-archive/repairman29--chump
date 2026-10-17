@@ -33,6 +33,7 @@ For UI / CLI / docs changes, also describe what you exercised manually. -->
 - [ ] If this adds a `docs/*.md` file: deleted one, OR included a `Net-new-docs: <reason>` trailer ([INFRA-009](docs/audits/RED_LETTER.md))
 - [ ] Touched `web/v2/**`? Checked [`docs/design/PWA_STYLE_GUIDE.md`](docs/design/PWA_STYLE_GUIDE.md) for token/breakpoint/composition rules (INFRA-1593)
 - [ ] Targets `main`; will land via the merge queue (`bot-merge.sh --auto-merge` or `gh pr merge --auto --squash`)
+- [ ] Must NOT auto-merge yet? Add the `no-auto-merge` label or a line `Auto-merge: hold` here; every fleet armer honors it (RESILIENT-1613)
 
 ## Notes for reviewers
 

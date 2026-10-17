@@ -1,0 +1,13 @@
+# scripts/ci/arm-policy-allowlist.txt — RESILIENT-1613
+#
+# Shell files that call `gh pr merge ... --auto` WITHOUT sourcing
+# scripts/coord/lib/arm-policy.sh and calling arm_policy_allows.
+# Read by scripts/ci/test-arm-policy.sh.
+#
+# SHRINK-ONLY. Every line is a debt with a reason; delete the line in the
+# same PR that wires the helper into the file. Never add a new entry to make
+# the gate green: wire the helper instead.
+#
+# Format: <repo-relative path>   # reason: <why>
+scripts/coord/armed-pr-rebaser.sh   # reason: owned by CREDIBLE-1510 (queue-aware skip) in flight; gets the arm_policy_allows call in the follow-up after it lands
+scripts/coord/oracle-refresh.sh     # reason: arms the PR it opened one line earlier on a fresh per-run branch (no PR number in hand, no prior human decision can exist)
