@@ -1196,6 +1196,9 @@ jobs:
       - name: bot-merge auto-commit HEAD race (INFRA-8202)
         run: bash scripts/ci/test-bot-merge-auto-commit-head-race.sh
 
+      - name: bot-merge dispatch --paths overflow preserve (RESILIENT-1610)
+        run: bash scripts/ci/test-bot-merge-paths-overflow.sh
+
       - name: subagent budget kill — parent-enforced SIGTERM+grace+SIGKILL (INFRA-1972)
         run: bash scripts/ci/test-subagent-budget-kill.sh
 

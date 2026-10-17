@@ -2643,6 +2643,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "bot-merge-paths-overflow",
+            &["bash", "scripts/ci/test-bot-merge-paths-overflow.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-257-doc-only-guards",
             &["bash", "scripts/ci/test-infra-257-doc-only-guards.sh"],
             GateKind::Scripts,

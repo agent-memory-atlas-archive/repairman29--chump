@@ -2483,22 +2483,35 @@ commit needs a different message, amend after ship lands or split
 the PR.
 
 Bypass: CHUMP_BOT_MERGE_AUTO_COMMIT_M=0 to opt out (handles staging manually)."
-        # INFRA-8202 AC3: refuse to auto-commit any staged path the dispatch
-        # lease didn't scope us to — closes the MISSION-111.yaml collateral-
-        # deletion class (a sibling organ's edit landing in OUR commit).
+        # INFRA-8202 AC3 + RESILIENT-1610: classify staged paths outside the
+        # dispatch lease instead of refusing wholesale. A path outside the
+        # lease is ALLOWED (committed with the in-scope work) when it sits in
+        # the same crate (crates/<name>/) or the src/ tree as a leased path,
+        # OR when no OTHER live lease claims it — this is what the old hard
+        # commit fence lost (three Rust dispatches: a crates/chump-gap-store
+        # lease whose diff also touched src/main.rs). Only a REAL collision
+        # (a docs/gaps/*.yaml deletion — the MISSION-111 collateral class — or
+        # a path some other live lease owns) is pulled out: it is preserved on
+        # refs/stash/<gap-id> (git update-ref after a temp commit, so the work
+        # is never lost), the in-scope paths are committed, and
+        # kind=dispatch_paths_overflow is emitted with the preserved list.
         _bm_staged_for_commit="$(git diff --cached --name-only 2>/dev/null)"
         _bm_lease_file="$(_bm_resolve_lease_file)"
-        _bm_stray="$(_bm_stray_staged_paths "$_bm_lease_file" "$_bm_staged_for_commit")"
-        if [[ -n "$_bm_stray" ]]; then
-            red "INFRA-8202: refusing auto-commit — staged paths outside the dispatch lease: $(printf '%s' "$_bm_stray" | tr '\n' ' ')"
-            exit 4
+        _bm_gap_for_overflow="${GAP_IDS[0]:-${GAP_ID:-unknown}}"
+        _bm_collisions="$(_bm_collision_staged_paths "$_bm_lease_file" "$_bm_gap_for_overflow" "$_bm_staged_for_commit")"
+        if [[ -n "$_bm_collisions" ]]; then
+            _bm_preserve_and_drop_collisions "$_bm_gap_for_overflow" "$_bm_collisions"
+            _bm_staged_for_commit="$(git diff --cached --name-only 2>/dev/null)"
         elif [[ -z "$_bm_lease_file" ]]; then
             info "INFRA-8202: no dispatch lease found — staged for auto-commit: $(printf '%s' "$_bm_staged_for_commit" | tr '\n' ' ')"
         fi
+        # After pulling any collisions out, there may be nothing in-scope left.
+        if git diff --cached --quiet 2>/dev/null; then
+            info "RESILIENT-1610: all staged paths were preserved as overflow — nothing in-scope to auto-commit"
         # INFRA-8202 AC1: a sibling organ (pr-auto-rebase / merge-serializer)
         # can move HEAD out from under this commit mid-hook-run — retry once
         # with the same staged-path list instead of stranding the work.
-        if _bm_auto_commit_with_retry "$_autostage_msg" "$_bm_staged_for_commit"; then
+        elif _bm_auto_commit_with_retry "$_autostage_msg" "$_bm_staged_for_commit"; then
             green "INFRA-472: auto-committed pre-rebase changes"
         else
             red "INFRA-472: auto-commit failed — pre-commit hook rejected the changes."

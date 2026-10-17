@@ -6585,6 +6585,19 @@ events:
       lax mode is auditable.
     consumers: [fleet-brief, waste-tally]
     fields_required: [ts, kind, gap]
+  # ── RESILIENT-1610: dispatch --paths overflow preserved on a stash ref ───
+  - kind: dispatch_paths_overflow
+    effect_metric: self
+    emitter: scripts/coord/lib/bot-merge-autocommit.sh RESILIENT-1610
+    trigger: bot-merge's auto-commit found staged paths outside the dispatch
+      lease that genuinely collide (a docs/gaps/*.yaml deletion, or a path
+      another live lease owns). Instead of refusing the whole commit (the old
+      INFRA-8202 fence, which lost finished work in three Rust dispatches), the
+      colliding paths are preserved on refs/stash/<gap-id> and the in-scope
+      paths are committed. Crate-/src-sibling and unclaimed paths are allowed
+      through and are NOT reported here.
+    consumers: [fleet-brief, waste-tally]
+    fields_required: [ts, kind, gap_id, paths]
   # ── CREDIBLE-058: branch-protection / workflow-job alignment ─────────────
   - kind: branch_protection_drift
     effect_metric: self
