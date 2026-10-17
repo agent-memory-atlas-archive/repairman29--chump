@@ -1109,6 +1109,8 @@ pub struct KpiReport {
     pub green_first_try: GreenFirstTrySection,
     pub time_to_land: TimeToLandSection,
     pub gate_false_positive: GateFalsePositiveSection,
+    /// CREDIBLE-1512: CI runner pickup-latency (p50/p95 per hour) + queued count.
+    pub ci_pickup: crate::ci_pickup::CiPickupReport,
 }
 
 impl KpiReport {
@@ -1136,12 +1138,14 @@ impl KpiReport {
         out.push_str(&self.time_to_land.render_text());
         out.push('\n');
         out.push_str(&self.gate_false_positive.render_text());
+        out.push('\n');
+        out.push_str(&self.ci_pickup.render_text());
         out
     }
 
     pub fn render_json(&self) -> String {
         format!(
-            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{}}}"#,
+            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"ci_pickup":{}}}"#,
             self.ship_rate.render_json(),
             self.mission_history.render_json(),
             self.cost_savings.render_json(),
@@ -1152,6 +1156,7 @@ impl KpiReport {
             self.green_first_try.render_json(),
             self.time_to_land.render_json(),
             self.gate_false_positive.render_json(),
+            self.ci_pickup.render_json(),
         )
     }
 }
@@ -1393,6 +1398,8 @@ pub fn build_full_report(repo_root: &Path, window_days: u64) -> KpiReport {
         green_first_try: build_green_first_try_section(repo_root),
         time_to_land: build_time_to_land_section(repo_root),
         gate_false_positive: build_gate_false_positive_section(repo_root),
+        // CREDIBLE-1512: default 24h window for the embedded CI-pickup section.
+        ci_pickup: crate::ci_pickup::build_ci_pickup_report(repo_root, 24),
     }
 }
 

@@ -52,6 +52,11 @@ ChumpMenu/ChumpMenu.app/
 # Agent path-lease files (runtime only; never commit)
 .chump-locks/
 
+# CREDIBLE-1512: CI pickup-latency samples — runtime metrics written by
+# scripts/ci/ci-pickup-collect.sh (last-N-runs window, rewritten each collection),
+# read by `chump kpi report --ci-pickup`. Regenerable; never committed.
+.chump/metrics/
+
 # SQLite gap store — binary DB is not committed; only the compressed .lz4 is tracked
 .chump/state.db
 .chump/state.db-shm

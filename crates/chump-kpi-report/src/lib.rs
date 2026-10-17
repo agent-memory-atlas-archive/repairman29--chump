@@ -14,6 +14,7 @@
 //!     [`kpi_report::set_cost_fn`] — the same injection contract
 //!     `chump-waste-tally` uses (EFFECTIVE-411). This keeps the crate a clean
 //!     leaf that depends only on the two data crates above.
+pub mod ci_pickup;
 pub mod debt_index;
 pub mod kpi_report;
 pub mod live_pct;

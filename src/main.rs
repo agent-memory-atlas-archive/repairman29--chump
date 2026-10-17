@@ -1117,6 +1117,8 @@ fn print_help() {
     println!("  kpi report --agents  per-agent throughput (ships/fails/P50)");
     println!("  kpi report --agents --date YYYY-MM-DD  specific date");
     println!("  kpi report --claims  claim-lint bust-rate per model (CREDIBLE-208)");
+    println!("  kpi report --ci-pickup  CI runner pickup-latency p50/p95 per hour + ci_runs_queued (CREDIBLE-1512)");
+    println!("  kpi report --ci-pickup --emit-if-starved  emit kind=ci_runner_starved when p50 pickup > 10 min");
     println!(
         "  kpi report --debt-index  crown gauge (live_pct/debt/top-5 dormant) + NBA feed (CREDIBLE-357)"
     );
@@ -18368,8 +18370,47 @@ async fn main() -> Result<()> {
         let want_integration = args.iter().any(|a| a == "--integration");
         let want_mission_binary = args.iter().any(|a| a == "--mission-binary");
         let want_debt_index = args.iter().any(|a| a == "--debt-index");
+        let want_ci_pickup = args.iter().any(|a| a == "--ci-pickup");
 
         let repo_root = repo_path::repo_root();
+
+        // CREDIBLE-1512: --ci-pickup shows runner pickup-latency p50/p95 per hour
+        // + ci_runs_queued. With --emit-if-starved, writes kind=ci_runner_starved
+        // to ambient.jsonl when the trailing-30-min p50 exceeds 10 min (the
+        // detector that pages the operator on hosted-runner starvation). A
+        // periodic launchd/cron job runs `--ci-pickup --emit-if-starved`; the
+        // data is collected out-of-band by scripts/ci/ci-pickup-collect.sh.
+        if want_ci_pickup {
+            let window_hours = flag("--window")
+                .and_then(|w| {
+                    let w = w.trim();
+                    if let Some(h) = w.strip_suffix('h') {
+                        h.parse::<u64>().ok()
+                    } else if let Some(d) = w.strip_suffix('d') {
+                        d.parse::<u64>().ok().map(|d| d.saturating_mul(24))
+                    } else {
+                        w.parse::<u64>().ok()
+                    }
+                })
+                .unwrap_or(24);
+            let report =
+                chump_kpi_report::ci_pickup::build_ci_pickup_report(&repo_root, window_hours);
+            if args.iter().any(|a| a == "--emit-if-starved") {
+                match chump_kpi_report::ci_pickup::emit_runner_starved_if_needed(
+                    &repo_root, &report,
+                ) {
+                    Ok(true) => eprintln!("chump kpi report: emitted kind=ci_runner_starved"),
+                    Ok(false) => {}
+                    Err(e) => eprintln!("chump kpi report: ci_runner_starved emit failed: {e}"),
+                }
+            }
+            if want_json {
+                println!("{}", report.render_json());
+            } else {
+                print!("{}", report.render_text());
+            }
+            return Ok(());
+        }
 
         // MISSION-066: --mission-binary shows ① THE BINARY repeatability —
         // the current/longest zero-touch-BEAST-merge streak recorded by

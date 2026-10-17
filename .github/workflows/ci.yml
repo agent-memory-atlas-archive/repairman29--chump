@@ -139,6 +139,12 @@ jobs:
       ci_config_only: ${{ steps.lanes.outputs.ci_config_only }}
       scripts_only: ${{ steps.lanes.outputs.scripts_only }}
       docs_only: ${{ steps.lanes.outputs.docs_only }}
+      # CREDIBLE-1512: cargo-test shard plan. pull_request runs 2 shards (half
+      # the runner-pool draw per PR-event CI run), push-to-main + merge_group
+      # keep 4 for full-partition coverage of trunk. ct_shards drives the matrix;
+      # ct_total is the --partition denominator (must equal the shard count).
+      ct_shards: ${{ steps.shardplan.outputs.ct_shards }}
+      ct_total: ${{ steps.shardplan.outputs.ct_total }}
     steps:
       - uses: actions/checkout@v7
       - name: Record job start (CREDIBLE-069)
@@ -198,8 +204,13 @@ jobs:
               - 'tests/**'
               - 'wasm/**'
               - 'web/**'
+            # CREDIBLE-1512: e2e is the PWA Playwright suite (ARM, Ollama, ~10-12
+            # min). It is gated to its OWN surface — the web UI, the e2e harness,
+            # and the setup scripts it runs — NOT the broad `src/**`/ci.yml that
+            # fired it on every backend PR. A pure-backend src change no longer
+            # draws a runner for pwa e2e on pull_request; merge_group still runs
+            # the full suite (job `if:` below) and ci-nightly.yml covers the rest.
             e2e:
-              - 'src/**'
               - 'web/**'
               - 'e2e/**'
               - 'scripts/ci/ci-setup-ollama-e2e.sh'
@@ -208,7 +219,6 @@ jobs:
               - 'scripts/eval/dogfood-matrix.sh'
               - 'scripts/ci/golden-path-timing.sh'
               - 'scripts/ci/verify-external-golden-path.sh'
-              - '.github/workflows/ci.yml'
             tauri:
               - 'src/**'
               - 'desktop/**'
@@ -294,6 +304,21 @@ jobs:
             echo "ci_config_only=true" >> "$GITHUB_OUTPUT"
           else
             echo "ci_config_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # CREDIBLE-1512: cargo-test shard plan — 2 shards on pull_request, 4 on
+      # push-to-main / merge_group. Cutting PR-event shards 4→2 halves this
+      # lane's runner draw per PR (the dominant ubuntu-24.04-arm consumer) while
+      # trunk + the merge queue still run the full 4-way partition.
+      - name: Compute cargo-test shard plan (CREDIBLE-1512)
+        id: shardplan
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo 'ct_shards=[1,2]' >> "$GITHUB_OUTPUT"
+            echo 'ct_total=2' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ct_shards=[1,2,3,4]' >> "$GITHUB_OUTPUT"
+            echo 'ct_total=4' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Emit self-hosted runner stats (CREDIBLE-069)
@@ -1927,10 +1952,14 @@ jobs:
     # as pass — no separate stub job needed (see META-261 collapsed
     # stub/required pattern below).
     if: (needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group') && needs.changes.outputs.ci_config_only != 'true'
+    # CREDIBLE-1512: dynamic shard count — 2 on pull_request, 4 on push/merge_group
+    # (needs.changes.outputs.ct_shards / ct_total). The `cargo-test` rollup below
+    # keys off the single check-run name `cargo-test`, unchanged, so branch
+    # protection and the `verified` aggregator are untouched by the shard count.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.changes.outputs.ct_shards) }}
     name: cargo-test-shard (${{ matrix.shard }})
     # INFRA-2117 (CI-REVIEW Lever 1A, 2026-05-29): default to GH-hosted ubuntu.
     # Self-hosted Mac caused ~50% of CI-rot tax (DOC-063 post-mortem).
@@ -2093,7 +2122,7 @@ jobs:
           if [ "${CARGO_NEXTEST_DISABLE:-0}" = "1" ]; then
             bash scripts/ci/cargo-test-with-rerun.sh -- cargo test --workspace 2>&1 | tee "$_TRIAGE_OUT"; exit "${PIPESTATUS[0]}"
           else
-            bash scripts/ci/cargo-test-with-rerun.sh -- cargo nextest run --workspace --partition count:${{ matrix.shard }}/4 2>&1 | tee "$_TRIAGE_OUT"; exit "${PIPESTATUS[0]}"
+            bash scripts/ci/cargo-test-with-rerun.sh -- cargo nextest run --workspace --partition count:${{ matrix.shard }}/${{ needs.changes.outputs.ct_total }} 2>&1 | tee "$_TRIAGE_OUT"; exit "${PIPESTATUS[0]}"
           fi
 
       # CREDIBLE-013: CI failure triage — classify failures as flake / real /
@@ -2212,24 +2241,16 @@ jobs:
             runs-on-expr: "${{ vars.RUNNER_E2E_PWA != '' && fromJSON(vars.RUNNER_E2E_PWA) || 'ubuntu-24.04-arm' }}"
             cache-key: ci-e2e-pwa
             timeout: 60
-          # Shard B: Battle sim (RESILIENT-016: disabled on PR runs)
-          - suite: battle-sim
-            enabled: false
-            runs-on-expr: ubuntu-latest
-            cache-key: ci-e2e-battle-sim
-            timeout: 30
-          # Shard C: Golden path (RESILIENT-016: disabled on PR runs)
-          - suite: golden-path
-            enabled: false
-            runs-on-expr: "${{ vars.RUNNER_E2E_GOLDEN_PATH != '' && fromJSON(vars.RUNNER_E2E_GOLDEN_PATH) || 'ubuntu-latest' }}"
-            cache-key: ci-e2e-golden
-            timeout: 30
+          # CREDIBLE-1512: battle-sim + golden-path were already RESILIENT-016-
+          # disabled (enabled:false → every step skipped) yet still SPAWNED two
+          # no-op jobs on every e2e run, each drawing a runner slot to do nothing.
+          # They are covered by ci-nightly.yml, so they are dropped from the PR
+          # matrix entirely rather than spawned-and-skipped. test-e2e (the rollup)
+          # treats the smaller matrix the same way — skipped/success both pass.
     # INFRA-1342: push trigger removed (same rollup-FAILURE trap as tauri).
     # pwa suite: runs when e2e files change or merge_group.
-    # battle-sim / golden-path: RESILIENT-016 disabled (enabled=false → job skipped).
     # INFRA-2320: matrix context not allowed in job-level if (GHA expression rule).
-    # The matrix.enabled gating moved to step-level — disabled suites still spawn
-    # but skip all real work; continue-on-error keeps them non-blocking.
+    # The matrix.enabled gating stays at step-level for forward-compat.
     if: needs.changes.outputs.e2e == 'true' || github.event_name == 'merge_group'
     continue-on-error: true
     runs-on: ${{ matrix.runs-on-expr }}

@@ -113,6 +113,12 @@ jobs:
     continue-on-error: true  # INFRA-1348: a filter failure must not block audit
     outputs:
       docs_only: ${{ steps.lanes.outputs.docs_only }}
+      # CREDIBLE-1512: per-lane audit shard plan. On pull_request only the shards
+      # whose lane changed run; push/merge_group run all 4. Cuts the audit runner
+      # draw on PRs that touch just one lane (e.g. a Rust-only PR skips the
+      # bash-gate shard). The `audit` aggregate keys off the single check-run
+      # name `audit` (unchanged) so the `verified` cross-workflow poll is intact.
+      audit_shards: ${{ steps.lanes.outputs.audit_shards }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -149,12 +155,13 @@ jobs:
               - 'CODE_OF_CONDUCT.md'
               - 'CHANGELOG.md'
               - 'SECURITY.md'
-      - name: Compute docs_only (mirrors ci.yml INFRA-1379)
+      - name: Compute docs_only + audit shard plan (mirrors ci.yml INFRA-1379)
         id: lanes
         run: |
           if [[ "${{ github.event_name }}" != "pull_request" ]]; then
             # push-to-main / merge_group: always run the full matrix.
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo 'audit_shards=[1,2,3,4]' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           rust="${{ steps.filter.outputs.rust }}"
@@ -163,9 +170,23 @@ jobs:
           docs="${{ steps.filter.outputs.docs }}"
           if [[ "$docs" == "true" && "$rust" != "true" && "$web" != "true" && "$scripts" != "true" ]]; then
             echo "docs_only=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo 'audit_shards=[]' >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          # CREDIBLE-1512: per-lane shard plan for PRs. Shard groupings (see
+          # audit-shard header): 1=cargo gates, 2=event-registry/observability/
+          # cache telemetry, 3=bash/script gates, 4=cross-PR contract + security.
+          #   shard 1 → rust ;  shard 2 → rust or scripts ;  shard 3 → scripts ;
+          #   shard 4 → always (security/cross-PR must run on every code change).
+          shards=()
+          [[ "$rust" == "true" ]] && shards+=(1)
+          { [[ "$rust" == "true" || "$scripts" == "true" ]]; } && shards+=(2)
+          [[ "$scripts" == "true" ]] && shards+=(3)
+          shards+=(4)
+          # Join into a JSON array, e.g. [1,2,4].
+          printf -v joined '%s,' "${shards[@]}"
+          echo "audit_shards=[${joined%,}]" >> "$GITHUB_OUTPUT"
 
   # ── audit-shard ──────────────────────────────────────────────────────────────
   # INFRA-2565: 4-way parallel shard matrix replacing the single serial `audit` job.
@@ -185,10 +206,14 @@ jobs:
   audit-shard:
     needs: [changes]
     if: needs.changes.outputs.docs_only != 'true'
+    # CREDIBLE-1512: shard set is per-lane on PRs (needs.changes.outputs.audit_shards),
+    # all 4 on push/merge_group. The `audit` rollup below keys off the single
+    # check-run name `audit`, unchanged, so branch protection / the `verified`
+    # cross-workflow poll are untouched by the shard count.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.changes.outputs.audit_shards) }}
     name: audit-shard (${{ matrix.shard }})
     # INFRA-2117 (CI-REVIEW Lever 1A, 2026-05-29): audit defaults to GH-hosted ubuntu
     # to eliminate the self-hosted-Mac CI-rot tax (DOC-063 post-mortem).
