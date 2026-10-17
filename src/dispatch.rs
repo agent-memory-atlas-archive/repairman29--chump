@@ -693,8 +693,9 @@ fn spawn_opencode(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     let child_pid = child.id();
     ws.set_child_pid(child_pid);
     let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
-    let status = wait_with_hang_detection(child, "opencode -p", opts.gap_id)
-        .context("waiting for opencode -p to complete")?;
+    let status =
+        wait_with_hang_detection(child, "opencode -p", opts.gap_id, Some(ws.working_dir()))
+            .context("waiting for opencode -p to complete")?;
     group_guard.release();
     if !status.success() {
         bail!(
@@ -730,7 +731,7 @@ fn spawn_aider(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     let child_pid = child.id();
     ws.set_child_pid(child_pid);
     let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
-    let status = wait_with_hang_detection(child, "aider", opts.gap_id)
+    let status = wait_with_hang_detection(child, "aider", opts.gap_id, Some(ws.working_dir()))
         .context("waiting for aider --message to complete")?;
     group_guard.release();
     if !status.success() {
@@ -778,8 +779,13 @@ fn spawn_local(ws: &Workspace, prompt: &str) -> Result<()> {
     let child_pid = child.id();
     ws.set_child_pid(child_pid);
     let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
-    let status = wait_with_hang_detection(child, "chump gen --local", opts.gap_id)
-        .context("waiting for chump gen --local to complete")?;
+    let status = wait_with_hang_detection(
+        child,
+        "chump gen --local",
+        opts.gap_id,
+        Some(ws.working_dir()),
+    )
+    .context("waiting for chump gen --local to complete")?;
     group_guard.release();
     if !status.success() {
         bail!(
@@ -873,7 +879,7 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
         // Dropping `stdin` here closes the pipe (EOF), which is how `claude
         // -p` knows the prompt is complete and starts working.
     }
-    let status = wait_with_hang_detection(child, "claude -p", opts.gap_id)
+    let status = wait_with_hang_detection(child, "claude -p", opts.gap_id, Some(ws.working_dir()))
         .context("waiting for claude -p to complete")?;
     group_guard.release();
     if !status.success() {
@@ -915,8 +921,13 @@ fn spawn_exec_gap(ws: &Workspace) -> Result<()> {
     let child_pid = child.id();
     ws.set_child_pid(child_pid);
     let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
-    let status = wait_with_hang_detection(child, "chump --execute-gap", opts.gap_id)
-        .context("waiting for chump --execute-gap to complete")?;
+    let status = wait_with_hang_detection(
+        child,
+        "chump --execute-gap",
+        opts.gap_id,
+        Some(ws.working_dir()),
+    )
+    .context("waiting for chump --execute-gap to complete")?;
     group_guard.release();
     if !status.success() {
         bail!(
@@ -928,16 +939,251 @@ fn spawn_exec_gap(ws: &Workspace) -> Result<()> {
     Ok(())
 }
 
-/// Wait for a child process with hang detection (INFRA-406).
-/// If the process doesn't complete within the timeout period, send SIGTERM
-/// and emit an ALERT to ambient.jsonl.
+/// Tuning for [`wait_with_hang_detection`], split out (RESILIENT-1612) so the
+/// loop can be driven in tests with second-scale values instead of the
+/// production 900s/3600s deadlines, without mutating process env.
+struct HangConfig {
+    /// CHUMP_SUBAGENT_BUDGET_S (legacy CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S),
+    /// default 900. Wall-clock; 0 disables.
+    budget_secs: u64,
+    /// CHUMP_DISPATCH_HANG_TIMEOUT_SECS, default 3600. IDLE time (no observed
+    /// worktree activity), not wall-clock since spawn; 0 disables.
+    hang_secs: u64,
+    /// CHUMP_DISPATCH_ACTIVITY_POLL_SECS, default 20 (clamped to >= 1): how
+    /// often the worktree is re-fingerprinted for activity.
+    activity_poll: Duration,
+    /// How often the child is polled for exit.
+    tick: Duration,
+    /// SIGTERM → SIGKILL grace window for the budget and salvage kill paths.
+    grace_secs: u64,
+}
+
+impl HangConfig {
+    fn from_env() -> Self {
+        let budget_secs: u64 = std::env::var("CHUMP_SUBAGENT_BUDGET_S")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .or_else(|| {
+                // Fall back to the legacy bot-merge-specific name if set,
+                // so existing env configs keep working (CLAUDE.md still
+                // documents CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S=900).
+                std::env::var("CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            })
+            .unwrap_or(900);
+        let hang_secs: u64 = std::env::var("CHUMP_DISPATCH_HANG_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3600);
+        let poll_secs: u64 = std::env::var("CHUMP_DISPATCH_ACTIVITY_POLL_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(20)
+            .max(1);
+        HangConfig {
+            budget_secs,
+            hang_secs,
+            activity_poll: Duration::from_secs(poll_secs),
+            tick: Duration::from_secs(1),
+            grace_secs: 30,
+        }
+    }
+}
+
+/// What the hang/budget loop reports. Production routes these to ambient
+/// emitters; tests collect them.
+#[derive(Debug, Clone, PartialEq)]
+enum HangEvent {
+    /// No activity source could be read: the hang detector is disabled for
+    /// this dispatch instead of firing at start+timeout (RESILIENT-1612 AC2).
+    Blind { reason: String },
+    /// Parent-enforced wall-clock budget exceeded (INFRA-1972).
+    BudgetKill { pid: u32 },
+    /// No worktree activity for `idle_secs`. `committed` = the worktree's
+    /// HEAD moved since spawn, in which case the child is stopped and the
+    /// dispatch proceeds to its ship step instead of aborting.
+    HangKill { idle_secs: u64, committed: bool },
+}
+
+/// Directory names never walked when fingerprinting a worktree for activity:
+/// build output (cargo writes there continuously during a build that may
+/// itself be hung), git internals (probed explicitly below instead),
+/// vendored deps, and lease/heartbeat state that other processes touch.
+const ACTIVITY_EXCLUDED_DIRS: &[&str] = &[
+    "target",
+    ".git",
+    "node_modules",
+    ".chump-locks",
+    ".cargo-build-target",
+];
+
+/// Upper bound on entries visited per fingerprint so a pathological tree
+/// cannot turn a 20s poll into a multi-second stall.
+const ACTIVITY_MAX_ENTRIES: usize = 400_000;
+
+/// RESILIENT-1612: the activity signal for the dispatch hang detector.
 ///
-/// The timeout is configurable via CHUMP_DISPATCH_HANG_TIMEOUT_SECS env var
-/// (default 3600 = 1 hour). Set to 0 to disable hang detection.
+/// The old detector compared wall-clock time since spawn against the
+/// timeout and read no activity signal at all, so it fired at exactly
+/// start+timeout even when the agent had edited and committed minutes
+/// earlier (receipt: RESILIENT-1610 dispatch, commit 02:33:38Z, killed
+/// 02:40:27Z = start+1200s). `claude -p` in this invocation prints no
+/// stream-json, so there is no tool_use marker to read; the cheapest robust
+/// signal is the worktree itself: file mtimes (excluding
+/// [`ACTIVITY_EXCLUDED_DIRS`]) plus the worktree's git index, HEAD, and HEAD
+/// reflog, so a `git add` or `git commit` counts as activity.
+struct ActivityProbe {
+    root: PathBuf,
+    git_files: Vec<PathBuf>,
+}
+
+/// (wrapping sum of mtimes in ns, max mtime in ns, entry count). Any file
+/// write, creation, or deletion changes at least one component.
+type ActivityFingerprint = (u128, u128, u64);
+
+impl ActivityProbe {
+    /// `None` when `root` is not a readable directory (→ detector blind).
+    fn new(root: &Path) -> Option<Self> {
+        if !root.is_dir() {
+            return None;
+        }
+        let git_files = resolve_git_dir(root)
+            .map(|g| vec![g.join("index"), g.join("HEAD"), g.join("logs").join("HEAD")])
+            .unwrap_or_default();
+        Some(ActivityProbe {
+            root: root.to_path_buf(),
+            git_files,
+        })
+    }
+
+    /// `None` when the root itself cannot be listed.
+    fn fingerprint(&self) -> Option<ActivityFingerprint> {
+        let mut sum: u128 = 0;
+        let mut max: u128 = 0;
+        let mut count: u64 = 0;
+        let mut fold = |md: &std::fs::Metadata| {
+            let ns = md
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            sum = sum.wrapping_add(ns);
+            max = max.max(ns);
+            count += 1;
+        };
+        // The root must be listable, or the probe is blind.
+        let root_iter = std::fs::read_dir(&self.root).ok()?;
+        let mut stack: Vec<std::fs::ReadDir> = vec![root_iter];
+        let mut visited = 0usize;
+        while let Some(iter) = stack.last_mut() {
+            let Some(entry) = iter.next() else {
+                stack.pop();
+                continue;
+            };
+            visited += 1;
+            if visited > ACTIVITY_MAX_ENTRIES {
+                break;
+            }
+            let Ok(entry) = entry else { continue };
+            // symlink_metadata: never follow links (the dispatch worktree's
+            // state.db is a symlink into the main checkout, whose mtime moves
+            // with every other agent's writes).
+            let Ok(md) = std::fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if md.is_dir() {
+                let name = entry.file_name();
+                let skip = name
+                    .to_str()
+                    .is_some_and(|n| ACTIVITY_EXCLUDED_DIRS.contains(&n));
+                if !skip {
+                    if let Ok(sub) = std::fs::read_dir(entry.path()) {
+                        stack.push(sub);
+                    }
+                }
+                continue;
+            }
+            fold(&md);
+        }
+        for f in &self.git_files {
+            if let Ok(md) = std::fs::metadata(f) {
+                fold(&md);
+            }
+        }
+        Some((sum, max, count))
+    }
+}
+
+/// Resolve a worktree's git dir: `<root>/.git` when it is a directory, or
+/// the `gitdir: <path>` target when it is a linked-worktree pointer file.
+fn resolve_git_dir(root: &Path) -> Option<PathBuf> {
+    let dot_git = root.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    let text = std::fs::read_to_string(&dot_git).ok()?;
+    let rel = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
+    let p = PathBuf::from(rel);
+    Some(if p.is_absolute() { p } else { root.join(p) })
+}
+
+/// Current `HEAD` commit of the worktree at `root`, if it is a git checkout.
+fn worktree_head(root: &Path) -> Option<String> {
+    let out = Command::new("git")
+        .args(["rev-parse", "--verify", "-q", "HEAD"])
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// Wait for a child process with hang detection (INFRA-406, RESILIENT-1612).
+///
+/// `activity_root` is the directory the child works in (the dispatch
+/// worktree). The hang timeout (CHUMP_DISPATCH_HANG_TIMEOUT_SECS, default
+/// 3600, 0 disables) is measured as IDLE time: the clock resets whenever the
+/// worktree fingerprint changes ([`ActivityProbe`]). With no readable
+/// activity root the detector logs `kind=dispatch_hang_detector_blind` and
+/// stays off rather than firing at start+timeout. If the idle timeout fires
+/// after the child has committed, the child is stopped and this returns a
+/// success status so the dispatch still runs its ship step.
 fn wait_with_hang_detection(
+    child: Child,
+    process_name: &str,
+    gap_id: &str,
+    activity_root: Option<&Path>,
+) -> Result<std::process::ExitStatus> {
+    let cfg = HangConfig::from_env();
+    let mut sink = |ev: HangEvent| match ev {
+        HangEvent::Blind { reason } => {
+            emit_hang_detector_blind(process_name, gap_id, cfg.hang_secs, &reason)
+        }
+        HangEvent::BudgetKill { pid } => {
+            emit_subagent_killed_at_budget(process_name, gap_id, cfg.budget_secs, pid)
+        }
+        HangEvent::HangKill {
+            idle_secs,
+            committed,
+        } => emit_hang_alert(process_name, gap_id, cfg.hang_secs, idle_secs, committed),
+    };
+    wait_with_hang_detection_cfg(child, process_name, gap_id, activity_root, &cfg, &mut sink)
+}
+
+fn wait_with_hang_detection_cfg(
     mut child: Child,
     process_name: &str,
     gap_id: &str,
+    activity_root: Option<&Path>,
+    cfg: &HangConfig,
+    on_event: &mut dyn FnMut(HangEvent),
 ) -> Result<std::process::ExitStatus> {
     // Two cooperating deadlines:
     //   1. SUBAGENT BUDGET (CHUMP_SUBAGENT_BUDGET_S, default 900s):
@@ -949,39 +1195,58 @@ fn wait_with_hang_detection(
     //      enforcement that didn't exist before. On exceed: SIGTERM, then
     //      30s grace, then SIGKILL. Emits kind=subagent_killed_at_budget.
     //   2. HANG TIMEOUT (CHUMP_DISPATCH_HANG_TIMEOUT_SECS, default 3600s):
-    //      backup deadline — catches a stuck process that somehow survived
-    //      the budget kill. SIGKILL only. Emits kind=hang_detector.
+    //      IDLE deadline (RESILIENT-1612) — fires only after that long with
+    //      no worktree activity. SIGKILL. Emits kind=hang_detector.
     //
-    // Either env set to 0 disables that specific deadline. The budget
-    // (faster) fires first by design; hang is a backstop.
-    let budget_secs: u64 = std::env::var("CHUMP_SUBAGENT_BUDGET_S")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .or_else(|| {
-            // Fall back to the legacy bot-merge-specific name if set,
-            // so existing env configs keep working (CLAUDE.md still
-            // documents CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S=900).
-            std::env::var("CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S")
-                .ok()
-                .and_then(|s| s.parse().ok())
-        })
-        .unwrap_or(900);
-
-    let hang_secs: u64 = std::env::var("CHUMP_DISPATCH_HANG_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(3600);
-
-    let no_budget = budget_secs == 0;
-    let no_hang = hang_secs == 0;
-    if no_budget && no_hang {
+    // Either set to 0 disables that specific deadline.
+    let no_budget = cfg.budget_secs == 0;
+    let mut hang_enabled = cfg.hang_secs != 0;
+    if no_budget && !hang_enabled {
         return child.wait().context("waiting for child process");
     }
 
     let start = std::time::Instant::now();
     let child_pid = child.id();
     let mut budget_kill_in_flight: Option<std::time::Instant> = None;
-    let grace_secs: u64 = 30; // SIGTERM → SIGKILL grace window
+
+    // RESILIENT-1612: activity source. Blind → detector off, loudly.
+    let probe = activity_root.and_then(ActivityProbe::new);
+    let mut last_fp = probe.as_ref().and_then(|p| p.fingerprint());
+    if hang_enabled && last_fp.is_none() {
+        let reason = match activity_root {
+            None => "no activity root (no worktree for this backend)".to_string(),
+            Some(p) => format!("activity root unreadable: {}", p.display()),
+        };
+        eprintln!(
+            "[dispatch] {gap_id}: hang detector blind ({reason}); \
+             not enforcing the {}s idle timeout",
+            cfg.hang_secs
+        );
+        on_event(HangEvent::Blind { reason });
+        hang_enabled = false;
+    }
+    let head_at_start = if hang_enabled {
+        activity_root.and_then(worktree_head)
+    } else {
+        None
+    };
+    let mut last_activity = start;
+    let mut last_poll = start;
+
+    // Re-fingerprint; true (and clock reset) when the worktree changed.
+    let refresh = |last_fp: &mut Option<ActivityFingerprint>,
+                   last_activity: &mut std::time::Instant|
+     -> bool {
+        let Some(fp) = probe.as_ref().and_then(|p| p.fingerprint()) else {
+            return false; // transient unreadability: not activity
+        };
+        if Some(fp) != *last_fp {
+            *last_fp = Some(fp);
+            *last_activity = std::time::Instant::now();
+            return true;
+        }
+        false
+    };
 
     loop {
         match child.try_wait() {
@@ -990,9 +1255,11 @@ fn wait_with_hang_detection(
                 let elapsed = start.elapsed();
 
                 // Budget enforcement (faster, graceful)
-                if !no_budget && budget_kill_in_flight.is_none() && elapsed.as_secs() > budget_secs
+                if !no_budget
+                    && budget_kill_in_flight.is_none()
+                    && elapsed.as_secs() > cfg.budget_secs
                 {
-                    emit_subagent_killed_at_budget(process_name, gap_id, budget_secs, child_pid);
+                    on_event(HangEvent::BudgetKill { pid: child_pid });
                     // INFRA-8198: signal the whole GROUP (negative pgid),
                     // not just the direct child pid — `configure_child_lifetime`
                     // made the child its own process-group leader, so this
@@ -1005,34 +1272,74 @@ fn wait_with_hang_detection(
                 // After SIGTERM, allow `grace_secs` for graceful shutdown
                 // before SIGKILL. INFRA-1972 AC: "at budget_secs + 30s: SIGKILL".
                 if let Some(term_at) = budget_kill_in_flight {
-                    if term_at.elapsed().as_secs() > grace_secs {
+                    if term_at.elapsed().as_secs() > cfg.grace_secs {
                         kill_process_group(child_pid, libc::SIGKILL);
                         let _ = child.wait();
                         bail!(
                             "{} exceeded subagent budget ({} secs) for gap {}; SIGTERM at budget, \
                              SIGKILL after {}s grace",
                             process_name,
-                            budget_secs,
+                            cfg.budget_secs,
                             gap_id,
-                            grace_secs
+                            cfg.grace_secs
                         );
                     }
                 }
 
-                // Hang-detector backstop (slower, hard kill — handles a stuck
-                // process that somehow survived the budget SIGTERM+SIGKILL).
-                if !no_hang && elapsed > Duration::from_secs(hang_secs) {
-                    emit_hang_alert(process_name, gap_id, hang_secs);
+                if hang_enabled && last_poll.elapsed() >= cfg.activity_poll {
+                    last_poll = std::time::Instant::now();
+                    refresh(&mut last_fp, &mut last_activity);
+                }
+
+                // Idle hang detector (RESILIENT-1612): fires on no ACTIVITY
+                // for hang_secs, not on wall-clock since spawn. One fresh
+                // probe first, since the last poll may be up to
+                // activity_poll stale.
+                if hang_enabled
+                    && last_activity.elapsed() > Duration::from_secs(cfg.hang_secs)
+                    && !refresh(&mut last_fp, &mut last_activity)
+                {
+                    let idle_secs = last_activity.elapsed().as_secs();
+                    let committed = head_at_start.is_some()
+                        && activity_root.and_then(worktree_head) != head_at_start;
+                    on_event(HangEvent::HangKill {
+                        idle_secs,
+                        committed,
+                    });
+                    if committed {
+                        // The agent committed and then went quiet: its work
+                        // is finished. Stop it (gracefully first) and let the
+                        // dispatch ship what it committed instead of
+                        // aborting the ship step (RESILIENT-1612 AC3).
+                        eprintln!(
+                            "[dispatch] {gap_id}: {process_name} idle {idle_secs}s after \
+                             committing; stopping it and proceeding to ship"
+                        );
+                        kill_process_group(child_pid, libc::SIGTERM);
+                        let term_at = std::time::Instant::now();
+                        while term_at.elapsed().as_secs() <= cfg.grace_secs {
+                            if let Ok(Some(_)) = child.try_wait() {
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(200));
+                        }
+                        kill_process_group(child_pid, libc::SIGKILL);
+                        let _ = child.wait();
+                        use std::os::unix::process::ExitStatusExt as _;
+                        return Ok(std::process::ExitStatus::from_raw(0));
+                    }
                     kill_process_group(child_pid, libc::SIGKILL);
                     let _ = child.wait();
                     bail!(
-                        "{} exceeded no-tool-call timeout ({} secs) for gap {}; sent SIGTERM",
+                        "{} showed no worktree activity for {} secs (hang timeout {} secs) \
+                         for gap {}; sent SIGKILL",
                         process_name,
-                        hang_secs,
+                        idle_secs,
+                        cfg.hang_secs,
                         gap_id
                     );
                 }
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(cfg.tick);
             }
             Err(e) => return Err(e).context("checking child process status"),
         }
@@ -1270,8 +1577,16 @@ impl ChildGroupGuard {
     fn release(&mut self) {}
 }
 
-/// Emit a hang-detection alert to ambient.jsonl (INFRA-406).
-fn emit_hang_alert(process_name: &str, gap_id: &str, timeout_secs: u64) {
+/// Emit a hang-detection alert to ambient.jsonl (INFRA-406). RESILIENT-1612
+/// adds `idle_secs` (time since the last observed worktree activity) and
+/// `committed` (HEAD moved since spawn → the dispatch proceeds to ship).
+fn emit_hang_alert(
+    process_name: &str,
+    gap_id: &str,
+    timeout_secs: u64,
+    idle_secs: u64,
+    committed: bool,
+) {
     let repo_root = crate::repo_path::runtime_base();
     let lock_dir = repo_root.join(".chump-locks");
     let _ = std::fs::create_dir_all(&lock_dir);
@@ -1292,7 +1607,8 @@ fn emit_hang_alert(process_name: &str, gap_id: &str, timeout_secs: u64) {
     let line = format!(
         "{{\"ts\":\"{ts}\",\"session\":\"{session}\",\"worktree\":\"{worktree}\",\
          \"event\":\"hang_detected\",\"kind\":\"hang_detector\",\"process\":\"{process_name}\",\
-         \"gap\":\"{gap_id}\",\"timeout_secs\":{timeout_secs}}}"
+         \"gap\":\"{gap_id}\",\"timeout_secs\":{timeout_secs},\"idle_secs\":{idle_secs},\
+         \"committed\":{committed}}}"
     );
 
     use std::io::Write as _;
@@ -1315,6 +1631,35 @@ fn emit_hang_alert(process_name: &str, gap_id: &str, timeout_secs: u64) {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn();
+    }
+}
+
+/// RESILIENT-1612: emit `kind=dispatch_hang_detector_blind` when the hang
+/// detector has no readable activity source for a dispatch and therefore
+/// stays off (rather than firing at start+timeout on a child it cannot see).
+fn emit_hang_detector_blind(process_name: &str, gap_id: &str, timeout_secs: u64, reason: &str) {
+    let repo_root = crate::repo_path::runtime_base();
+    let lock_dir = repo_root.join(".chump-locks");
+    let _ = std::fs::create_dir_all(&lock_dir);
+    let ambient_path = std::env::var("CHUMP_AMBIENT_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| lock_dir.join("ambient.jsonl"));
+    let session = crate::ambient_stream::env_session_id().unwrap_or_else(|| "unknown".to_string());
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let reason = reason.replace('\\', "\\\\").replace('"', "\\\"");
+    // scanner anchor: "kind":"dispatch_hang_detector_blind"
+    let line = format!(
+        "{{\"ts\":\"{ts}\",\"session\":\"{session}\",\"kind\":\"dispatch_hang_detector_blind\",\
+         \"process\":\"{process_name}\",\"gap\":\"{gap_id}\",\"timeout_secs\":{timeout_secs},\
+         \"reason\":\"{reason}\"}}"
+    );
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ambient_path)
+    {
+        let _ = writeln!(f, "{}", line);
     }
 }
 
@@ -2594,5 +2939,202 @@ mod tests {
         std::env::remove_var("CHUMP_WORK_BACKEND");
         let backend = backend_from_env("".to_string(), "do the thing".to_string());
         assert!(matches!(backend, WorkBackend::Headless { .. }));
+    }
+
+    // ── RESILIENT-1612: hang detector advances on real activity ────────────
+
+    /// Second-scale config: hang after `hang_secs` idle, poll every second,
+    /// budget off so only the hang detector is under test.
+    fn hang_test_cfg(hang_secs: u64) -> HangConfig {
+        HangConfig {
+            budget_secs: 0,
+            hang_secs,
+            activity_poll: Duration::from_secs(1),
+            tick: Duration::from_millis(100),
+            grace_secs: 1,
+        }
+    }
+
+    fn spawn_sh(dir: &Path, script: &str) -> Child {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg(script).current_dir(dir);
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+        configure_child_lifetime(&mut cmd);
+        cmd.spawn().expect("spawn sh")
+    }
+
+    fn run_hang(
+        dir: Option<&Path>,
+        script_dir: &Path,
+        script: &str,
+        cfg: &HangConfig,
+    ) -> (Result<std::process::ExitStatus>, Vec<HangEvent>, Duration) {
+        let child = spawn_sh(script_dir, script);
+        let mut events = Vec::new();
+        let t0 = std::time::Instant::now();
+        let res = wait_with_hang_detection_cfg(
+            child,
+            "test-child",
+            "RESILIENT-1612",
+            dir,
+            cfg,
+            &mut |e| events.push(e),
+        );
+        (res, events, t0.elapsed())
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let st = Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args(args)
+            .current_dir(dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("git");
+        assert!(st.success(), "git {args:?} failed");
+    }
+
+    /// AC1: a child that touches a file well inside the idle window survives
+    /// past 2x the hang timeout (the old wall-clock detector killed it at
+    /// exactly 1x), and exits on its own with success.
+    #[test]
+    fn hang_detector_active_child_survives_twice_the_timeout() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("seed.txt"), "0").unwrap();
+        let cfg = hang_test_cfg(3);
+        // Touches every 1s for ~7.5s total (> 2 x 3s), then exits 0.
+        let script = "i=0; while [ $i -lt 7 ]; do sleep 1; echo $i > work.txt; i=$((i+1)); done";
+        let (res, events, elapsed) = run_hang(Some(tmp.path()), tmp.path(), script, &cfg);
+        let status = res.expect("active child must not be killed by the hang detector");
+        assert!(status.success());
+        assert!(elapsed >= Duration::from_secs(6), "child ran {elapsed:?}");
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, HangEvent::HangKill { .. })),
+            "no hang kill expected, got {events:?}"
+        );
+    }
+
+    /// AC1 contrast: a silent child is killed once it has been idle past the
+    /// timeout.
+    #[test]
+    fn hang_detector_silent_child_is_killed() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("seed.txt"), "0").unwrap();
+        let cfg = hang_test_cfg(2);
+        let (res, events, elapsed) = run_hang(Some(tmp.path()), tmp.path(), "sleep 60", &cfg);
+        let err = res.expect_err("silent child must be killed");
+        assert!(
+            format!("{err:#}").contains("no worktree activity"),
+            "unexpected error: {err:#}"
+        );
+        assert!(elapsed < Duration::from_secs(15), "kill took {elapsed:?}");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            HangEvent::HangKill {
+                committed: false,
+                ..
+            }
+        )));
+    }
+
+    /// AC2: with no activity source the detector logs blind and does NOT
+    /// fire at start+timeout — the child outlives the timeout and exits 0.
+    #[test]
+    fn hang_detector_blind_does_not_fire() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = hang_test_cfg(1);
+        let missing = tmp.path().join("does-not-exist");
+        for root in [None, Some(missing.as_path())] {
+            let (res, events, elapsed) = run_hang(root, tmp.path(), "sleep 3", &cfg);
+            let status = res.expect("blind detector must not kill");
+            assert!(status.success());
+            assert!(elapsed >= Duration::from_secs(3));
+            assert!(
+                matches!(events.first(), Some(HangEvent::Blind { .. })),
+                "expected Blind event, got {events:?}"
+            );
+            assert!(!events
+                .iter()
+                .any(|e| matches!(e, HangEvent::HangKill { .. })));
+        }
+    }
+
+    /// AC3: a child that commits and then goes silent is not aborted: the
+    /// commit counts as activity, and when the idle timeout later fires the
+    /// child is stopped with a SUCCESS status so the dispatch ships.
+    #[test]
+    fn hang_detector_committed_child_proceeds_to_ship() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        git(dir, &["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "a").unwrap();
+        git(dir, &["add", "a.txt"]);
+        git(dir, &["commit", "-qm", "base"]);
+        let cfg = hang_test_cfg(3);
+        let script = "sleep 1; echo b > b.txt; \
+             git add b.txt && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false \
+             -c core.hooksPath=/dev/null commit -qm work; sleep 60";
+        let (res, events, elapsed) = run_hang(Some(dir), dir, script, &cfg);
+        let status = res.expect("committed child must not abort the dispatch");
+        assert!(
+            status.success(),
+            "salvage must report success, got {status:?}"
+        );
+        // Commit landed at ~1s; killed only after a full idle window after it.
+        assert!(elapsed >= Duration::from_secs(4), "fired at {elapsed:?}");
+        assert!(elapsed < Duration::from_secs(20), "took {elapsed:?}");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                HangEvent::HangKill {
+                    committed: true,
+                    ..
+                }
+            )),
+            "expected committed HangKill, got {events:?}"
+        );
+    }
+
+    /// The probe ignores build output and git internals but sees a commit
+    /// through the index / HEAD reflog.
+    #[test]
+    fn activity_probe_ignores_target_and_sees_commits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        git(dir, &["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "a").unwrap();
+        git(dir, &["add", "a.txt"]);
+        git(dir, &["commit", "-qm", "base"]);
+        std::fs::create_dir_all(dir.join("target/debug")).unwrap();
+        let probe = ActivityProbe::new(dir).expect("probe");
+        let fp0 = probe.fingerprint().expect("fp");
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(dir.join("target/debug/out.o"), "x").unwrap();
+        assert_eq!(probe.fingerprint(), Some(fp0), "target/ must be ignored");
+        // Commit an already-tracked change to an existing file without
+        // touching the working tree after the probe: index + reflog move.
+        std::fs::write(dir.join("a.txt"), "a2").unwrap();
+        let fp1 = probe.fingerprint().unwrap();
+        assert_ne!(fp1, fp0);
+        std::thread::sleep(Duration::from_millis(20));
+        git(dir, &["commit", "-qam", "c2"]);
+        assert_ne!(
+            probe.fingerprint(),
+            Some(fp1),
+            "commit must count as activity"
+        );
     }
 }

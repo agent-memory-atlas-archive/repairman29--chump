@@ -691,8 +691,23 @@ events:
   - kind: hang_detector
     effect_metric: self
     emitter: src/dispatch.rs (chump dispatch)
-    trigger: subprocess hung past deadline; process details and name logged
+    trigger: dispatched subprocess showed no worktree activity (file/index/HEAD
+      mtimes) for CHUMP_DISPATCH_HANG_TIMEOUT_SECS (RESILIENT-1612; was
+      wall-clock since spawn); carries idle_secs and committed (HEAD moved since
+      spawn, in which case the child is stopped and the dispatch ships)
     consumers: [fleet-brief, watchdog, operator-recall]
+
+  - kind: dispatch_hang_detector_blind
+    status: active
+    effect_metric: self
+    emitter: src/dispatch.rs (chump dispatch — wait_with_hang_detection, RESILIENT-1612)
+    emitter_paths: [src/dispatch.rs]
+    trigger: the dispatch hang detector has no readable activity source (no
+      worktree for the backend, or the worktree cannot be listed), so it stays
+      OFF for this dispatch instead of firing at start+timeout on a child it
+      cannot see. The subagent budget (CHUMP_SUBAGENT_BUDGET_S) still applies.
+    consumers: [fleet-brief, watchdog]
+    fields_required: [ts, session, kind, process, gap, timeout_secs, reason]
 
   - kind: claim_aborted_disk_full
     effect_metric: self
