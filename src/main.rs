@@ -12831,6 +12831,52 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            // INFRA-8192 (Phase R R2, first slice): write the gap-to-PR link
+            // as a typed row at PR-open time, instead of only being
+            // recoverable later by parsing the PR title. bot-merge.sh calls
+            // this right after `gh pr create` succeeds.
+            "link-pr" => {
+                if args
+                    .iter()
+                    .skip(3)
+                    .any(|a| matches!(a.as_str(), "--help" | "-h"))
+                {
+                    println!(
+                        "Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA>\n\n\
+                         Record a typed gap-to-PR link in state.db (gap_prs table).\n\
+                         Idempotent: re-running with the same GAP-ID/PR-NUMBER updates head_sha."
+                    );
+                    return Ok(());
+                }
+                let gap_id = args.get(3).cloned().unwrap_or_else(|| {
+                    eprintln!("Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA>");
+                    std::process::exit(2);
+                });
+                let pr_number: i64 = args
+                    .get(4)
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .filter(|n| *n > 0)
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                            "chump gap link-pr: PR-NUMBER must be a positive integer (got {:?})",
+                            args.get(4)
+                        );
+                        std::process::exit(2);
+                    });
+                let head_sha = flag("--sha").unwrap_or_else(|| {
+                    eprintln!("Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA>");
+                    std::process::exit(2);
+                });
+                match store.link_pr(&gap_id, pr_number, &head_sha) {
+                    Ok(()) => {
+                        println!("linked {gap_id} -> PR #{pr_number} ({head_sha})");
+                    }
+                    Err(e) => {
+                        eprintln!("chump gap link-pr: {e:#}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             // EFFECTIVE-038: A2A L2 task-suspension. `suspend` moves a gap
             // into status=waiting_operator carrying a structured question
             // payload — used when an agent hits auth_required (missing
@@ -17969,6 +18015,9 @@ async fn main() -> Result<()> {
                 eprintln!("  preflight        <GAP-ID>");
                 eprintln!(
                     "  ship             <GAP-ID> [--session ID] [--update-yaml] [--closed-pr N]"
+                );
+                eprintln!(
+                    "  link-pr          <GAP-ID> <PR-NUMBER> --sha <SHA>  # INFRA-8192: typed gap-to-PR link"
                 );
                 eprintln!(
                     "  set              <GAP-ID> [--title T] [--description D] [--priority P]"

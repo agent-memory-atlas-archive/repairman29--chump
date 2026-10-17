@@ -182,6 +182,19 @@ pub struct LeaseRow {
     pub expires_at: i64,
 }
 
+/// A typed gap-to-PR link (INFRA-8192). Written at PR-open time by
+/// `chump gap link-pr <GAP> <PR> --sha <SHA>`, instead of being parsed from
+/// the PR title after the fact.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct GapPrRow {
+    pub gap_id: String,
+    pub pr_number: i64,
+    pub head_sha: String,
+    pub opened_at: i64,
+    /// open | merged | closed.
+    pub state: String,
+}
+
 // ────────────────────────── DB open/migrate ──────────────────────────
 
 pub struct GapStore {
@@ -809,6 +822,26 @@ impl GapStore {
         let _ = self
             .conn
             .execute("ALTER TABLE gaps ADD COLUMN landing_receipt_json TEXT", []);
+
+        // INFRA-8192 (Phase R R2, first slice): gap_prs table — a typed
+        // gap-to-PR link written at PR-open time (`chump gap link-pr`), so
+        // bot-merge.sh no longer has to rely solely on parsing the PR title
+        // for the gap ID. One row per (gap_id, pr_number); `chump gap
+        // link-pr` re-run on the same pair UPSERTs in place (idempotent for
+        // bot-merge retries). Second slice removes the regex title closers
+        // once this table is the trusted source.
+        let _ = self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS gap_prs (
+                gap_id      TEXT NOT NULL,
+                pr_number   INTEGER NOT NULL,
+                head_sha    TEXT NOT NULL,
+                opened_at   INTEGER NOT NULL,
+                state       TEXT NOT NULL DEFAULT 'open',
+                PRIMARY KEY (gap_id, pr_number)
+             );
+             CREATE INDEX IF NOT EXISTS gap_prs_pr_number ON gap_prs(pr_number);
+            ",
+        );
 
         // MISSION-033: first-class repos table + 3 indexes.
         // Derived index: auto-upserted on `chump gap import` for every
@@ -6613,6 +6646,59 @@ impl GapStore {
     }
 }
 
+// ────────── gap_prs table (INFRA-8192) ──────────
+
+impl GapStore {
+    /// Parse one row from the gap_prs table.
+    fn row_to_gap_pr(row: &rusqlite::Row<'_>) -> rusqlite::Result<GapPrRow> {
+        Ok(GapPrRow {
+            gap_id: row.get(0)?,
+            pr_number: row.get(1)?,
+            head_sha: row.get(2)?,
+            opened_at: row.get(3)?,
+            state: row.get(4)?,
+        })
+    }
+
+    /// Record a gap-to-PR link, typically called right after `gh pr create`
+    /// succeeds. Idempotent: re-running with the same (gap_id, pr_number)
+    /// UPSERTs the head_sha/state rather than erroring, so a bot-merge retry
+    /// on the same branch doesn't fail here.
+    pub fn link_pr(&self, gap_id: &str, pr_number: i64, head_sha: &str) -> Result<()> {
+        let now = unix_now();
+        self.conn.execute(
+            "INSERT INTO gap_prs(gap_id, pr_number, head_sha, opened_at, state)
+             VALUES(?1, ?2, ?3, ?4, 'open')
+             ON CONFLICT(gap_id, pr_number) DO UPDATE SET head_sha=excluded.head_sha",
+            params![gap_id, pr_number, head_sha, now],
+        )?;
+        Ok(())
+    }
+
+    /// List all PR links recorded for a gap, most-recently-opened first.
+    pub fn list_prs_for_gap(&self, gap_id: &str) -> Result<Vec<GapPrRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT gap_id, pr_number, head_sha, opened_at, state FROM gap_prs \
+             WHERE gap_id=?1 ORDER BY opened_at DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![gap_id], Self::row_to_gap_pr)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Fetch one gap_prs row by (gap_id, pr_number). Returns None if not found.
+    pub fn get_pr_link(&self, gap_id: &str, pr_number: i64) -> Result<Option<GapPrRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT gap_id, pr_number, head_sha, opened_at, state FROM gap_prs \
+             WHERE gap_id=?1 AND pr_number=?2",
+        )?;
+        stmt.query_row(params![gap_id, pr_number], Self::row_to_gap_pr)
+            .optional()
+            .map_err(Into::into)
+    }
+}
+
 // ────────── repos table (MISSION-033) ──────────
 
 impl GapStore {
@@ -8092,6 +8178,53 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let store = GapStore::open(dir.path()).unwrap();
         (store, dir)
+    }
+
+    // ── INFRA-8192: gap_prs table + link_pr tests ──────────────────────
+
+    #[test]
+    fn link_pr_records_a_retrievable_row() {
+        let (store, _dir) = test_store();
+        store.link_pr("INFRA-8192", 5517, "abc123").unwrap();
+
+        let link = store.get_pr_link("INFRA-8192", 5517).unwrap().unwrap();
+        assert_eq!(link.gap_id, "INFRA-8192");
+        assert_eq!(link.pr_number, 5517);
+        assert_eq!(link.head_sha, "abc123");
+        assert_eq!(link.state, "open");
+        assert!(link.opened_at > 0);
+    }
+
+    #[test]
+    fn link_pr_is_idempotent_and_updates_head_sha_on_repush() {
+        let (store, _dir) = test_store();
+        store.link_pr("INFRA-8192", 5517, "abc123").unwrap();
+        store.link_pr("INFRA-8192", 5517, "def456").unwrap();
+
+        let links = store.list_prs_for_gap("INFRA-8192").unwrap();
+        assert_eq!(
+            links.len(),
+            1,
+            "same (gap_id, pr_number) must upsert, not duplicate"
+        );
+        assert_eq!(links[0].head_sha, "def456");
+    }
+
+    #[test]
+    fn list_prs_for_gap_returns_only_matching_gap() {
+        let (store, _dir) = test_store();
+        store.link_pr("INFRA-8192", 5517, "abc123").unwrap();
+        store.link_pr("INFRA-9999", 6001, "zzz999").unwrap();
+
+        let links = store.list_prs_for_gap("INFRA-8192").unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].pr_number, 5517);
+    }
+
+    #[test]
+    fn get_pr_link_returns_none_when_absent() {
+        let (store, _dir) = test_store();
+        assert!(store.get_pr_link("INFRA-8192", 1).unwrap().is_none());
     }
 
     // ── EFFECTIVE-679: idea-drop intake tests ──────────────────────────
