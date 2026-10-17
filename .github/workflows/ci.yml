@@ -618,6 +618,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           sha="${{ github.event.pull_request.head.sha || github.sha }}"
+          # --timeout-s 120 is INTENTIONALLY shorter than the script default
+          # (600s): it is a short grace window, not a wait-for-audit. A real
+          # audit run takes 15-40 min on starved runners, so no fixed poll window
+          # can outlast it — holding a runner for 600s would still time out and
+          # just waste a slot. Two mechanisms make the short window correct:
+          #   (1) RESILIENT-1617 lane-seen rule — a still-running audit (shards
+          #       in_progress / audit.yml run not completed) reports in_progress
+          #       => verified classifies PENDING, NOT FAIL, on the first pass; and
+          #   (2) RESILIENT-1562 — .github/workflows/verified-recompute.yml
+          #       re-runs this `verified` job on the Audit/integrations
+          #       workflow_run=completed event, so the final verdict reflects the
+          #       audit/ACP terminal state regardless of this poll window.
           bash scripts/ci/poll-cross-workflow-checks.sh \
             --sha "$sha" \
             --check "audit" \

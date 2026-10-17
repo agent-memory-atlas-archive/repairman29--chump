@@ -17,6 +17,22 @@
 # registered) is still reported `failure` (fail-closed: the "wedge waiting on
 # a context that'll never post" mode).
 #
+# RESILIENT-1617: the `audit` aggregate job posts its own check-run only AFTER
+# its shard matrix (audit-shard (N)) finishes — needs:-gated jobs get no
+# check-run until their dependencies complete. So between poll start and audit
+# completion there is NO check-run named `audit` at all, and RESILIENT-1561's
+# fail-closed path mis-classified that still-running audit as `failure` on
+# all-green PRs (e.g. #5565, 2026-10-17; and every push to main whose audit
+# outlived the 120s grace). A lane is therefore ALSO counted as SEEN (and kept
+# `in_progress`, never failed) when EITHER:
+#   - a shard-style member check-run — one whose name starts with the lane name
+#     followed by a space, `(`, or `-` (so `audit-shard (N)` belongs to the
+#     `audit` lane) — is queued or in_progress, OR
+#   - the lane's backing workflow run (audit.yml for `audit`) reports a run that
+#     is not completed via `gh run list --workflow <wf> --commit <sha>`.
+# Once the aggregate `audit` check-run finally posts, the exact-name match below
+# resolves it to success/failure as usual.
+#
 # Usage:
 #   poll-cross-workflow-checks.sh --sha SHA --check "name" [--check "name" ...] \
 #       [--repo owner/repo] [--timeout-s N] [--interval-s N]
@@ -61,6 +77,42 @@ fetch_check_runs() {
     gh api "repos/${REPO}/commits/${SHA}/check-runs" --paginate -q '.check_runs' 2>/dev/null || echo '[]'
 }
 
+# RESILIENT-1617: which workflow backs a cross-workflow lane whose aggregate
+# check-run lags its shard matrix. Only the `audit` lane has this shape today
+# (audit.yml: audit-shard matrix -> `audit` aggregate). Extend here if another
+# lane gains the same needs:-gated aggregate pattern.
+backing_workflow_for() {
+    case "$1" in
+        audit) echo "audit.yml" ;;
+        *)     echo "" ;;
+    esac
+}
+
+# A lane is SEEN-but-running when a shard-style member check-run — name starts
+# with "<lane> ", "<lane>(" or "<lane>-" (so `audit-shard (N)` -> `audit`) — is
+# queued or in_progress. startswith() is literal, so lane names containing jq
+# regex metacharacters (e.g. the ACP lane's parentheses/slash) are safe.
+lane_has_running_member() {
+    local lane="$1" json="$2"
+    echo "$json" | jq -e --arg n "$lane" '
+        any(.[];
+            ((.name | startswith($n + " "))
+             or (.name | startswith($n + "("))
+             or (.name | startswith($n + "-")))
+            and (.status == "queued" or .status == "in_progress"))' >/dev/null 2>&1
+}
+
+# Fallback SEEN signal: the lane's backing workflow run for this SHA exists and
+# is not completed. Covers the transient where all shards completed but the
+# aggregate check-run has not posted yet (workflow still finishing).
+backing_workflow_running() {
+    local lane="$1" sha="$2" wf rows
+    wf="$(backing_workflow_for "$lane")"
+    [[ -n "$wf" ]] || return 1
+    rows="$(gh run list --workflow "$wf" --commit "$sha" --json status --limit 20 2>/dev/null || echo '[]')"
+    echo "$rows" | jq -e 'any(.[]; .status != "completed")' >/dev/null 2>&1
+}
+
 while true; do
     runs_json="$(fetch_check_runs)"
     all_terminal=1
@@ -70,6 +122,14 @@ while true; do
         # completed run with conclusion=="success"; else fall back to the latest run.
         entry="$(echo "$runs_json" | jq -c --arg n "$c" '[.[] | select(.name == $n)] as $runs | ([$runs[] | select(.conclusion == "success")] | last) // ($runs | sort_by(.started_at) | last) // empty')"
         if [[ -z "$entry" ]]; then
+            # RESILIENT-1617: no check-run named exactly "$c" yet. The audit
+            # aggregate posts its check-run only after its shards finish, so
+            # mark the lane SEEN-but-running (stays in_progress, never
+            # fail-closed) when a shard member is queued/in_progress or the
+            # backing workflow run has not completed. Otherwise genuinely unseen.
+            if lane_has_running_member "$c" "$runs_json" || backing_workflow_running "$c" "$SHA"; then
+                SEEN["$c"]=1
+            fi
             all_terminal=0
             continue
         fi

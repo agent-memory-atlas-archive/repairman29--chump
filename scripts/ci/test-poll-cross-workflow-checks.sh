@@ -129,6 +129,86 @@ else
     fail "retry-to-success: got: $out"
 fi
 
+# ---- Test 7 (RESILIENT-1617): audit aggregate check-run absent, shards in_progress ----
+# The `audit` aggregate job gets no check-run until its shard matrix finishes,
+# so at timeout there is no check-run named `audit` — only `audit-shard (N)`.
+# The shard members mark the lane SEEN-but-running: poll must emit
+# `audit=in_progress`, and the aggregator must then classify PENDING (exit 2),
+# NOT fail-close to failure. Regression guard for the #5565 false-FAIL class.
+AGG="$REPO_ROOT/scripts/ci/aggregator-verified.sh"
+gh() {
+    if [[ "${1:-}" == "run" ]]; then
+        # gh run list --workflow audit.yml --commit SHA --json status
+        echo '[{"status":"in_progress"}]'
+    else
+        # gh api .../check-runs  — shards running, no `audit` aggregate yet
+        echo '[
+          {"name":"audit-shard (1)","status":"in_progress","started_at":"2026-10-17T18:54:00Z"},
+          {"name":"audit-shard (2)","status":"in_progress","started_at":"2026-10-17T18:54:00Z"}
+        ]'
+    fi
+}
+export -f gh
+out="$("$POLL" --sha deadbeef --check "audit" --timeout-s 2 --interval-s 1 2>/dev/null)"
+if echo "$out" | grep -qx "audit=in_progress"; then
+    ok "shards in_progress + no audit check-run -> audit=in_progress (seen, not fail-closed)"
+else
+    fail "shards in_progress: got: $out"
+fi
+# and the aggregator classifies that PENDING (exit 2), never FAIL
+agg_rc=0
+"$AGG" --lane "audit=in_progress" >/dev/null 2>&1 || agg_rc=$?
+if [[ "$agg_rc" -eq 2 ]]; then
+    ok "audit=in_progress aggregates to PENDING (exit 2)"
+else
+    fail "expected aggregator exit 2 (PENDING) for audit=in_progress, got exit $agg_rc"
+fi
+
+# ---- Test 7b (RESILIENT-1617): shards gone, aggregate not posted, workflow still running ----
+# Transient where every shard completed but the `audit` aggregate check-run has
+# not posted yet; the backing audit.yml run is still not completed, so the lane
+# stays SEEN-but-running (in_progress), never fail-closed.
+gh() {
+    if [[ "${1:-}" == "run" ]]; then
+        echo '[{"status":"in_progress"}]'
+    else
+        echo '[]'
+    fi
+}
+export -f gh
+out="$("$POLL" --sha deadbeef --check "audit" --timeout-s 2 --interval-s 1 2>/dev/null)"
+if echo "$out" | grep -qx "audit=in_progress"; then
+    ok "no check-runs but audit.yml run still running -> audit=in_progress (workflow-run fallback)"
+else
+    fail "workflow-run fallback: got: $out"
+fi
+
+# ---- Test 8 (RESILIENT-1617): no audit run exists at all -> failure (fail-closed stays) ----
+# No check-runs and no audit.yml workflow run for the SHA: the lane is genuinely
+# never-seen, so fail-closed behavior is preserved — poll emits failure and the
+# aggregator classifies FAIL (exit 1).
+gh() {
+    if [[ "${1:-}" == "run" ]]; then
+        echo '[]'
+    else
+        echo '[]'
+    fi
+}
+export -f gh
+out="$("$POLL" --sha deadbeef --check "audit" --timeout-s 2 --interval-s 1 2>/dev/null)"
+if echo "$out" | grep -qx "audit=failure"; then
+    ok "no audit run at all -> audit=failure (fail-closed stays)"
+else
+    fail "no-audit-run fail-closed: got: $out"
+fi
+agg_rc=0
+"$AGG" --lane "audit=failure" >/dev/null 2>&1 || agg_rc=$?
+if [[ "$agg_rc" -eq 1 ]]; then
+    ok "audit=failure aggregates to FAIL (exit 1)"
+else
+    fail "expected aggregator exit 1 (FAIL) for audit=failure, got exit $agg_rc"
+fi
+
 echo
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]] || exit 1

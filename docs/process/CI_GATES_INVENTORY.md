@@ -210,6 +210,50 @@ Each per-gate gap emits `kind=ci_gate_mirrored` when it ships, queryable via
 INFRA-1787..1794 land, Tier A grows from 5 → 13 gates; the autonomy-tax
 falls roughly proportionally.
 
+## Cross-workflow `verified` lane-seen rule (RESILIENT-1617)
+
+The sole required check, `verified` (ci.yml), aggregates two lanes that live in
+*other* workflows — `audit` (audit.yml) and `ACP protocol smoke test`
+(integrations.yml) — by polling the Checks API with
+`scripts/ci/poll-cross-workflow-checks.sh`. GitHub Actions only posts a
+check-run for a `needs:`-gated job once its dependencies finish, so the `audit`
+aggregate job has **no check-run at all** while its `audit-shard (N)` matrix is
+still running. Classifying a never-seen lane as `failure` at the poll timeout
+(fail-closed) therefore produced false `verified=FAIL` on all-green PRs whenever
+an audit outlived the 120s grace window (e.g. #5565 on 2026-10-17, and every
+push to main under runner starvation).
+
+**Lane-seen rule.** A lane is counted as **SEEN** — and reported `in_progress`
+(which `scripts/ci/aggregator-verified.sh` classifies PENDING, exit 2), never
+`failure` — when **any** of these hold:
+
+1. a check-run named exactly the lane name exists (resolved to its
+   success/failure/cancelled/skipped conclusion once terminal); OR
+2. a **shard-style member** check-run — one whose name starts with the lane name
+   followed by a space, `(`, or `-` (so `audit-shard (N)` belongs to the `audit`
+   lane) — is `queued` or `in_progress`; OR
+3. the lane's **backing workflow run** reports a run that is **not completed**
+   via `gh run list --workflow <wf> --commit <sha>` (only `audit` → `audit.yml`
+   today; covers the transient where every shard completed but the aggregate
+   check-run has not posted yet).
+
+A lane that matches **none** of these at the timeout is genuinely never-seen and
+stays **fail-closed** (`failure`) — the "wedge waiting on a context that'll never
+post" mode (RESILIENT-1561).
+
+**Why the 120s grace is intentionally shorter than the 600s script default.**
+A real audit takes 15-40 min on starved runners, so no fixed poll window can
+outlast it — holding a runner for 600s would still time out and just waste a
+slot. The short window is correct because (a) the lane-seen rule above makes the
+first verdict PENDING (not FAIL), and (b) RESILIENT-1562's
+`.github/workflows/verified-recompute.yml` re-runs `verified` on the
+Audit/integrations `workflow_run=completed` event, so the final verdict reflects
+the audit/ACP terminal state regardless of the poll window.
+
+Guarded by `scripts/ci/test-poll-cross-workflow-checks.sh` (shards-in_progress →
+`audit=in_progress` → aggregator exit 2; no-audit-run → `audit=failure` →
+aggregator exit 1).
+
 ## Update history
 
 - **2026-05-23** — Initial inventory. INFRA-1731 just shipped as the
@@ -217,3 +261,6 @@ falls roughly proportionally.
   follow-ups.
 - **2026-10-17** — CREDIBLE-1514: scripts/ci census section; `census-nightly`
   added to Tier D.
+- **2026-10-17** — RESILIENT-1617: documented the cross-workflow `verified`
+  lane-seen rule (shard-style members + backing-workflow-run signal) so a
+  still-running audit reports PENDING, not a false FAIL.
