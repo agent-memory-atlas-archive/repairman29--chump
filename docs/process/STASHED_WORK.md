@@ -11,6 +11,15 @@ Why `refs/stash/*` and not a branch:
   `on: push` workflows and does not appear in `git branch -r` / PR pickers.
 - **Recoverable** — checkout to a real branch when someone resumes the work.
 
+## Machine-appended stash manifest
+
+`scripts/coord/orphan-branch-sweeper.sh` (ZERO-WASTE-136) automatically stashes
+**unmerged, stale** remote branches here before deleting them: it pushes the tip
+to `refs/stash/<branch>` on origin and appends a row to
+[`docs/process/STASHED_BRANCHES.md`](./STASHED_BRANCHES.md). That file is the
+machine-readable counterpart of the curated table below — same durability
+guarantees, same recovery procedure.
+
 ## How agents fetch + inspect the stash
 
 ```bash

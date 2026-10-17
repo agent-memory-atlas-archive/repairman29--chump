@@ -2804,6 +2804,16 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
 
+        // ZERO-WASTE-136: orphan-branch-sweeper pagination + merged-fast-path
+        // + stash-before-delete. Hermetic — stubs `gh` on PATH with a two-page
+        // fake listing, no network. Mirrors the sweeper's regression guard so
+        // the one-page bug + destroy-before-stash cannot silently return.
+        steps.push(step(
+            "orphan-branch-sweeper",
+            &["bash", "scripts/ci/test-orphan-branch-sweeper.sh"],
+            GateKind::Scripts,
+        ));
+
         // INFRA-5000 (META-070/INFRA-3373 slice): cli_observability_misc
         // gate — mirrors the 41 remaining cli-observability-misc cluster
         // scripts from docs/process/AUDIT_JOB_DECOMPOSITION.md.

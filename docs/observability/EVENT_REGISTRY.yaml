@@ -7374,11 +7374,21 @@ events:
   - kind: orphan_branch_deleted
     effect_metric: self
     emitter: scripts/coord/orphan-branch-sweeper.sh INFRA-1450
-    trigger: orphan-branch-sweeper.sh deleted a remote branch that had no open PR
-      and whose last commit exceeded the age threshold (default 14d). Fires in
-      --apply mode only; dry-run runs produce no event.
+    trigger: orphan-branch-sweeper.sh deleted a remote branch that had no open PR.
+      reason=merged (fully merged into base, deleted immediately regardless of
+      age) or reason=stashed (unmerged + stale; tip pushed to refs/stash/<branch>
+      first, ZERO-WASTE-136). Fires in --apply mode only; dry-run produces no event.
     consumers: [fleet-brief, waste-tally]
-    fields_required: [ts, kind, branch, last_commit_age_days, sweep_run_id]
+    fields_required: [ts, kind, branch, reason, last_commit_age_days, sweep_run_id]
+
+  - kind: orphan_branch_stashed
+    effect_metric: self
+    emitter: scripts/coord/orphan-branch-sweeper.sh ZERO-WASTE-136
+    trigger: orphan-branch-sweeper.sh pushed an unmerged, stale branch's tip to a
+      durable refs/stash/<branch> ref on origin and recorded it in the stash
+      manifest, immediately before deleting the branch. Fires in --apply mode only.
+    consumers: [fleet-brief, waste-tally, ops-audit]
+    fields_required: [ts, kind, branch, stash_ref, sha, last_commit_age_days, sweep_run_id]
 
   - kind: orphan_branch_sweep_run
     effect_metric: self
@@ -7386,7 +7396,7 @@ events:
     trigger: orphan-branch-sweeper.sh completed a full scan. Emitted in both
       dry-run and apply modes; use dry_run field to distinguish.
     consumers: [fleet-brief, ops-audit]
-    fields_required: [ts, kind, nwo, candidates, deleted, skipped_open_pr, skipped_recent, dry_run, sweep_run_id]
+    fields_required: [ts, kind, nwo, candidates, merged_candidates, stash_candidates, deleted, merged_deleted, stashed, skipped_open_pr, skipped_recent, dry_run, sweep_run_id]
 
   - kind: dup_pr_blocked
     effect_metric: self
