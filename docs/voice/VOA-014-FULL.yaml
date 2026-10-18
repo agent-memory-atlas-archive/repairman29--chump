@@ -1,0 +1,28 @@
+# VOA-014 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-014
+filed_at: "2026-10-18T15:02:19Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: node-disk-full
+    minutes_lost: 45
+    workaround_used:
+      summary: "rm target dirs, killed 15 orphan pollers, ran the reaper by hand (cuphead 2 GB twice), Mac cleanup x4"
+    proposed_fix:
+      shape: tooling
+      fix: "Class D reaper (RESILIENT-1620 #5585), poller exit (RESILIENT-1624 #5597), Mac reaper (INFRA-8585)"
+    impact_estimate_minutes_per_session: 45
+    evidence:
+      - "RESILIENT-1620"
+      - "RESILIENT-1624"
+      - "INFRA-8585"

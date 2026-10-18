@@ -1,0 +1,26 @@
+# VOA-018 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-018
+filed_at: "2026-10-18T15:02:19Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: serial-dispatch-chain
+    minutes_lost: 60
+    workaround_used:
+      summary: "hand-written chain scripts v10..v12 dispatch one Opus gap at a time"
+    proposed_fix:
+      shape: tooling
+      fix: "conductor / nba-dispatch (paused); stage for un-pause after the reviewer gate (CREDIBLE-1526)"
+    impact_estimate_minutes_per_session: 60
+    evidence:
+      - "CREDIBLE-1526"

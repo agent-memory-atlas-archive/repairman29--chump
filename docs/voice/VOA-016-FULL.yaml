@@ -1,0 +1,26 @@
+# VOA-016 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-016
+filed_at: "2026-10-18T15:02:19Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: red-armed-pr-repair
+    minutes_lost: 120
+    workaround_used:
+      summary: "architect-started Agent repair lanes for 10 PRs"
+    proposed_fix:
+      shape: tooling
+      fix: "repair organ dispatching chump dispatch --repair (RESILIENT-1633)"
+    impact_estimate_minutes_per_session: 120
+    evidence:
+      - "RESILIENT-1633"

@@ -1,0 +1,27 @@
+# VOA-017 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-017
+filed_at: "2026-10-18T15:02:19Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: escalated-pr-review
+    minutes_lost: 30
+    workaround_used:
+      summary: "architect-run independent Opus review via Agent (#5587)"
+    proposed_fix:
+      shape: tooling
+      fix: "review organ for ESCALATE (CREDIBLE-1542)"
+    impact_estimate_minutes_per_session: 30
+    evidence:
+      - "CREDIBLE-1542"
+      - "#5587"

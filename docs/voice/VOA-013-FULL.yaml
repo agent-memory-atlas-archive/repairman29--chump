@@ -1,0 +1,26 @@
+# VOA-013 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-013
+filed_at: "2026-10-18T15:02:18Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: main-verified-pending-red
+    minutes_lost: 15
+    workaround_used:
+      summary: "gh run rerun --failed on main twice (8e7c80352, 82c42005f)"
+    proposed_fix:
+      shape: tooling
+      fix: "verified-recompute for push events (CREDIBLE-1521, chain v12)"
+    impact_estimate_minutes_per_session: 15
+    evidence:
+      - "CREDIBLE-1521"

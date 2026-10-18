@@ -1,0 +1,26 @@
+# VOA-019 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-019
+filed_at: "2026-10-18T15:02:19Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: p0-budget-overflow
+    minutes_lost: 5
+    workaround_used:
+      summary: "demoted three P0 slices by hand"
+    proposed_fix:
+      shape: tooling
+      fix: "reserve enforces the P0 budget (CREDIBLE-1543)"
+    impact_estimate_minutes_per_session: 5
+    evidence:
+      - "CREDIBLE-1543"

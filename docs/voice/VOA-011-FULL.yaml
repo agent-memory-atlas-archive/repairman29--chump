@@ -1,0 +1,27 @@
+# VOA-011 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-011
+filed_at: "2026-10-18T15:02:18Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: union-registry-dirty-pr
+    minutes_lost: 60
+    workaround_used:
+      summary: "merged origin/main locally with the union driver and pushed from cuphead (#5570, #5573 twice)"
+    proposed_fix:
+      shape: tooling
+      fix: "registries stop needing a driver (RESILIENT-1618, landed #5583)"
+    impact_estimate_minutes_per_session: 60
+    evidence:
+      - "RESILIENT-1618"
+      - "#5583"

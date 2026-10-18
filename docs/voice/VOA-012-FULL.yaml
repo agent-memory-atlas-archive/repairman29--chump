@@ -1,0 +1,27 @@
+# VOA-012 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-012
+filed_at: "2026-10-18T15:02:18Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: gap-ship-after-merge
+    minutes_lost: 25
+    workaround_used:
+      summary: "chump gap ship --closed-pr by hand for ~20 merged PRs, often before gap-closure-reconcile ran"
+    proposed_fix:
+      shape: tooling
+      fix: "let gap-closure-reconcile do it; it self-closed CREDIBLE-1520 and INFRA-8574 (CREDIBLE-204 class)"
+    impact_estimate_minutes_per_session: 25
+    evidence:
+      - "CREDIBLE-1520"
+      - "INFRA-8574"

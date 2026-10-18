@@ -1,0 +1,26 @@
+# VOA-020 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-020
+filed_at: "2026-10-18T15:02:18Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: armed-pr-behind-under-strict
+    minutes_lost: 40
+    workaround_used:
+      summary: "architect ran gh api update-branch by hand ~8 times (#5582 x2, #5584, #5590, ...)"
+    proposed_fix:
+      shape: tooling
+      fix: "install and run armed-pr-rebaser (RESILIENT-1632)"
+    impact_estimate_minutes_per_session: 40
+    evidence:
+      - "RESILIENT-1632"

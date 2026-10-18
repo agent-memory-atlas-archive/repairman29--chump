@@ -1,0 +1,26 @@
+# VOA-015 — Voice of the Agent, full report.
+# Auto-filed by `chump voice` (INFRA-2258).
+# See docs/process/VOICE_OF_AGENT.md for protocol.
+
+id: VOA-015
+filed_at: "2026-10-18T15:02:19Z"
+
+reporter:
+  agent_role: unknown-role
+  chump_version: "0.2.0"
+  target_repo: "anonymous"
+  target_repo_disclosure: anonymous
+  session_id: "(elided)"
+
+wedge_observations:
+
+  - wedge_class: node-missing-nextest
+    minutes_lost: 10
+    workaround_used:
+      summary: "cargo install cargo-nextest by hand on cuphead"
+    proposed_fix:
+      shape: tooling
+      fix: "node provisioning installs nextest (INFRA-8572)"
+    impact_estimate_minutes_per_session: 10
+    evidence:
+      - "INFRA-8572"
