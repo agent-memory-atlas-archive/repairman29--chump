@@ -5,17 +5,23 @@
 # CI fails if a line is ADDED.
 #
 # Date: 2026-10-17 (INFRA-8218 R6.1 baseline)
+#
+# INFRA-8574 (PHASE-R R6): shrank the allowlist by removing 4 dead entries that
+# no longer match ANY detector pattern (gap-doctor.py, gap-normalize-domains.sh,
+# chump-pe-suite-demo.sh, ci/lib/gate-fixtures.sh). The remaining leases-table
+# writers below (bot-merge.sh, stale-gap-lock-reaper.sh, stale-worktree-reaper.sh)
+# only DELETE stale rows (lease cleanup), so they are kept as the one allowlisted
+# exception to the "crates/chump-atomic-claim is the only leases-table writer"
+# invariant now enforced by the lease-writer check in test-invariant-boundary.sh.
+# Routing that cleanup through a Rust-owned `chump claim --release` path is a
+# tracked follow-up (see MISSION-028).
 
-# 9 baseline store writers (from gap description):
+# 5 baseline store writers (from gap description):
 bot-merge.sh
 gap-reserve.sh
-gap-doctor.py
-gap-normalize-domains.sh
 backfill-opened-dates.sh
 stale-gap-lock-reaper.sh
 stale-worktree-reaper.sh
-chump-pe-suite-demo.sh
-ci/lib/gate-fixtures.sh
 
 # Additional detected writers (2026-10-17 baseline scan):
 admin-merge-cycle.sh

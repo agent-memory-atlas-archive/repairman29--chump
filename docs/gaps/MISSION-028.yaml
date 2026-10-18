@@ -13,4 +13,18 @@
     - "runtime-verified: a P0 MISSION gap is claimed within N worker cycles of filing"
     - mission-ship-ratio climbs toward >=2/3
   outcome_id: MISSION-010
+  notes: |
+    05:04Z 2026-10-18 INFRA-8574 (PHASE-R R6, lease-writer invariant): the
+    lease-writer half of the picker consolidation now has a gate.
+    scripts/ci/test-invariant-boundary.sh enforces (unconditionally) that only
+    crates/chump-atomic-claim (i.e. `chump claim`) writes .chump-locks/claim-*.json
+    and the state.db leases table; the invariant-boundary allowlist shrank by 4
+    dead entries. The WORKER picker _pick_and_claim_gap.py still writes its own
+    <session>.json lease via try_claim_gap (a second, parallel atomic-claim
+    implementation), so routing that direct write through `chump claim` (adding a
+    lease-only primitive to crates/chump-atomic-claim) + migrating the picker's
+    lease tests (test-pick-and-claim-atomic / test-gap-lock-self-clean /
+    test-infra-409-atomic-stagger / test-pick-and-claim-lockdir) is the reserved
+    follow-up slice of INFRA-8195 AC2. That is the same "_pick_and_claim_gap.py is
+    the one lease path" consolidation this gap tracks.
 
