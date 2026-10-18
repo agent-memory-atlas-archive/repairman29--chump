@@ -3234,6 +3234,17 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
 
+        // CREDIBLE-1524 (PHASE-R R3): admin-merge consensus gate. Grep gate
+        // (every `gh pr merge --admin` call site is guarded) + stubbed-gh
+        // refusal fixtures per call-site shape. Hermetic (tmpdir ambient +
+        // recorder stubs, no network). Mirrors the ci.yml step of the same
+        // name.
+        steps.push(step(
+            "admin-merge-consensus-gate",
+            &["bash", "scripts/ci/test-admin-merge-consensus-gate.sh"],
+            GateKind::Scripts,
+        ));
+
         // INFRA-5000 (META-070/INFRA-3373 slice): cli_observability_misc
         // gate — mirrors the 41 remaining cli-observability-misc cluster
         // scripts from docs/process/AUDIT_JOB_DECOMPOSITION.md.

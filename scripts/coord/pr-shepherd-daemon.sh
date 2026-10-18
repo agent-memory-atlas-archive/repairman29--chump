@@ -138,6 +138,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/arm-policy.sh"
 # terminal; never admin-merge/rebase/arm it, whatever its classification.
 # shellcheck source=scripts/coord/lib/pr-cut-guard.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/pr-cut-guard.sh"
+# CREDIBLE-1524: the admin-merge consensus gate — every --admin bypass refuses
+# unless a PASSED AdminMergeProposal consensus_result names the PR.
+# shellcheck source=scripts/coord/lib/admin-merge-consensus-gate.sh
+source "$REPO_ROOT/scripts/coord/lib/admin-merge-consensus-gate.sh"
 
 emit_tick() {
   local count="$1"
@@ -1229,6 +1233,13 @@ for p in prs:
           # rather than racing another merge-mutation organ on this PR.
           _emit_pr_queue_auto_action "$pr_num" "admin_merge_skipped" "merge_pipeline_lock_held" "$author" "$c"
           echo "[pr-shepherd-daemon] #${pr_num}: merge-pipeline-driver.lock held elsewhere — no-op (RESILIENT-1563)" >&2
+        elif ! admin_merge_consensus_gate "$pr_num"; then
+          # CREDIBLE-1524: refuse the --admin bypass unless a PASSED
+          # AdminMergeProposal consensus_result names this PR (enforce mode;
+          # shadow mode logs + proceeds). Release the pipeline lock we hold.
+          _emit_pr_queue_auto_action "$pr_num" "admin_merge_skipped" "consensus_gate" "$author" "$c"
+          echo "[pr-shepherd-daemon] #${pr_num}: admin-merge refused by consensus gate (CREDIBLE-1524)" >&2
+          merge_pipeline_lock_release
         else
           echo "[pr-shepherd-daemon] admin-merging PR #${pr_num} (author=${author}, ${c})" >&2
           local merge_exit=0

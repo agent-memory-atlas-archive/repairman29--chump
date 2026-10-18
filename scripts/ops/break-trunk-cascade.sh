@@ -48,6 +48,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# CREDIBLE-1524: admin-merge consensus gate (refuses --admin without a PASSED
+# AdminMergeProposal consensus_result for the PR).
+# shellcheck source=scripts/coord/lib/admin-merge-consensus-gate.sh
+source "$SCRIPT_DIR/../coord/lib/admin-merge-consensus-gate.sh"
 
 PR_NUM=""
 REASON=""
@@ -262,6 +266,14 @@ echo "[break-trunk-cascade] step 3/3: gh pr merge $PR_NUM --admin --squash ..." 
 MERGE_EXIT=0
 START_EPOCH=$(date -u +%s)
 if [[ "$DRY_RUN" -ne 1 ]]; then
+    # CREDIBLE-1524: refuse the --admin bypass unless a PASSED AdminMergeProposal
+    # consensus_result names this PR (enforce mode; shadow logs + proceeds). The
+    # restore_protections call below (and the EXIT trap) re-arms branch protection.
+    if ! admin_merge_consensus_gate "$PR_NUM"; then
+        echo "[break-trunk-cascade] admin-merge REFUSED by consensus gate (CREDIBLE-1524) — PR #$PR_NUM" >&2
+        restore_protections
+        exit 1
+    fi
     gh pr merge "$PR_NUM" --admin --squash 2>&1 || MERGE_EXIT=$?
 fi
 END_EPOCH=$(date -u +%s)

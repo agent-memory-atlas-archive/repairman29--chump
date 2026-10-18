@@ -4241,6 +4241,10 @@ fi
 # ── 7. Enable auto-merge (optional) ──────────────────────────────────────────
 # META-156 AC#1: step=pr_merge_arm
 _bm_step_start "pr_merge_arm"
+# CREDIBLE-1524 AC3: log the consensus merge gate mode on every bot-merge run
+# (even when disabled / not arming auto-merge), so the enforce/shadow posture
+# is always visible in the run log and auditable.
+info "bot-merge: consensus merge gate mode=${CHUMP_CONSENSUS_MERGE_GATE:-0} (CHUMP_CONSENSUS_MERGE_GATE; shadow-first per CREDIBLE-1524)"
 if [[ $AUTO_MERGE -eq 1 ]]; then
     TARGET_PR="${EXISTING_PR:-}"
     if [[ -z "$TARGET_PR" ]]; then

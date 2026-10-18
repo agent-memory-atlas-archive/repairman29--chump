@@ -11247,6 +11247,57 @@ events:
     status: stable
     # payload: {pr: number, corr_id: string, reason: string, operator_session_id: string, mode: string, gap_id: string, ts: string}
 
+  # ── CREDIBLE-1524 (PHASE-R R3): admin-merge consensus gate ──────────────────
+  # The sibling of the INFRA-2274 auto-merge gate, for the higher-trust
+  # `gh pr merge --admin` bypass path. Emitted by the shared gate in
+  # scripts/lib/admin-merge-consensus-gate.sh at every --admin call site
+  # (pr-shepherd-daemon.sh, recovery-queue-service.sh, admin-merge-cycle.sh,
+  # break-trunk-cascade.sh). corr_id convention: admin-merge-pr-<N>.
+  - kind: admin_merge_consensus_approved
+    effect_metric: credible
+    emitter: scripts/lib/admin-merge-consensus-gate.sh (CREDIBLE-1524)
+    # scanner-anchor: "kind":"admin_merge_consensus_approved"
+    trigger: >
+      Emitted when an admin-merge call site finds a kind=consensus_result
+      verdict=PASSED AdminMergeProposal naming the PR (corr_id admin-merge-pr-N).
+      The --admin merge proceeds. Pairs with admin_merge_consensus_refused /
+      admin_merge_consensus_shadow for the full audit trail.
+    consumers: [ops-audit, consensus-bypass-leaderboard]
+    fields_required: [ts, kind, pr, corr_id, verdict, mode, gap_id, proposal_type]
+    expected_volume: "one per admin-merge once enforce mode is active"
+    status: shadow
+    # payload: {pr: number, corr_id: string, verdict: "PASSED", mode: "shadow"|"enforce", gap_id: string, proposal_type: "AdminMergeProposal", ts: string}
+
+  - kind: admin_merge_consensus_refused
+    effect_metric: credible
+    emitter: scripts/lib/admin-merge-consensus-gate.sh (CREDIBLE-1524)
+    # scanner-anchor: "kind":"admin_merge_consensus_refused"
+    trigger: >
+      Emitted in ENFORCE mode when an admin-merge call site finds NO PASSED
+      AdminMergeProposal consensus_result for the PR. The --admin merge is
+      refused (gate returns non-zero); the call site skips/exits. Operator can
+      cast votes via `chump vote admin-merge-pr-N +1 --reason "..."`.
+    consumers: [ops-audit, consensus-bypass-leaderboard]
+    fields_required: [ts, kind, pr, corr_id, verdict, mode, gap_id, proposal_type]
+    expected_volume: "low; spikes signal vote-cast discipline drift under enforce"
+    status: shadow
+    # payload: {pr: number, corr_id: string, verdict: "NO_PASSED", mode: "enforce", gap_id: string, proposal_type: "AdminMergeProposal", ts: string}
+
+  - kind: admin_merge_consensus_shadow
+    effect_metric: credible
+    emitter: scripts/lib/admin-merge-consensus-gate.sh (CREDIBLE-1524)
+    # scanner-anchor: "kind":"admin_merge_consensus_shadow"
+    trigger: >
+      Emitted in SHADOW mode (the node-installer default) when an admin-merge
+      call site finds NO PASSED AdminMergeProposal consensus_result. The gate
+      logs that it WOULD refuse in enforce mode but proceeds anyway. This is the
+      observation signal that precedes the shadow->enforce flip.
+    consumers: [ops-audit, consensus-bypass-leaderboard]
+    fields_required: [ts, kind, pr, corr_id, verdict, mode, gap_id, proposal_type]
+    expected_volume: "high during the shadow observation window; trends down as vote discipline lands"
+    status: shadow
+    # payload: {pr: number, corr_id: string, verdict: "NO_PASSED", mode: "shadow", gap_id: string, proposal_type: "AdminMergeProposal", ts: string}
+
   # ── INFRA-2156 (META-125/C5): chump consensus ask ───────────────────────────
   - kind: consensus_ask_published
     effect_metric: self

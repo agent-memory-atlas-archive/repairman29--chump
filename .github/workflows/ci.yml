@@ -831,6 +831,10 @@ jobs:
         run: bash scripts/ci/test-backlog-sync-reader-dirty-tree.sh
       - name: backlog-sync registry-remote contract (same script, fixture only)
         run: bash scripts/ci/test-backlog-sync-registry-remote.sh
+      # CREDIBLE-1524: every --admin merge call site refuses without a PASSED
+      # AdminMergeProposal consensus_result (grep gate + stubbed-gh fixtures).
+      - name: admin-merge consensus gate (CREDIBLE-1524)
+        run: bash scripts/ci/test-admin-merge-consensus-gate.sh
 
       # RESILIENT-1055 / RESILIENT-1102: the shared organ-unit host-rewriter +
       # role-roster placement. Locks the byte-for-byte rewrite contract both

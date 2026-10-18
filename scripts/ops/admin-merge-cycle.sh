@@ -55,6 +55,10 @@ DROP_JSON="$SNAPSHOT_DIR/drop.json"
 RESTORE_JSON="$SNAPSHOT_DIR/restore.json"
 NOISE_CLASSES_FILE="${CHUMP_NOISE_CLASSES_FILE:-$SCRIPT_DIR/known-noise-classes.yaml}"
 GH_BIN="${CHUMP_ADMIN_MERGE_TEST_GH:-gh}"
+# CREDIBLE-1524: admin-merge consensus gate (refuses --admin without a PASSED
+# AdminMergeProposal consensus_result for the PR).
+# shellcheck source=scripts/coord/lib/admin-merge-consensus-gate.sh
+source "$SCRIPT_DIR/../coord/lib/admin-merge-consensus-gate.sh"
 
 # Defaults
 PR_NUM=""
@@ -482,6 +486,14 @@ if [[ "$DRY_RUN" != "1" ]]; then
 fi
 
 # Step 3: Admin-merge the PR
+# CREDIBLE-1524: refuse the --admin bypass unless a PASSED AdminMergeProposal
+# consensus_result names this PR (enforce mode; shadow logs + proceeds).
+if [[ "$DRY_RUN" != "1" ]] && ! admin_merge_consensus_gate "$PR_NUM"; then
+    echo "[admin-merge-cycle] step 3/4: admin-merge REFUSED by consensus gate (CREDIBLE-1524) — PR #$PR_NUM" >&2
+    echo "[admin-merge-cycle] restoring ruleset before exit..." >&2
+    _run "$GH_BIN" api -X PUT "repos/$REPO/rulesets/$RULESET_ID" --input "$RESTORE_JSON" > /dev/null || true
+    exit 1
+fi
 echo "[admin-merge-cycle] step 3/4: merging PR #$PR_NUM with --admin --squash" >&2
 MERGE_EXIT=0
 _run "$GH_BIN" pr merge "$PR_NUM" --squash --admin || MERGE_EXIT=$?

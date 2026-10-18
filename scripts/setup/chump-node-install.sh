@@ -651,6 +651,14 @@ write_node_env() {
   if [ -f "$node_env" ]; then
     _ceiling_lines="$(grep -E '^(export )?(CHUMP_MAX_CONCURRENT_CLAUDE|CHUMP_MAX_CONCURRENT_CARGO_JOBS)=' "$node_env" 2>/dev/null || true)"
   fi
+  # CREDIBLE-1524: the admin-merge consensus gate ships SHADOW-FIRST on every
+  # node. Preserve an operator-set value (e.g. enforce) across the whole-file
+  # rewrite; default to shadow when absent so a fresh node observes before it
+  # enforces.
+  local _consensus_gate_line=""
+  if [ -f "$node_env" ]; then
+    _consensus_gate_line="$(grep -E '^(export )?CHUMP_CONSENSUS_MERGE_GATE=' "$node_env" 2>/dev/null || true)"
+  fi
   ( umask 077
     {
       printf 'export CHUMP_STATE_DIR=%s\n' "$STATE_DIR"
@@ -689,6 +697,13 @@ write_node_env() {
       printf 'export CHUMP_NODE_WORK_ENABLED=%s\n' "$work_enabled"
       printf 'export CHUMP_NODE_MODE=%s\n' "$node_mode"
       if [ -n "$_ceiling_lines" ]; then printf '%s\n' "$_ceiling_lines"; fi
+      # CREDIBLE-1524: admin-merge consensus gate, shadow-first (preserve
+      # operator value across rewrite; default shadow on fresh nodes).
+      if [ -n "$_consensus_gate_line" ]; then
+        printf '%s\n' "$_consensus_gate_line"
+      else
+        printf 'export CHUMP_CONSENSUS_MERGE_GATE=shadow\n'
+      fi
     } > "$node_env"
   )
   # RESILIENT-1604: write the admission ceiling when absent (max(1, nproc/2)
@@ -706,6 +721,7 @@ write_node_env() {
   # shellcheck disable=SC1090
   . "$node_env"
   export CHUMP_STATE_DIR CHUMP_STATE_DB CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE CHUMP_NODE_WORK_ENABLED CHUMP_NODE_MODE CHUMP_RUN_USER CHUMP_GAP_SERVER
+  export CHUMP_CONSENSUS_MERGE_GATE 2>/dev/null || true
   export CHUMP_MAX_CONCURRENT_CLAUDE CHUMP_MAX_CONCURRENT_CARGO_JOBS 2>/dev/null || true
   ok "node.env written + sourced: $node_env (mode=$CHUMP_NODE_MODE, run-user=$CHUMP_RUN_USER)"
   install_shell_hook "$node_env"

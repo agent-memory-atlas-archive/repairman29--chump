@@ -64,6 +64,10 @@ trap 'rm -f "$IN_FLIGHT_FLAG"' EXIT
 # shellcheck source=scripts/coord/lib/silent-noop-guard.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/silent-noop-guard.sh"
 _sng_install_guard "recovery_queue_service" "$AMBIENT"
+# CREDIBLE-1524: admin-merge consensus gate (refuses --admin without a PASSED
+# AdminMergeProposal consensus_result for the PR).
+# shellcheck source=scripts/coord/lib/admin-merge-consensus-gate.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/admin-merge-consensus-gate.sh"
 
 if [[ "${CHUMP_RECOVERY_QUEUE_PAUSE:-0}" == "1" ]]; then
     printf '{"ts":"%s","kind":"recovery_queue_paused","source":"recovery_queue_service","reason":"env_pause"}\n' \
@@ -372,6 +376,13 @@ with open('$dropped','w') as f: json.dump(out,f)
         pr="$(echo "$pr" | xargs)"
         [[ -z "$pr" ]] && continue
         if ! _pr_safe_to_admin "$pr"; then
+            failed+="$pr,"
+            continue
+        fi
+        # CREDIBLE-1524: refuse the --admin bypass unless a PASSED
+        # AdminMergeProposal consensus_result names this PR (enforce mode;
+        # shadow logs + proceeds).
+        if ! admin_merge_consensus_gate "$pr"; then
             failed+="$pr,"
             continue
         fi
