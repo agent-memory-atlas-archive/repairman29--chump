@@ -1365,6 +1365,9 @@ jobs:
       - name: dispatch headless wakeup tools disallowed + stranded work saved (INFRA-8203)
         run: bash scripts/ci/test-dispatch-work-stranded.sh
 
+      - name: urgent-inbox poll loop lifetime — exits with session/worktree, cwd outside worktree (RESILIENT-1624)
+        run: bash scripts/ci/test-urgent-inbox-poll-loop-lifetime.sh
+
       - name: commit-msg docs-delta trailer check (INFRA-1969)
         run: bash scripts/ci/test-docs-delta-commit-msg.sh
 

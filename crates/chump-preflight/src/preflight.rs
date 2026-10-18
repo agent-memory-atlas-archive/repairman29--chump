@@ -3054,6 +3054,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "urgent-inbox-poll-loop-lifetime",
+            &["bash", "scripts/ci/test-urgent-inbox-poll-loop-lifetime.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "infra-258-reaper-partial-delivery",
             &[
                 "bash",

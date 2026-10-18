@@ -326,6 +326,15 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
         duration_s: duration_secs,
     });
 
+    // RESILIENT-1624: the SessionStart hook inside a headless `claude -p`
+    // daemonizes an urgent-inbox poll loop out of the work child's process
+    // group, so INFRA-8198's process-group kill above never reaches it. Kill
+    // it explicitly on the way out so no immortal poller is left pinning the
+    // worktree cwd against the Class-D reaper. The loop also self-exits on its
+    // next tick (its session is this dispatch's child), so this is the fast
+    // path, not the only one.
+    kill_urgent_inbox_poll_loop(workspace.working_dir());
+
     Ok(DispatchOutcome {
         gap_id: opts.gap_id.to_string(),
         branch,
@@ -373,6 +382,43 @@ fn child_is_alive(pid: u32) -> bool {
 fn child_is_alive(_pid: u32) -> bool {
     false
 }
+
+/// RESILIENT-1624: kill the urgent-inbox poll loop that the SessionStart hook
+/// (`scripts/setup/session-start-urgent-inbox-poll.sh`) daemonized for this
+/// worktree. The hook writes the loop's pid to
+/// `<working_dir>/.chump-locks/urgent-inbox-poll-loop.pid`; because the hook
+/// runs inside the headless `claude -p` work child and nohup/disowns the loop
+/// out of the process group, INFRA-8198's `kill_process_group` never reaches
+/// it — so it would otherwise survive as an immortal poller pinning the
+/// worktree cwd against the Class-D reaper. Best-effort: a missing pidfile, a
+/// stale pid, or a non-unix host is a no-op.
+#[cfg(unix)]
+fn kill_urgent_inbox_poll_loop(working_dir: &Path) {
+    let pidfile = working_dir
+        .join(".chump-locks")
+        .join("urgent-inbox-poll-loop.pid");
+    let Ok(contents) = std::fs::read_to_string(&pidfile) else {
+        return;
+    };
+    let Some(pid) = contents
+        .lines()
+        .next()
+        .and_then(|l| l.trim().parse::<i32>().ok())
+    else {
+        return;
+    };
+    if pid > 1 && child_is_alive(pid as u32) {
+        // SAFETY: SIGTERM to a specific, still-live pid read from our own
+        // worktree's pidfile; no negative pid / process-group semantics here.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        }
+    }
+    let _ = std::fs::remove_file(&pidfile);
+}
+
+#[cfg(not(unix))]
+fn kill_urgent_inbox_poll_loop(_working_dir: &Path) {}
 
 /// INFRA-8198: signal a whole process group (negative pid). `pid` must be a
 /// pgid produced by [`configure_child_lifetime`]'s `process_group(0)` (which

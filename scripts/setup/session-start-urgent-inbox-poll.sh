@@ -44,7 +44,15 @@ if [[ -x "$LOOP_SCRIPT" && "${CHUMP_URGENT_INBOX_POLL_LOOP_DISABLE:-0}" != "1" ]
     EXISTING_PID=""
     [[ -f "$LOOP_PIDFILE" ]] && EXISTING_PID="$(cat "$LOOP_PIDFILE" 2>/dev/null | head -1 | xargs)"
     if [[ -z "$EXISTING_PID" ]] || ! kill -0 "$EXISTING_PID" 2>/dev/null; then
-        nohup "$LOOP_SCRIPT" >/dev/null 2>/dev/null &
+        # RESILIENT-1624: start the loop with cwd=/ so it NEVER pins the
+        # worktree against the reaper, and hand it this session's PID ($PPID =
+        # the `claude` process that ran this hook) so it exits the moment the
+        # session dies. We drop the old `nohup` here on purpose: the loop must
+        # die with its session, and self-exits via the parent-liveness check.
+        # The subshell `exec`s into the loop so $! is the loop's own pid (what
+        # the pidfile and `chump dispatch`'s exit-path kill both target).
+        SESSION_PID="$PPID"
+        ( cd / && CHUMP_REPO="$REPO_ROOT" exec "$LOOP_SCRIPT" "$SESSION_PID" ) >/dev/null 2>/dev/null &
         echo "$!" > "$LOOP_PIDFILE" 2>/dev/null || true
         disown 2>/dev/null || true
     fi
