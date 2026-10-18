@@ -20,9 +20,14 @@
 # unit whose WorkingDirectory/HOME/User don't exist there -> CHDIR/127 every
 # cycle, or (the "instruments lie" keystone) a bare `Environment=HOME=/root`
 # that survives a naive prefix-rewrite and makes every tool read /root/.config.
-# organ_unit_host_rewrite detects each unit's OWN baked-in source user and
-# rewrites THAT home, then injects a uniform host-agnostic runtime context, so
-# the SAME manifest wires correctly on any host.
+# organ_unit_host_rewrite resolves each unit's placeholder template to this
+# host and injects a uniform host-agnostic runtime context, so the SAME
+# manifest wires correctly on any host. INFRA-8571 (Phase R R5 slice 3) retired
+# the legacy source-home sed rules that used to PATCH a baked /Users/<name> or
+# /home/<name> path: now that every tracked unit is a placeholder template (the
+# no-host-literal gate holds the line), a literal reaching this rewriter is a
+# regression and fails LOUDLY instead of being silently patched (which hid
+# exactly that class of regression).
 
 # organ_unit_host_rewrite <src-file> <dest-file> <run-user> <run-home> [keep_root] [repo_root] [scope]
 #   Writes the host-rewritten unit from <src-file> to <dest-file>.
@@ -80,45 +85,36 @@ organ_unit_host_rewrite() {
     repo_on_host="$(cd "$repo_on_host" 2>/dev/null && pwd -P || echo "$repo_on_host")"
   fi
 
-  # Detect the unit's OWN baked-in source user (its `User=` line; default root
-  # when absent, matching the historical helsinki shape) and rewrite THAT home.
-  local src_user src_home
-  src_user="$(grep -m1 -E '^User=' "$src" | cut -d= -f2 || true)"
-  [[ -z "$src_user" ]] && src_user="root"
-  if [[ "$src_user" == "root" ]]; then
-    src_home="/root"
-  else
-    src_home="$(getent passwd "$src_user" 2>/dev/null | cut -d: -f6 || true)"
-    [[ -z "$src_home" ]] && src_home="/home/$src_user"
+  # INFRA-8571 (Phase R R5 slice 3): the source MUST be a placeholder template.
+  # The legacy source-home rewrite rules that used to PATCH a baked /Users/<name>
+  # or /home/<name> path (and a baked `User=<name>`) into the run host are gone;
+  # with every tracked unit a placeholder template (the no-host-literal gate,
+  # scripts/ci/test-provision-no-host-literals.sh), a literal reaching this
+  # rewriter is a regression that must fail LOUDLY, not be silently patched —
+  # patching is exactly what hid the regression before. The typed renderer
+  # refuses the same template (crates/chump-provision::render ->
+  # RenderError::HostLiterals); this is its shell mirror. Same four rules as
+  # find_host_literals / the gate; a comment line (first non-blank char `#`, NOT
+  # a `#!` shebang) executes nothing and is skipped, so an incident receipt in a
+  # comment is fine. User= is injected below for system scope only — a template
+  # never carries one.
+  local _host_literals
+  _host_literals="$(grep -nIE '(^|[^A-Za-z0-9_])User=[A-Za-z_]|/home/[a-z_]|/root/|/opt/homebrew' "$src" 2>/dev/null \
+    | grep -vE '^[0-9]+:[[:space:]]*#([^!]|$)' || true)"
+  if [[ -n "$_host_literals" ]]; then
+    {
+      echo "organ_unit_host_rewrite: refusing $src — it carries a host literal (INFRA-8571)."
+      echo "  Write a placeholder template (__HOME__ __REPO_ROOT__ __BIN_DIR__ __NODE_ENV__ __BREW_PREFIX__); User= is injected at system scope."
+      echo "$_host_literals" | sed 's/^/    /'
+    } >&2
+    return 1
   fi
 
-  # s#$SRC_HOME/Projects/chump#$REPO_ON_HOST#g -> the repo path itself, wherever
-  #   it appears (WorkingDirectory=, ExecStart=, an inline `cd …`, CHUMP_REPO_ROOT=,
-  #   a PATH entry). It runs FIRST — BEFORE the home-prefix swap — so the whole
-  #   baked repo path is redirected to this box's ACTUAL checkout, not merely
-  #   home-prefix-swapped into a $HOME/Projects/chump that may not exist on an
-  #   owned node (the 200/CHDIR root, RESILIENT-1102). `chump` is always a
-  #   complete path segment here (the char after it is always /, ;, ), ", space,
-  #   or EOL — never `chumpX`), so a plain global swap cannot over-match a
-  #   sibling token. Assumes run-user == REPO_ROOT's owner (both placers derive
-  #   run-user via stat %U of the checkout), so the later home-swap never re-hits
-  #   $REPO_ON_HOST.
-  # s#$SRC_HOME/#...#g  -> remaining path PREFIXES ($SRC_HOME/.chump, $SRC_HOME/.cargo, …)
-  # s#=$SRC_HOME$#...#  -> a BARE $SRC_HOME as the WHOLE value of an assignment
-  #                       (chiefly `Environment=HOME=/root`, no trailing slash).
-  # s#^User=$SRC_USER$# -> the User= line itself.
-  # INFRA-8194 (Phase R R5): placeholder templates. A migrated unit carries NO
-  # host literal at all — __HOME__ / __REPO_ROOT__ / __BIN_DIR__ / __NODE_ENV__
-  # and no User= line — and this stage resolves them exactly as the typed
-  # renderer does (`chump node render-unit`, crates/chump-provision::render;
-  # same tokens, same values; __BREW_PREFIX__ joined them in slice 2). These -e rules run LAST so the legacy
-  # source-home rewrites above can never touch an already-resolved path. User=
-  # for a template comes from the injection block below (system scope only).
-  # INFRA-8194 slice 2: __BREW_PREFIX__ resolves through the shared host-path
-  # mirror (scripts/lib/host-paths.sh, same rule as chump_provision::brew_prefix:
-  # the Apple Silicon prefix only on a Mac that has it, /usr/local elsewhere).
-  # A copy of this lib sourced on its own (synthetic tests) falls back to the
-  # non-Darwin answer, which is what every systemd host gets anyway.
+  # __BREW_PREFIX__ resolves through the shared host-path mirror
+  # (scripts/lib/host-paths.sh, same rule as chump_provision::brew_prefix: the
+  # Apple Silicon prefix only on a Mac that has it, /usr/local elsewhere). A copy
+  # of this lib sourced on its own (synthetic tests) falls back to the non-Darwin
+  # answer, which is what every systemd host gets anyway.
   local brew_prefix="/usr/local"
   if ! declare -F chump_brew_prefix >/dev/null 2>&1; then
     # shellcheck source=../../lib/host-paths.sh
@@ -128,11 +124,12 @@ organ_unit_host_rewrite() {
     brew_prefix="$(chump_brew_prefix)"
   fi
 
-  sed -e "s#${src_home%/}/Projects/chump#${repo_on_host}#g" \
-      -e "s#${src_home%/}/#${run_home%/}/#g" \
-      -e "s#=${src_home%/}\$#=${run_home%/}#" \
-      -e "s#^User=${src_user}\$#User=${run_user}#" \
-      -e "s#__REPO_ROOT__#${repo_on_host}#g" \
+  # Resolve the placeholder template to this host — the ONLY rewrites left
+  # (INFRA-8571): placeholder-in, host-resolved-out, every host literal already
+  # refused above. __REPO_ROOT__ gets the realpath-resolved checkout so a
+  # bootstrap symlink is never baked in (RESILIENT-1102); it resolves exactly as
+  # the typed renderer does (`chump node render-unit`; same tokens, same values).
+  sed -e "s#__REPO_ROOT__#${repo_on_host}#g" \
       -e "s#__BIN_DIR__#${run_home%/}/.cargo/bin#g" \
       -e "s#__NODE_ENV__#${run_home%/}/.chump/node.env#g" \
       -e "s#__BREW_PREFIX__#${brew_prefix}#g" \

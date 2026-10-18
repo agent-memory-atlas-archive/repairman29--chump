@@ -98,40 +98,61 @@ if ! sed --version 2>/dev/null | grep -qi gnu; then
   echo "ALL PASS"; exit 0
 fi
 source "$LIB_UNIT"
-SRCU="$TMP/root-unit.service"
+# INFRA-8571: the source is a placeholder TEMPLATE (__HOME__ / __REPO_ROOT__,
+# no User= line). The rewriter resolves the placeholders and injects the
+# host-agnostic runtime context; a baked /root/ or User= literal would now be
+# refused loudly (section 4b).
+# Use a $TMP run-home (no pre-existing Projects/chump symlink) so the 5-arg
+# fallback is deterministic on any machine — a dev box whose real
+# $HOME/Projects/chump is a bootstrap symlink would otherwise realpath-collapse
+# the fallback and make this assertion machine-dependent.
+RH="$TMP/rh"; mkdir -p "$RH"
+SRCU="$TMP/tpl-unit.service"
 cat > "$SRCU" <<'EOF'
 [Unit]
 Description=x
 [Service]
-User=root
-Environment=HOME=/root
-ExecStart=/root/Projects/chump/scripts/x.sh
+Environment=HOME=__HOME__
+ExecStart=__REPO_ROOT__/scripts/x.sh
 EOF
 DESTU="$TMP/out.service"
-organ_unit_host_rewrite "$SRCU" "$DESTU" "ubuntu" "/home/ubuntu" 0 || fail "host_rewrite returned non-zero"
-grep -q '^User=ubuntu$' "$DESTU" || fail "host_rewrite: User=root should become User=ubuntu"
-grep -q '^Environment=HOME=/home/ubuntu$' "$DESTU" || fail "host_rewrite: bare Environment=HOME=/root should become /home/ubuntu (the instruments-lie keystone)"
-# Legacy 5-arg call (no repo_root) preserves the historical $HOME/Projects/chump
-# assumption — backward compat for any caller that hasn't opted into the fix.
-grep -q '^ExecStart=/home/ubuntu/Projects/chump/scripts/x.sh$' "$DESTU" || fail "host_rewrite: /root path prefix should rewrite to run-home (legacy default)"
+organ_unit_host_rewrite "$SRCU" "$DESTU" "ubuntu" "$RH" 0 || fail "host_rewrite returned non-zero"
+grep -q '^User=ubuntu$' "$DESTU" || fail "host_rewrite: system scope must inject User=ubuntu"
+grep -q "^Environment=HOME=${RH}\$" "$DESTU" || fail "host_rewrite: __HOME__ should resolve to the run-home (the instruments-lie keystone)"
+# 5-arg call (no repo_root): __REPO_ROOT__ falls back to $HOME/Projects/chump.
+grep -q "^ExecStart=${RH}/Projects/chump/scripts/x.sh\$" "$DESTU" || fail "host_rewrite: __REPO_ROOT__ should resolve to the run-home repo (legacy default)"
 # keep-root
-organ_unit_host_rewrite "$SRCU" "$DESTU" "ubuntu" "/home/ubuntu" 1 || fail "host_rewrite keep-root returned non-zero"
+organ_unit_host_rewrite "$SRCU" "$DESTU" "ubuntu" "$RH" 1 || fail "host_rewrite keep-root returned non-zero"
 grep -q '^User=root$' "$DESTU" || fail "host_rewrite keep-root: User must stay root"
-pass "organ_unit_host_rewrite: root->run-user, bare HOME rewrite, path-prefix rewrite, keep-root all hold"
+pass "organ_unit_host_rewrite: placeholder resolution, User inject, __HOME__ resolve, keep-root all hold"
 
-# ── 5. RESILIENT-1102: repo_root rewrites the baked repo path to the REAL ────
-# checkout, so units never point at a non-existent $HOME/Projects/chump (the
-# owned-node 200/CHDIR root — this whole class had ZERO test coverage before).
+# ── 4b. INFRA-8571: a baked host literal is REFUSED, not patched ─────────────
+# The legacy source-home sed rules are gone; a unit that still carries a baked
+# /root/ path or User= line fails install LOUDLY so the gate is the only path.
+SRCBAD="$TMP/baked-literal.service"
+cat > "$SRCBAD" <<'EOF'
+[Unit]
+Description=x
+[Service]
+User=root
+ExecStart=/root/Projects/chump/scripts/x.sh
+EOF
+organ_unit_host_rewrite "$SRCBAD" "$TMP/out-bad.service" "ubuntu" "/home/ubuntu" 0 2>/dev/null \
+  && fail "a source with a baked /root/ + User= literal must be refused (INFRA-8571)"
+pass "organ_unit_host_rewrite refuses a baked host literal instead of patching it"
+
+# ── 5. RESILIENT-1102: __REPO_ROOT__ resolves to the REAL checkout, so units ──
+# never point at a non-existent $HOME/Projects/chump (the owned-node 200/CHDIR
+# root — this whole class had ZERO test coverage before).
 SRCR="$TMP/repo-unit.service"
 cat > "$SRCR" <<'EOF'
 [Unit]
 Description=x
 [Service]
-User=root
-Environment=HOME=/root
-Environment=CHUMP_REPO_ROOT=/root/Projects/chump
-WorkingDirectory=/root/Projects/chump
-ExecStart=/bin/bash -lc 'source /root/.chump/providers.env; cd /root/Projects/chump; exec /root/Projects/chump/scripts/ops/x.sh'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+WorkingDirectory=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'source __HOME__/.chump/providers.env; cd __REPO_ROOT__; exec __REPO_ROOT__/scripts/ops/x.sh'
 EOF
 # The box's real repo lives at $HOME/chump (NO Projects segment) — and it EXISTS.
 # Compare against its PHYSICAL path: the rewriter now realpath-resolves the repo

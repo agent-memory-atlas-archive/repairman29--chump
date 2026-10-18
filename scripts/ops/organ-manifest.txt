@@ -111,9 +111,14 @@
 #                            The systemd manager scope this organ can work in.
 #                            Omitted means "any" (every line before this field
 #                            existed), so nothing regresses. `system` = the
-#                            organ needs root (chump-organ-deploy writes
-#                            /etc/systemd/system); `user` = it only exists in a
-#                            systemd --user manager. The host's own scope comes
+#                            organ lives ONLY in the system manager — either it
+#                            needs root to run (chump-organ-deploy writes
+#                            /etc/systemd/system) OR it is installed into
+#                            /etc/systemd/system via sudo and never into a --user
+#                            manager (the housekeeping= loop-services, placed by
+#                            install-node-housekeeping.sh on every node;
+#                            INFRA-8571). `user` = it only exists in a systemd
+#                            --user manager. The host's own scope comes
 #                            from the typed Host enum (`chump node host --field
 #                            run-scope`, crates/chump-provision: root ->
 #                            linux-systemd-system, anyone else ->
@@ -696,12 +701,12 @@ enabled     chump-mission-grade.timer  role=data requires=bin:chump platforms=la
 # ambiguous between two unrelated capabilities, a NEW behavior this
 # zero-behavior-change slice must not introduce. See node-housekeeping-
 # roster-lib.sh's own comment and INFRA-7772 (filed) for the fix.
-enabled     chump-node-orchestrator.service  role=brain requires=file:~/.chump/organs/node-orchestrator.sh housekeeping=scripts/ops/node-orchestrator.sh|0|
-enabled     chump-worktree-reaper.service  role=janitor requires=file:~/.chump/organs/worktree-reaper.sh housekeeping=scripts/ops/stale-worktree-reaper.sh|900|--execute
-enabled     chump-disk-monitor.service  role=janitor requires=file:~/.chump/organs/disk-monitor.sh housekeeping=scripts/ops/disk-health-monitor.sh|300|
-enabled     chump-main-health-watchdog.service  role=brain requires=file:~/.chump/organs/main-health-watchdog.sh housekeeping=scripts/ops/main-health-watchdog.sh|600|
-enabled     chump-cargo-sweep-gc.service  role=janitor requires=file:~/.chump/organs/cargo-sweep-gc.sh housekeeping=scripts/ops/cargo-sweep-gc.sh|3600|
-enabled     chump-reviver.service  role=brain requires=file:~/.chump/organs/reviver.sh housekeeping=scripts/coord/post-push-integrity-watch.sh|60|
-enabled     chump-pr-stuck-live-scan.service  role=brain requires=file:~/.chump/organs/pr-stuck-live-scan.sh housekeeping=scripts/ops/stuck-pr-filer.sh|3600|
-enabled     chump-pr-stuck-cluster-detector.service  role=brain requires=file:~/.chump/organs/pr-stuck-cluster-detector.sh housekeeping=scripts/coord/pr-stuck-cluster-detector.sh|1800|--apply
-enabled     chump-armed-pr-rebaser.service  role=brain requires=file:~/.chump/organs/armed-pr-rebaser.sh housekeeping=scripts/coord/armed-pr-rebaser.sh|1200|
+enabled     chump-node-orchestrator.service  role=brain requires=file:~/.chump/organs/node-orchestrator.sh housekeeping=scripts/ops/node-orchestrator.sh|0| run-scope=system
+enabled     chump-worktree-reaper.service  role=janitor requires=file:~/.chump/organs/worktree-reaper.sh housekeeping=scripts/ops/stale-worktree-reaper.sh|900|--execute run-scope=system
+enabled     chump-disk-monitor.service  role=janitor requires=file:~/.chump/organs/disk-monitor.sh housekeeping=scripts/ops/disk-health-monitor.sh|300| run-scope=system
+enabled     chump-main-health-watchdog.service  role=brain requires=file:~/.chump/organs/main-health-watchdog.sh housekeeping=scripts/ops/main-health-watchdog.sh|600| run-scope=system
+enabled     chump-cargo-sweep-gc.service  role=janitor requires=file:~/.chump/organs/cargo-sweep-gc.sh housekeeping=scripts/ops/cargo-sweep-gc.sh|3600| run-scope=system
+enabled     chump-reviver.service  role=brain requires=file:~/.chump/organs/reviver.sh housekeeping=scripts/coord/post-push-integrity-watch.sh|60| run-scope=system
+enabled     chump-pr-stuck-live-scan.service  role=brain requires=file:~/.chump/organs/pr-stuck-live-scan.sh housekeeping=scripts/ops/stuck-pr-filer.sh|3600| run-scope=system
+enabled     chump-pr-stuck-cluster-detector.service  role=brain requires=file:~/.chump/organs/pr-stuck-cluster-detector.sh housekeeping=scripts/coord/pr-stuck-cluster-detector.sh|1800|--apply run-scope=system
+enabled     chump-armed-pr-rebaser.service  role=brain requires=file:~/.chump/organs/armed-pr-rebaser.sh housekeeping=scripts/coord/armed-pr-rebaser.sh|1200| run-scope=system

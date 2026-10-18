@@ -133,14 +133,15 @@ if ! sed --version 2>/dev/null | grep -qi gnu; then
 else
   # shellcheck disable=SC1090
   source "$LIB_UNIT"
+  # INFRA-8571: the source is a placeholder template (no host literal) — the
+  # rewriter resolves it and injects the canonical-store EnvironmentFile.
   SRCU="$TMP/unit-src.service"
   cat > "$SRCU" <<'EOF'
 [Unit]
 Description=x
 [Service]
-User=root
-Environment=HOME=/root
-ExecStart=/root/Projects/chump/scripts/x.sh
+Environment=HOME=__HOME__
+ExecStart=__REPO_ROOT__/scripts/x.sh
 EOF
   DESTU="$TMP/unit-out.service"
   organ_unit_host_rewrite "$SRCU" "$DESTU" "ubuntu" "/home/ubuntu" 0 || fail "organ_unit_host_rewrite returned non-zero"
@@ -148,17 +149,23 @@ EOF
     && pass "organ_unit_host_rewrite injects EnvironmentFile=-<run_home>/.chump/node.env" \
     || fail "organ_unit_host_rewrite did not inject node.env EnvironmentFile (got: $(grep '^EnvironmentFile=' "$DESTU" 2>/dev/null))"
 
-  # Idempotent: re-running the rewrite over an already-wired unit must not
-  # duplicate the EnvironmentFile= line. (src != dest — organ_unit_host_rewrite
-  # redirects into dest via `sed ... "$src" > "$dest"`, which would truncate a
-  # shared file before sed ever reads it.)
+  # Idempotent: a template that ALREADY declares the node.env EnvironmentFile
+  # (via __NODE_ENV__) must not get a second, injected one — the injection guard
+  # (`grep -q '^EnvironmentFile=.*node.env'`) skips when one is already present.
   SRCU2="$TMP/unit-already-wired.service"
-  cp "$DESTU" "$SRCU2"
+  cat > "$SRCU2" <<'EOF'
+[Unit]
+Description=x
+[Service]
+Environment=HOME=__HOME__
+EnvironmentFile=-__NODE_ENV__
+ExecStart=__REPO_ROOT__/scripts/x.sh
+EOF
   DESTU2="$TMP/unit-out-2.service"
   organ_unit_host_rewrite "$SRCU2" "$DESTU2" "ubuntu" "/home/ubuntu" 0 || fail "re-rewrite returned non-zero"
   HITS="$(grep -c '^EnvironmentFile=.*node\.env' "$DESTU2" 2>/dev/null || echo 0)"
   [ "$HITS" = "1" ] \
-    && pass "re-running organ_unit_host_rewrite does not duplicate EnvironmentFile=" \
+    && pass "a template that already declares node.env EnvironmentFile is not duplicated" \
     || fail "EnvironmentFile= duplicated on re-rewrite (count=$HITS)"
 fi
 

@@ -39,19 +39,29 @@ mk() { # <file> <extra-service-lines...>
 }
 has_ug() { grep -qE '^(User|Group)=' "$1"; }
 
-# 1. user scope strips every source shape
-for shape in "User=root" "User=jeff" "User=ubuntu" "User=ubuntu
-Group=ubuntu" "Group=adm" "Type=oneshot"; do
+# 1. INFRA-8571: a source carrying a baked User= is a host literal and now
+# fails the rewrite LOUDLY (the gate is the only path — no silent patch/strip).
+# The RESILIENT-1571 invariant still holds for a Group= source (Group= is not a
+# host literal, so the rewrite accepts it and the user-scope strip removes it)
+# and for a clean no-identity template (the production shape: nothing to strip).
+for shape in "User=root" "User=jeff" "User=ubuntu"; do
+  mk "$TMP/s.service" "$shape"
+  organ_unit_host_rewrite "$TMP/s.service" "$TMP/o.service" ubuntu /home/ubuntu 0 "" user 2>/dev/null \
+    && fail "a baked [$shape] source must be refused (host literal), not silently stripped"
+done
+ok "scope=user: a baked User= source is refused loudly (INFRA-8571), not patched"
+
+for shape in "Group=adm" "Type=oneshot" ""; do
   mk "$TMP/s.service" "$shape"
   organ_unit_host_rewrite "$TMP/s.service" "$TMP/o.service" ubuntu /home/ubuntu 0 "" user || fail "rewrite rc!=0 for [$shape]"
   has_ug "$TMP/o.service" && fail "scope=user left User=/Group= for source shape [$shape]"
 done
-ok "scope=user: no User=/Group= for root/jeff/ubuntu/Group/none sources"
+ok "scope=user: no User=/Group= for Group=/typed/clean (literal-free) sources"
 
-# 2. keep_root=1 must NOT resurrect User=root in user scope
-mk "$TMP/s.service" "User=root"
+# 2. keep_root=1 must NOT resurrect User= in user scope (clean template source)
+mk "$TMP/s.service" "Type=oneshot"
 organ_unit_host_rewrite "$TMP/s.service" "$TMP/o.service" ubuntu /home/ubuntu 1 "" user
-has_ug "$TMP/o.service" && fail "keep_root=1 in scope=user must not emit User=root"
+has_ug "$TMP/o.service" && fail "keep_root=1 in scope=user must not emit User="
 ok "scope=user ignores keep_root"
 
 # 3. the rest of the rewrite still happens (HOME / PATH / WorkingDirectory / node.env)
@@ -61,10 +71,11 @@ grep -q '^EnvironmentFile=.*node\.env' "$TMP/o.service" || fail "user scope lost
 grep -q '^ExecStart=/bin/true$' "$TMP/o.service" || fail "user scope mangled ExecStart"
 ok "scope=user keeps HOME/WorkingDirectory/node.env injection"
 
-# 4. system scope (default + explicit) is unchanged: User injected, keep_root works
-mk "$TMP/s.service" "User=root"
+# 4. system scope (default + explicit) is unchanged: User injected from a clean
+# template (no baked User=), keep_root forces root.
+mk "$TMP/s.service" "Type=oneshot"
 organ_unit_host_rewrite "$TMP/s.service" "$TMP/o.service" ubuntu /home/ubuntu 0
-grep -q '^User=ubuntu$' "$TMP/o.service" || fail "default scope regressed: User=root->ubuntu"
+grep -q '^User=ubuntu$' "$TMP/o.service" || fail "default scope must inject User=ubuntu"
 organ_unit_host_rewrite "$TMP/s.service" "$TMP/o.service" ubuntu /home/ubuntu 1 "" system
 grep -q '^User=root$' "$TMP/o.service" || fail "system scope keep_root regressed"
 mk "$TMP/n.service" "Type=oneshot"
