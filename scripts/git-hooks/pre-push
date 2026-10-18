@@ -94,7 +94,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # this on 2026-05-16: #2250, #2251, #2252, #2254). The trap MUST be after
 # `set -e`/`-o pipefail` so it actually fires; placement here is load-bearing.
 # Capture exit-status before any further commands clobber $? .
-trap 'rc=$?; echo "[pre-push] hook aborted at line $LINENO with exit $rc" >&2; exit $rc' ERR
+trap 'rc=$?; echo "[pre-push] hook aborted at line $LINENO (command: ${BASH_COMMAND}) with exit $rc" >&2; exit $rc' ERR
 
 # Never block pushes to main/master — those go through PR only.
 REMOTE="$1"
@@ -1130,7 +1130,15 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
             # block every push across the fleet. Cargo's env CARGO_BUILD_*
             # overrides the [build] section in config.toml.
             _PREPUSH_WRAPPER_OVERRIDE=()
-            _PREPUSH_WRAPPER_BIN="${RUSTC_WRAPPER:-$(awk -F\" '/^[[:space:]]*rustc-wrapper[[:space:]]*=/ {print $2; exit}' "$REPO_ROOT_T/.cargo/config.toml" 2>/dev/null)}"
+            # RESILIENT-1619: `|| true` INSIDE the substitution is load-bearing.
+            # .cargo/config.toml is per-machine + gitignored (written by
+            # install-sccache.sh); on any checkout without it (e.g. cuphead, no
+            # sccache) awk exits 2 reading the missing file, the command
+            # substitution carries that status into the assignment, and
+            # `set -e` kills the whole hook BEFORE the cargo test gate runs —
+            # "hook aborted at line … with exit 2", no BLOCKED reason, no test
+            # log. `2>/dev/null` only silenced stderr, not the exit status.
+            _PREPUSH_WRAPPER_BIN="${RUSTC_WRAPPER:-$(awk -F\" '/^[[:space:]]*rustc-wrapper[[:space:]]*=/ {print $2; exit}' "$REPO_ROOT_T/.cargo/config.toml" 2>/dev/null || true)}"
             if [[ -n "$_PREPUSH_WRAPPER_BIN" ]]; then
                 # EFFECTIVE-097: HEAL, don't just probe. The old INFRA-2184 check ran
                 # `$WRAPPER --version`, but for sccache that is a CLIENT-only call that
@@ -1229,8 +1237,11 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                     _ALL_KNOWN=1
                     _UNKNOWN_TESTS=()
                     if [[ -n "$_FAILED" && -f "$_CATALOG" ]]; then
+                        # RESILIENT-1619: `|| true` guards the set -e + pipefail
+                        # abort when the catalog has zero `- test:` lines (grep
+                        # exits 1 → pipeline exits 1 → assignment carries it).
                         _CATALOG_TESTS=$(grep -E '^[[:space:]]*-[[:space:]]*test:' "$_CATALOG" \
-                            | sed -E 's/^[[:space:]]*-[[:space:]]*test:[[:space:]]+//; s/"//g; s/[[:space:]]*$//')
+                            | sed -E 's/^[[:space:]]*-[[:space:]]*test:[[:space:]]+//; s/"//g; s/[[:space:]]*$//' || true)
                         # INFRA-1658: materialize to tempfile to dodge printf|grep -q
                         # pipefail race (set -o pipefail is in effect).
                         _CAT_TMP=$(mktemp)

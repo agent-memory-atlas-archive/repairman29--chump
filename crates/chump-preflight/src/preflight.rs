@@ -2544,6 +2544,14 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "pre-push-wrapper-discovery-no-config",
+            &[
+                "bash",
+                "scripts/ci/test-prepush-wrapper-discovery-no-config.sh",
+            ],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "preflight-ci-parity-smoke",
             &["bash", "scripts/ci/test-preflight-ci-parity.sh"],
             GateKind::Scripts,

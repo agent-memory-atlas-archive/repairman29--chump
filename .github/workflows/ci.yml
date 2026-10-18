@@ -1547,6 +1547,9 @@ jobs:
       - name: pre-push cargo-test full-suite gate (INFRA-761)
         run: bash scripts/ci/test-pre-push-test-gate.sh
 
+      - name: pre-push wrapper-discovery survives missing config.toml (RESILIENT-1619)
+        run: bash scripts/ci/test-prepush-wrapper-discovery-no-config.sh
+
       - name: pr-watch shepherd smoke (INFRA-354)
         run: bash scripts/ci/test-pr-watch-shepherd-smoke.sh
 
