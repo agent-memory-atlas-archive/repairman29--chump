@@ -4060,6 +4060,18 @@ events:
     trigger: disk free < 10% (CHUMP_DISK_LOW_PCT); warning-level alert
     consumers: [operator-recall, fleet-brief]
 
+  - kind: disk_low_cargo_reaper_triggered
+    effect_metric: self
+    emitter: scripts/ops/disk-health-monitor.sh (RESILIENT-1620)
+    trigger: >
+      disk free dropped below the warn/critical/blocking threshold and
+      disk-health-monitor invoked cargo-target-reaper.sh --class-d-only
+      --execute to reclaim merged/closed lease-less dispatch worktree build
+      dirs. Emitted once per monitor invocation (dry_run flags a --dry-run run).
+    consumers: [fleet-brief, waste-tally, ops-audit]
+    fields_required: [ts, kind]
+    fields_optional: [dry_run]
+
   - kind: disk_audit_report
     effect_metric: self
     emitter: scripts/coord/disk-audit.sh (INFRA-1469)
@@ -7145,15 +7157,18 @@ events:
   - kind: cargo_target_reaped
     effect_metric: self
     emitter: >
-      scripts/ops/cargo-target-reaper.sh (INFRA-1250 + INFRA-1170)
+      scripts/ops/cargo-target-reaper.sh (INFRA-1250 + INFRA-1170 + RESILIENT-1620)
     trigger: >
       cargo-target-reaper.sh reaped a stale fingerprint dir, rlib, fleet
       target directory, or an orphaned /tmp/chump-*/target/ whose originating
-      git worktree is no longer registered. Failure events (cargo lock active,
-      rm failure) also use this kind with an error + failure_class field.
+      git worktree is no longer registered. RESILIENT-1620 Class D (class:"D")
+      reaps target/ + .cargo-test-target/ of a lease-less dispatch worktree
+      under .claude/worktrees whose branch PR is merged/closed. Failure events
+      (cargo lock active, rm failure) also use this kind with an error +
+      failure_class field.
     consumers: [fleet-brief, waste-tally]
     fields_required: [ts, kind, path]
-    fields_optional: [bytes_freed, age_days, dry_run, worktree_gone, error, failure_class]
+    fields_optional: [bytes_freed, age_days, dry_run, worktree_gone, error, failure_class, class, worktree, branch]
 
   - kind: cargo_target_reaper_summary
     effect_metric: self
@@ -7161,7 +7176,7 @@ events:
     trigger: cargo-target-reaper.sh completed a full run (dry or execute).
     consumers: [fleet-brief, waste-tally]
     fields_required: [ts, kind, reaped_count, bytes_freed, execute, worktree_orphan_count]
-    fields_optional: [cross_build_count, cargo_test_target_count, lease_auto_merge_count, runner_scope_count, aggressive_mode]
+    fields_optional: [cross_build_count, cargo_test_target_count, lease_auto_merge_count, runner_scope_count, root_orphan_target_count, class_d_count, aggressive_mode, class_d_only]
 
   - kind: cargo_target_reaper_event_listener_started
     effect_metric: self

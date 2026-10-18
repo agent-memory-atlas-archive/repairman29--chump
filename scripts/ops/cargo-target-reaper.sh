@@ -57,6 +57,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 EXECUTE=0
 EVENT_LISTEN=0
+# RESILIENT-1620: Class D — lease-less dispatch worktrees under the repo's
+# .claude/worktrees whose PR merged/closed. --class-d-only runs ONLY Class D,
+# bypassing the global cargo-process / low-disk guards (Class D is build-safe
+# per-worktree: it checks live lease, process cwd inside, live bot-merge, and
+# cargo lock before touching any worktree). Used by disk-health-monitor's
+# alert→action trigger and the Class-D CI test.
+CLASS_D_ONLY=0
 FINGERPRINT_AGE_D="${CHUMP_CARGO_REAPER_FINGERPRINT_AGE_D:-14}"
 FLEET_AGE_D="${CHUMP_CARGO_REAPER_FLEET_AGE_D:-7}"
 MIN_FREE_GB=1
@@ -77,12 +84,20 @@ fi
 if [[ -f "$(dirname "$0")/../coord/lib/github_cache.sh" ]]; then
     source "$(dirname "$0")/../coord/lib/github_cache.sh"
 fi
+# RESILIENT-1620: chump_gh (throttled + criticality-aware gh wrapper, INFRA-1080)
+# for the Class D cache-miss fallback. Degrade to plain gh if the lib is absent.
+# shellcheck source=scripts/coord/lib/github.sh
+if [[ -f "$(dirname "$0")/../coord/lib/github.sh" ]]; then
+    source "$(dirname "$0")/../coord/lib/github.sh" 2>/dev/null || true
+fi
+command -v chump_gh >/dev/null 2>&1 || chump_gh() { gh "$@"; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --execute)            EXECUTE=1 ;;
         --dry-run)            FORCE_DRY=1 ;;
         --event-listen)       EVENT_LISTEN=1 ;;
+        --class-d-only)       CLASS_D_ONLY=1 ;;
         --fingerprint-age-d)  FINGERPRINT_AGE_D="$2"; shift ;;
         --fleet-age-d)        FLEET_AGE_D="$2"; shift ;;
         --help|-h)
@@ -103,6 +118,228 @@ if [[ $EXECUTE -eq 0 && "${FORCE_DRY:-0}" -eq 0 ]]; then
         EXECUTE=1
         echo "[cargo-target-reaper] disk ${_used_pct}% >= ${CHUMP_REAPER_AUTO_EXECUTE_PCT:-80}% — auto-escalating to --execute"
     fi
+fi
+
+# ── (j) RESILIENT-1620: Class D — merged/closed dispatch worktree build dirs ─
+# A worktree under the repo's .claude/worktrees with:
+#   - NO live lease (wt_has_active_lease, state.db + .chump-locks)
+#   - NO process cwd inside it
+#   - NO live bot-merge ship (wt_has_live_bot_merge)
+#   - and whose branch's PR is MERGED or CLOSED (cache-first, gh fallback)
+# gets ONLY target/ and .cargo-test-target/ removed — never the source tree.
+# This is the state chump dispatch leaves after a ship: active-target-reaper
+# keeps the worktree and only reaps target/ once it has gone quiet (mtime >1d),
+# so a just-merged worktree's fresh target/ lives for a full day and filled the
+# disk to 99% (receipt 2026-10-17 22:47Z). Class D reaps it on PR-merge,
+# regardless of mtime, because the work is already on origin.
+
+# _classd_cwd_inside <wt_real> — return 0 iff a live process has its cwd at or
+# under <wt_real>. /proc on Linux; lsof fallback elsewhere.
+_classd_cwd_inside() {
+    local wt="$1" c link
+    if [[ -d /proc ]]; then
+        for c in /proc/[0-9]*/cwd; do
+            link="$(readlink "$c" 2>/dev/null || true)"
+            [[ -z "$link" ]] && continue
+            if [[ "$link" == "$wt" || "$link" == "$wt"/* ]]; then
+                return 0
+            fi
+        done
+        return 1
+    fi
+    if command -v lsof >/dev/null 2>&1 && lsof -a -d cwd +D "$wt" 2>/dev/null | grep -q .; then
+        return 0
+    fi
+    return 1
+}
+
+# _classd_has_lease <wt> — return 0 iff ANY lease store that could hold this
+# worktree's lease names it live. wt_has_active_lease reads ONE store, chosen
+# by env precedence (CHUMP_LOCK_DIR / CHUMP_STATE_DB beat the repo root). When
+# that env points at a different checkout than the repo whose worktrees are
+# being scanned (REAPER_REPO_ROOT), the scanned repo's own .chump-locks and
+# .chump/state.db were never consulted and a leased worktree read as
+# lease-less (CI fast-checks pins CHUMP_LOCK_DIR to the workspace; a node
+# pins CHUMP_STATE_DB). Check the env-resolved store AND the scanned repo's
+# stores; more stores can only skip more, never reap more.
+_classd_has_lease() {
+    local wt="$1" ttl="${CHUMP_LEASE_HEARTBEAT_TTL_S:-600}"
+    local root="${REAPER_REPO_ROOT:-$REPO_ROOT}"
+    wt_has_active_lease "$wt" "$ttl" && return 0
+    CHUMP_LOCK_DIR="${root}/.chump-locks" CHUMP_STATE_DB="${root}/.chump/state.db" \
+        wt_has_active_lease "$wt" "$ttl" && return 0
+    return 1
+}
+
+# _classd_pr_merged_or_closed <branch> — echo "yes" if the branch's PR is
+# merged or closed, "no" if open, "" if unknown/no PR. Cache-first (reads the
+# local github_cache.db directly), chump_gh fallback.
+_classd_pr_merged_or_closed() {
+    local branch="$1"
+    local state=""
+    # Cache-first: the webhook-fed SQLite cache knows merged_at / closed state.
+    if command -v sqlite3 >/dev/null 2>&1; then
+        local db=""
+        if command -v _cache_db_path >/dev/null 2>&1; then
+            db="$(_cache_db_path 2>/dev/null || true)"
+        elif [[ -n "${CHUMP_CACHE_DB:-}" ]]; then
+            db="$CHUMP_CACHE_DB"
+        fi
+        if [[ -n "$db" && -f "$db" ]]; then
+            local esc="${branch//\'/\'\'}"
+            local row
+            row="$(sqlite3 "$db" \
+                "SELECT CASE \
+                    WHEN merged_at IS NOT NULL THEN 'yes' \
+                    WHEN raw_payload_json LIKE '%\"state\":\"closed\"%' THEN 'yes' \
+                    ELSE 'no' END \
+                 FROM pr_state WHERE head_ref = '${esc}' \
+                 ORDER BY number DESC LIMIT 1" 2>/dev/null || true)"
+            if [[ -n "$row" ]]; then
+                printf '%s' "$row"
+                return 0
+            fi
+        fi
+    fi
+    # chump_gh fallback (background-tagged) — --state all so merged/closed PRs
+    # are visible. cache_lookup_pr_by_branch filters merged_at IS NULL, so it
+    # cannot answer "merged or closed"; the inline cache read above covers that.
+    local pr_json
+    pr_json="$(CHUMP_GH_CALL_CRITICALITY=background \
+        chump_gh pr list --head "$branch" --state all --json number,state --limit 1 2>/dev/null || true)"
+    [[ -n "$pr_json" ]] || { printf ''; return 0; }
+    state="$(printf '%s' "$pr_json" | python3 -c \
+        "import json,sys
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    d=[]
+print(d[0]['state'] if d else '')" 2>/dev/null || true)"
+    case "$state" in
+        MERGED|CLOSED) printf 'yes' ;;
+        OPEN)          printf 'no' ;;
+        *)             printf '' ;;
+    esac
+}
+
+# run_class_d — scan .claude/worktrees for merged/closed lease-less worktrees
+# and reap their target/ + .cargo-test-target/. Uses globals EXECUTE,
+# _dry_label, AMBIENT_LOG, _total_bytes, _reaped_count.
+_classd_count=0
+run_class_d() {
+    local wt_base
+    wt_base="${CHUMP_WORKTREE_BASE:-${REAPER_REPO_ROOT:-$REPO_ROOT}/.claude/worktrees}"
+    # Fail closed: without the lease checker Class D cannot prove a worktree is
+    # lease-less, so it reaps nothing rather than everything.
+    if ! command -v wt_has_active_lease >/dev/null 2>&1; then
+        echo "[cargo-target-reaper] Class D skipped: wt_has_active_lease unavailable (scripts/lib/worktree-iter.sh not loaded)"
+        return 0
+    fi
+    echo "[cargo-target-reaper] Scanning ${wt_base}/* (Class D: merged/closed lease-less dispatch worktrees)…"
+    local wt
+    local -a _wts=()
+    if command -v scan_worktrees >/dev/null 2>&1; then
+        while IFS= read -r wt; do _wts+=("$wt"); done < <(
+            CHUMP_WORKTREE_BASE="$wt_base" CHUMP_WT_SCAN_TMP=0 CHUMP_WT_SCAN_DOT_CLAUDE=1 \
+                scan_worktrees --no-tmp --include-dot-claude 2>/dev/null || true)
+    else
+        local d
+        for d in "$wt_base"/*/; do [[ -d "$d" ]] && _wts+=("${d%/}"); done
+    fi
+
+    for wt in "${_wts[@]+"${_wts[@]}"}"; do
+        [[ -d "$wt" ]] || continue
+        wt="${wt%/}"
+        local target="$wt/target"
+        local ctt="$wt/.cargo-test-target"
+        # Nothing to reap if neither build dir exists.
+        [[ -d "$target" || -d "$ctt" ]] || continue
+
+        # Opt-out sentinel (same marker the other reapers honor).
+        if [[ -e "$wt/.chump-no-reap" ]]; then
+            echo "  skip (.chump-no-reap present): ${wt}"
+            continue
+        fi
+
+        # Safety: never reap a worktree with a live lease.
+        if _classd_has_lease "$wt"; then
+            echo "  skip (active lease): ${wt}"
+            continue
+        fi
+
+        # Safety: never reap a worktree that is a live process's cwd.
+        if _classd_cwd_inside "$wt"; then
+            echo "  skip (process cwd inside): ${wt}"
+            continue
+        fi
+
+        # Safety: never race a live bot-merge ship.
+        if command -v wt_has_live_bot_merge >/dev/null 2>&1 && wt_has_live_bot_merge "$wt"; then
+            echo "  skip (live bot-merge: ${WT_LIVE_BOT_MERGE_DETAIL:-?}): ${wt}"
+            continue
+        fi
+
+        # Resolve the branch, then the PR state (cache-first, gh fallback).
+        local branch
+        branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+        if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
+            echo "  skip (no branch): ${wt}"
+            continue
+        fi
+        local merged
+        merged="$(_classd_pr_merged_or_closed "$branch")"
+        if [[ "$merged" != "yes" ]]; then
+            echo "  skip (PR open/unknown for ${branch}): ${wt}"
+            continue
+        fi
+
+        # Reap ONLY the build dirs — never the source tree.
+        local reap_dir size_bytes age_days
+        for reap_dir in "$target" "$ctt"; do
+            [[ -d "$reap_dir" ]] || continue
+            # Belt-and-suspenders: skip if a cargo lock says a build is in flight.
+            if [[ -f "${reap_dir}/.cargo-lock" ]]; then
+                echo "  skip (cargo lock active): ${reap_dir}"
+                continue
+            fi
+            size_bytes=$(du -sk "$reap_dir" 2>/dev/null | awk '{print $1 * 1024}' || echo 0)
+            age_days=$(( ( $(date +%s) - $(stat -f%m "$reap_dir" 2>/dev/null \
+                || stat -c%Y "$reap_dir" 2>/dev/null || echo 0) ) / 86400 ))
+            echo "${_dry_label}  class-D reap: ${reap_dir} (branch ${branch} merged/closed, ${age_days}d old, ~$(( size_bytes / 1024 / 1024 ))MB)"
+            if [[ $EXECUTE -eq 1 ]]; then
+                rm -rf "$reap_dir" 2>/dev/null || true
+            fi
+            _total_bytes=$(( _total_bytes + size_bytes ))
+            _reaped_count=$(( _reaped_count + 1 ))
+            _classd_count=$(( _classd_count + 1 ))
+            printf '{"ts":"%s","kind":"cargo_target_reaped","path":"%s","bytes_freed":%d,"age_days":%d,"dry_run":%s,"class":"D","worktree":"%s","branch":"%s"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$reap_dir" "$size_bytes" "$age_days" \
+                "$([[ $EXECUTE -eq 1 ]] && echo 'false' || echo 'true')" "$wt" "$branch" \
+                >> "$AMBIENT_LOG" 2>/dev/null || true
+        done
+    done
+}
+
+# ── --class-d-only early path (RESILIENT-1620) ──────────────────────────────
+# Runs ONLY Class D, bypassing the global cargo-process / low-disk guards that
+# the full run uses: Class D is build-safe per-worktree (lease + cwd + bot-merge
+# + cargo-lock checks), so disk-health-monitor's alert→action trigger can fire
+# it unconditionally even while the fleet is building.
+if [[ $CLASS_D_ONLY -eq 1 ]]; then
+    AMBIENT_LOG="${REAPER_REPO_ROOT:-$REPO_ROOT}/.chump-locks/ambient.jsonl"
+    _dry_label="[DRY-RUN]"
+    [[ $EXECUTE -eq 1 ]] && _dry_label=""
+    _total_bytes=0
+    _reaped_count=0
+    run_class_d
+    _total_mb=$(( _total_bytes / 1024 / 1024 ))
+    echo ""
+    echo "[cargo-target-reaper] ${_dry_label} Class-D-only done: ${_classd_count} artifacts, ~${_total_mb}MB"
+    printf '{"ts":"%s","kind":"cargo_target_reaper_summary","reaped_count":%d,"bytes_freed":%d,"execute":%s,"worktree_orphan_count":0,"cross_build_count":0,"cargo_test_target_count":0,"lease_auto_merge_count":0,"runner_scope_count":0,"root_orphan_target_count":0,"class_d_count":%d,"aggressive_mode":false,"class_d_only":true}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_reaped_count" "$_total_bytes" \
+        "$([[ $EXECUTE -eq 1 ]] && echo 'true' || echo 'false')" "$_classd_count" \
+        >> "$AMBIENT_LOG" 2>/dev/null || true
+    exit 0
 fi
 
 # ── Event-listener mode (INFRA-2181) ────────────────────────────────────────
@@ -655,18 +892,22 @@ for _root_ctt in "${REPO_ROOT}/.cargo-test-target" "${REPO_ROOT}/.cargo-build-ta
         >> "$AMBIENT_LOG" 2>/dev/null || true
 done
 
+# ── (j) RESILIENT-1620: Class D — merged/closed lease-less dispatch worktrees ─
+run_class_d
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 _total_mb=$(( _total_bytes / 1024 / 1024 ))
 echo ""
-echo "[cargo-target-reaper] ${_dry_label} Done: ${_reaped_count} artifacts, ~${_total_mb}MB (orphaned /tmp worktrees: ${_tmp_orphan_count}, runner-scope: ${_runner_scope_count})"
+echo "[cargo-target-reaper] ${_dry_label} Done: ${_reaped_count} artifacts, ~${_total_mb}MB (orphaned /tmp worktrees: ${_tmp_orphan_count}, runner-scope: ${_runner_scope_count}, class-D: ${_classd_count})"
 if [[ $EXECUTE -eq 0 && $_reaped_count -gt 0 ]]; then
     echo "[cargo-target-reaper] Re-run with --execute to actually delete."
 fi
 
 # Summary ambient event — includes worktree_orphan_count (INFRA-1170) + INFRA-2125 class counts + INFRA-2188 runner_scope_count + INFRA-7890 root_orphan_target_count + aggressive_mode flag.
-printf '{"ts":"%s","kind":"cargo_target_reaper_summary","reaped_count":%d,"bytes_freed":%d,"execute":%s,"worktree_orphan_count":%d,"cross_build_count":%d,"cargo_test_target_count":%d,"lease_auto_merge_count":%d,"runner_scope_count":%d,"root_orphan_target_count":%d,"aggressive_mode":%s}\n' \
+printf '{"ts":"%s","kind":"cargo_target_reaper_summary","reaped_count":%d,"bytes_freed":%d,"execute":%s,"worktree_orphan_count":%d,"cross_build_count":%d,"cargo_test_target_count":%d,"lease_auto_merge_count":%d,"runner_scope_count":%d,"root_orphan_target_count":%d,"class_d_count":%d,"aggressive_mode":%s}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_reaped_count" "$_total_bytes" \
     "$([[ $EXECUTE -eq 1 ]] && echo 'true' || echo 'false')" \
     "$_tmp_orphan_count" "$_cross_build_count" "$_cargo_test_target_count" "$_lease_armed_count" \
-    "$_runner_scope_count" "$_root_orphan_target_count" "$([[ $AGGRESSIVE_MODE -eq 1 ]] && echo 'true' || echo 'false')" \
+    "$_runner_scope_count" "$_root_orphan_target_count" "$_classd_count" \
+    "$([[ $AGGRESSIVE_MODE -eq 1 ]] && echo 'true' || echo 'false')" \
     >> "$AMBIENT_LOG" 2>/dev/null || true

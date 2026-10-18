@@ -2704,6 +2704,13 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-reaper-bot-merge-live.sh"],
             GateKind::Scripts,
         ));
+        // RESILIENT-1620: cargo-target-reaper Class D reaps merged/closed
+        // lease-less dispatch worktree build dirs; disk-health low-disk trigger.
+        steps.push(step(
+            "cargo-target-reaper-class-d",
+            &["bash", "scripts/ci/test-cargo-target-reaper-class-d.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "bot-merge-recovery-in-progress-smoke",
             &["bash", "scripts/ci/test-bot-merge-recovery-in-progress.sh"],

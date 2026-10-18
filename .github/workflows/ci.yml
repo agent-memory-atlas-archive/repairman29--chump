@@ -1381,6 +1381,9 @@ jobs:
       - name: cargo-target-reaper — dry-run, --execute, safety guards, ambient event (INFRA-1250)
         run: bash scripts/ci/test-cargo-target-reaper.sh
 
+      - name: cargo-target-reaper Class D — merged/closed lease-less worktree + disk-health trigger (RESILIENT-1620)
+        run: bash scripts/ci/test-cargo-target-reaper-class-d.sh
+
       - name: worktree-reaper active-worktree safety guard (INFRA-1074)
         run: bash scripts/ci/test-worktree-reaper-safety.sh
 
