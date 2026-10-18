@@ -1261,6 +1261,253 @@ pub fn build_shell_invariant_writers_section_with(
     }
 }
 
+// ── Shell LOC by Month Section (INFRA-8577, R6 gauge) ────────────────────────
+
+/// One month's shell-LOC reading: total lines of `.sh` and `.py` files under
+/// `scripts/` at the **first commit of that month**, read straight out of git
+/// objects (`git ls-tree` + `git cat-file --batch`, no checkout). Lines are
+/// counted `wc -l`-style (newline bytes), so a file with no trailing newline
+/// does not count its final partial line.
+#[derive(Debug, Clone)]
+pub struct ShellLocMonth {
+    /// `YYYY-MM`.
+    pub month: String,
+    /// First commit SHA of that month on `HEAD`'s history. `None` when the
+    /// month has no commit in range.
+    pub commit: Option<String>,
+    /// Total `.sh` + `.py` LOC under `scripts/` at `commit`. `None` when there
+    /// is no commit, or git could not be read.
+    pub loc: Option<u64>,
+}
+
+/// The R6 falling-trend gauge: shell LOC under `scripts/` at the first commit
+/// of each of the last three months, so the batch-of-5-files-per-PR shrink
+/// (INFRA-8195) is measurable. Months are oldest → newest so the trend reads
+/// left-to-right. See docs/strategy/PHASE_R_ARCHITECTURE_PROGRAM_2026-10-15.md §R6.
+#[derive(Debug, Default, Clone)]
+pub struct ShellLocByMonthSection {
+    pub months: Vec<ShellLocMonth>,
+}
+
+impl ShellLocByMonthSection {
+    pub fn render_text(&self) -> String {
+        let mut out = String::from("═══ Shell LOC by Month (R6) ═══\n");
+        if self.months.is_empty() {
+            out.push_str("  No git history available.\n");
+            return out;
+        }
+        // One trend line, oldest → newest, joined by arrows (AC3).
+        let cells: Vec<String> = self
+            .months
+            .iter()
+            .map(|m| {
+                let v = m
+                    .loc
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "n/a".to_string());
+                format!("{}={}", m.month, v)
+            })
+            .collect();
+        out.push_str(&format!("  trend: {}\n", cells.join(" → ")));
+        out
+    }
+
+    pub fn render_json(&self) -> String {
+        let rows: Vec<String> = self
+            .months
+            .iter()
+            .map(|m| {
+                let commit = m
+                    .commit
+                    .as_deref()
+                    .map(|c| format!(r#""{}""#, json_escape(c)))
+                    .unwrap_or_else(|| "null".to_string());
+                let loc = m
+                    .loc
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "null".to_string());
+                format!(
+                    r#"{{"month":"{}","commit":{},"loc":{}}}"#,
+                    json_escape(&m.month),
+                    commit,
+                    loc,
+                )
+            })
+            .collect();
+        format!("[{}]", rows.join(","))
+    }
+}
+
+/// The `(year, month)` of the `n` months ending at `(year, month0)`, oldest
+/// first. `month0` is 1..=12. Arithmetic is modular so year boundaries wrap
+/// correctly (e.g. Jan of year Y looks back to Nov/Dec of Y-1).
+fn last_n_months(year: i32, month0: u32, n: usize) -> Vec<(i32, u32)> {
+    let base = year as i64 * 12 + (month0 as i64 - 1);
+    (0..n as i64)
+        .rev()
+        .map(|back| {
+            let total = base - back;
+            let y = total.div_euclid(12) as i32;
+            let m = total.rem_euclid(12) as u32 + 1;
+            (y, m)
+        })
+        .collect()
+}
+
+/// First commit SHA of each requested `(year, month)` on `HEAD`'s history, in
+/// the same order as `months`. Reads `git log` once (`%H %cd` with a `%Y-%m`
+/// date format) and keeps the earliest commit per month (log is newest-first,
+/// so the last-seen line for a month is its earliest commit).
+fn first_commit_of_each_month(repo_root: &Path, months: &[(i32, u32)]) -> Vec<Option<String>> {
+    let out = std::process::Command::new("git")
+        .args(["-C", &repo_root.to_string_lossy()])
+        .args(["log", "--format=%H %cd", "--date=format:%Y-%m"])
+        .output();
+    let mut earliest: BTreeMap<String, String> = BTreeMap::new();
+    if let Ok(out) = out {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for line in stdout.lines() {
+                if let Some((sha, ym)) = line.split_once(' ') {
+                    // Newest-first: overwrite so the last write (oldest commit)
+                    // of each month wins.
+                    earliest.insert(ym.trim().to_string(), sha.trim().to_string());
+                }
+            }
+        }
+    }
+    months
+        .iter()
+        .map(|(y, m)| earliest.get(&format!("{y:04}-{m:02}")).cloned())
+        .collect()
+}
+
+/// Total `.sh` + `.py` LOC under `scripts/` at `commit`, read from git objects
+/// with no checkout. `ls-tree` lists the blobs; a single `cat-file --batch`
+/// streams their contents and lines are counted by newline byte. `None` on git
+/// failure; `Some(0)` when the tree has no matching files.
+fn count_shell_loc_at_commit(repo_root: &Path, commit: &str) -> Option<u64> {
+    let root = repo_root.to_string_lossy().to_string();
+    let listing = std::process::Command::new("git")
+        .args(["-C", &root, "ls-tree", "-r", commit, "--", "scripts"])
+        .output()
+        .ok()?;
+    if !listing.status.success() {
+        return None;
+    }
+    let listing = String::from_utf8_lossy(&listing.stdout);
+    let mut hashes: Vec<String> = Vec::new();
+    for line in listing.lines() {
+        // Format: "<mode> <type> <object>\t<path>"
+        let Some((meta, path)) = line.split_once('\t') else {
+            continue;
+        };
+        if !(path.ends_with(".sh") || path.ends_with(".py")) {
+            continue;
+        }
+        if let Some(obj) = meta.split_whitespace().nth(2) {
+            hashes.push(obj.to_string());
+        }
+    }
+    if hashes.is_empty() {
+        return Some(0);
+    }
+
+    let mut child = std::process::Command::new("git")
+        .args(["-C", &root, "cat-file", "--batch"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    // Write hashes from a thread so a large stdout can't deadlock the pipe
+    // while we're still feeding stdin.
+    let mut stdin = child.stdin.take()?;
+    let input = {
+        let mut s = hashes.join("\n");
+        s.push('\n');
+        s
+    };
+    let writer = std::thread::spawn(move || {
+        use std::io::Write;
+        let _ = stdin.write_all(input.as_bytes());
+    });
+    let out = child.wait_with_output().ok()?;
+    let _ = writer.join();
+    if !out.status.success() {
+        return None;
+    }
+
+    // Parse the --batch stream: per entry a header line
+    // "<sha> <type> <size>\n" followed by <size> content bytes and a trailing
+    // newline. A missing object is "<sha> missing\n" with no body.
+    let buf = &out.stdout;
+    let n = buf.len();
+    let mut i = 0usize;
+    let mut total: u64 = 0;
+    for _ in 0..hashes.len() {
+        if i >= n {
+            break;
+        }
+        let mut j = i;
+        while j < n && buf[j] != b'\n' {
+            j += 1;
+        }
+        let header = String::from_utf8_lossy(&buf[i..j]);
+        i = j + 1; // past the header newline
+        let parts: Vec<&str> = header.split_whitespace().collect();
+        if parts.len() < 3 {
+            // "missing" or malformed — no body to skip.
+            continue;
+        }
+        let Ok(size) = parts[2].parse::<usize>() else {
+            continue;
+        };
+        if i + size > n {
+            break;
+        }
+        total += buf[i..i + size].iter().filter(|&&b| b == b'\n').count() as u64;
+        i += size;
+        if i < n && buf[i] == b'\n' {
+            i += 1; // trailing newline git appends after the body
+        }
+    }
+    Some(total)
+}
+
+/// Build the shell-LOC-by-month gauge for the last three months ending at the
+/// current UTC month.
+pub fn build_shell_loc_by_month_section(repo_root: &Path) -> ShellLocByMonthSection {
+    use chrono::Datelike;
+    let now = chrono::Utc::now();
+    let months = last_n_months(now.year(), now.month(), 3);
+    build_shell_loc_by_month_section_with(repo_root, &months)
+}
+
+/// [`build_shell_loc_by_month_section`] with an explicit month list, so tests
+/// can pin the window against a fixture repo with known counts.
+pub fn build_shell_loc_by_month_section_with(
+    repo_root: &Path,
+    months: &[(i32, u32)],
+) -> ShellLocByMonthSection {
+    let commits = first_commit_of_each_month(repo_root, months);
+    let months = months
+        .iter()
+        .zip(commits)
+        .map(|((y, m), commit)| {
+            let loc = commit
+                .as_deref()
+                .and_then(|c| count_shell_loc_at_commit(repo_root, c));
+            ShellLocMonth {
+                month: format!("{y:04}-{m:02}"),
+                commit,
+                loc,
+            }
+        })
+        .collect();
+    ShellLocByMonthSection { months }
+}
+
 // ── CI Test Census (CREDIBLE-1514) ──────────────────────────────────────────
 
 /// `ci_tests_unwired` / `ci_tests_red` from docs/observability/ci-test-census.json,
@@ -1344,6 +1591,9 @@ pub struct KpiReport {
     pub time_to_land: TimeToLandSection,
     pub gate_false_positive: GateFalsePositiveSection,
     pub shell_invariant_writers: ShellInvariantWritersSection,
+    /// INFRA-8577: shell LOC under scripts/ at the first commit of each of the
+    /// last three months — the R6 falling-trend gauge.
+    pub shell_loc_by_month: ShellLocByMonthSection,
     /// CREDIBLE-1512: CI runner pickup-latency (p50/p95 per hour) + queued count.
     pub ci_pickup: crate::ci_pickup::CiPickupReport,
     pub ci_census: CiCensusSection,
@@ -1377,6 +1627,8 @@ impl KpiReport {
         out.push('\n');
         out.push_str(&self.shell_invariant_writers.render_text());
         out.push('\n');
+        out.push_str(&self.shell_loc_by_month.render_text());
+        out.push('\n');
         out.push_str(&self.ci_pickup.render_text());
         out.push('\n');
         out.push_str(&self.ci_census.render_text());
@@ -1385,7 +1637,7 @@ impl KpiReport {
 
     pub fn render_json(&self) -> String {
         format!(
-            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"shell_invariant_writers":{},"ci_pickup":{},"ci_census":{}}}"#,
+            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"shell_invariant_writers":{},"shell_loc_by_month":{},"ci_pickup":{},"ci_census":{}}}"#,
             self.ship_rate.render_json(),
             self.mission_history.render_json(),
             self.cost_savings.render_json(),
@@ -1397,6 +1649,7 @@ impl KpiReport {
             self.time_to_land.render_json(),
             self.gate_false_positive.render_json(),
             self.shell_invariant_writers.render_json(),
+            self.shell_loc_by_month.render_json(),
             self.ci_pickup.render_json(),
             self.ci_census.render_json(),
         )
@@ -1641,6 +1894,7 @@ pub fn build_full_report(repo_root: &Path, window_days: u64) -> KpiReport {
         time_to_land: build_time_to_land_section(repo_root),
         gate_false_positive: build_gate_false_positive_section(repo_root),
         shell_invariant_writers: build_shell_invariant_writers_section(repo_root),
+        shell_loc_by_month: build_shell_loc_by_month_section(repo_root),
         // CREDIBLE-1512: default 24h window for the embedded CI-pickup section.
         ci_pickup: crate::ci_pickup::build_ci_pickup_report(repo_root, 24),
         ci_census: build_ci_census_section(repo_root),
@@ -4173,6 +4427,142 @@ mod tests {
         let section = build_shell_invariant_writers_section(&tmp);
         assert_eq!(section.file_count, Some(5));
         assert_eq!(section.source, "ambient");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── INFRA-8577: shell LOC by month ──────────────────────────────────────
+
+    #[test]
+    fn infra8577_last_n_months_wraps_year_boundary() {
+        assert_eq!(
+            last_n_months(2026, 10, 3),
+            vec![(2026, 8), (2026, 9), (2026, 10)]
+        );
+        // January looks back into the prior year.
+        assert_eq!(
+            last_n_months(2026, 1, 3),
+            vec![(2025, 11), (2025, 12), (2026, 1)]
+        );
+    }
+
+    /// `n` lines, each newline-terminated, so `wc -l` (newline count) == `n`.
+    fn n_lines(n: usize) -> String {
+        (0..n).map(|i| format!("line{i}\n")).collect()
+    }
+
+    /// Replace the repo's `scripts/` tree with `files` and commit, dating both
+    /// the author and committer at `date` (RFC3339-ish, git-parseable).
+    fn commit_scripts(dir: &Path, date: &str, files: &[(&str, usize)]) {
+        let scripts = dir.join("scripts");
+        let _ = std::fs::remove_dir_all(&scripts);
+        std::fs::create_dir_all(&scripts).unwrap();
+        for (name, n) in files {
+            std::fs::write(scripts.join(name), n_lines(*n)).unwrap();
+        }
+        let add = std::process::Command::new("git")
+            .args(["-C", &dir.to_string_lossy(), "add", "-A"])
+            .output()
+            .unwrap();
+        assert!(add.status.success());
+        let commit = std::process::Command::new("git")
+            .args([
+                "-C",
+                &dir.to_string_lossy(),
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-m",
+                "fixture",
+            ])
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .unwrap();
+        assert!(
+            commit.status.success(),
+            "commit failed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+    }
+
+    #[test]
+    fn infra8577_shell_loc_by_month_matches_fixture_counts() {
+        let tmp = tempdir();
+        let _ = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&tmp)
+            .output();
+
+        // August: a.sh(10) + b.py(5) + a non-shell file that must be ignored.
+        commit_scripts(
+            &tmp,
+            "2026-08-01T12:00:00",
+            &[("a.sh", 10), ("b.py", 5), ("README.md", 7)],
+        );
+        // September: a.sh shrinks to 6, b.py stays 5 → 11.
+        commit_scripts(
+            &tmp,
+            "2026-09-02T09:00:00",
+            &[("a.sh", 6), ("b.py", 5), ("README.md", 7)],
+        );
+        // October: b.py dropped, a.sh shrinks to 4 → 4.
+        commit_scripts(
+            &tmp,
+            "2026-10-03T08:00:00",
+            &[("a.sh", 4), ("README.md", 7)],
+        );
+
+        let months = [(2026, 8), (2026, 9), (2026, 10)];
+        let section = build_shell_loc_by_month_section_with(&tmp, &months);
+
+        assert_eq!(section.months.len(), 3);
+        assert_eq!(section.months[0].month, "2026-08");
+        assert_eq!(section.months[0].loc, Some(15)); // .md excluded
+        assert_eq!(section.months[1].month, "2026-09");
+        assert_eq!(section.months[1].loc, Some(11));
+        assert_eq!(section.months[2].month, "2026-10");
+        assert_eq!(section.months[2].loc, Some(4));
+        assert!(section.months.iter().all(|m| m.commit.is_some()));
+
+        // AC3: text report prints the trend line.
+        let text = section.render_text();
+        assert!(text.contains("trend:"), "text: {text}");
+        assert!(text.contains("2026-08=15"), "text: {text}");
+        assert!(text.contains("2026-10=4"), "text: {text}");
+
+        // AC1: JSON carries the three months with loc values.
+        let json = section.render_json();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v.as_array().unwrap().len(), 3);
+        assert_eq!(v[0]["month"], "2026-08");
+        assert_eq!(v[0]["loc"], 15);
+        assert_eq!(v[2]["loc"], 4);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn infra8577_month_with_no_commit_is_null() {
+        let tmp = tempdir();
+        let _ = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&tmp)
+            .output();
+        commit_scripts(&tmp, "2026-10-01T12:00:00", &[("a.sh", 3)]);
+
+        // Ask for a month (August) that has no commit — loc/commit are None.
+        let section = build_shell_loc_by_month_section_with(&tmp, &[(2026, 8), (2026, 10)]);
+        assert_eq!(section.months[0].commit, None);
+        assert_eq!(section.months[0].loc, None);
+        assert_eq!(section.months[1].loc, Some(3));
+
+        let json = section.render_json();
+        assert!(json.contains(r#""month":"2026-08","commit":null,"loc":null"#));
+        let text = section.render_text();
+        assert!(text.contains("2026-08=n/a"), "text: {text}");
+
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
