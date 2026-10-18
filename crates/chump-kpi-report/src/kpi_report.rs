@@ -1597,6 +1597,8 @@ pub struct KpiReport {
     /// CREDIBLE-1512: CI runner pickup-latency (p50/p95 per hour) + queued count.
     pub ci_pickup: crate::ci_pickup::CiPickupReport,
     pub ci_census: CiCensusSection,
+    /// CREDIBLE-1525: admin_merges_7d — merges that bypassed the verified gate.
+    pub admin_merges: crate::admin_merges::AdminMergesSection,
 }
 
 impl KpiReport {
@@ -1632,12 +1634,14 @@ impl KpiReport {
         out.push_str(&self.ci_pickup.render_text());
         out.push('\n');
         out.push_str(&self.ci_census.render_text());
+        out.push('\n');
+        out.push_str(&self.admin_merges.render_text());
         out
     }
 
     pub fn render_json(&self) -> String {
         format!(
-            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"shell_invariant_writers":{},"shell_loc_by_month":{},"ci_pickup":{},"ci_census":{}}}"#,
+            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"shell_invariant_writers":{},"shell_loc_by_month":{},"ci_pickup":{},"ci_census":{},"admin_merges":{}}}"#,
             self.ship_rate.render_json(),
             self.mission_history.render_json(),
             self.cost_savings.render_json(),
@@ -1652,6 +1656,7 @@ impl KpiReport {
             self.shell_loc_by_month.render_json(),
             self.ci_pickup.render_json(),
             self.ci_census.render_json(),
+            self.admin_merges.render_json(),
         )
     }
 }
@@ -1898,6 +1903,7 @@ pub fn build_full_report(repo_root: &Path, window_days: u64) -> KpiReport {
         // CREDIBLE-1512: default 24h window for the embedded CI-pickup section.
         ci_pickup: crate::ci_pickup::build_ci_pickup_report(repo_root, 24),
         ci_census: build_ci_census_section(repo_root),
+        admin_merges: crate::admin_merges::build_admin_merges_section(repo_root),
     }
 }
 
@@ -2292,14 +2298,14 @@ fn percentile_u64(sorted: &[ShipTokens], pct: usize) -> Option<u64> {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-fn current_unix() -> u64 {
+pub(crate) fn current_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
 
-fn parse_iso8601_to_unix(s: &str) -> Option<u64> {
+pub(crate) fn parse_iso8601_to_unix(s: &str) -> Option<u64> {
     let s = s.trim_end_matches('Z');
     let mut parts = s.splitn(2, 'T');
     let date_part = parts.next()?;
@@ -2343,11 +2349,11 @@ fn extract_field(line: &str, field: &str) -> Option<String> {
     }
 }
 
-fn extract_int_field(line: &str, field: &str) -> Option<u64> {
+pub(crate) fn extract_int_field(line: &str, field: &str) -> Option<u64> {
     extract_field(line, field)?.parse().ok()
 }
 
-fn json_escape(s: &str) -> String {
+pub(crate) fn json_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
@@ -3796,6 +3802,8 @@ mod tests {
         assert!(json.contains(r#""leverage""#));
         assert!(json.contains(r#""tokens_per_ship""#));
         assert!(json.contains(r#""handoff_rate""#));
+        // CREDIBLE-1525: admin_merges_7d present (no cache in tmp → source none, 0).
+        assert!(json.contains(r#""admin_merges":{"admin_merges_7d":0,"source":"none"}"#));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

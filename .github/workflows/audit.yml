@@ -462,6 +462,12 @@ jobs:
         run: |
           CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-cli-output-format.sh
 
+      - name: admin_merges_7d counter — kpi report + floor_temp + admin_merge_executed (CREDIBLE-1525)
+        if: matrix.shard == 1
+        # Single-line run: (not `run: |`) so the INFRA-1867 parity matcher sees
+        # the script path and matches the preflight.rs mirror.
+        run: CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-admin-merges-7d.sh
+
       - name: gap consolidate — near-duplicate title detection (INFRA-935)
         if: matrix.shard == 1
         run: |

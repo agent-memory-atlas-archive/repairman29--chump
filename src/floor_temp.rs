@@ -93,6 +93,12 @@ pub struct FloorTempReport {
     pub total_hot_events: usize,
     pub components: Vec<ComponentCount>,
     pub recommendation: String,
+    /// CREDIBLE-1525: the `admin_merges_7d` counter surfaced by
+    /// `chump kpi report` — the *same* number, computed by the same calculator
+    /// (`chump_kpi_report::admin_merges`). `None` when not populated (the pure
+    /// `compute()` path leaves it unset; the CLI arm fills it in).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admin_merges_7d: Option<u64>,
 }
 
 /// Compute floor temperature by reading the ambient log.
@@ -165,6 +171,7 @@ pub fn compute(ambient_path: &Path, window_secs: u64) -> FloorTempReport {
         total_hot_events: total,
         components,
         recommendation: temp.recommendation().to_string(),
+        admin_merges_7d: None,
     }
 }
 

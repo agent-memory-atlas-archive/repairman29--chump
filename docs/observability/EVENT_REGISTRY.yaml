@@ -14366,6 +14366,16 @@ events:
     consumers: [observability, operator-recall]
     fields_required: [ts, kind, p50_pickup_s, runs_queued, window_min, sample_count]
 
+  - kind: admin_merge_executed
+    effect_metric: credible
+    emitter: crates/chump-kpi-report/src/admin_merges.rs (CREDIBLE-1525; via `chump kpi report`)
+    trigger: a merged PR whose merge was NOT via auto-merge AND whose
+      branch-protection-required `verified` check was not success at merge time —
+      detected over a trailing 7d window from the GitHub cache (.chump/github_cache.db,
+      gh fallback); deduped by PR number so re-runs are idempotent
+    consumers: [floor_temp, observability, operator]
+    fields_required: [ts, kind, pr, merged_at, source]
+
   - kind: checkout_single_branch_refspec
     effect_metric: resilient
     emitter: scripts/coord/fleet-doctor-strict.sh (INFRA-8210)

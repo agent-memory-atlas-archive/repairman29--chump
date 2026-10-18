@@ -173,6 +173,11 @@ const CONTENT_GUARD_MIRRORS: &[(&str, &str)] = &[
 // `cli-observability-misc` gate.
 const CLI_OBSERVABILITY_MISC_SCRIPTS: &[(&str, &str)] = &[
     ("acp-real-clients", "scripts/ci/test-acp-real-clients.sh"),
+    // CREDIBLE-1525: admin_merges_7d counter fixture — kpi report + floor_temp
+    // + admin_merge_executed agree over a synthetic github_cache.db. Pure local
+    // (chump binary + sqlite3 + python3, no network). Mirrors the audit.yml
+    // audit-shard step of the same name.
+    ("admin-merges-7d", "scripts/ci/test-admin-merges-7d.sh"),
     // INFRA-8219: `chump admit` node-wide admission ceiling smoke — proves the
     // free/deferred exit codes (0 / 75) + kind=admission_deferred emit. Fast
     // (~2s), pure local (chump binary + sentinel sleeps, no network).

@@ -11,12 +11,17 @@ serde_json = "1.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 chump-gap-store = { path = "../chump-gap-store", version = "0.2.0" }
 chump-waste-tally = { path = "../chump-waste-tally", version = "0.1.0" }
+# CREDIBLE-1525: admin_merges_7d reads the GitHub cache DB (.chump/github_cache.db)
+# directly, matching the cache-first/gh-fallback contract the bash helpers use.
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 # Tests seed a real GapStore and poke it via conn_for_test() (test-helpers
 # feature) with rusqlite::params!.
 chump-gap-store = { path = "../chump-gap-store", version = "0.2.0", features = ["test-helpers"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+# CREDIBLE-1525: admin_merges tests seed a throwaway github_cache.db + ambient log.
+tempfile = "3"
 
 [lints]
 workspace = true

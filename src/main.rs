@@ -3417,7 +3417,13 @@ async fn main() -> Result<()> {
         // returns COLD/WARM/HOT. Emits kind=floor_temp on each invocation.
         if want_temp {
             let ambient = floor_temp::ambient_path_for(&repo_root);
-            let report = floor_temp::compute(&ambient, floor_temp::DEFAULT_WINDOW_SECS);
+            let mut report = floor_temp::compute(&ambient, floor_temp::DEFAULT_WINDOW_SECS);
+            // CREDIBLE-1525 (AC3): surface the same admin_merges_7d number
+            // `chump kpi report` computes, via the same calculator.
+            report.admin_merges_7d = Some(
+                chump_kpi_report::admin_merges::build_admin_merges_section(&repo_root)
+                    .admin_merges_7d,
+            );
             floor_temp::emit_floor_temp(&report);
             if want_json {
                 println!(
@@ -3431,6 +3437,9 @@ async fn main() -> Result<()> {
                     report.total_hot_events,
                     report.window_secs / 3600
                 );
+                if let Some(n) = report.admin_merges_7d {
+                    eprintln!("  admin_merges_7d: {n}");
+                }
                 eprintln!("  {}", report.recommendation);
             }
             // Exit code: HOT → 2, WARM → 1, COLD → 0 (so CI/workers can react).
@@ -18658,6 +18667,19 @@ async fn main() -> Result<()> {
             }
         } else {
             let report = kpi_report::build_full_report(&repo_root, window_days);
+            // CREDIBLE-1525: emit kind=admin_merge_executed for each newly-detected
+            // admin merge (deduped by PR number), so floor_temp and consumers see
+            // the same signal the counter is built from.
+            match chump_kpi_report::admin_merges::emit_admin_merge_events(
+                &repo_root,
+                &report.admin_merges,
+            ) {
+                Ok(n) if n > 0 => {
+                    eprintln!("chump kpi report: emitted {n} kind=admin_merge_executed")
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("chump kpi report: admin_merge_executed emit failed: {e}"),
+            }
             let output = if want_json {
                 report.render_json()
             } else {
