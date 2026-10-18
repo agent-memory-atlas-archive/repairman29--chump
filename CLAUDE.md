@@ -234,6 +234,10 @@ Manual fallback if broken:
 ```bash
 git push -u origin <branch> --force-with-lease
 gh pr create --base main
+# CREDIBLE-1520 (Phase R R2, AC1): write the typed gap→PR link right after
+# gh pr create, exactly as bot-merge.sh does, so chump gap ship can later read
+# the gap_prs FK instead of re-parsing the PR title. Idempotent.
+chump gap link-pr <ID> <N> --sha "$(git rev-parse HEAD)"
 gh pr merge <N> --auto --squash
 chump gap ship <ID> --update-yaml
 ```

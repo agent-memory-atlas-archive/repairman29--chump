@@ -2720,6 +2720,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "link-pr-at-open-credible-1520",
+            &["bash", "scripts/ci/test-credible-1520-link-pr-at-open.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "cargo-target-no-worktree-default",
             &[
                 "bash",

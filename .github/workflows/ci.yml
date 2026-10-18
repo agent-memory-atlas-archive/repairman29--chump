@@ -1929,6 +1929,9 @@ jobs:
       - name: bot-merge recovery mode opens a missing PR smoke (INFRA-8209)
         run: bash scripts/ci/test-bot-merge-recovery-pr-create.sh
 
+      - name: every PR-open path writes the gap_prs link (CREDIBLE-1520)
+        run: CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-credible-1520-link-pr-at-open.sh
+
       - name: Cargo target dir - no worktree-local default (ZERO-WASTE-134)
         run: bash scripts/ci/test-cargo-target-no-worktree-default.sh
 

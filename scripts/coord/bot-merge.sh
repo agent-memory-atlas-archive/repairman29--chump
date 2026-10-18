@@ -552,6 +552,30 @@ _bm_completed_emit() {
         >> "$ambient" 2>/dev/null || true
 }
 
+# CREDIBLE-1520 (Phase R R2, AC1): write the typed gap→PR link at PR-open time.
+# Every path that opens (or re-resolves) a PR for a gap calls this so that
+# `chump gap ship` can later read the gap_prs FK instead of re-parsing the PR
+# title (the three title-regex closers INFRA-8192 set out to retire). Idempotent
+# via link_pr's UPSERT, so a re-run on the same branch is safe. BEST-EFFORT by
+# design: a link failure must never block a ship here — enforcing the FK at ship
+# is AC2, a later slice. Writes one row per gap cited for this PR.
+_bm_link_pr() {
+    local pr_number="$1"
+    [[ -z "$pr_number" || "$pr_number" == "0" ]] && return 0
+    [[ ${#GAP_IDS[@]} -eq 0 ]] && return 0
+    command -v chump >/dev/null 2>&1 || return 0
+    local head_sha
+    head_sha="$(git rev-parse HEAD 2>/dev/null || echo "")"
+    [[ -z "$head_sha" ]] && return 0
+    local gid
+    for gid in "${GAP_IDS[@]}"; do
+        [[ -z "$gid" || "$gid" == "none" ]] && continue
+        if chump gap link-pr "$gid" "$pr_number" --sha "$head_sha" >/dev/null 2>&1; then
+            info "CREDIBLE-1520: linked $gid → PR #$pr_number in gap_prs ($head_sha)"
+        fi
+    done
+}
+
 # ── RESILIENT-010: step-specific failure helper ───────────────────────────────
 # Usage: _bm_fail <step-name> <exit-code> [message]
 # Emits kind=bot_merge_phase_failure to ambient.jsonl (RESILIENT-011), exits with the given code.
@@ -4113,6 +4137,17 @@ else
 fi
 # META-156 AC#1: step=pr_create done
 _bm_step_done "pr_create" 0
+
+# CREDIBLE-1520 (Phase R R2, AC1): resolve the PR number this run opened or
+# re-used and write the typed gap_prs link before any downstream step reads it.
+# Prefers the number captured in the create block (_rest_result from the REST
+# fallback, _new_pr from gh pr create, or EXISTING_PR when the push updated an
+# already-open PR), falling back to a fresh lookup by branch.
+_bm_linked_pr="${_rest_result:-${_new_pr:-${EXISTING_PR:-}}}"
+if [[ -z "$_bm_linked_pr" ]]; then
+    _bm_linked_pr="$(gh pr view "$BRANCH" --json number --jq '.number' 2>/dev/null || echo "")"
+fi
+_bm_link_pr "$_bm_linked_pr"
 
 # ── INFRA-103: apply parallelism label to the PR ─────────────────────────────
 # Classify this PR as 'serializing' or 'parallel-safe' based on whether it
