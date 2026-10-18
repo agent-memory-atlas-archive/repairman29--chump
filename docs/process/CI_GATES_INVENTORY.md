@@ -254,6 +254,34 @@ Guarded by `scripts/ci/test-poll-cross-workflow-checks.sh` (shards-in_progress �
 `audit=in_progress` → aggregator exit 2; no-audit-run → `audit=failure` →
 aggregator exit 1).
 
+## continue-on-error PR-reporting jobs (CREDIBLE-1522, PHASE-R R3 / CREDIBLE-1492 AC1)
+
+A top-level job in `.github/workflows/ci.yml` with `continue-on-error: true`
+**at the job level** posts a check-run to the PR whose conclusion is *always*
+success regardless of what its steps did — a green check carrying no
+information (the R3 "honest ship gate" defect: "Red checks carrying no
+information"). The R3 stance is: **make each such job required-and-green
+(remove `continue-on-error`) or delete it.** Step-level `continue-on-error` is
+out of scope — a step does not post its own PR check-run (its job does), so
+step-level `continue-on-error` is the sanctioned INFRA-1869 advisory-demotion
+mechanism and does not make a PR check lie.
+
+Enforcement: `scripts/ci/test-no-coe-pr-reporting.sh` (ci.yml `fast-checks` →
+feeds the required `verified` lane; mirrored in `chump preflight`) fails when a
+**new** job-level `continue-on-error` job appears that is not on
+`scripts/ci/coe-pr-reporting-allowlist.txt`. The allowlist is a decision ledger,
+intended to **shrink**, not a permanent exemption.
+
+Inventory + decision as of 2026-10-18:
+
+| Job (ci.yml key) | Decision | Why |
+|---|---|---|
+| `tauri-cowork-e2e` | **DELETED** | Disabled on PR runs forever (`if: github.event_name == 'disabled-RESILIENT-016'`); the real job lives in `ci-nightly.yml`. Nothing in ci.yml `needs` it. A permanently-skipped job posting a neutral check is pure noise. Removed in CREDIBLE-1522. (CREDIBLE-1515 claimed to remove it but the landed diff was comment-only.) |
+| `changes` | **KEEP (allowlisted)** | Routing / `dorny/paths-filter` job, not a correctness gate. `continue-on-error` makes the conclusion *neutral* on a transient runner/network failure so a blip does not flip rollup state and block auto-merge; downstream reads null path-filter outputs as `false` (safe skip). Not a verdict-bearing check. |
+| `e2e` | **KEEP (allowlisted)** | Selenium PWA e2e shards, deliberately non-blocking on PR runs (flaky; moved to the daily `ci-nightly.yml` cron per RESILIENT-016 / INFRA-1529). Candidate for deletion from PR runs once nightly coverage is confirmed sufficient — tracked, not a permanent keep. |
+| `test-e2e` | **KEEP (allowlisted)** | Aggregator rollup over the `e2e` shards; `continue-on-error` is defensive against the aggregator's own runner errors contributing a spurious FAILURE to rollup state (INFRA-1348). Lives or dies with `e2e` above. |
+| `integration-test` (System integration test, INFRA-849) | **FIX landed; promotion to required pending 3 green main runs** | The job was red on every PR — masked by `continue-on-error` — at the `test-gap-close-decomposed-integration.sh` (RESILIENT-1373) step, which ran against the **shared** store and hit the PHASE-R R1 single-writer proof-of-merge guard (CREDIBLE-1491): `gap set --status done --closed-pr 9001` refused because no commit carrying `(#9001)` is on `origin/main`. (Assertion 4 of `test-system-integration.sh`, which INFRA-8184 named, already passes — the real red was elsewhere in the same job.) CREDIBLE-1522 isolates that test into its own `CHUMP_REPO` with no `.git`, so the R1 guard runs in fixture mode and the test stops mutating the canonical store. Per CREDIBLE-1492 AC1, the job joins the required `verified` lane and drops `continue-on-error` **after 3 consecutive green main runs** — until then it stays allowlisted with this decision. |
+
 ## Update history
 
 - **2026-05-23** — Initial inventory. INFRA-1731 just shipped as the
@@ -264,3 +292,10 @@ aggregator exit 1).
 - **2026-10-17** — RESILIENT-1617: documented the cross-workflow `verified`
   lane-seen rule (shard-style members + backing-workflow-run signal) so a
   still-running audit reports PENDING, not a false FAIL.
+- **2026-10-18** — CREDIBLE-1522 (PHASE-R R3 / CREDIBLE-1492 AC1): inventoried
+  the five job-level `continue-on-error` PR-reporting jobs (§ above); deleted the
+  dead `tauri-cowork-e2e` stub; added the `no-coe-pr-reporting` gate
+  (`scripts/ci/test-no-coe-pr-reporting.sh` + `coe-pr-reporting-allowlist.txt`,
+  wired into fast-checks and preflight) that fails on a new un-allowlisted
+  job-level `continue-on-error` job; fixed the INFRA-849 integration-test red
+  (RESILIENT-1373 step isolated from the shared store / R1 guard).

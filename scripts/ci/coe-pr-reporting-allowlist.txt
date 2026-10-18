@@ -1,0 +1,36 @@
+# scripts/ci/coe-pr-reporting-allowlist.txt — CREDIBLE-1522 (PHASE-R R3, CREDIBLE-1492 AC1)
+#
+# Every top-level job in .github/workflows/ci.yml that carries
+# `continue-on-error: true` AT THE JOB LEVEL posts a check-run to the PR whose
+# conclusion is ALWAYS success regardless of what its steps did — a green check
+# that carries no information (the R3 "honest ship gate" defect). The default
+# stance is: make the job required-and-green or delete it. A job may stay
+# continue-on-error ONLY if it is listed here with a one-line decision, and the
+# matching row in docs/process/CI_GATES_INVENTORY.md (§ continue-on-error
+# PR-reporting jobs) records why.
+#
+# Format: one job key per line, `#` comments and blank lines ignored. The key is
+# the YAML job name under `jobs:` in ci.yml (NOT the display `name:`).
+#
+# scripts/ci/test-no-coe-pr-reporting.sh fails CI when ci.yml grows a NEW
+# job-level continue-on-error job that is not on this list. The list is intended
+# to SHRINK: each entry is a decision still owed to the R3 program, not a
+# permanent exemption.
+
+# Routing / path-filter job, not a correctness gate. dorny/paths-filter can fail
+# transiently (runner/network); continue-on-error makes the conclusion neutral so
+# a blip does not flip rollup state. See ci.yml job `changes` header comment.
+changes
+
+# E2E selenium lanes: deliberately non-blocking on PR runs (flaky, moved to the
+# daily ci-nightly.yml cron per RESILIENT-016/INFRA-1529). Candidate for deletion
+# from PR runs once nightly coverage is confirmed sufficient — tracked, not kept.
+e2e
+test-e2e
+
+# System integration test (INFRA-849). Green-fix for the R1 single-writer
+# collision landed in CREDIBLE-1522 (the RESILIENT-1373 close-decomposed step ran
+# against the shared store and hit the proof-of-merge guard). Promotion to a
+# required `verified` lane (remove continue-on-error) is gated on 3 consecutive
+# green main runs per CREDIBLE-1492 AC1 — tracked there, not a permanent exemption.
+integration-test

@@ -22,6 +22,11 @@ fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 
 # Resolve chump binary
 CHUMP_BIN="${CHUMP_BIN:-chump}"
+# CREDIBLE-1522: absolutize a relative path (CI passes CHUMP_BIN=target/debug/chump)
+# BEFORE the cd into the isolated store below, or it stops resolving there.
+if [[ "$CHUMP_BIN" == */* && "$CHUMP_BIN" != /* ]]; then
+  CHUMP_BIN="$PWD/$CHUMP_BIN"
+fi
 command -v "$CHUMP_BIN" >/dev/null 2>&1 || fail "Cannot find chump binary"
 
 TMP="$(mktemp -d -t test-resilient-1373.XXXXXX)"
@@ -30,21 +35,34 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cd "$REPO_ROOT" || fail "Cannot cd to $REPO_ROOT"
+# CREDIBLE-1522 (PHASE-R R3): run against an ISOLATED store, not the canonical
+# checkout's. Before this, the test `cd`'d into $REPO_ROOT and created/mutated
+# gaps in the real state.db — it auto-closed real decomposed parents as a side
+# effect, and under the R1 single writer (CREDIBLE-1491) the child done-flips
+# (`gap set --status done --closed-pr 900X`) were REFUSED because no commit
+# carrying (#900X) is on origin/main (the proof-of-merge guard) — which reddened
+# the INFRA-849 integration-test job on every PR (masked by continue-on-error).
+# A fresh CHUMP_REPO with NO `.git` makes `verify_proof_of_merge` run in its
+# documented fixture mode (fail-open for test scaffolding), so the synthetic
+# done-flips are allowed, and nothing touches the canonical store.
+export CHUMP_REPO="$TMP/repo"
+mkdir -p "$CHUMP_REPO"
+cd "$CHUMP_REPO" || fail "Cannot cd to isolated repo $CHUMP_REPO"
 
 echo "=== RESILIENT-1373: auto-close decomposed parent gaps ==="
+echo "  (isolated store: $CHUMP_REPO)"
 
 # ─ Create decomposed parent gap ────────────────────────────────────────────────
-PARENT=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 $CHUMP_BIN gap reserve --domain RESILIENT --title "RESILIENT: test decomposed parent" --priority P1 2>&1 | grep '^RESILIENT-' | tail -1)
+PARENT=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 CHUMP_GAP_RESERVE_NO_SIMILARITY=1 $CHUMP_BIN gap reserve --force --domain RESILIENT --title "RESILIENT: test decomposed parent" --priority P1 2>&1 | grep '^RESILIENT-' | tail -1)
 [ -n "$PARENT" ] || fail "Cannot reserve parent gap"
 pass "Created parent gap: $PARENT"
 
 # ─ Create child slices ─────────────────────────────────────────────────────────
-CHILD1=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 $CHUMP_BIN gap reserve --domain RESILIENT --title "RESILIENT: test slice one" --priority P2 2>&1 | grep '^RESILIENT-' | tail -1)
+CHILD1=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 CHUMP_GAP_RESERVE_NO_SIMILARITY=1 $CHUMP_BIN gap reserve --force --domain RESILIENT --title "RESILIENT: test slice one" --priority P2 2>&1 | grep '^RESILIENT-' | tail -1)
 [ -n "$CHILD1" ] || fail "Cannot reserve child1 gap"
 pass "Created child gap 1: $CHILD1"
 
-CHILD2=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 $CHUMP_BIN gap reserve --domain RESILIENT --title "RESILIENT: test slice two" --priority P2 2>&1 | grep '^RESILIENT-' | tail -1)
+CHILD2=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 CHUMP_GAP_RESERVE_NO_SIMILARITY=1 $CHUMP_BIN gap reserve --force --domain RESILIENT --title "RESILIENT: test slice two" --priority P2 2>&1 | grep '^RESILIENT-' | tail -1)
 [ -n "$CHILD2" ] || fail "Cannot reserve child2 gap"
 pass "Created child gap 2: $CHILD2"
 
@@ -116,15 +134,15 @@ else
 fi
 
 # ─ Test with partial children (only one done) ──────────────────────────────────
-PARENT2=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 $CHUMP_BIN gap reserve --domain RESILIENT --title "RESILIENT: test partial decomposed" --priority P1 2>&1 | grep '^RESILIENT-' | tail -1)
+PARENT2=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 CHUMP_GAP_RESERVE_NO_SIMILARITY=1 $CHUMP_BIN gap reserve --force --domain RESILIENT --title "RESILIENT: test partial decomposed" --priority P1 2>&1 | grep '^RESILIENT-' | tail -1)
 [ -n "$PARENT2" ] || fail "Cannot reserve second parent gap"
 pass "Created second parent gap: $PARENT2"
 
-CHILD3=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 $CHUMP_BIN gap reserve --domain RESILIENT --title "RESILIENT: test slice three" --priority P2 2>&1 | grep '^RESILIENT-' | tail -1)
+CHILD3=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 CHUMP_GAP_RESERVE_NO_SIMILARITY=1 $CHUMP_BIN gap reserve --force --domain RESILIENT --title "RESILIENT: test slice three" --priority P2 2>&1 | grep '^RESILIENT-' | tail -1)
 [ -n "$CHILD3" ] || fail "Cannot reserve child3 gap"
 pass "Created child gap 3: $CHILD3"
 
-CHILD4=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 $CHUMP_BIN gap reserve --domain RESILIENT --title "RESILIENT: test slice four" --priority P2 2>&1 | grep '^RESILIENT-' | tail -1)
+CHILD4=$(CHUMP_GAP_RESERVE_NO_EVIDENCE=1 CHUMP_GAP_RESERVE_NO_SIMILARITY=1 $CHUMP_BIN gap reserve --force --domain RESILIENT --title "RESILIENT: test slice four" --priority P2 2>&1 | grep '^RESILIENT-' | tail -1)
 [ -n "$CHILD4" ] || fail "Cannot reserve child4 gap"
 pass "Created child gap 4: $CHILD4"
 

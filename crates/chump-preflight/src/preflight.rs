@@ -2844,6 +2844,15 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-workflow-concurrency-groups.sh"],
             GateKind::Scripts,
         ));
+        // CREDIBLE-1522 (PHASE-R R3 / CREDIBLE-1492 AC1): a new ci.yml job with
+        // job-level continue-on-error:true posts an always-green PR check that
+        // carries no information. Mirror the ci.yml fast-checks gate so the drift
+        // fails locally in <1s, not after a push.
+        steps.push(step(
+            "no-coe-pr-reporting",
+            &["bash", "scripts/ci/test-no-coe-pr-reporting.sh"],
+            GateKind::Scripts,
+        ));
         // RESILIENT-1606/1607 + RESILIENT-1611: wired by the 2026-10-17 Phase R train.
         steps.push(step(
             "pr-cut-honored",

@@ -105,8 +105,10 @@ env:
 
 jobs:
   # ── Path filter ────────────────────────────────────────────────────────────
-  # Determines which downstream jobs need to run.  Both tauri-cowork-e2e and
-  # test-e2e check the outputs of this job via `needs.changes.outputs.*`.
+  # Determines which downstream jobs need to run. Downstream jobs (e2e,
+  # test-e2e, test) check the outputs of this job via `needs.changes.outputs.*`.
+  # (The PR-run tauri-cowork-e2e stub was deleted in CREDIBLE-1522; the real
+  # tauri e2e lane lives in ci-nightly.yml.)
   # On push-to-main and merge_group every path is considered changed so the
   # full suite always runs there.
   changes:
@@ -327,111 +329,6 @@ jobs:
         with:
           job_start_ts: ${{ steps.job-start.outputs.ts }}
           workflow_name: changes
-
-  # ── Tauri Cowork E2E ───────────────────────────────────────────────────────
-  # Only runs when desktop / src / e2e-tauri files change. Skipped on
-  # docs-only, scripts-only, crate-only PRs.
-  tauri-cowork-e2e:
-    needs: changes
-    # RESILIENT-016 (2026-05-17): disabled on PR runs — moved to ci-nightly.yml
-    # (cron daily). Selenium timeouts were blocking 5+ PRs (INFRA-1529). The
-    # test-e2e aggregator treats skipped as success so no branch-protection impact.
-    # Always-false, written as a comparison because actionlint rejects a
-    # constant `if: false`. The job stays disabled.
-    if: ${{ github.event_name == 'disabled-RESILIENT-016' }}
-    continue-on-error: true
-    runs-on: ${{ vars.RUNNER_TAURI_COWORK_E2E != '' && fromJSON(vars.RUNNER_TAURI_COWORK_E2E) || 'ubuntu-latest' }}  # INFRA-1542: lane override via repo var (unset → ubuntu-latest)
-    steps:
-      - uses: actions/checkout@v7
-
-      # Same rationale as the test job's Free disk space step — this job
-      # builds chump + chump-desktop (two binaries) plus tauri-driver.
-      - name: Free disk space
-        if: runner.os == 'Linux'  # INFRA-1539: proactive Linux-only guard
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/Python
-          sudo docker image prune --all --force || true
-          df -h /
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.95.0
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install Tauri + WebDriver system packages
-        if: runner.os == 'Linux'  # INFRA-1542: apt-get gated on Linux (macOS uses native WebKit)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            xvfb \
-            build-essential \
-            pkg-config \
-            libssl-dev \
-            libgtk-3-dev \
-            librsvg2-dev \
-            util-linux
-          # INFRA-6093: the apt package providing WebKitWebDriver was renamed
-          # from webkit2gtk-driver -> webkitgtk-webdriver on newer Ubuntu
-          # bases (verified against Ubuntu 26.04 "resolute"); try both so
-          # this step doesn't die outright whenever ubuntu-latest advances.
-          sudo apt-get install -y webkit2gtk-driver \
-            || sudo apt-get install -y webkitgtk-webdriver
-
-      - name: Cache tauri-driver binary
-        id: tauri-driver-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.cargo/bin/tauri-driver
-          key: tauri-driver-crate-ubuntu-amd64-v1
-
-      - name: Install tauri-driver
-        # INFRA-2244: cargo-binstall fetches pre-built binary (~5s) vs cargo
-        # install's compile-from-source (~90s). Falls back to compile if no
-        # pre-built binary is published for the tool/platform.
-        if: steps.tauri-driver-cache.outputs.cache-hit != 'true'
-        run: |
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
-            || cargo install cargo-binstall --locked
-          cargo binstall -y tauri-driver \
-            || cargo install tauri-driver --locked
-
-      - name: Build chump + Cowork (Tauri) shell
-        run: |
-          cargo build --bin chump
-          cargo build -p chump-desktop
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: '20'
-
-      - name: Cowork WebDriver E2E (xvfb)
-        env:
-          CHUMP_WEB_PORT: '3848'
-          CHUMP_WEB_TOKEN: ''
-          CHUMP_DESKTOP_API_BASE: http://127.0.0.1:3848
-          CHUMP_DESKTOP_AUTO_WEB: '0'
-        run: |
-          "${CARGO_TARGET_DIR:-./target}"/debug/chump --web &
-          CHUMP_PID=$!
-          # shellcheck disable=SC2034  # i is only a retry counter
-          for i in $(seq 1 90); do
-            if curl -sf http://127.0.0.1:3848/api/health >/dev/null; then
-              echo "chump web ready"
-              break
-            fi
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:3848/api/health >/dev/null
-          cd e2e-tauri && npm ci
-          xvfb-run -a npm test
-          kill "${CHUMP_PID}" || true
-          wait "${CHUMP_PID}" 2>/dev/null || true
 
   # ── Required-check rollup ─────────────────────────────────────────────────
   # The "test" name is wired into branch protection (required status check).
@@ -1971,6 +1868,13 @@ jobs:
 
       - name: workflow_run/schedule concurrency groups are stable (ZERO-WASTE-135)
         run: bash scripts/ci/test-workflow-concurrency-groups.sh
+
+      - name: no un-allowlisted job-level continue-on-error PR-reporting job (CREDIBLE-1522)
+        # PHASE-R R3 / CREDIBLE-1492 AC1: a new ci.yml job with job-level
+        # continue-on-error:true posts a check-run that is always green — a check
+        # carrying no information. Fails unless the job is in
+        # scripts/ci/coe-pr-reporting-allowlist.txt with a recorded decision.
+        run: bash scripts/ci/test-no-coe-pr-reporting.sh
 
       - name: gap YAML mirror is export-only (INFRA-8193)
         # Phase R R4: state.db is the only truth; docs/gaps/*.yaml is written

@@ -74,7 +74,10 @@ fi
 # INFRA-2475: 'audit' moved to audit.yml (INFRA-2452) — it is no longer a ci.yml job.
 # audit.yml has its own RUNNER_AUDIT flip mechanism (same pattern, different workflow).
 # Reduced expected count from 5 to 4.
-HEAVY_JOBS="clippy cargo-test-shard tauri-cowork-e2e fast-checks"
+# CREDIBLE-1523: 'tauri-cowork-e2e' removed — the permanently-disabled stub was
+# deleted from ci.yml (the live job lives in ci-nightly.yml per RESILIENT-016;
+# the stub tripped ci-advisory.yml's advisory-drift-gate). Reduced 4 → 3.
+HEAVY_JOBS="clippy cargo-test-shard fast-checks"
 flexible=0
 fixed=0
 for job in $HEAVY_JOBS; do
