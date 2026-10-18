@@ -43,7 +43,7 @@ to live.
 |---|---|---|---|---|
 | **R1** | Ship is one state transition gated on a landing receipt: a merge SHA reachable from `origin/main` whose PR row links the gap. One function writes `done`/`shipped`. Idempotent. | The re-ship loop (RESILIENT-1562 shipped 87 times in 2h, landing nothing); the false-close class | CREDIBLE-1491 | P1 |
 | **R2** | The gap-to-PR link is a typed FK written when the PR opens, read at ship. No title regex anywhere. | `fix(X:)` closing gap X (#5317); three regex readers drifting | INFRA-8192 | P1 |
-| **R3** | Honest ship gate: every check is required-and-green or deleted; admin bypass needs a PASSED consensus; `enforce_admins` and `strict` on; admin merges counted. | Red checks carrying no information; invisible `--admin` merges | CREDIBLE-1492 | P1 |
+| **R3** | Honest ship gate: every check is required-and-green or deleted; admin bypass needs a PASSED consensus; `enforce_admins` and `strict` on; admin merges counted. **`strict=true` restored 2026-10-18 between 00:17:56Z and 00:19:02Z** (read back false then true by the architect via `gh api .../branches/main/protection`). It had been off since 2026-10-17 15:20Z for the landing window, and the trigger was zero armed PRs waiting on CI after #5573 merged. The architect's PATCH was refused by its session classifier, and the operator's two attempts failed in gh ("unexpected end of JSON input"); the Chief session applied it. Slices: CREDIBLE-1522/1523 (AC1), CREDIBLE-1524 (AC3+4), CREDIBLE-1525 (AC5), CREDIBLE-1502 (AC2, done), CREDIBLE-1521 (main `verified` on push). | Red checks carrying no information; invisible `--admin` merges | CREDIBLE-1492 | P1 |
 | **R3 measurement** (CREDIBLE-1512, hosted-runner starvation) | The honest ship gate is only honest if a green check is *reachable* — under `strict=true` every main merge requeues every armed PR, and the hosted-runner pool could not keep up. Measured 2026-10-17 04:58Z: **22 runs queued, 1 job running, ubuntu-latest pickup 20-40 min, GitHub status clean**; re-measured 12:38Z: **32 queued**; and again ~13:11Z via `chump kpi report --ci-pickup`: **62 runs queued, pickup p95=543s (9m), max=1011s (16m), p50=0** (survivorship — fast jobs complete, starved jobs still queued; `ci_runs_queued` is the leading signal). Fix shipped: PR-event CI runs cut cargo-test shards 4→2, audit shards path-filtered per lane, pwa e2e gated to its own paths; `kind=ci_runner_starved` fires when trailing-30m p50 pickup > 10m. Capacity options A/B/C + recommendation: [`docs/process/CI_RUNNER_CAPACITY.md`](../process/CI_RUNNER_CAPACITY.md). | ubuntu-latest `runner=none` for 20-40m while status reads green; landings gated on runner pickup | CREDIBLE-1512 | P1 |
 | **R6** | The invariant boundary. Rust owns invariants (store, leases, gap status, the ship transition, admission); shell owns glue and may stay shell. A CI gate fails any shell that writes an invariant directly; `chump` verbs are the shortest path; agent matched to layer. Metric: shell files that write invariants, target zero. | Picker sprawl (MISSION-028); 9 scripts writing the store and a dozen writing leases on main (2026-10-17 baseline); Rust-first honored by a bypass trailer | INFRA-8195 (slices R6.1 gate, R6.2 `chump admit`, R6.3 layer-aware dispatch, R6.4 gauge) | P1 |
 | **R4** | One canonical store. `state.sql` and `gap_store.db` leave git; the YAML mirror is export-only; the swamp is archived, never deleted. | Split-brain drift; the 9,223-file swamp; `sync --push` blast radius | INFRA-8193; INFRA-8190 landed: one resolver (`crates/chump-store-path` + `scripts/coord/lib/state-store.sh`: `CHUMP_STATE_DB` > main checkout's `.chump/state.db` > root), hard single-source gate (`gap-store-single-source-check.sh` check C); INFRA-8222: `chump store reconcile` merges a node's stale home store into the live one before the pin flips (newest-wins, terminal-status guard). INFRA-8193 slice 1 landed: `state.sql`, `state.sql.lz4`, `gap_store.db` out of git; claim/preflight state.sql self-heal and the state.sql merge driver removed; reserve's canonical max reads the private registry only; `gap sync --pull` is a hard error; export-only gate `test-gap-yaml-export-only.sh` (allowlist may only shrink). Slice 2: archive the YAML tree on cuphead + reconcile stores (INFRA-8222). Slice 3: retire the postgrest backend code paths. | P2 |
@@ -95,6 +95,28 @@ train (13): R6 ×5 (INFRA-8195, RESILIENT-1604/1615/1616/1617), R3 ×4 (CREDIBLE
 INFRA-8203, ZERO-WASTE-133), R1 (CREDIBLE-1491), R5 (INFRA-8571), R7 slice 2, plus the
 R6 shell-absorption umbrella. The second train is #5566 (CREDIBLE-1506) and the chain v8/v9
 PRs (CREDIBLE-1516, RESILIENT-1617, RESILIENT-1615, RESILIENT-1616, INFRA-8571).
+
+**Opus window receipt, 2026-10-17 21:15Z to 2026-10-18 00:20Z (handoff from the Fable session).**
+Eleven PRs landed one at a time with zero admin merges, and each gap was shipped on the node with
+`chump gap ship --closed-pr`:
+#5569 ZERO-WASTE-133, #5571 CREDIBLE-1516, #5572 RESILIENT-1617, #5574 CREDIBLE-1518,
+#5576 RESILIENT-1604, #5577 RESILIENT-1615, #5570 RESILIENT-1608, #5578 RESILIENT-1616,
+#5575 CREDIBLE-1491 (R1 umbrella: one receipt-gated writer; gap-doctor Bucket 2 now goes through
+it, and the INFRA-308 test was rewritten to assert the refusal), #5573 INFRA-8203, and #5579 INFRA-8571
+(R5 slice 3).
+- **Rollup:** PHASE-R went from 63 of 76 done to 72 of 93 (77%). The total grew because every finding
+  became a linked gap.
+- **R1 AC2 is only half met** (merge SHA yes, typed FK no). Filed as CREDIBLE-1520 rather than
+  reopening INFRA-8192.
+- **Umbrellas sliced by hand** (decompose has no provider on cuphead, INFRA-8573): CREDIBLE-1492
+  into CREDIBLE-1522..1525, and INFRA-8195 into INFRA-8574..8577.
+- **Ship-path classes found:** classes 33-40 in the ship-path measurement.
+- **Two PRs went DIRTY twice** on the union-driver class and were landed by local merges with
+  the fixed driver (#5570, #5573).
+- **Main protection:** `strict=true` restored 00:19Z (see the R3 row).
+- **Chains:** v10 (RESILIENT-1619, CREDIBLE-1520 AC1, RESILIENT-1618, CREDIBLE-1519,
+  RESILIENT-1620, INFRA-8573) and v11 (the eight umbrella slices) run on cuphead, one claude at
+  a time.
 
 **The honest metric for the whole program.** One gap filed, dispatched, built, merged
 and flipped to shipped by the fleet with zero admin merges and zero human terminal.
