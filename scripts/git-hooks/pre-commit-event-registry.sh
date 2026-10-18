@@ -101,7 +101,18 @@ fi
 # Extract registered kinds from the YAML. Lazy regex parse to avoid a
 # pyyaml dep — the schema is shallow enough that `^  - kind: <name>` is
 # unambiguous.
-REGISTERED=$(grep -E '^  - kind:[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*' "$REGISTRY" \
+# RESILIENT-1618: new kinds land as per-entry fragments under
+# docs/observability/events.d/ (new files never conflict on GitHub). Read the
+# complete generated view (monolith base + fragments, including any fragment
+# the author is staging right now) so a fragment-registered kind is recognized.
+GEN="$REPO_ROOT/scripts/ci/gen-registries.sh"
+if [[ -x "$GEN" ]]; then
+    REGISTRY_TEXT=$(bash "$GEN" events)
+else
+    REGISTRY_TEXT=$(cat "$REGISTRY")
+fi
+REGISTERED=$(printf '%s\n' "$REGISTRY_TEXT" \
+    | grep -E '^  - kind:[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*' \
     | sed -E 's/^  - kind:[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*).*/\1/' \
     | sort -u)
 

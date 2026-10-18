@@ -1147,6 +1147,22 @@ jobs:
         # (discover_test_scripts) and the pre-commit registry hook.
         run: bash scripts/ci/test-event-registry-yaml-parse.sh
 
+      - name: registry fragments freshness/validity gate (RESILIENT-1618)
+        # New event kinds + internal env vars land as per-entry fragment files
+        # under docs/observability/events.d/ and scripts/ci/env-vars.d/ so two
+        # armed PRs never touch a shared file (GitHub never runs the local
+        # merge=union driver). Asserts filename==entry, no dup vs base/other
+        # fragments, and that the generated complete registry parses under
+        # PyYAML. Mirrored in `chump preflight`.
+        run: bash scripts/ci/test-registry-fragments.sh
+
+      - name: registry fragments no-conflict proof (RESILIENT-1618)
+        # Hermetic two-PR update-branch test: two PRs that each add one event
+        # fragment + one env-var fragment land in sequence with zero conflicts,
+        # with a negative control proving the old monolith-append path DOES
+        # conflict. Mirrored in `chump preflight`.
+        run: bash scripts/ci/test-registry-fragment-no-conflict.sh
+
       - name: capabilities registry gate (CREDIBLE-240)
         # docs/CAPABILITIES_REGISTRY.json is indexed by almanac, so a stale or
         # broken catalog gets served to agents with a file:line receipt. This

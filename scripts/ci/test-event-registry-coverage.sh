@@ -36,6 +36,15 @@ if [[ ! -f "$REGISTRY" ]]; then
     exit 3
 fi
 
+# RESILIENT-1618: new kinds now land as per-entry fragments under
+# docs/observability/events.d/ (new files never conflict on GitHub, unlike
+# appends to the monolith). Audit the COMPLETE generated view (frozen monolith
+# base + fragments) so fragment-registered kinds count as registered.
+COMBINED_REGISTRY="$(mktemp)"
+trap 'rm -f "$COMBINED_REGISTRY"' EXIT
+bash "$REPO_ROOT/scripts/ci/gen-registries.sh" events > "$COMBINED_REGISTRY"
+REGISTRY="$COMBINED_REGISTRY"
+
 # Optional allowlist — empty file is fine for first-run.
 [[ -f "$ALLOWLIST" ]] || ALLOWLIST=/dev/null
 
@@ -46,7 +55,8 @@ if [[ "${CHUMP_EVENT_REGISTRY_ALLOW_DRIFT:-0}" == "1" ]]; then
     exit 0
 fi
 
-exec python3 - "$REGISTRY" "$ALLOWLIST" "$MODE" <<'PYEOF'
+set +e  # capture python's exit code below instead of letting set -e abort
+python3 - "$REGISTRY" "$ALLOWLIST" "$MODE" <<'PYEOF'
 import re, subprocess, sys, pathlib
 
 registry_path, allowlist_path, mode = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -554,3 +564,5 @@ if required_consumer_failures:
 print("[event-registry-audit] OK")
 sys.exit(0)
 PYEOF
+rc=$?
+exit "$rc"

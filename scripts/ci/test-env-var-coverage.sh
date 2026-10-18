@@ -35,7 +35,10 @@ src_vars=$(grep -rn 'std::env::var\b\|env::var(' "$REPO_ROOT/src/" $crate_src_di
 
 # Build lookup sets
 env_example_vars=$(grep -oE '[A-Z][A-Z0-9_]{3,}' "$ENV_EXAMPLE" | sort -u)
-internal_vars=$(grep -v '^#' "$INTERNAL_LIST" | grep -v '^$' | sort -u)
+# RESILIENT-1618: new internal vars land as per-entry fragments under
+# scripts/ci/env-vars.d/ (new files never conflict on GitHub, unlike appends to
+# the monolith). Audit the COMPLETE generated view (frozen base + fragments).
+internal_vars=$(bash "$REPO_ROOT/scripts/ci/gen-registries.sh" env-vars | grep -v '^#' | grep -v '^$' | sort -u)
 debt_vars=$(grep -v '^#' "$DEBT_LIST" | grep -v '^$' | sort -u)
 
 fail=0

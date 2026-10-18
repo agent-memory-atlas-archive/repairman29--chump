@@ -255,6 +255,18 @@ const CLI_OBSERVABILITY_MISC_SCRIPTS: &[(&str, &str)] = &[
     ),
     ("pr-cost-telemetry", "scripts/ci/test-pr-cost-telemetry.sh"),
     ("pr-fix-clippy", "scripts/ci/test-pr-fix-clippy.sh"),
+    // RESILIENT-1618: per-entry registry fragments remove the merge-driver
+    // dependency on EVENT_REGISTRY.yaml / env-vars-internal.txt. Both gates are
+    // hermetic + fast (no network); mirror the ci.yml steps for preflight
+    // parity.
+    (
+        "registry-fragments",
+        "scripts/ci/test-registry-fragments.sh",
+    ),
+    (
+        "registry-fragment-no-conflict",
+        "scripts/ci/test-registry-fragment-no-conflict.sh",
+    ),
     (
         "pr-stuck-cluster-observability",
         "scripts/ci/test-pr-stuck-cluster-observability.sh",

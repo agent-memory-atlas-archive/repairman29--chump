@@ -377,6 +377,44 @@ to hide them. Real reds as of `origin/main` eef8a96c3:
 
 Treat these as known-red until their owning lane fixes them; do not let them gate a Mac push.
 
+## Landing a PR that adds a registry entry (RESILIENT-1618)
+
+**The problem.** `docs/observability/EVENT_REGISTRY.yaml` and
+`scripts/ci/env-vars-internal.txt` are append-only registries marked
+`merge=union` in `.gitattributes`. **GitHub's server-side merge never runs local
+merge drivers** — mergeability, `update-branch`, and the merge itself all ignore
+`merge=union`. So two armed PRs that each *append one entry to the monolith*
+always flip to CONFLICTING after the first lands, and `update-branch` (the only
+sanctioned unstick) cannot heal it — a human ends up pushing a local merge, which
+then trips the host pre-push gates.
+
+**The fix (forward path).** Register new entries as a **per-entry fragment file**,
+not an append to the monolith:
+
+- new event kind → `docs/observability/events.d/<kind>.yaml`
+- new internal env var → `scripts/ci/env-vars.d/<VAR>`
+
+A fragment is a brand-new file, so two such PRs never touch a shared file and
+GitHub's merge / `update-branch` is conflict-free — **no merge driver, no human
+push**. `scripts/ci/gen-registries.sh events|env-vars` concatenates the frozen
+monolith base + fragments into the complete view consumers read; the CI gates
+`test-registry-fragments.sh` (validity) and `test-registry-fragment-no-conflict.sh`
+(two-PR proof) enforce it. See `docs/observability/events.d/README.md`.
+
+**Interim rule (until the full conversion lands).** The `chump emit-event` /
+`chump add-env-var` writers and most readers still target the monolith (slice-1
+migrated only the generator + the two CI coverage gates + the pre-commit
+event-registry hook — see the RESILIENT-1618 gap notes). Until the writers are
+migrated:
+
+- **Prefer** hand-writing the fragment file under `events.d/` / `env-vars.d/`
+  (conflict-free, recognized by the migrated gates) instead of appending to the
+  monolith.
+- If a PR **does** append to the monolith, land it through **`update-branch`** or a
+  **local merge run with the fixed union driver**
+  (`scripts/git/merge-driver-union.sh`) — **never a GitHub-side rebase**, which
+  drops the other side's appended entries.
+
 ## Closing a fleet PR on purpose — `pr-cut`
 
 **The rule.** The only sanctioned way to close a fleet PR on purpose is `bash scripts/coord/pr-cut.sh <N> --reason "<text>"` (the shell form of `chump pr cut`; the Rust arm follows under Phase R R6). A bare `gh pr close`, or `gh pr close` plus a hand-applied `rot-reaped` label, is not sanctioned: two organs police closed fleet PRs and both will fight it.
