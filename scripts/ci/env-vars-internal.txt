@@ -3659,3 +3659,21 @@ CHUMP_CLIPPY_MIN_DISK_KB
 # ZERO-WASTE-133: per-tool-call timeout for headless dispatch agents (seconds;
 # default 300, 0 disables the timeout env and the stalled-call watchdog)
 CHUMP_DISPATCH_TOOL_CALL_TIMEOUT_SECS
+
+# ── Tier 2: chumpd worker loop control (PHASE-R R6, INFRA-8575) ────────────
+# The per-worker loop control moved from scripts/dispatch/worker.sh into the
+# `chumpd worker` subcommand; these tune/override it (config, not bypass).
+# Full command run via `bash -c` once per tick (default: worker.sh --tick)
+CHUMP_WORKER_TICK_CMD
+# Inter-tick sleep in seconds (default 0 = shell body owns idle cadence)
+CHUMP_WORKER_TICK_CADENCE_S
+# Per-tick wall-clock budget in seconds (default 0 = no timeout)
+CHUMP_WORKER_TICK_BUDGET_S
+# Fleet-paused sentinel path (default <repo>/.chump/fleet-paused)
+CHUMP_WORKER_PAUSE_FILE
+# Per-worker heartbeat file (default <CHUMP_HEARTBEAT_DIR>/chump-fleet-worker-<AGENT_ID>.heartbeat)
+CHUMP_WORKER_HEARTBEAT_FILE
+# Set to 1 by `chumpd worker` on the tick-body child so worker.sh runs ONE pass
+CHUMP_WORKER_SINGLE_TICK
+# Override the chumpd binary the worker.sh shim execs (default: resolve from target/ or PATH)
+CHUMPD_BIN

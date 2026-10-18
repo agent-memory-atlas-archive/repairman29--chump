@@ -3248,6 +3248,17 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
 
+        // INFRA-8575: `chumpd worker` owns the worker.sh loop control
+        // (cadence, heartbeat, fleet-paused sentinel, per-tick budget). Stub
+        // tick body, no real fleet, no network; builds chumpd when absent and
+        // fails (never SKIPs) on a build error. Mirrors the ci.yml fast-checks
+        // step of the same gap.
+        steps.push(step(
+            "chumpd-worker-loop",
+            &["bash", "scripts/ci/test-chumpd-worker-loop.sh"],
+            GateKind::Scripts,
+        ));
+
         // CREDIBLE-1524 (PHASE-R R3): admin-merge consensus gate. Grep gate
         // (every `gh pr merge --admin` call site is guarded) + stubbed-gh
         // refusal fixtures per call-site shape. Hermetic (tmpdir ambient +

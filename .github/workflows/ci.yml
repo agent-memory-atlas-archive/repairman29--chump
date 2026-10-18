@@ -1655,6 +1655,14 @@ jobs:
         # crates/chump-preflight/src/preflight.rs.
         run: CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-gap-decompose-claude-backend.sh
 
+      - name: chumpd worker owns loop control — cadence/heartbeat/pause (INFRA-8575)
+        # Runs after "Build chump (debug, single bin)" so shared deps are warm.
+        # Builds chumpd explicitly (no pipe, so a build failure fails the step)
+        # and the test fails, never SKIPs, if chumpd is missing. Single-line
+        # run: so the INFRA-1867 parity matcher sees the script path. Mirrored
+        # in crates/chump-preflight/src/preflight.rs.
+        run: cargo build -p chumpd && bash scripts/ci/test-chumpd-worker-loop.sh
+
       - name: bot-merge auto-close handshake (INFRA-154)
         run: |
           CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" \

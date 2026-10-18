@@ -60,15 +60,49 @@ fi
 # and exit 0 without writing a lease, creating a worktree, or spawning claude.
 # Activated by --dry-run CLI flag or CHUMP_FLEET_DRY_RUN=1 env var.
 DRY_RUN="${CHUMP_FLEET_DRY_RUN:-0}"
+# INFRA-8575: --tick runs exactly ONE pass of the tick body (no inner loop),
+# which is how `chumpd worker` drives this script. Equivalent to the env
+# CHUMP_WORKER_SINGLE_TICK=1 that chumpd sets on the child.
+_WORKER_SINGLE_TICK="${CHUMP_WORKER_SINGLE_TICK:-0}"
 for _arg in "$@"; do
     case "$_arg" in
         --dry-run) DRY_RUN=1 ;;
+        --tick)    _WORKER_SINGLE_TICK=1 ;;
     esac
 done
 export CHUMP_FLEET_DRY_RUN="$DRY_RUN"
+export CHUMP_WORKER_SINGLE_TICK="$_WORKER_SINGLE_TICK"
 
 AGENT_ID="${AGENT_ID:-?}"
 REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+
+# ── PHASE-R R6 / INFRA-8575: loop-control shim ───────────────────────────────
+# The per-worker loop control (cadence, heartbeat, fleet-paused sentinel,
+# per-tick budget) now lives in the `chumpd worker` subcommand. Unless we are
+# running a single tick body (invoked BY `chumpd worker`), resolve the chumpd
+# binary and exec the Rust loop — worker.sh keeps its file name so every
+# installer and unit that references this path still works. If the binary
+# can't be found we fall through to the legacy inline loop below, so a host
+# without a built chumpd never loses its worker (graceful shim fallback).
+if [[ "$_WORKER_SINGLE_TICK" != "1" ]]; then
+    _chumpd_bin="${CHUMPD_BIN:-}"
+    if [[ -z "$_chumpd_bin" ]]; then
+        for _cand in \
+            "$REPO_ROOT/target/debug/chumpd" \
+            "$REPO_ROOT/target/release/chumpd" \
+            "$(command -v chumpd 2>/dev/null || true)"; do
+            if [[ -n "$_cand" && -x "$_cand" ]]; then
+                _chumpd_bin="$_cand"
+                break
+            fi
+        done
+    fi
+    if [[ -n "$_chumpd_bin" && -x "$_chumpd_bin" ]]; then
+        exec "$_chumpd_bin" worker
+    fi
+    echo "[worker.sh] chumpd binary not found; running legacy inline loop (INFRA-8575 shim fallback)" >&2
+fi
+# ── end INFRA-8575 shim ──────────────────────────────────────────────────────
 
 # RESILIENT-1009 (RESILIENT-596 slice): the floor model + escalation ladder
 # are single-sourced from this repo-committed manifest, sourced LAST so it
@@ -854,7 +888,10 @@ _check_worker_head_reexec() {
 }
 
 cycle=0
-while :; do
+# INFRA-8575: in single-tick mode (driven by `chumpd worker`) run the body
+# exactly once; otherwise loop forever as before. The tick body below is
+# unchanged — only the loop condition gained the single-pass guard.
+while { [[ "${CHUMP_WORKER_SINGLE_TICK:-0}" != "1" ]] || [[ "$cycle" -eq 0 ]]; }; do
     cycle=$((cycle + 1))
 
     _check_worker_head_reexec

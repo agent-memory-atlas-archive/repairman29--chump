@@ -19,6 +19,7 @@
 //! socket (CLI reads via chumpd) is the next slice; see MISSION-051 AC.
 
 mod file_sandbox;
+mod worker_loop;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -483,6 +484,15 @@ async fn handle_socket(cfg: Config, listener: UnixListener) {
 
 #[tokio::main]
 async fn main() {
+    // PHASE-R R6 / INFRA-8575: thin `chumpd worker` arm — the per-worker loop
+    // control (cadence, heartbeat, fleet-paused sentinel, per-tick budget).
+    // Dispatched before any supervisor setup so it never binds the socket or
+    // takes pool ownership; worker.sh execs this.
+    let argv: Vec<String> = std::env::args().collect();
+    if argv.get(1).map(String::as_str) == Some("worker") {
+        std::process::exit(worker_loop::run(&argv[2..]));
+    }
+
     // SAFETY: signal() with a signal-safe handler that only stores an atomic.
     unsafe {
         let handler = on_term as extern "C" fn(i32) as *const () as usize;
