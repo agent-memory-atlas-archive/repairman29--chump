@@ -291,6 +291,48 @@ const CLI_OBSERVABILITY_MISC_SCRIPTS: &[(&str, &str)] = &[
     ),
 ];
 
+/// RESILIENT-1622: the STRUCTURAL subset — the no-build, scripts-scope gates
+/// that need no cargo compile and catch the structural CI-fail classes that
+/// have repeatedly cost a repair round on the dispatch/bot-merge ship path
+/// (#5582 unwired-test + parity regression; #5585 raw-gh in a hot path). Each
+/// is pure shell/python/git, hermetic, and fires in ~1-3s, so the whole
+/// subset runs well under 30s warm — small enough to run inside bot-merge's
+/// push-phase budget and the bot-merge pre-push hook where a full `chump
+/// preflight` (cargo build) would blow the 300s budget (INFRA-2426).
+///
+/// Single source of truth: `--structural` builds its step list from here,
+/// bot-merge.sh invokes `chump preflight --structural`, and the pre-push hook
+/// runs it under CHUMP_BOT_MERGE_IN_PROGRESS (INFRA-3521 narrowed, not reverted).
+/// Ordered cheapest-first.
+const STRUCTURAL_GATES: &[(&str, &str)] = &[
+    (
+        "event-registry-audit",
+        "scripts/ci/test-event-registry-coverage.sh",
+    ),
+    ("env-var-coverage", "scripts/ci/test-env-var-coverage.sh"),
+    (
+        "path-filter-coverage",
+        "scripts/ci/check-path-filter-coverage.sh",
+    ),
+    (
+        "no-new-bypass-env-vars",
+        "scripts/ci/test-no-new-bypass-env-vars.sh",
+    ),
+    (
+        "census-shrink-only",
+        "scripts/ci/test-census-shrink-only.sh",
+    ),
+    (
+        "preflight-ci-parity-smoke",
+        "scripts/ci/test-preflight-ci-parity.sh",
+    ),
+    // RESILIENT-1622 notes (2026-10-18 architect receipt): #5585 failed the
+    // raw-gh lint gate (INFRA-1274) in CI — a structural no-build gate too.
+    // The gate reads scripts/ci/raw-gh-allowlist.txt, so this one entry covers
+    // both the lint and its allowlist check.
+    ("raw-gh-lint", "scripts/ci/test-no-raw-gh-in-hot-paths.sh"),
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
     Pass,
@@ -861,6 +903,13 @@ struct Args {
     /// `newcmd` is a placeholder that does nothing but exit 0 — a template
     /// other subcommands can copy the wiring from.
     newcmd: bool,
+    /// RESILIENT-1622: run ONLY the structural (no-build, scripts-scope) subset
+    /// — the gates in `STRUCTURAL_GATES`. No cargo compile, no scope auto-detect,
+    /// budget <30s warm. Used by bot-merge.sh and the bot-merge pre-push hook so
+    /// the structural CI-fail classes (census drift, parity regression, undocumented
+    /// env var / ambient kind, path-filter gap, raw gh in a hot path) are caught
+    /// locally before push instead of costing a 30-45 min CI round + repair dispatch.
+    structural: bool,
 }
 
 fn parse_args(argv: &[String]) -> Args {
@@ -876,6 +925,7 @@ fn parse_args(argv: &[String]) -> Args {
         full: false,
         artifact_type: None,
         newcmd: false,
+        structural: false,
     };
     let mut i = 0;
     while i < argv.len() {
@@ -886,6 +936,7 @@ fn parse_args(argv: &[String]) -> Args {
             "--keep-going" => a.keep_going = true,
             "--json" => a.json = true,
             "--pre-commit" => a.pre_commit = true,
+            "--structural" => a.structural = true,
             "-h" | "--help" => a.help = true,
             "newcmd" => a.newcmd = true,
             "--scope" => {
@@ -954,6 +1005,14 @@ OPTIONS:
                     --scope all + --with-tests, then runs every audit.yml test
                     script that is locally-safe (auto-skips network/gh gates).
                     Slower, but one local pass replaces a ~20-min CI round-trip.
+    --structural    RESILIENT-1622: run ONLY the structural (no-build,
+                    scripts-scope) subset — census-shrink-only, preflight-ci-
+                    parity, env-var-coverage, event-registry-audit, path-filter-
+                    coverage, no-new-bypass-env-vars, raw-gh-lint. No cargo
+                    compile; budget <30s warm. bot-merge.sh runs this before
+                    push and the bot-merge pre-push hook runs it (INFRA-3521
+                    narrowed) so the structural CI-fail classes are caught
+                    locally instead of costing a CI round + repair dispatch.
     --keep-going    Don't exit on the first failure; run all gates
     --json          Emit one JSON object per gate to stdout (machine-readable)
     --pre-commit    Enable pre-commit-only gates (docs-delta-trailer audit
@@ -1646,6 +1705,18 @@ pub fn run(argv: &[String]) -> i32 {
     // origin/main is already failing it (zero-bypass: no env override needed).
     let is_main_red_gate =
         |gate_name: &str| -> bool { main_red_gates.iter().any(|g| g == gate_name) };
+
+    // RESILIENT-1622: --structural short-circuits the whole cargo/scope pipeline
+    // and runs ONLY the no-build structural subset. It still honors the main-RED
+    // auto-skip so a gate already failing on trunk never blocks a ship.
+    if args.structural {
+        return run_structural(
+            args.keep_going,
+            args.json,
+            &main_red_gates,
+            &trunk_fix_gap_id,
+        );
+    }
 
     let scope = resolve_scope(args.scope, &repo_root);
     eprintln!(
@@ -2646,6 +2717,18 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-census-shrink-only.sh"],
             GateKind::Scripts,
         ));
+        // RESILIENT-1622: structural preflight subset on the bot-merge push path.
+        // Proves --structural + STRUCTURAL_GATES membership, bot-merge + pre-push
+        // wiring, and that a synthetic unwired scripts/ci test fails the structural
+        // census gate locally (#5582 class). Hermetic fixture, no cargo build, <3s.
+        steps.push(step(
+            "resilient-1622-structural-subset",
+            &[
+                "bash",
+                "scripts/ci/test-resilient-1622-structural-subset.sh",
+            ],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "css-token-discipline-smoke",
             &["bash", "scripts/ci/test-css-token-discipline.sh"],
@@ -3493,6 +3576,108 @@ pub fn run(argv: &[String]) -> i32 {
     } else {
         eprintln!("\n[preflight] PASS — all gates green ({}ms)", total_ms);
         0
+    }
+}
+
+/// RESILIENT-1622: run ONLY the structural (no-build) subset — the gates in
+/// `STRUCTURAL_GATES`. No cargo compile, no scope auto-detect; the whole subset
+/// runs in <30s warm so it fits inside bot-merge's push-phase budget and the
+/// bot-merge pre-push hook. Honors the main-RED auto-skip (a gate already red
+/// on origin/main never blocks a ship). On failure, prints the failing gate
+/// names so the caller (bot-merge) can surface them. Returns an exit code.
+fn run_structural(
+    keep_going: bool,
+    json: bool,
+    main_red_gates: &[String],
+    trunk_fix_gap_id: &str,
+) -> i32 {
+    eprintln!(
+        "[preflight] --structural: {} no-build gate(s) (census, ci-parity, env-var, \
+         event-registry, path-filter, no-new-bypass, raw-gh)",
+        STRUCTURAL_GATES.len()
+    );
+    let started = Instant::now();
+    let mut failed_gates: Vec<&'static str> = vec![];
+    let mut json_results: Vec<String> = vec![];
+
+    for &(name, script) in STRUCTURAL_GATES {
+        // INFRA-2422: auto-skip gates already failing on origin/main so a
+        // trunk-RED structural gate never blocks the fleet's own ship path.
+        if main_red_gates.iter().any(|g| g == name) {
+            eprintln!(
+                "[preflight] skipping {} (main-red — see {})",
+                name,
+                if trunk_fix_gap_id.is_empty() {
+                    "watchdog state"
+                } else {
+                    trunk_fix_gap_id
+                }
+            );
+            emit_main_red_skip(name, trunk_fix_gap_id);
+            if json {
+                json_results.push(format!(
+                    r#"{{"step":"{}","status":"Skipped","elapsed_ms":0,"reason":"main-red"}}"#,
+                    name
+                ));
+            }
+            continue;
+        }
+
+        let s = step(name, &["bash", script], GateKind::Scripts);
+        eprint!("[preflight] {} ... ", name);
+        let out = run_step(&s);
+        let symbol = match out.status {
+            Status::Pass => "✓",
+            Status::Fail => "✗",
+            Status::Skipped => "·",
+        };
+        eprintln!("{} ({}ms)", symbol, out.elapsed_ms);
+        if json {
+            json_results.push(format!(
+                r#"{{"step":"{}","status":"{:?}","elapsed_ms":{}}}"#,
+                name, out.status, out.elapsed_ms
+            ));
+        }
+        if out.status == Status::Fail {
+            failed_gates.push(name);
+            if let Some(cap) = &out.captured {
+                eprintln!("---- {} output ----", name);
+                let trunc = if cap.len() > 2048 {
+                    format!(
+                        "{}\n... [{} more bytes truncated]",
+                        &cap[..2048],
+                        cap.len() - 2048
+                    )
+                } else {
+                    cap.clone()
+                };
+                eprintln!("{}", trunc);
+                eprintln!("---- end ----");
+            }
+            if !keep_going {
+                break;
+            }
+        }
+    }
+
+    let total_ms = started.elapsed().as_millis();
+    if json {
+        println!("[{}]", json_results.join(","));
+    }
+    if failed_gates.is_empty() {
+        eprintln!(
+            "\n[preflight --structural] PASS — all structural gates green ({}ms)",
+            total_ms
+        );
+        0
+    } else {
+        eprintln!(
+            "\n[preflight --structural] FAIL — structural gate(s): {} ({}ms)",
+            failed_gates.join(", "),
+            total_ms
+        );
+        eprintln!("   Fix the failing gate(s) before push — these cost a full CI round if missed.");
+        1
     }
 }
 

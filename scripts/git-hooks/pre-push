@@ -407,28 +407,55 @@ if command -v chump &>/dev/null \
         fi
     done <<<"$_HOOK_STDIN"
 
-    # INFRA-3521: skip the preflight re-run when the push is bot-merge-initiated.
-    # bot-merge already runs fmt/clippy/test as its own gates before pushing and
-    # deliberately delegates the heavy suite to CI (INFRA-1399), so re-running
-    # `chump preflight` in this hook is pure redundancy — and a cold compile here
-    # regularly blows bot-merge's 300s push-phase budget (INFRA-2426), which
-    # SIGTERMs the push mid-flight and orphans the worktree (→ META-156 re-claim
-    # failure on the next attempt). CI on the PR is the authoritative gate.
-    # Direct (non-bot-merge) `git push` still runs the full preflight below.
+    # INFRA-3521 (narrowed by RESILIENT-1622): when the push is bot-merge-initiated,
+    # don't SKIP preflight entirely — run only the STRUCTURAL (no-build,
+    # scripts-scope) subset. bot-merge already runs fmt/clippy/test and delegates
+    # the heavy cargo suite to CI (INFRA-1399), so re-running the FULL `chump
+    # preflight` here is pure redundancy — and a cold compile regularly blew
+    # bot-merge's 300s push-phase budget (INFRA-2426), SIGTERMing the push and
+    # orphaning the worktree (→ META-156). But the structural gates (census,
+    # ci-parity, env-var coverage, event-registry audit, path-filter, no-new-bypass,
+    # raw-gh) ran NOWHERE before push on the fleet's own ship path, so an unwired
+    # test / parity regression surfaced only after a 30-45 min CI round + repair
+    # dispatch (#5582, #5585). The structural subset has no cargo compile, so it
+    # stays well under the push budget. Direct (non-bot-merge) `git push` still
+    # runs the full preflight below.
+    _pf_structural_arg=""
     if [[ "$preflight_has_targets" -eq 1 && "${CHUMP_BOT_MERGE_IN_PROGRESS:-0}" == "1" ]]; then
-        echo "[pre-push] INFRA-3521: skipping preflight re-run — bot-merge already gated this push; CI is authoritative." >&2
-        preflight_has_targets=0
         _amb_3521="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.chump-locks/ambient.jsonl"
-        printf '{"ts":"%s","kind":"prepush_preflight_skipped_botmerge","reason":"INFRA-3521: bot-merge already gated + CI authoritative"}\n' \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$_amb_3521" 2>/dev/null || true
-        unset _amb_3521
+        # RESILIENT-1622 rollout safety: --structural is a NEW flag. `chump
+        # preflight` ignores unknown flags for forward-compat, so a STALE binary
+        # handed --structural would silently run the FULL (cargo-build) preflight
+        # here and blow bot-merge's 300s push budget — the exact META-156
+        # regression INFRA-3521 fixed. Only run the structural subset when the
+        # binary actually advertises the flag; otherwise fall back to the old
+        # INFRA-3521 skip (CI remains authoritative) until the new binary is live.
+        # Capture --help first, then test it: a `--help | grep -q` pipeline under
+        # pipefail can SIGPIPE the upstream and read as false (fleet CI class 31).
+        _pf_help="$(chump preflight --help 2>/dev/null || true)"
+        if [[ "$_pf_help" == *--structural* ]]; then
+            _pf_structural_arg="--structural"
+            echo "[pre-push] INFRA-3521 (RESILIENT-1622): bot-merge push — running structural preflight subset (no cargo build) instead of skipping." >&2
+            printf '{"ts":"%s","kind":"prepush_preflight_skipped_botmerge","reason":"INFRA-3521 narrowed (RESILIENT-1622): full preflight skipped, structural subset runs"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$_amb_3521" 2>/dev/null || true
+        else
+            preflight_has_targets=0
+            echo "[pre-push] INFRA-3521: skipping preflight re-run — bot-merge already gated this push; CI is authoritative (binary predates --structural)." >&2
+            printf '{"ts":"%s","kind":"prepush_preflight_skipped_botmerge","reason":"INFRA-3521: bot-merge already gated + CI authoritative (binary predates --structural)"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$_amb_3521" 2>/dev/null || true
+        fi
+        unset _amb_3521 _pf_help
     fi
 
     if [[ "$preflight_has_targets" -eq 1 ]]; then
-        echo "[pre-push] INFRA-1671: running chump preflight ..." >&2
+        if [[ -n "$_pf_structural_arg" ]]; then
+            echo "[pre-push] RESILIENT-1622: running chump preflight --structural ..." >&2
+        else
+            echo "[pre-push] INFRA-1671: running chump preflight ..." >&2
+        fi
         _pf_start="$(date +%s)"
         _pf_rc=0
-        chump preflight 2>&1 || _pf_rc=$?
+        chump preflight $_pf_structural_arg 2>&1 || _pf_rc=$?
 
         # INFRA-1927: emit preflight_ci_agreement for agreement-rate measurement.
         # Bypass: CHUMP_PREFLIGHT_CI_AGREEMENT=0

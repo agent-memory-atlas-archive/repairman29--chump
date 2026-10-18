@@ -3760,6 +3760,54 @@ print(' '.join(conflicts))
     fi
 fi
 
+# ── 4b. Structural preflight subset (RESILIENT-1622) ────────────────────────────
+# The dispatch/bot-merge ship path runs fmt/clippy/test and delegates the heavy
+# cargo suite to CI (INFRA-1399), but the structural no-build gates (census
+# shrink-only, preflight-ci-parity, env-var coverage, event-registry audit,
+# path-filter allowlist, no-new-bypass-env-vars, raw-gh lint) ran NOWHERE before
+# push — so an unwired new scripts/ci test or a parity regression surfaced only
+# after a 30-45 min CI round + repair dispatch (#5582, #5585). Run the structural
+# subset here and fail the ship with the gate name before paying the push + CI.
+# No cargo compile, <30s warm — well under the push-phase budget. The bot-merge
+# pre-push hook runs the same subset (INFRA-3521 narrowed), so this is fail-fast
+# with a named gate, not the sole enforcement. Skipped under --fast (CI is the
+# gate; mirrors the --fast clippy/DOR skip) and when `chump` isn't on PATH
+# (early bootstrap — the pre-push hook still enforces). No bot-merge-only bypass
+# env: --fast skips it, and the sanctioned emergency escape is
+# CHUMP_BOT_MERGE_NO_VERIFY (which bypasses the whole pre-push hook).
+# RESILIENT-1622 rollout safety: --structural is a NEW flag and `chump preflight`
+# ignores unknown flags (forward-compat), so a STALE binary handed --structural
+# would silently run the FULL cargo-build preflight here. Capability-gate on the
+# binary actually advertising --structural; a stale binary skips this stage (the
+# pre-push hook + CI remain the gate) rather than paying an unexpected full build.
+# Capture --help first, then test it: piping `chump preflight --help` into `grep -q`
+# under pipefail can SIGPIPE the upstream on grep's early exit and read as false,
+# silently skipping this gate (fleet CI class 31).
+_bm_pf_help=""
+if [[ $FAST -eq 0 ]] && command -v chump >/dev/null 2>&1; then
+    _bm_pf_help="$(chump preflight --help 2>/dev/null || true)"
+fi
+if [[ "$_bm_pf_help" == *--structural* ]]; then
+    stage_start "structural preflight subset (chump preflight --structural)" 120
+    _bm_struct_out="$(mktemp)"
+    _bm_struct_rc=0
+    run_timed_hb "chump preflight --structural" 120 \
+        chump preflight --structural >"$_bm_struct_out" 2>&1 || _bm_struct_rc=$?
+    cat "$_bm_struct_out" >&2 || true
+    if [[ "$_bm_struct_rc" -ne 0 ]]; then
+        # Surface the failing gate name(s) from the "FAIL — structural gate(s): …" line.
+        _bm_struct_gates="$(grep -oE 'structural gate\(s\): [^(]+' "$_bm_struct_out" 2>/dev/null | head -1 | sed 's/structural gate(s): //; s/[[:space:]]*$//' || true)"
+        [[ -z "$_bm_struct_gates" ]] && _bm_struct_gates="unknown (see output above)"
+        rm -f "$_bm_struct_out"
+        red "RESILIENT-1622: structural preflight subset FAILED before push — gate(s): ${_bm_struct_gates}"
+        red "  → Fix locally (each miss costs a full CI round)."
+        _bm_fail "preflight" 10 "RESILIENT-1622 structural subset refused — failing gate(s): ${_bm_struct_gates}"
+    fi
+    rm -f "$_bm_struct_out"
+    stage_done
+fi
+unset _bm_pf_help
+
 # ── 5. Push ───────────────────────────────────────────────────────────────────
 # META-156 AC#1: step=push
 _bm_step_start "push"

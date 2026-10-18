@@ -1854,6 +1854,13 @@ jobs:
           CHUMP_CENSUS_ALLOW_GROWTH: ${{ startsWith(github.head_ref, 'census/') && '1' || '0' }}
         run: bash scripts/ci/test-census-shrink-only.sh
 
+      - name: structural preflight subset on the bot-merge push path (RESILIENT-1622)
+        # Proves `chump preflight --structural` exists + lists the seven no-build
+        # gates, bot-merge runs it before push, the pre-push hook runs it under
+        # bot-merge (INFRA-3521 narrowed), and a synthetic unwired scripts/ci test
+        # fails the structural census gate locally (#5582 class). Hermetic, no build.
+        run: bash scripts/ci/test-resilient-1622-structural-subset.sh
+
       - name: CSS token-discipline smoke (INFRA-1590)
         run: bash scripts/ci/test-css-token-discipline.sh
 
