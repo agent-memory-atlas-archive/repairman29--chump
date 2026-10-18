@@ -1,0 +1,171 @@
+# ops-organ-census-allowlist.txt — INFRA-8576 (PHASE-R R6, INFRA-8195 AC4)
+#
+# Grandfathered baseline of scripts/ops/*.sh "organs" that predate the CI-side
+# census gate (scripts/ci/test-ops-organ-census.sh). The census gate fails a
+# NEW organ (one not listed here) unless it carries ONE of:
+#   (1) a Rust twin — a `# Rust-Twin: <path>` header pointing at an existing
+#       crates/**/*.rs or src/**/*.rs file, or
+#   (2) a `Rust-First-Bypass:` trailer on the commit that ADDED the organ
+#       (same trailer contract as scripts/git-hooks/pre-commit-rust-first.sh,
+#       META-064 — the census is the CI-side mirror of that commit-time hook),
+#   (3) a Tier-D line in docs/process/CI_GATES_INVENTORY.md naming the organ.
+#
+# SHRINK-ONLY: this list may only lose entries over time (as organs grow Rust
+# twins or are deleted). CI review rejects additions — a new organ must satisfy
+# one of (1)/(2)/(3) above instead of being grandfathered. Mirrors the
+# shrink-only discipline of scripts/ci/invariant-boundary-allowlist.txt
+# (INFRA-8218).
+#
+# Baseline captured: 2026-10-18.
+
+active-target-reaper.sh
+admin-merge-cycle.sh
+agent-throughput-tracker.sh
+almanac-liveness-refresh.sh
+almanac-summarize-watchdog.sh
+almanac-vision-keeper.sh
+ambient-rotate-now.sh
+apex-watchdog.sh
+atomic-binary-swap.sh
+audit-allowlist-staleness.sh
+audit-bypass-frequency.sh
+audit-flake-catalog.sh
+audit-opencode-identity-residue.sh
+audit-stale-worktrees.sh
+auto-adopt.sh
+auto-arm-sweeper.sh
+auto-deploy.sh
+back-pressure-controller.sh
+backfill-shipped-gaps.sh
+branch-protection-drift.sh
+break-trunk-cascade.sh
+build-on-pixel.sh
+capability-lifecycle.sh
+capability-provider-join.sh
+cargo-sweep-gc.sh
+cargo-target-reaper.sh
+change-approval.sh
+check-process-organ-heal-live.sh
+checkout-sync.sh
+chump-eu-status.sh
+chump-post-integration-prune.sh
+chumpbar-pause.sh
+chumpbar-status.sh
+ci-flake-rerun.sh
+ci-health-weekly.sh
+ci-qa-score.sh
+ci-summary-rerun.sh
+cj-deadman-push.sh
+classify-incident.sh
+classify-intent.sh
+closed-pr-watchdog.sh
+closer-pr-batcher.sh
+cooldown-transient-sweep.sh
+cost-enforcement.sh
+credential-lifecycle.sh
+curator-no-idle-watchdog.sh
+curator-supervisor-run.sh
+deploy-tool.sh
+discord-gateway-run.sh
+disk-health-monitor.sh
+disk-pressure-watchdog.sh
+dispatch-flatline-detector.sh
+distill-pr-skills.sh
+effect-verifier.sh
+electrician.sh
+external-clone-reaper.sh
+external-scan-reaper.sh
+faculty-collector.sh
+first-pass-yield.sh
+fix-cj-dnsmasq.sh
+fleet-clone-index.sh
+fleet-health-sentinel.sh
+fleet-metrics-snapshot.sh
+fleet-pool-keeper.sh
+fleet-unstick.sh
+fleet-worker-watchdog.sh
+gap-curate.sh
+gap-dedup-check.sh
+gap-lifecycle-manager.sh
+gap-perf-report.sh
+gap-run-now.sh
+gap-template.sh
+generate-architecture-doc.sh
+generate-capabilities-registry.sh
+generate-organ-registry.sh
+ghost-open-gaps-reaper.sh
+github-cache-divergence-audit.sh
+github-cache-reconcile.sh
+github-liaison.sh
+holler-init.sh
+index-almanac.sh
+install-pixel-builder-systemd.sh
+jeff-bus-ingest.sh
+journey-odds.sh
+lint-storm-detector.sh
+load-aware-deadman.sh
+main-health-watchdog.sh
+muscle-role-rollout.sh
+net-probe.sh
+node-capacity-plan.sh
+node-converge.sh
+node-main-sync.sh
+node-orchestrator.sh
+node-refresh-chump.sh
+node-refresh-fleet-server.sh
+node-script-host-refresh.sh
+obs-alerting.sh
+offnode-deadman-watch.sh
+olive-post-launch-monitor.sh
+onboard-scout-scheduler.sh
+oracle-event-trigger.sh
+org-router.sh
+organ-binary-freshness-selftest.sh
+organ-deploy.sh
+organ-reconcile.sh
+organ-role-roster.sh
+organ-success-verifier.sh
+organ-watchdog.sh
+pillar-balance-check.sh
+pixel-build-and-publish.sh
+pr-approval-action.sh
+pr-blocked-watch.sh
+pr-fmt-shepherd.sh
+pr-repair-rebase.sh
+pr-triage-reporter.sh
+pr-watch-shepherd.sh
+process-organ-heal.sh
+prune-worktrees.sh
+queue-health-monitor.sh
+r2-sccache-lifecycle.sh
+reap-orphan-claude-procs.sh
+reaper-heartbeat-watchdog.sh
+refresh-chump-binary.sh
+render-organ-roster.sh
+render-third-peer.sh
+render-vital-signs.sh
+repair-main-worktree-config.sh
+restart-actions-runners.sh
+rollback-gap.sh
+rot-reaper.sh
+rotate-sccache-r2-gh-only.sh
+rotate-sccache-r2-token.sh
+self-model.sh
+stale-auditor-finding-reaper.sh
+stale-bot-merge-reaper.sh
+stale-branch-reaper.sh
+stale-gap-lock-reaper.sh
+stale-pr-reaper.sh
+stale-process-watchdog.sh
+stale-worktree-reaper.sh
+stuck-pr-filer.sh
+subagent-budget-reaper.sh
+subagent-watchdog.sh
+svc-abstraction.sh
+system-invariants-monitor.sh
+test-stale-bot-merge-reaper.sh
+uncommitted-wip-watchdog.sh
+velocity-trending.sh
+vital-signs.sh
+wake-recovery.sh
+worktree-contamination-check.sh

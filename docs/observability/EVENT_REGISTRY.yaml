@@ -14265,6 +14265,18 @@ events:
       violation, `unapproved` (flagged files missing from the allowlist).
     consumers: [kpi-report, fleet-brief]
     fields_required: [ts, kind, count, mode]
+  - kind: ops_organ_census
+    status: active
+    effect_metric: credible
+    emitter: scripts/ci/test-ops-organ-census.sh (INFRA-8576 R6, INFRA-8195 AC4)
+    emitter_paths: [scripts/ci/test-ops-organ-census.sh]
+    trigger: every census-gate run; appended to .chump-locks/ambient.jsonl.
+      `status` is ok|violation. On violation, `violations` is the count of
+      scripts/ops/*.sh organs that are not grandfathered and carry no Rust twin,
+      no Rust-First-Bypass trailer on the adding commit, and no Tier-D line, and
+      `organs` is their comma-joined basenames.
+    consumers: [fleet-brief]
+    fields_required: [ts, kind, status]
   - kind: self_report_calibration
     status: active
     effect_metric: credible

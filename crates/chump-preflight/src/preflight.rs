@@ -2889,6 +2889,19 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-gap-yaml-export-only.sh"],
             GateKind::Scripts,
         ));
+        // INFRA-8576 (Phase R R6 / INFRA-8195 AC4): CI-side organ census —
+        // a new scripts/ops/*.sh organ fails unless it is grandfathered or
+        // carries a Rust twin / Rust-First-Bypass trailer / Tier-D line.
+        steps.push(step(
+            "ops-organ-census",
+            &["bash", "scripts/ci/test-ops-organ-census.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
+            "ops-organ-census-fixture",
+            &["bash", "scripts/ci/test-ops-organ-census-fixture.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "grep-c-echo0-guard-smoke",
             &["bash", "scripts/ci/test-grep-c-echo0-guard.sh"],

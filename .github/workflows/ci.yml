@@ -1125,6 +1125,17 @@ jobs:
           CHUMP_BOUNDARY_GATE: enforce
         run: bash scripts/ci/test-invariant-boundary.sh
 
+      - name: ops-organ census gate (INFRA-8576)
+        # Phase R R6 / INFRA-8195 AC4: CI-side mirror of the META-064
+        # pre-commit-rust-first.sh organ check. A new scripts/ops/*.sh organ
+        # (not grandfathered in ops-organ-census-allowlist.txt) fails unless it
+        # declares a `# Rust-Twin:` header, the adding commit carries a
+        # Rust-First-Bypass trailer, or a Tier-D line names it.
+        run: bash scripts/ci/test-ops-organ-census.sh
+
+      - name: ops-organ census fixture (INFRA-8576)
+        run: bash scripts/ci/test-ops-organ-census-fixture.sh
+
       - name: arm policy in Rust and Python armers (INFRA-8221)
         # Every Rust/Python site that arms, merges, update-branches or
         # force-pushes a PR calls the one arm policy (no-auto-merge label /
