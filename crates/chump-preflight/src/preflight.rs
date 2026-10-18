@@ -2731,6 +2731,18 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-credible-1520-link-pr-at-open.sh"],
             GateKind::Scripts,
         ));
+        // INFRA-8573: decompose claude -p backend gate. Mirrors the ci.yml
+        // "decompose claude -p backend fallthrough" step — proves `chump gap
+        // decompose --backend auto` falls through a dead cascade (Ollama
+        // absent) to a stub `claude` on PATH, `--backend claude` reaches it
+        // directly, and a total failure lists every provider tried in order.
+        // Hermetic: isolated state.db, dead 127.0.0.1:9 endpoint, stub claude;
+        // no network. Resolves the built binary via lib/discover-chump-bin.sh.
+        steps.push(step(
+            "gap-decompose-claude-backend",
+            &["bash", "scripts/ci/test-gap-decompose-claude-backend.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "cargo-target-no-worktree-default",
             &[

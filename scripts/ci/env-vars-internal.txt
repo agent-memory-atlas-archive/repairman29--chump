@@ -502,6 +502,8 @@ CHUMP_PREFLIGHT_SKIP_ACGATE
 CHUMP_SKIP_PARITY_CHECK
 # INFRA-1719: AST crawler typed inputs
 CHUMP_DECOMPOSE_AST
+# INFRA-8573: optional --model override for the `claude -p` decompose backend
+CHUMP_DECOMPOSE_MODEL
 # INFRA-1760: A2A Layer 2c CapabilityManifest opt-in hardware fields.
 # When set to "1", current_manifest() populates gpu + ip fields by reading
 # CHUMP_GPU_LABEL + CHUMP_IP_LABEL respectively. Default OFF for privacy —

@@ -82,6 +82,7 @@ mod curator_bell;
 mod dashboard;
 mod sourcing_resolver; // INFRA-3508 (COTG-S.1): repo -> arsenal -> world prior-art resolver
 pub use chump_db_pool::db_pool;
+mod decompose_backend; // INFRA-8573: --backend selection (cascade / claude -p / auto) for `chump gap decompose`
 mod decompose_task_tool;
 mod delegate_tool;
 mod desktop_launcher;
@@ -15228,10 +15229,19 @@ async fn main() -> Result<()> {
                     .skip(3)
                     .any(|a| matches!(a.as_str(), "--help" | "-h"))
                 {
-                    println!("Usage: chump gap decompose <GAP-ID> [--apply] [--verify] [--json] [--dry-run] [--no-description] [--external-repo <owner/repo|path>] [--clone-path <path>]");
+                    println!("Usage: chump gap decompose <GAP-ID> [--backend auto|cascade|claude] [--apply] [--verify] [--json] [--dry-run] [--no-description] [--external-repo <owner/repo|path>] [--clone-path <path>]");
                     println!();
                     println!(
-                        "Suggests xs/s slices for a large (m/l) gap using the provider cascade."
+                        "Suggests xs/s slices for a large (m/l) gap using the selected backend."
+                    );
+                    println!(
+                        "  --backend <value>         LLM backend: auto (cascade then claude -p),"
+                    );
+                    println!(
+                        "                            cascade (local/cloud only), or claude (claude -p only)."
+                    );
+                    println!(
+                        "                            Default: the node's CHUMP_WORK_BACKEND routing config, else auto."
                     );
                     println!(
                         "  --verify                  Validate slices via a stronger model before filing"
@@ -15257,11 +15267,12 @@ async fn main() -> Result<()> {
                     return Ok(());
                 }
                 let gap_id = args.get(3).cloned().unwrap_or_else(|| {
-                    eprintln!("Usage: chump gap decompose <GAP-ID> [--apply] [--verify] [--json] [--dry-run] [--no-description] [--external-repo <owner/repo|path>] [--clone-path <path>]");
+                    eprintln!("Usage: chump gap decompose <GAP-ID> [--backend auto|cascade|claude] [--apply] [--verify] [--json] [--dry-run] [--no-description] [--external-repo <owner/repo|path>] [--clone-path <path>]");
                     eprintln!();
                     eprintln!(
-                        "Suggests xs/s slices for a large (m/l) gap using the provider cascade."
+                        "Suggests xs/s slices for a large (m/l) gap using the selected backend."
                     );
+                    eprintln!("  --backend <value>         auto (cascade then claude -p) | cascade | claude");
                     eprintln!("  --verify                  Validate slices via a stronger model before filing");
                     eprintln!("  --apply                   File the suggested slices and demote the parent");
                     eprintln!("  --json                    Output suggestions as JSON");
@@ -15278,6 +15289,25 @@ async fn main() -> Result<()> {
                 let verify = args.iter().any(|a| a == "--verify");
                 let dry_run = args.iter().any(|a| a == "--dry-run");
                 let no_description = args.iter().any(|a| a == "--no-description");
+
+                // INFRA-8573: --backend selects the LLM backend (auto | cascade
+                // | claude). When omitted, the node's routing config
+                // (CHUMP_WORK_BACKEND, the same seam `chump dispatch` reads)
+                // decides; default is auto (cascade first, then `claude -p`).
+                let backend_flag: Option<String> = args
+                    .iter()
+                    .position(|a| a == "--backend")
+                    .and_then(|i| args.get(i + 1))
+                    .cloned();
+                let decompose_backend = match crate::decompose_backend::DecomposeBackend::resolve(
+                    backend_flag.as_deref(),
+                ) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("chump gap decompose: {e:#}");
+                        std::process::exit(2);
+                    }
+                };
 
                 // INFRA-2112: --external-repo <owner/repo|absolute-path> flag.
                 // Resolves to a clone path; injects external context into the
@@ -15429,7 +15459,20 @@ async fn main() -> Result<()> {
                         "infra2112 decompose external-repo mode active"
                     );
                 }
-                let provider = crate::provider_cascade::build_provider();
+                // INFRA-8573: route through the selected decompose backend so a
+                // node with no local/cloud cascade (e.g. cuphead, Ollama absent)
+                // still reaches an LLM via `claude -p`, and so a total failure
+                // lists every provider tried in order.
+                if !dry_run {
+                    eprintln!("chump gap decompose: backend={}", decompose_backend.label());
+                }
+                let decompose_model = std::env::var("CHUMP_DECOMPOSE_MODEL")
+                    .ok()
+                    .filter(|m| !m.is_empty());
+                let provider = crate::decompose_backend::build_decompose_provider(
+                    decompose_backend,
+                    decompose_model,
+                );
                 let ac_display = if parent.acceptance_criteria.trim().is_empty()
                     || parent.acceptance_criteria.trim() == "[]"
                 {
