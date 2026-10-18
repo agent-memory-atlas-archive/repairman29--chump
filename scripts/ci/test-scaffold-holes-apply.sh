@@ -47,8 +47,11 @@ fn test_sub() {
 }
 EOF
 
+# CREDIBLE-1519: --force bypasses the RESILIENT-069 farmer-RED claim gate so
+# this fixture seed stays hermetic against host farmer state (a paused/stale
+# host would otherwise RED-block the reserve and leave PARENT_ID empty).
 PARENT_ID=$("$CHUMP" gap reserve --domain EFFECTIVE --title "scaffold: arithmetic skeleton" \
-    --priority P2 --effort m --json 2>/dev/null | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    --priority P2 --effort m --force --json 2>/dev/null | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 if [ -z "$PARENT_ID" ]; then
     PARENT_ID=$("$CHUMP" gap list --status open --json 2>/dev/null | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 fi

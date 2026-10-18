@@ -113,7 +113,7 @@ else
         "$CHUMP_BIN" gap reserve \
             --domain TEST \
             --title "TEST: INFRA-2423 auto-fetch smoke fixture" \
-            --priority P3 2>&1 | grep '^TEST-' | tail -1
+            --priority P3 --force 2>&1 | grep '^TEST-' | tail -1
     ) || true
 
     if [[ -z "$gap_id" ]]; then

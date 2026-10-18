@@ -96,12 +96,19 @@ DB="$TMP/.chump/state.db"
 
 # (a) Schema migration — repos table + 3 indexes exist after first open.
 # Trigger DB creation by reserving a gap (which opens GapStore).
+# CREDIBLE-1519: --force bypasses the RESILIENT-069 farmer-RED claim gate so
+# this hermetic seed doesn't read host ~/.chump oauth/heartbeat state (a stale
+# host token would otherwise RED-block the reserve and SEED_ID would come back
+# empty). Capture stderr so an empty SEED_ID prints the real reserve error +
+# failing step instead of exiting 1 silently.
+SEED_ERR="$TMP/seed-reserve.err"
 SEED_ID=$("$BIN" gap reserve --domain INFRA --priority P1 --effort xs \
-    --title "repos-migration-test-seed" --quiet 2>/dev/null)
+    --title "repos-migration-test-seed" --force --quiet 2>"$SEED_ERR")
 if [[ -n "$SEED_ID" ]]; then
     ok "seed gap reserved ($SEED_ID) — DB opened and migration ran"
 else
-    fail "failed to reserve seed gap"
+    echo "    seed reserve error: $(cat "$SEED_ERR" 2>/dev/null)" >&2
+    fail "failed to reserve seed gap (step: repos table migration seed)"
 fi
 
 if sqlite3 "$DB" ".tables" 2>/dev/null | grep -q "repos"; then

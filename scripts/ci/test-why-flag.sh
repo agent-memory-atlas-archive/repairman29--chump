@@ -16,7 +16,10 @@ cleanup() { rm -f "$TMPOUT" "$TMPERR"; }
 trap cleanup EXIT
 
 # ── 1. gap reserve --why ─────────────────────────────────────────────────────
-cargo run --quiet -- gap reserve --domain TEST --title "why flag test $$" --why \
+# CREDIBLE-1519: --force skips the RESILIENT-069 farmer gate so a farmer-RED
+# host can't inject a stderr refusal / exit 1 and break the --why stderr
+# assertion (the --why rationale is unaffected by --force).
+cargo run --quiet -- gap reserve --domain TEST --title "why flag test $$" --why --force \
     >"$TMPOUT" 2>"$TMPERR"
 
 STDOUT="$(cat "$TMPOUT")"

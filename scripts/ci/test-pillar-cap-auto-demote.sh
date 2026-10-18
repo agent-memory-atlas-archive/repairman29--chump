@@ -39,6 +39,10 @@ git -C "$FAKE" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 AMBIENT="$FAKE/.chump-locks/ambient.jsonl"
 
 export CHUMP_REPO="$FAKE" CHUMP_WORKTREE_ROOT="$FAKE"
+# CREDIBLE-1519: isolate the RESILIENT-069 farmer gate's oauth path off the
+# host ~/.chump (a stale host token would RED-block these seeds). --force would
+# bypass the pillar-balance gate under test, so isolate via CHUMP_HOME instead.
+export CHUMP_HOME="$FAKE"
 export CHUMP_GAP_RESERVE_NO_SIMILARITY=1 CHUMP_DISABLE_OFFLINE_CHECK=1
 cd "$FAKE" || exit 1
 

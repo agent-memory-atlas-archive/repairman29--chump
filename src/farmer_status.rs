@@ -133,7 +133,7 @@ fn check_oauth_fresh(repo_root: &Path, reasons: &mut Vec<String>) -> bool {
         }
     }
 
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = chump_state_home().unwrap_or_default();
     let cache_path = PathBuf::from(&home).join(".chump/auth-status-cache");
     if let Ok(text) = std::fs::read_to_string(&cache_path) {
         let mut lines = text.lines();
@@ -163,6 +163,27 @@ fn check_oauth_fresh(repo_root: &Path, reasons: &mut Vec<String>) -> bool {
 
     // No signal at all — fail-open.
     true
+}
+
+/// CREDIBLE-1519: resolve the chump state home directory the oauth-freshness
+/// check reads (`<home>/.chump/{auth-status-cache,oauth-token.json}`). Honors
+/// `CHUMP_HOME` before falling back to `HOME`, mirroring
+/// `auth::chump_config_path`. Without this, a caller that redirected all other
+/// state via a temp `CHUMP_HOME` (hermetic `scripts/ci/test-*.sh` seeds, a
+/// `CHUMP_HOME`-scoped invocation) still had this gate read the host's real
+/// `~/.chump/oauth-token.json` — a 69-day-stale host token then RED-blocked
+/// `chump gap reserve` inside the temp home, failing preflight on every
+/// Rust-touching push from a paused/observer host.
+fn chump_state_home() -> Option<String> {
+    resolve_state_home(std::env::var("CHUMP_HOME").ok(), std::env::var("HOME").ok())
+}
+
+/// Pure precedence rule for [`chump_state_home`]: a non-empty `CHUMP_HOME`
+/// wins, else `HOME`. Split out so the precedence is unit-testable without
+/// mutating process-global env (which would race the auth.rs env tests in the
+/// same test binary).
+fn resolve_state_home(chump_home: Option<String>, home: Option<String>) -> Option<String> {
+    chump_home.filter(|s| !s.is_empty()).or(home)
 }
 
 /// RESILIENT-409: true when a free-tier / execute-gap provider cascade (the
@@ -377,6 +398,31 @@ mod tests {
         assert!(
             !(red.sentinel_absent && red.exit78_free && red.oauth_fresh && red.heartbeat_fresh)
         );
+    }
+
+    #[test]
+    fn resolve_state_home_prefers_chump_home() {
+        // CREDIBLE-1519 AC2: the oauth-freshness check must resolve its state
+        // dir from CHUMP_HOME before HOME, so a hermetic temp CHUMP_HOME
+        // redirects the token path and the host's stale ~/.chump token can't
+        // RED-block a scoped `chump gap reserve`. Pure test — no env mutation.
+        assert_eq!(
+            resolve_state_home(Some("/tmp/chome".into()), Some("/home/host".into())),
+            Some("/tmp/chome".into())
+        );
+        // Empty CHUMP_HOME is treated as unset -> fall back to HOME.
+        assert_eq!(
+            resolve_state_home(Some(String::new()), Some("/home/host".into())),
+            Some("/home/host".into())
+        );
+        // No CHUMP_HOME -> HOME.
+        assert_eq!(
+            resolve_state_home(None, Some("/home/host".into())),
+            Some("/home/host".into())
+        );
+        // Neither set -> None (callers default to empty, hitting the fail-open
+        // "no signal" branch rather than reading an attacker-controlled root).
+        assert_eq!(resolve_state_home(None, None), None);
     }
 
     #[test]

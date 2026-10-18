@@ -160,7 +160,8 @@ echo "--- Assertion 1: Claim creates lease JSON ---"
             --domain INFRA \
             --title "CREDIBLE: integration-test-pipeline-$(date +%s)-$$" \
             --priority P3 \
-            --effort xs 2>&1
+            --effort xs \
+            --force 2>&1
     ) || true
 
     # Extract gap ID from output (format: INFRA-NNNN)

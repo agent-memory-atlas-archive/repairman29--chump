@@ -32,6 +32,11 @@ git -C "$TMP" config user.email "test@ci.local" 2>/dev/null || true
 git -C "$TMP" config user.name "CI" 2>/dev/null || true
 
 export CHUMP_REPO="$TMP"
+# CREDIBLE-1519: CHUMP_HOME redirects the RESILIENT-069 farmer gate's oauth
+# freshness path off the host's ~/.chump so a stale host token can't RED-block
+# these seeds. --force would bypass the pillar-balance gate under test, so we
+# isolate via CHUMP_HOME (honored by src/farmer_status.rs) instead.
+export CHUMP_HOME="$TMP"
 export CHUMP_WORKTREE_ROOT="$TMP"
 export CHUMP_BINARY_STALENESS_CHECK=0
 # Bypass FLEET-029 ambient glance and INFRA-1149 similarity check in seed
@@ -105,6 +110,7 @@ git init -q -b main . 2>/dev/null || git init -q . 2>/dev/null || true
 git -C "$TMP2" config user.email "test@ci.local" 2>/dev/null || true
 git -C "$TMP2" config user.name "CI" 2>/dev/null || true
 export CHUMP_REPO="$TMP2"
+export CHUMP_HOME="$TMP2"  # CREDIBLE-1519: isolate farmer-gate oauth path
 export CHUMP_WORKTREE_ROOT="$TMP2"
 
 # Seed 9 RESILIENT + 1 EFFECTIVE with real ACs

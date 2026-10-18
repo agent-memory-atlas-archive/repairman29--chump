@@ -59,6 +59,14 @@ fi
 TMPDIR_BASE="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
 
+# CREDIBLE-1519: this fixture drives gap reserve via per-call CHUMP_STATE_DB and
+# never sets CHUMP_REPO/CHUMP_HOME, so the RESILIENT-069 farmer gate resolves
+# repo_root to the cwd (a paused host's .chump/fleet-paused) and oauth to the
+# host ~/.chump — both RED-block the seeds. --force would bypass the pillar
+# gate under test, so pin CHUMP_HOME at a hermetic temp dir instead (honored by
+# src/farmer_status.rs for oauth + repo_root for sentinel/heartbeat).
+export CHUMP_HOME="$TMPDIR_BASE"
+
 # INFRA-1149: gap-reserve title-similarity gate would otherwise block the 2nd+
 # gap in a pillar (near-identical fixture titles) and starve every pillar
 # unconditionally — export the bypass for the whole fixture run.

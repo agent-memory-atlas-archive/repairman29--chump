@@ -16,7 +16,7 @@ cleanup() { rm -f "$TMPOUT" "$TMPERR"; }
 trap cleanup EXIT
 
 # ── default mode: progress lines must appear on stderr, not stdout ──────────
-cargo run --quiet -- gap reserve --domain TEST --title "progress output test $$" \
+cargo run --quiet -- gap reserve --domain TEST --title "progress output test $$" --force \
     >"$TMPOUT" 2>"$TMPERR"
 
 STDOUT="$(cat "$TMPOUT")"
@@ -53,7 +53,10 @@ TMPOUT2="$(mktemp)"
 TMPERR2="$(mktemp)"
 trap 'cleanup; rm -f "$TMPOUT2" "$TMPERR2"' EXIT
 
-cargo run --quiet -- gap reserve --domain TEST --title "progress quiet test $$" --quiet \
+# CREDIBLE-1519: --force skips the RESILIENT-069 farmer gate so a farmer-RED
+# host can't inject an extra stderr line / exit 1 and break these stdout/stderr
+# assertions (progress phase lines are unaffected by --force).
+cargo run --quiet -- gap reserve --domain TEST --title "progress quiet test $$" --quiet --force \
     >"$TMPOUT2" 2>"$TMPERR2"
 
 STDOUT2="$(cat "$TMPOUT2")"

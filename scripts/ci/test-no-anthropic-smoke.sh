@@ -66,10 +66,13 @@ pass "gap list works without Anthropic creds"
 
 # ── Test 2: chump gap reserve works without creds ──────────────────────────
 echo "--- Test 2: gap reserve ---"
+# CREDIBLE-1519: --force bypasses the RESILIENT-069 farmer-RED claim gate so
+# this fixture seed is hermetic against host farmer state (the no-creds path
+# under test is unaffected by --force).
 gap_id=$(FLEET_029_AMBIENT_GLANCE_SKIP=1 "$CHUMP_BIN" gap reserve \
     --domain TEST \
     --title "TEST: CREDIBLE-046 no-anthropic smoke fixture" \
-    --priority P3 2>&1 | grep '^TEST-' | tail -1)
+    --priority P3 --force 2>&1 | grep '^TEST-' | tail -1)
 [ -n "$gap_id" ] || fail "gap reserve failed or returned no gap ID"
 # ZERO-WASTE-020: state.db is canonical; gap reserve no longer writes a
 # docs/gaps/<ID>.yaml mirror. Read state via `gap show` instead.
