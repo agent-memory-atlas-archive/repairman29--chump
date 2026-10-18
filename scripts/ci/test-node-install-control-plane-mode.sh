@@ -30,9 +30,13 @@ else
   pass "missing provider credentials selects control-plane mode"
 fi
 write_node_env >/dev/null
-grep -qx 'export CHUMP_NODE_WORK_ENABLED=0' "$CHUMP_STATE_DIR/node.env" \
+grep -qx 'CHUMP_NODE_WORK_ENABLED=0' "$CHUMP_STATE_DIR/node.env" \
   && pass "node.env persists work-disabled mode without credentials" \
   || fail "node.env did not persist control-plane mode"
+# INFRA-8588: node.env is bare KEY=VALUE — systemd EnvironmentFile rejects export.
+grep -q '^[[:space:]]*export[[:space:]]' "$CHUMP_STATE_DIR/node.env" \
+  && fail "node.env has an export line (systemd EnvironmentFile would ignore it)" \
+  || pass "node.env is bare KEY=VALUE (no export lines)"
 if worker_execution_enabled; then
   fail "worker execution enabled without credentials"
 else
@@ -44,7 +48,7 @@ fi
 printf 'CLAUDE_CODE_OAUTH_TOKEN=test-token\nGH_TOKEN=test-token\n' > "$CHUMP_STATE_DIR/providers.env"
 CONTROL_PLANE_ONLY=0
 write_node_env >/dev/null
-grep -qx 'export CHUMP_NODE_WORK_ENABLED=1' "$CHUMP_STATE_DIR/node.env" \
+grep -qx 'CHUMP_NODE_WORK_ENABLED=1' "$CHUMP_STATE_DIR/node.env" \
   && pass "credentialed re-install enables work mode" \
   || fail "credentialed re-install did not enable work mode"
 if worker_execution_enabled; then

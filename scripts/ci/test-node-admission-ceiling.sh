@@ -69,11 +69,12 @@ done
 # ── B. ensure: write-when-absent, idempotent, no rewrite ────────────────────
 NE="$TMP/b/node.env"
 mkdir -p "$TMP/b"
-printf 'export CHUMP_STATE_DIR=/x\nexport CHUMP_NODE_MODE=work-ready' > "$NE" # no trailing newline
+# INFRA-8588: node.env is bare KEY=VALUE (no export).
+printf 'CHUMP_STATE_DIR=/x\nCHUMP_NODE_MODE=work-ready' > "$NE" # no trailing newline
 out="$(STUB_NPROC=4 chump_ensure_admission_ceiling "$NE")"; rc=$?
-if [ "$rc" -eq 10 ] && grep -qx 'export CHUMP_MAX_CONCURRENT_CLAUDE=2' "$NE" \
-    && grep -qx 'export CHUMP_MAX_CONCURRENT_CARGO_JOBS=2' "$NE" \
-    && grep -qx 'export CHUMP_NODE_MODE=work-ready' "$NE"; then
+if [ "$rc" -eq 10 ] && grep -qx 'CHUMP_MAX_CONCURRENT_CLAUDE=2' "$NE" \
+    && grep -qx 'CHUMP_MAX_CONCURRENT_CARGO_JOBS=2' "$NE" \
+    && grep -qx 'CHUMP_NODE_MODE=work-ready' "$NE"; then
     ok "B absent keys appended as nproc/2 (rc=10), last line not glued"
 else
     ko "B first ensure: rc=$rc out=$out file=$(cat "$NE")"
@@ -90,7 +91,7 @@ printf 'CHUMP_MAX_CONCURRENT_CLAUDE="3" # operator\n' > "$NE2"
 STUB_NPROC=4 chump_ensure_admission_ceiling "$NE2" >/dev/null; rc=$?
 if [ "$rc" -eq 10 ] && [ "$(grep -c CHUMP_MAX_CONCURRENT_CLAUDE "$NE2")" -eq 1 ] \
     && [ "$(_chump_env_file_int "$NE2" CHUMP_MAX_CONCURRENT_CLAUDE)" = 3 ] \
-    && grep -qx 'export CHUMP_MAX_CONCURRENT_CARGO_JOBS=2' "$NE2"; then
+    && grep -qx 'CHUMP_MAX_CONCURRENT_CARGO_JOBS=2' "$NE2"; then
     ok "B present (operator-tuned) key kept; only the absent one written"
 else
     ko "B tuned key handling: rc=$rc file=$(cat "$NE2")"
@@ -116,18 +117,20 @@ H="$TMP/c-home"
 mkdir -p "$H/node/repo" "$H/.chump"
 run_write_node_env "$H"
 NEC="$H/.chump/node.env"
-if grep -qx 'export CHUMP_MAX_CONCURRENT_CLAUDE=2' "$NEC" 2>/dev/null \
-    && grep -qx 'export CHUMP_MAX_CONCURRENT_CARGO_JOBS=2' "$NEC" 2>/dev/null \
-    && grep -q '^export CHUMP_STATE_DB=' "$NEC"; then
+if grep -qx 'CHUMP_MAX_CONCURRENT_CLAUDE=2' "$NEC" 2>/dev/null \
+    && grep -qx 'CHUMP_MAX_CONCURRENT_CARGO_JOBS=2' "$NEC" 2>/dev/null \
+    && grep -q '^CHUMP_STATE_DB=' "$NEC"; then
     ok "C fresh install: node.env carries worker count + cargo ceiling (nproc=4 -> 2/2)"
 else
     ko "C fresh install node.env: $(cat "$NEC" 2>/dev/null)"
 fi
-sed -i.bak 's/^export CHUMP_MAX_CONCURRENT_CLAUDE=2$/export CHUMP_MAX_CONCURRENT_CLAUDE=1/' "$NEC"
+# INFRA-8588: no export lines in a freshly-written node.env.
+if grep -q '^[[:space:]]*export[[:space:]]' "$NEC"; then ko "C fresh install node.env has an export line: $(grep -n '^[[:space:]]*export' "$NEC")"; else ok "C fresh install node.env is bare (no export lines)"; fi
+sed -i.bak 's/^CHUMP_MAX_CONCURRENT_CLAUDE=2$/CHUMP_MAX_CONCURRENT_CLAUDE=1/' "$NEC"
 run_write_node_env "$H"
-if grep -qx 'export CHUMP_MAX_CONCURRENT_CLAUDE=1' "$NEC" \
-    && [ "$(grep -c '^export CHUMP_MAX_CONCURRENT_CLAUDE=' "$NEC")" -eq 1 ] \
-    && [ "$(grep -c '^export CHUMP_MAX_CONCURRENT_CARGO_JOBS=' "$NEC")" -eq 1 ]; then
+if grep -qx 'CHUMP_MAX_CONCURRENT_CLAUDE=1' "$NEC" \
+    && [ "$(grep -c '^CHUMP_MAX_CONCURRENT_CLAUDE=' "$NEC")" -eq 1 ] \
+    && [ "$(grep -c '^CHUMP_MAX_CONCURRENT_CARGO_JOBS=' "$NEC")" -eq 1 ]; then
     ok "C re-install keeps the tuned ceiling (1) and writes no duplicate keys"
 else
     ko "C re-install: $(grep CHUMP_MAX_CONCURRENT "$NEC")"
@@ -152,7 +155,7 @@ doctor() { # <claude> <cargo> [env assignments...] -> prints "<status>|<detail>"
         bash -c '. "$DOCTOR"; check_admission_ceiling; printf "%s|%s\n" "${STATUSES[0]}" "${DETAILS[0]}"'
 }
 mkdir -p "$TMP/e-home/.chump"
-printf 'export CHUMP_MAX_CONCURRENT_CLAUDE=2\nexport CHUMP_MAX_CONCURRENT_CARGO_JOBS=2\n' > "$TMP/e-home/.chump/node.env"
+printf 'CHUMP_MAX_CONCURRENT_CLAUDE=2\nCHUMP_MAX_CONCURRENT_CARGO_JOBS=2\n' > "$TMP/e-home/.chump/node.env"
 r="$(doctor 2 2)"
 case "$r" in pass\|*"claude -p 2/2"*) ok "E at the ceiling (2/2, 2/2) -> PASS" ;; *) ko "E at ceiling: $r" ;; esac
 r="$(doctor 8 1)"
@@ -164,6 +167,21 @@ case "$r" in pass\|*"claude -p 3/5"*) ok "E process env overrides node.env (3 on
 rm -f "$TMP/e-home/.chump/node.env"
 r="$(doctor 3 0)"
 case "$r" in fail\|*"claude -p 3/2"*) ok "E no node.env -> nproc default (4 -> 2): 3 running -> RED" ;; *) ko "E nproc default: $r" ;; esac
+
+# ── F. fleet-doctor check_node_env_no_export (INFRA-8588) ──────────────────
+# shellcheck disable=SC2016  # the single-quoted script is expanded by the child bash
+doctor_noexport() { # -> prints "<status>|<detail>" for the LAST registered check
+    env HOME="$TMP/f-home" CHUMP_STATE_DIR="$TMP/f-home/.chump" \
+        FLEET_DOCTOR_SOURCED=1 DOCTOR="$DOCTOR" \
+        bash -c '. "$DOCTOR"; check_node_env_no_export; i=$(( ${#CHECKS[@]} - 1 )); printf "%s|%s\n" "${STATUSES[$i]}" "${DETAILS[$i]}"'
+}
+mkdir -p "$TMP/f-home/.chump"
+printf 'export CHUMP_NODE_MODE=paused\nCHUMP_RUN_USER=ubuntu\n' > "$TMP/f-home/.chump/node.env"
+r="$(doctor_noexport)"
+case "$r" in fail\|*"export line"*) ok "F node.env with an export line -> RED" ;; *) ko "F export line not flagged: $r" ;; esac
+printf 'CHUMP_NODE_MODE=paused\nCHUMP_RUN_USER=ubuntu\n' > "$TMP/f-home/.chump/node.env"
+r="$(doctor_noexport)"
+case "$r" in pass\|*) [ "${r%%\|*}" = pass ] && ok "F bare node.env -> PASS" || ko "F bare node.env not pass: $r" ;; esac
 
 printf '\n== %d passed, %d failed ==\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

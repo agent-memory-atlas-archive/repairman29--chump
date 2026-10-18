@@ -29,7 +29,7 @@ echo "=== test-infra-3632-canonical-store-env.sh ==="
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/chump-3632-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# ── 1. write_node_env() exports CHUMP_STATE_DB (not just CHUMP_STATE_DIR) ──
+# ── 1. write_node_env() writes CHUMP_STATE_DB (not just CHUMP_STATE_DIR) ──
 FAKE_HOME="$TMP/home"
 mkdir -p "$FAKE_HOME"
 export HOME="$FAKE_HOME"
@@ -52,15 +52,19 @@ else
   fail "node.env not written"
 fi
 
-grep -q '^export CHUMP_STATE_DB=' "$NODE_ENV_FILE" 2>/dev/null \
-  && pass "node.env exports CHUMP_STATE_DB (the exact var GapStore::db_path() reads)" \
-  || fail "node.env missing CHUMP_STATE_DB export — GapStore::db_path() falls back to repo-local .chump/state.db"
+# INFRA-8588: node.env is written as BARE KEY=VALUE (no `export`) so systemd's
+# EnvironmentFile parser reads it (it rejects `export` lines). bash organs
+# recover export semantics by sourcing under `set -a`. All assertions below
+# pin the bare form.
+grep -q '^CHUMP_STATE_DB=' "$NODE_ENV_FILE" 2>/dev/null \
+  && pass "node.env sets CHUMP_STATE_DB (the exact var GapStore::db_path() reads)" \
+  || fail "node.env missing CHUMP_STATE_DB — GapStore::db_path() falls back to repo-local .chump/state.db"
 
 # INFRA-8190: the pinned store is the REPO-LOCAL one (what pin-less organs —
 # chump-fleet-server, worker.sh — resolve), not $CHUMP_STATE_DIR/state.db.
-grep -qx "export CHUMP_STATE_DB=$CHUMP_NODE_DIR/repo/.chump/state.db" "$NODE_ENV_FILE" 2>/dev/null \
+grep -qx "CHUMP_STATE_DB=$CHUMP_NODE_DIR/repo/.chump/state.db" "$NODE_ENV_FILE" 2>/dev/null \
   && pass "node.env pins CHUMP_STATE_DB to the repo-local canonical store (INFRA-8190)" \
-  || fail "node.env CHUMP_STATE_DB is not the repo-local store: $(grep '^export CHUMP_STATE_DB=' "$NODE_ENV_FILE" 2>/dev/null)"
+  || fail "node.env CHUMP_STATE_DB is not the repo-local store: $(grep '^CHUMP_STATE_DB=' "$NODE_ENV_FILE" 2>/dev/null)"
 
 # INFRA-8190: a legacy home-store pin inherited from an old node.env is the
 # split itself; a re-install must re-point it, not perpetuate it.
@@ -69,27 +73,27 @@ legacy_out="$(CHUMP_STATE_DB="$CHUMP_STATE_DIR/state.db" INSTALLER="$INSTALLER" 
   && pass "an inherited legacy \$CHUMP_STATE_DIR/state.db pin is re-pointed at the repo-local store" \
   || fail "legacy pin not replaced (got: $legacy_out)"
 
-grep -q '^export CHUMP_STATE_DIR=' "$NODE_ENV_FILE" 2>/dev/null \
-  && pass "node.env exports CHUMP_STATE_DIR" \
-  || fail "node.env missing CHUMP_STATE_DIR export"
+grep -q '^CHUMP_STATE_DIR=' "$NODE_ENV_FILE" 2>/dev/null \
+  && pass "node.env sets CHUMP_STATE_DIR" \
+  || fail "node.env missing CHUMP_STATE_DIR"
 
-grep -q '^export CHUMP_TEAM_URL=' "$NODE_ENV_FILE" 2>/dev/null \
-  && pass "node.env exports CHUMP_TEAM_URL" \
-  || fail "node.env missing CHUMP_TEAM_URL export"
+grep -q '^CHUMP_TEAM_URL=' "$NODE_ENV_FILE" 2>/dev/null \
+  && pass "node.env sets CHUMP_TEAM_URL" \
+  || fail "node.env missing CHUMP_TEAM_URL"
 
-grep -q '^export CHUMP_STORE_BACKEND=' "$NODE_ENV_FILE" 2>/dev/null \
-  && pass "node.env exports CHUMP_STORE_BACKEND" \
-  || fail "node.env missing CHUMP_STORE_BACKEND export"
+grep -q '^CHUMP_STORE_BACKEND=' "$NODE_ENV_FILE" 2>/dev/null \
+  && pass "node.env sets CHUMP_STORE_BACKEND" \
+  || fail "node.env missing CHUMP_STORE_BACKEND"
 
 # ── 1b. RESILIENT-1513: CHUMP_GAP_SERVER pins gap-filing clients
 # (src/gap_file.rs, default 127.0.0.1:7070) to the CANONICAL store node —
 # derived from CHUMP_GAP_STORE_URL's host, not left to default localhost —
 # so a bat-phone filing never silently targets a stale local fleet-server.
-grep -q '^export CHUMP_GAP_SERVER=' "$NODE_ENV_FILE" 2>/dev/null \
-  && pass "node.env exports CHUMP_GAP_SERVER" \
-  || fail "node.env missing CHUMP_GAP_SERVER export"
+grep -q '^CHUMP_GAP_SERVER=' "$NODE_ENV_FILE" 2>/dev/null \
+  && pass "node.env sets CHUMP_GAP_SERVER" \
+  || fail "node.env missing CHUMP_GAP_SERVER"
 
-gap_server_value="$(grep '^export CHUMP_GAP_SERVER=' "$NODE_ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
+gap_server_value="$(grep '^CHUMP_GAP_SERVER=' "$NODE_ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
 expected_gap_server="$(printf '%s' "$CHUMP_GAP_STORE_URL" | sed -E 's#^(https?://[^:/]+).*#\1#'):7070"
 [ "$gap_server_value" = "$expected_gap_server" ] \
   && pass "CHUMP_GAP_SERVER derives from CHUMP_GAP_STORE_URL's host at port 7070 ($gap_server_value)" \
@@ -100,7 +104,7 @@ expected_gap_server="$(printf '%s' "$CHUMP_GAP_STORE_URL" | sed -E 's#^(https?:/
   CHUMP_GAP_SERVER="http://override-host:9999"
   export CHUMP_GAP_SERVER
   write_node_env >/dev/null 2>&1
-  grep -q '^export CHUMP_GAP_SERVER=http://override-host:9999$' "$NODE_ENV_FILE"
+  grep -qx 'CHUMP_GAP_SERVER=http://override-host:9999' "$NODE_ENV_FILE"
 ) && pass "an explicit CHUMP_GAP_SERVER override wins over the derived default" \
   || fail "explicit CHUMP_GAP_SERVER override was not honored"
 unset CHUMP_GAP_SERVER

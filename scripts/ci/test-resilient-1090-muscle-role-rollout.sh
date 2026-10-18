@@ -129,10 +129,11 @@ ln -sf "$STUB" "$RTMP/systemctl"
 out1="$(run_rollout)"
 out2="$(run_rollout)"
 node_env="$STATE_DIR/node.env"
-[[ -f "$node_env" ]] && grep -q '^export CHUMP_NODE_ROLE=muscle$' "$node_env" \
+# INFRA-8588: node.env is bare KEY=VALUE (no export).
+[[ -f "$node_env" ]] && grep -q '^CHUMP_NODE_ROLE=muscle$' "$node_env" \
   && pass "node.env seeded with CHUMP_NODE_ROLE=muscle" \
   || fail "node.env missing CHUMP_NODE_ROLE=muscle: $(cat "$node_env" 2>/dev/null)"
-lines="$(grep -c '^export CHUMP_NODE_ROLE=' "$node_env" 2>/dev/null || echo 0)"
+lines="$(grep -c '^CHUMP_NODE_ROLE=' "$node_env" 2>/dev/null || echo 0)"
 [[ "$lines" == 1 ]] && pass "seeding node.env twice does not duplicate the CHUMP_NODE_ROLE line" \
   || fail "expected exactly 1 CHUMP_NODE_ROLE line after two runs, got $lines"
 

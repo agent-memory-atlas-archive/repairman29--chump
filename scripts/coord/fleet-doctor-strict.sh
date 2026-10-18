@@ -1640,6 +1640,34 @@ check_admission_ceiling() {
     fi
 }
 
+# ── Check 20 (INFRA-8588): node.env carries no `export` line ───────────────────
+# cuphead 2026-10-18: node.env mixed `export CHUMP_NODE_WORK_ENABLED=0` with bare
+# lines, so systemd EnvironmentFile units (worker, converge, gap-close) logged
+# "Ignoring invalid environment assignment export ..." and never saw the pause
+# knobs, while bash-sourcing organs honored them — a split-brain node config.
+# node.env MUST be the single systemd-compatible form: bare KEY=VALUE, no export.
+# This flags any export line so the operator rewrites it (a re-run of
+# chump-node-install.sh rewrites the whole file bare).
+check_node_env_no_export() {
+    local node_env="${CHUMP_STATE_DIR:-$HOME/.chump}/node.env"
+    if [[ ! -f "$node_env" ]]; then
+        register_check "node-env-no-export" "skip" "node.env not present ($node_env — not an installed node)" ""
+        return
+    fi
+    # grep under set -o pipefail: capture, then test (per Phase R shell rule).
+    local offenders
+    offenders="$(grep -nE '^[[:space:]]*export[[:space:]]' "$node_env" 2>/dev/null || true)"
+    if [[ -n "$offenders" ]]; then
+        local n
+        n="$(printf '%s\n' "$offenders" | grep -c . || true)"
+        register_check "node-env-no-export" "fail" \
+            "$node_env has $n export line(s) — systemd EnvironmentFile units silently ignore them (INFRA-8588): $(printf '%s' "$offenders" | tr '\n' ';')" \
+            "re-run: bash $REPO_ROOT/scripts/setup/chump-node-install.sh --role <role> --reconcile-organs-only  # rewrites node.env bare"
+    else
+        register_check "node-env-no-export" "pass" "$node_env is bare KEY=VALUE (no export lines)" ""
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -1669,6 +1697,7 @@ check_checkout_parked_off_main
 check_fetch_refspec_single_branch
 check_second_scope
 check_admission_ceiling
+check_node_env_no_export
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

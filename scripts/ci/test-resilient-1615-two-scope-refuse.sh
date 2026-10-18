@@ -110,9 +110,11 @@ grep -q "NOT FULLY PAUSED" "$TMP/pause.log" \
 ok "chump node pause refuses to report PAUSED while organs are active in either scope"
 
 # The sentinel + mode are still written (the user-scope pause is honored) even
-# though the command refuses to claim the node fully PAUSED.
-grep -qx "export CHUMP_NODE_MODE=paused" "$STATE_DIR/node.env" \
-    || fail "pause did not write CHUMP_NODE_MODE=paused"
+# though the command refuses to claim the node fully PAUSED. INFRA-8588: pause
+# writes the BARE form even when the seeded line used `export` (in-place
+# migration) — node.env must be systemd-EnvironmentFile-compatible (no export).
+grep -qx "CHUMP_NODE_MODE=paused" "$STATE_DIR/node.env" \
+    || fail "pause did not write bare CHUMP_NODE_MODE=paused: $(cat "$STATE_DIR/node.env")"
 [ -f "$STATE_DIR/.chump/fleet-paused" ] || fail "pause did not write the fleet-paused sentinel"
 ok "chump node pause still writes the sentinel + CHUMP_NODE_MODE=paused"
 

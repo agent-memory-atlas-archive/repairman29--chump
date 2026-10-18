@@ -649,7 +649,9 @@ write_node_env() {
   # the rewrite so the ceiling keys are only ever written when absent.
   local _ceiling_lines=""
   if [ -f "$node_env" ]; then
-    _ceiling_lines="$(grep -E '^(export )?(CHUMP_MAX_CONCURRENT_CLAUDE|CHUMP_MAX_CONCURRENT_CARGO_JOBS)=' "$node_env" 2>/dev/null || true)"
+    # INFRA-8588: carry the ceiling across the rewrite in the bare form, even if
+    # the existing file still has an `export ` prefix (strip it on the way in).
+    _ceiling_lines="$(grep -E '^(export )?(CHUMP_MAX_CONCURRENT_CLAUDE|CHUMP_MAX_CONCURRENT_CARGO_JOBS)=' "$node_env" 2>/dev/null | sed -E 's/^export //' || true)"
   fi
   # CREDIBLE-1524: the admin-merge consensus gate ships SHADOW-FIRST on every
   # node. Preserve an operator-set value (e.g. enforce) across the whole-file
@@ -657,11 +659,19 @@ write_node_env() {
   # enforces.
   local _consensus_gate_line=""
   if [ -f "$node_env" ]; then
-    _consensus_gate_line="$(grep -E '^(export )?CHUMP_CONSENSUS_MERGE_GATE=' "$node_env" 2>/dev/null || true)"
+    # INFRA-8588: carry in the bare form (strip any `export ` prefix).
+    _consensus_gate_line="$(grep -E '^(export )?CHUMP_CONSENSUS_MERGE_GATE=' "$node_env" 2>/dev/null | sed -E 's/^export //' || true)"
   fi
+  # INFRA-8588: node.env is written ONLY as bare KEY=VALUE (no `export`).
+  # systemd's EnvironmentFile parser rejects `export` lines (logs "Ignoring
+  # invalid environment assignment export KEY=VALUE"), so EnvironmentFile units
+  # (worker, converge, gap-close) silently lost the pause knobs while
+  # bash-sourcing organs honored them. bash consumers recover `export`
+  # semantics by sourcing under `set -a` (see the source-back below and the
+  # organ consumers). A converge/fleet-doctor check flags any export line.
   ( umask 077
     {
-      printf 'export CHUMP_STATE_DIR=%s\n' "$STATE_DIR"
+      printf 'CHUMP_STATE_DIR=%s\n' "$STATE_DIR"
       # INFRA-3632: pin the exact var GapStore::db_path() reads
       # (crates/chump-store-path, via chump-gap-store) so every shell/organ
       # that sources this file resolves the ONE canonical state.db.
@@ -669,17 +679,17 @@ write_node_env() {
       # a shell that sources node.env and an organ that does not resolve the
       # SAME file; scripts/coord/gap-store-single-source-check.sh fails hard
       # if they ever disagree again.
-      printf 'export CHUMP_STATE_DB=%s\n' "$STATE_DB"
-      printf 'export CHUMP_TEAM_URL=%s\n' "$team_url"
-      printf 'export CHUMP_TEAM_API_KEY=%s\n' "$team_api_key"
-      printf 'export CHUMP_STORE_BACKEND=%s\n' "$store_backend"
+      printf 'CHUMP_STATE_DB=%s\n' "$STATE_DB"
+      printf 'CHUMP_TEAM_URL=%s\n' "$team_url"
+      printf 'CHUMP_TEAM_API_KEY=%s\n' "$team_api_key"
+      printf 'CHUMP_STORE_BACKEND=%s\n' "$store_backend"
       # RESILIENT-1513: see gap_server derivation above — pins gap-filing
       # clients (src/gap_file.rs) to the canonical store node instead of a
       # stale local default.
-      printf 'export CHUMP_GAP_SERVER=%s\n' "$gap_server"
+      printf 'CHUMP_GAP_SERVER=%s\n' "$gap_server"
       # RESILIENT-1083: persist this node's role OUTSIDE the repo so the recurring
       # organ-reconcile can self-scope to it (and survive `git reset --hard`).
-      printf 'export CHUMP_NODE_ROLE=%s\n' "$ROLE"
+      printf 'CHUMP_NODE_ROLE=%s\n' "$ROLE"
       # RESILIENT-320: factory nodes size their own worker cap — no hand-placed
       # caps. clamp(1, cores-1), minus 1 when this node also serves embeds.
       if [ "$ROLE" = factory ]; then
@@ -687,22 +697,22 @@ write_node_env() {
         _cores="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)"
         if [ -n "${CHUMP_NODE_RUNS_EMBEDS:-}" ]; then _emb="$CHUMP_NODE_RUNS_EMBEDS"
         elif pgrep -x ollama >/dev/null 2>&1 || pgrep -f llama-server >/dev/null 2>&1; then _emb=1; fi
-        printf 'export CHUMP_ORCH_WORKER_MAX=%s\n' "$(organ_worker_count "$_cores" "$_emb")"
+        printf 'CHUMP_ORCH_WORKER_MAX=%s\n' "$(organ_worker_count "$_cores" "$_emb")"
       fi
       # RESILIENT-1446: persist the node's run-user so a root-run placer/deploy
       # emits run-user-shaped units (see the local run_user derivation above).
-      printf 'export CHUMP_RUN_USER=%s\n' "$run_user"
+      printf 'CHUMP_RUN_USER=%s\n' "$run_user"
       # OOTB contract: safe control-plane operation is valid without a provider;
       # workers start only after a credentialed re-install enables work mode.
-      printf 'export CHUMP_NODE_WORK_ENABLED=%s\n' "$work_enabled"
-      printf 'export CHUMP_NODE_MODE=%s\n' "$node_mode"
+      printf 'CHUMP_NODE_WORK_ENABLED=%s\n' "$work_enabled"
+      printf 'CHUMP_NODE_MODE=%s\n' "$node_mode"
       if [ -n "$_ceiling_lines" ]; then printf '%s\n' "$_ceiling_lines"; fi
       # CREDIBLE-1524: admin-merge consensus gate, shadow-first (preserve
       # operator value across rewrite; default shadow on fresh nodes).
       if [ -n "$_consensus_gate_line" ]; then
         printf '%s\n' "$_consensus_gate_line"
       else
-        printf 'export CHUMP_CONSENSUS_MERGE_GATE=shadow\n'
+        printf 'CHUMP_CONSENSUS_MERGE_GATE=shadow\n'
       fi
     } > "$node_env"
   )
@@ -717,9 +727,11 @@ write_node_env() {
   else
     no "lib/node-admission-ceiling.sh missing — node.env has no admission ceiling"
   fi
-  # Source now so subsequent phases inherit the canonical settings.
+  # Source now so subsequent phases inherit the canonical settings. INFRA-8588:
+  # node.env is bare KEY=VALUE, so source under `set -a` to auto-export (the
+  # explicit exports below stay as belt-and-suspenders for the specific keys).
   # shellcheck disable=SC1090
-  . "$node_env"
+  set -a; . "$node_env"; set +a
   export CHUMP_STATE_DIR CHUMP_STATE_DB CHUMP_TEAM_URL CHUMP_TEAM_API_KEY CHUMP_STORE_BACKEND CHUMP_NODE_ROLE CHUMP_NODE_WORK_ENABLED CHUMP_NODE_MODE CHUMP_RUN_USER CHUMP_GAP_SERVER
   export CHUMP_CONSENSUS_MERGE_GATE 2>/dev/null || true
   export CHUMP_MAX_CONCURRENT_CLAUDE CHUMP_MAX_CONCURRENT_CARGO_JOBS 2>/dev/null || true
@@ -736,7 +748,7 @@ write_node_env() {
 # install never duplicates the block.
 install_shell_hook() {
   local node_env="$1"
-  local marker="# chump-node-install: source node.env (INFRA-3632)"
+  local marker="# chump-node-install: source node.env (INFRA-3632, set -a per INFRA-8588)"
   # .bashrc is the one file virtually every interactive bash session reads
   # (directly for non-login shells; via .profile's `. "$HOME/.bashrc"` for
   # login shells) — create it if a fresh account doesn't have one yet, so the
@@ -751,7 +763,10 @@ install_shell_hook() {
     grep -qF "$marker" "$f" 2>/dev/null && continue
     {
       printf '\n%s\n' "$marker"
-      printf 'if [ -f "%s" ]; then . "%s"; fi\n' "$node_env" "$node_env"
+      # INFRA-8588: node.env is bare KEY=VALUE — source under `set -a` so the
+      # keys export into the interactive shell's child processes (the bare `chump`
+      # invocation this hook exists to feed), not just the shell itself.
+      printf 'if [ -f "%s" ]; then set -a; . "%s"; set +a; fi\n' "$node_env" "$node_env"
     } >> "$f"
     ok "interactive-shell hook installed: $f sources $node_env"
   done

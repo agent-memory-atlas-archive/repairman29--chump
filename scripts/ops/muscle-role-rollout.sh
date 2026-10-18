@@ -62,12 +62,15 @@ NODE_ENV="$STATE_DIR/node.env"
 echo "=== muscle-role-rollout.sh (RESILIENT-1090) — role=$ROLE apply=$APPLY ==="
 
 # ── step 1: seed node.env's CHUMP_NODE_ROLE (idempotent) ────────────────────
+# INFRA-8588: write bare KEY=VALUE (no `export`) — systemd EnvironmentFile units
+# reject `export` lines. Match an existing line in EITHER form so a pre-migration
+# file is rewritten to the bare form in place.
 mkdir -p "$STATE_DIR"
 touch "$NODE_ENV"
-if grep -q '^export CHUMP_NODE_ROLE=' "$NODE_ENV" 2>/dev/null; then
-  sed -i "s/^export CHUMP_NODE_ROLE=.*/export CHUMP_NODE_ROLE=$ROLE/" "$NODE_ENV"
+if grep -qE '^(export )?CHUMP_NODE_ROLE=' "$NODE_ENV" 2>/dev/null; then
+  sed -i -E "s/^(export )?CHUMP_NODE_ROLE=.*/CHUMP_NODE_ROLE=$ROLE/" "$NODE_ENV"
 else
-  printf 'export CHUMP_NODE_ROLE=%s\n' "$ROLE" >> "$NODE_ENV"
+  printf 'CHUMP_NODE_ROLE=%s\n' "$ROLE" >> "$NODE_ENV"
 fi
 echo "step 1/4: $NODE_ENV now carries CHUMP_NODE_ROLE=$ROLE"
 

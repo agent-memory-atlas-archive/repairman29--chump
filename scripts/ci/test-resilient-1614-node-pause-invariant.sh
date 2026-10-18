@@ -56,10 +56,11 @@ EOF
 CHUMP_STATE_DIR="$STATE_DIR" "$CHUMP_BIN" node pause --reason "test pause" \
     || fail "chump node pause failed"
 
-# Verify node.env was updated
-grep -qx "export CHUMP_NODE_MODE=paused" "$STATE_DIR/node.env" \
-    || fail "CHUMP_NODE_MODE not set to paused in node.env"
-ok "chump node pause sets CHUMP_NODE_MODE=paused"
+# Verify node.env was updated — INFRA-8588: pause writes the BARE form even
+# when the pre-existing line used `export` (in-place migration).
+grep -qx "CHUMP_NODE_MODE=paused" "$STATE_DIR/node.env" \
+    || fail "CHUMP_NODE_MODE not set to (bare) paused in node.env: $(cat "$STATE_DIR/node.env")"
+ok "chump node pause sets bare CHUMP_NODE_MODE=paused (migrating the export line)"
 
 # Verify sentinel exists
 [ -f "$STATE_DIR/.chump/fleet-paused" ] \
@@ -82,9 +83,9 @@ CHUMP_STATE_DIR="$STATE_DIR" "$CHUMP_BIN" node resume \
     || fail "chump node resume failed"
 
 # Verify node.env was updated
-grep -qx "export CHUMP_NODE_MODE=work-ready" "$STATE_DIR/node.env" \
-    || fail "CHUMP_NODE_MODE not set to work-ready in node.env"
-ok "chump node resume sets CHUMP_NODE_MODE=work-ready"
+grep -qx "CHUMP_NODE_MODE=work-ready" "$STATE_DIR/node.env" \
+    || fail "CHUMP_NODE_MODE not set to (bare) work-ready in node.env: $(cat "$STATE_DIR/node.env")"
+ok "chump node resume sets bare CHUMP_NODE_MODE=work-ready"
 
 # Verify sentinel was removed
 [ ! -f "$STATE_DIR/.chump/fleet-paused" ] \
@@ -147,7 +148,7 @@ EOF
     # Holds today: converge on a paused node must not lift the pause.
     [ -f "$STATE_DIR2/.chump/fleet-paused" ] \
         || fail "fleet-paused sentinel gone after node-converge on a paused node"
-    grep -qx "export CHUMP_NODE_MODE=paused" "$STATE_DIR2/node.env" \
+    grep -qx "CHUMP_NODE_MODE=paused" "$STATE_DIR2/node.env" \
         || fail "node-converge lifted CHUMP_NODE_MODE=paused in node.env"
     ok "node-converge on a paused node leaves the pause in place"
 

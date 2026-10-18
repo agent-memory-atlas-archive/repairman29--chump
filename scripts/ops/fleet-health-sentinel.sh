@@ -157,8 +157,9 @@ SUDO="${CHUMP_SENTINEL_SUDO-sudo -n}"
 # re-introduce them. Back-compat: role brain / all / EMPTY = coordination home →
 # lists unchanged (CJ and any pre-role node keep coordinating).
 _SENTINEL_NODE_ENV="${CHUMP_STATE_DIR:-$HOME/.chump}/node.env"
+# INFRA-8588: node.env is bare KEY=VALUE — source under `set -a` so the keys export.
 # shellcheck disable=SC1090
-[[ -f "$_SENTINEL_NODE_ENV" ]] && . "$_SENTINEL_NODE_ENV" 2>/dev/null || true
+[[ -f "$_SENTINEL_NODE_ENV" ]] && { set -a; . "$_SENTINEL_NODE_ENV" 2>/dev/null || true; set +a; }
 COORDINATION_ORGANS="${CHUMP_SENTINEL_COORDINATION_ORGANS:-chump-board-cycle.timer chump-nba-dispatch.timer chump-duty-officer.timer chump-next-best-action.timer}"
 _sentinel_is_coordination_role() {  # brain / all / empty = coordination home
   case "${1:-}" in brain|all|"") return 0 ;; *) return 1 ;; esac

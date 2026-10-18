@@ -105,30 +105,34 @@ impl NodeModeState {
         }
 
         let contents = fs::read_to_string(&self.node_env_path)?;
-        Ok(contents
-            .lines()
-            .any(|line| line.trim().starts_with("export CHUMP_NODE_MODE=paused")))
+        // INFRA-8588: read either form (a pre-migration file may still carry
+        // `export`), but we only ever WRITE bare.
+        Ok(contents.lines().any(|line| {
+            let t = line.trim();
+            t == "CHUMP_NODE_MODE=paused" || t == "export CHUMP_NODE_MODE=paused"
+        }))
     }
 
-    /// Update or add a line in the node.env format.
+    /// Update or add a line in node.env. INFRA-8588: node.env must be the single
+    /// systemd-compatible form (bare `KEY=VALUE`, no `export` — systemd's
+    /// EnvironmentFile parser rejects `export` lines), so we match an EXISTING
+    /// line in either form (to migrate a pre-INFRA-8588 file in place) but always
+    /// write the bare form via chump_provision::node_env::render_line.
     fn update_or_add_line(&self, contents: &mut String, key: &str, value: &str) {
-        let prefix = format!("export {}=", key);
-        let mut found = false;
+        let bare_prefix = format!("{}=", key);
+        let export_prefix = format!("export {}=", key);
+        let is_match = |line: &str| {
+            let t = line.trim_start();
+            t.starts_with(&bare_prefix) || t.starts_with(&export_prefix)
+        };
+        let new_line = chump_provision::node_env::render_line(key, value);
 
-        for line in contents.lines() {
-            if line.trim().starts_with(&prefix) {
-                found = true;
-                break;
-            }
-        }
-
-        if found {
-            // Replace existing line
-            let new_line = format!("export {}={}", key, value);
+        if contents.lines().any(is_match) {
+            // Replace existing line (migrates `export KEY=` → bare `KEY=`).
             *contents = contents
                 .lines()
                 .map(|line| {
-                    if line.trim().starts_with(&prefix) {
+                    if is_match(line) {
                         new_line.clone()
                     } else {
                         line.to_string()
@@ -144,7 +148,8 @@ impl NodeModeState {
             if !contents.ends_with('\n') && !contents.is_empty() {
                 contents.push('\n');
             }
-            contents.push_str(&format!("export {}={}\n", key, value));
+            contents.push_str(&new_line);
+            contents.push('\n');
         }
     }
 
@@ -220,9 +225,13 @@ mod tests {
         state.pause("test pause reason")?;
         assert!(state.is_paused()?);
 
-        // Verify node.env was updated
+        // Verify node.env was updated — INFRA-8588: bare, no `export`.
         let contents = fs::read_to_string(state_path.join("node.env"))?;
-        assert!(contents.contains("export CHUMP_NODE_MODE=paused"));
+        assert!(contents.contains("CHUMP_NODE_MODE=paused"));
+        assert!(
+            chump_provision::node_env::export_violations(&contents).is_empty(),
+            "pause must not write an export line: {contents:?}"
+        );
 
         // Verify sentinel exists
         assert!(state_path.join(".chump").join("fleet-paused").exists());
@@ -231,9 +240,13 @@ mod tests {
         state.resume()?;
         assert!(!state.is_paused()?);
 
-        // Verify node.env was updated
+        // Verify node.env was updated — INFRA-8588: bare, no `export`.
         let contents = fs::read_to_string(state_path.join("node.env"))?;
-        assert!(contents.contains("export CHUMP_NODE_MODE=work-ready"));
+        assert!(contents.contains("CHUMP_NODE_MODE=work-ready"));
+        assert!(
+            chump_provision::node_env::export_violations(&contents).is_empty(),
+            "resume must not write an export line: {contents:?}"
+        );
 
         // Verify sentinel was removed
         assert!(!state_path.join(".chump").join("fleet-paused").exists());

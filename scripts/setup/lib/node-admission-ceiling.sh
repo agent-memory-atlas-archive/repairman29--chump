@@ -91,9 +91,10 @@ chump_admission_ceiling_for() {
 
 # chump_ensure_admission_ceiling <node_env>
 #
-# Appends `export KEY=<max(1, nproc/2)>` for each ceiling key node_env lacks.
-# Never rewrites a key that is present. Prints the keys it wrote as
-# `KEY=value` lines (nothing when already complete). Returns:
+# Appends a bare `KEY=<max(1, nproc/2)>` (INFRA-8588: no `export` — node.env is
+# the single systemd-EnvironmentFile-compatible form) for each ceiling key
+# node_env lacks. Never rewrites a key that is present. Prints the keys it wrote
+# as `KEY=value` lines (nothing when already complete). Returns:
 #   0  — already complete, nothing written
 #   10 — one or more keys appended
 #   11 — write failed
@@ -104,12 +105,12 @@ chump_ensure_admission_ceiling() {
     def="$(chump_admission_default_ceiling)"
     for key in $_chump_admission_ceiling_keys; do
         [ -n "$(_chump_env_file_int "$node_env" "$key")" ] && continue
-        # A file that does not end in a newline would glue the export onto
+        # A file that does not end in a newline would glue the assignment onto
         # its last line.
         if [ -s "$node_env" ] && [ -n "$(tail -c 1 "$node_env")" ]; then
             printf '\n' >> "$node_env" || return 11
         fi
-        printf 'export %s=%s\n' "$key" "$def" >> "$node_env" || return 11
+        printf '%s=%s\n' "$key" "$def" >> "$node_env" || return 11
         printf '%s=%s\n' "$key" "$def"
         wrote=1
     done

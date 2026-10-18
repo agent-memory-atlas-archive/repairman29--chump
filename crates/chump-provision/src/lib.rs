@@ -40,6 +40,7 @@
 //! literal rules as [`find_host_literals`].
 
 pub mod cli;
+pub mod node_env; // INFRA-8588: node.env format invariant (bare KEY=VALUE, no export)
 pub mod scopes; // RESILIENT-1615: two-scope node enumeration (pure logic)
 pub mod scopes_live; // RESILIENT-1615: live systemctl/launchctl runner + `node scopes` CLI
 

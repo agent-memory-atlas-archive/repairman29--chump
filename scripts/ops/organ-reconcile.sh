@@ -407,8 +407,10 @@ ENABLED=("${SCOPE_FILTERED_ENABLED[@]}")
 # CHUMP_NODE_ROLE is only the fallback when nothing else scoped this run, and an
 # absent/empty value keeps the pre-existing whole-manifest behavior.
 _NODE_ENV="${CHUMP_STATE_DIR:-$HOME/.chump}/node.env"
+# INFRA-8588: node.env is bare KEY=VALUE — source under `set -a` so the keys
+# export (and so a bare line is read identically to the old `export` form).
 # shellcheck disable=SC1090
-[[ -f "$_NODE_ENV" ]] && source "$_NODE_ENV" 2>/dev/null || true
+[[ -f "$_NODE_ENV" ]] && { set -a; source "$_NODE_ENV" 2>/dev/null || true; set +a; }
 ROLE_FILTER="${CHUMP_ORGAN_RECONCILE_ROLE:-}"
 if [[ -z "$ROLE_FILTER" && -n "${CHUMP_NODE_ROLE:-}" && "${CHUMP_NODE_ROLE}" != "all" ]]; then
   ROLE_FILTER="$(organ_role_filter_for "${CHUMP_NODE_ROLE}")"
