@@ -1,6 +1,6 @@
 ---
 doc_tag: log
-last_audited: 2026-10-17
+last_audited: 2026-10-18
 ---
 
 # scripts/ci test census
@@ -13,1649 +13,1682 @@ Rule: a new scripts/ci test is wired or it is deleted. The shrink-only gate
 (`scripts/ci/test-census-shrink-only.sh`) fails any PR that adds an unwired
 test or grows the red count. See docs/process/CI_GATES_INVENTORY.md.
 
-- Run date: 2026-10-17 (generated 2026-10-17T14:28:11Z)
-- Mode: no-run on darwin; tests run this time: 0
-- Per-test timeout: 120s; jobs: 4
+- Run date: 2026-10-18 (generated 2026-10-18T09:24:35Z)
+- Mode: full on linux; tests run this time: 1648
+- Per-test timeout: 120s; jobs: 6
 
 | total | wired | unwired | red | pass | fail | timeout | skip | not run |
 |---|---|---|---|---|---|---|---|---|
-| 1612 | 381 | 1231 | 12 | 0 | 12 | 0 | 0 | 1600 |
+| 1648 | 441 | 1207 | 352 | 1279 | 327 | 25 | 17 | 0 |
 
 | | green | red |
 |---|---|---|
-| wired | 0 | 0 |
-| unwired | 0 | 12 |
+| wired | 376 | 59 |
+| unwired | 903 | 293 |
 
-## wired-red (0)
+## wired-red (59)
 
-(none)
+- `test-a2a-rpc-observability.sh` (fail, exit 1, run:linux)
+- `test-acp-real-clients.sh` (fail, exit 1, run:linux)
+- `test-advisory-merge.sh` (fail, exit 1, run:linux)
+- `test-almanac-liveness-reindex.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-conflict-integration.sh` (fail, exit 1, run:linux)
+- `test-capabilities-registry.sh` (fail, exit 1, run:linux)
+- `test-chump-bootstrap-rust.sh` (fail, exit 1, run:linux)
+- `test-chump-init-clean-machine.sh` (fail, exit 1, run:linux)
+- `test-chump-repos.sh` (timeout, exit 124, run:linux)
+- `test-claim-fuzzy-match.sh` (timeout, exit 124, run:linux)
+- `test-claim-import-similarity-nonfatal.sh` (timeout, exit 124, run:linux)
+- `test-cli-exit-codes.sh` (fail, exit 1, run:linux)
+- `test-cli-help-regression.sh` (fail, exit 1, run:linux)
+- `test-cli-output-format.sh` (fail, exit 1, run:linux)
+- `test-cli-product-surface.sh` (timeout, exit 124, run:linux)
+- `test-cost-per-model.sh` (fail, exit 1, run:linux)
+- `test-cost-watch.sh` (fail, exit 1, run:linux)
+- `test-coupling-cost.sh` (fail, exit 1, run:linux)
+- `test-cross-pr-contract.sh` (timeout, exit 124, run:linux)
+- `test-cursor-cli-integration.sh` (fail, exit 1, run:linux)
+- `test-docs-delta-guard.sh` (fail, exit 1, run:linux)
+- `test-effective-010-completion.sh` (fail, exit 2, run:linux)
+- `test-external-verify-merge.sh` (timeout, exit 124, run:linux)
+- `test-gap-add-note.sh` (fail, exit 1, run:linux)
+- `test-gap-audit-ac-open.sh` (fail, exit 1, run:linux)
+- `test-gap-close-decomposed-integration.sh` (fail, exit 1, run:linux)
+- `test-gap-closure-consistency-fixture.sh` (fail, exit 1, run:linux)
+- `test-gap-consolidate.sh` (fail, exit 1, run:linux)
+- `test-gap-decompose-claude-backend.sh` (fail, exit 1, run:linux)
+- `test-gap-id-lease-uniqueness.sh` (fail, exit 1, run:linux)
+- `test-gap-list-since.sh` (fail, exit 1, run:linux)
+- `test-gap-preflight-ac-gate.sh` (fail, exit 1, run:linux)
+- `test-gap-reserve-padding.sh` (fail, exit 1, run:linux)
+- `test-gap-show-ac-render.sh` (fail, exit 1, run:linux)
+- `test-github-api-telemetry.sh` (fail, exit 1, run:linux)
+- `test-infra-115-lease-ttl-file.sh` (fail, exit 1, run:linux)
+- `test-infra-254-pwa-root-redirect.sh` (fail, exit 1, run:linux)
+- `test-mock-services-integration.sh` (fail, exit 125, run:linux)
+- `test-mock-services.sh` (fail, exit 125, run:linux)
+- `test-no-anthropic-smoke.sh` (fail, exit 1, run:linux)
+- `test-pillar-balance.sh` (fail, exit 1, run:linux)
+- `test-pr-ac-coverage.sh` (fail, exit 2, run:linux)
+- `test-pr-fix-clippy.sh` (fail, exit 1, run:linux)
+- `test-pr-unstick-observability.sh` (fail, exit 1, run:linux)
+- `test-pre-push-rebase-allow.sh` (fail, exit 1, run:linux)
+- `test-public-doc-privacy.sh` (fail, exit 1, run:linux)
+- `test-pwa-auth-toast-stream.sh` (fail, exit 2, run:linux)
+- `test-pwa-cost-ceiling.sh` (fail, exit 1, run:linux)
+- `test-pwa-e2e-gap-workflow.sh` (fail, exit 1, run:linux)
+- `test-pwa-parse-gate.sh` (fail, exit 1, run:linux)
+- `test-pwa-version-compat.sh` (fail, exit 1, run:linux)
+- `test-pwa-workflow-observability.sh` (fail, exit 11, run:linux)
+- `test-r1-ship-one-transition.sh` (fail, exit 1, run:linux)
+- `test-research-026-preflight.sh` (fail, exit 127, run:linux)
+- `test-run-fleet-cross-repo.sh` (fail, exit 1, run:linux)
+- `test-stale-worktree-reaper-stash.sh` (fail, exit 1, run:linux)
+- `test-state-db-restore.sh` (fail, exit 1, run:linux)
+- `test-telemetry-cost.sh` (fail, exit 1, run:linux)
+- `test-uuid-gap-id-compat.sh` (fail, exit 1, run:linux)
 
-## unwired-red (12)
+## unwired-red (293)
 
-- `test-auto-merge-armer.sh` (fail, seed:PR#5535 (red on main 2026-10-17))
-- `test-bot-merge-portability.sh` (fail, seed:PR#5535 (red on main 2026-10-17))
-- `test-bot-merge-rest-direct.sh` (fail, seed:PR#5535 (red on main 2026-10-17))
-- `test-event-registry-effect-metric.sh` (fail, seed:PR#5535 (red on main 2026-10-17))
-- `test-inbox-first-picker.sh` (fail, seed:PR#5542 (red on main 2026-10-17))
-- `test-lease-lib.sh` (fail, seed:PR#5535 (red on main 2026-10-17))
-- `test-pick-and-claim-exclusion-reasons.sh` (fail, seed:PR#5542 (red on main 2026-10-17))
-- `test-pick-gap-cooldown.sh` (fail, seed:PR#5542 (red on main 2026-10-17))
-- `test-pick-gap-open-only.sh` (fail, seed:PR#5542 (red on main 2026-10-17))
-- `test-pick-gap-worker-stagger.sh` (fail, seed:PR#5542 (red on main 2026-10-17))
-- `test-picker-p0-mission-effort-bypass.sh` (fail, seed:PR#5542 (red on main 2026-10-17))
-- `test-stale-worktree-reaper-stash.sh` (fail, seed:PR#5535 (red on main 2026-10-17))
+- `test-a2a-mailbox.sh` (fail, exit 1, run:linux)
+- `test-a2a-rpc-bash-v0.sh` (fail, exit 1, run:linux)
+- `test-ac-coverage-gate.sh` (fail, exit 1, run:linux)
+- `test-all-gates-force-fire.sh` (fail, exit 1, run:linux)
+- `test-almanac-zero-hits.sh` (fail, exit 1, run:linux)
+- `test-ambient-emit-coverage.sh` (fail, exit 1, run:linux)
+- `test-ambient-emit-session-persist.sh` (fail, exit 1, run:linux)
+- `test-ambient-env-serialization.sh` (fail, exit 1, run:linux)
+- `test-api-broadcast.sh` (fail, exit 1, run:linux)
+- `test-api-dashboard-shape.sh` (fail, exit 1, run:linux)
+- `test-api-fleet-health.sh` (fail, exit 1, run:linux)
+- `test-api-inbox.sh` (fail, exit 1, run:linux)
+- `test-api-release-expired.sh` (fail, exit 1, run:linux)
+- `test-api-repo-init.sh` (timeout, exit 124, run:linux)
+- `test-api-roadmap.sh` (fail, exit 1, run:linux)
+- `test-ast-crawler-bash.sh` (timeout, exit 124, run:linux)
+- `test-ast-crawler.sh` (timeout, exit 124, run:linux)
+- `test-atomic-claim-collision.sh` (timeout, exit 124, run:linux)
+- `test-audit-matrix-shape.sh` (fail, exit 1, run:linux)
+- `test-audit-shard-coverage.sh` (fail, exit 1, run:linux)
+- `test-audit-stale-worktrees.sh` (fail, exit 1, run:linux)
+- `test-auth-storm-auto-recovery.sh` (fail, exit 1, run:linux)
+- `test-auth-tier-audit.sh` (fail, exit 1, run:linux)
+- `test-auto-merge-policy.sh` (fail, exit 1, run:linux)
+- `test-binary-refresh.sh` (fail, exit 1, run:linux)
+- `test-bootstrap-manifest-coverage.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-bench-mode.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-doctor-preflight.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-gap-fatal.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-hang-detection.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-hot-file-warning.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-mode-routing.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-rebase-before-test.sh` (fail, exit 1, run:linux)
+- `test-bot-merge-wedge-live-check.sh` (fail, exit 1, run:linux)
+- `test-branch-reaper.sh` (fail, exit 1, run:linux)
+- `test-briefing.sh` (timeout, exit 124, run:linux)
+- `test-bug-fix-auto-promotion.sh` (fail, exit 1, run:linux)
+- `test-cargo-path-discipline.sh` (fail, exit 1, run:linux)
+- `test-cargo-sweep-gc.sh` (fail, exit 1, run:linux)
+- `test-cargo-target-isolation.sh` (fail, exit 1, run:linux)
+- `test-cargo-target-reaper-runner-scope.sh` (fail, exit 1, run:linux)
+- `test-cargo-test-tiered.sh` (fail, exit 1, run:linux)
+- `test-cargo-tests-from-worktree.sh` (fail, exit 1, run:linux)
+- `test-cascade-all-exhausted-event.sh` (timeout, exit 124, run:linux)
+- `test-cascade-exhausted-retry.sh` (fail, exit 1, run:linux)
+- `test-cascade-graceful-skip.sh` (timeout, exit 124, run:linux)
+- `test-chump-cargo-build-wrapper.sh` (timeout, exit 124, run:linux)
+- `test-chump-ci-image.sh` (fail, exit 1, run:linux)
+- `test-chump-config.sh` (timeout, exit 124, run:linux)
+- `test-chump-consensus-aggregator-daemon.sh` (timeout, exit 124, run:linux)
+- `test-chump-cron-install.sh` (fail, exit 1, run:linux)
+- `test-chump-doctor-probe-resources.sh` (fail, exit 1, run:linux)
+- `test-chump-fleet-daemon.sh` (fail, exit 1, run:linux)
+- `test-chump-fleet-restart.sh` (fail, exit 1, run:linux)
+- `test-chump-fleet-subcommand.sh` (fail, exit 1, run:linux)
+- `test-chump-gap-reserve-evidence.sh` (fail, exit 1, run:linux)
+- `test-chump-health.sh` (fail, exit 1, run:linux)
+- `test-chump-mcp-list.sh` (fail, exit 1, run:linux)
+- `test-chump-revert.sh` (timeout, exit 124, run:linux)
+- `test-chump-scan.sh` (fail, exit 1, run:linux)
+- `test-chump-ship-manual.sh` (timeout, exit 124, run:linux)
+- `test-chump-test-sandbox.sh` (fail, exit 1, run:linux)
+- `test-chump-worker-rust.sh` (fail, exit 1, run:linux)
+- `test-chumpd.sh` (timeout, exit 124, run:linux)
+- `test-ci-fixture-coupling.sh` (fail, exit 1, run:linux)
+- `test-ci-health-weekly.sh` (timeout, exit 124, run:linux)
+- `test-ci-self-hosted-migration.sh` (fail, exit 1, run:linux)
+- `test-circuit-breaker.sh` (fail, exit 1, run:linux)
+- `test-claim-hot-file-overlap.sh` (fail, exit 1, run:linux)
+- `test-claim-main-health-gate.sh` (fail, exit 1, run:linux)
+- `test-claim-nugget-prefetch.sh` (fail, exit 1, run:linux)
+- `test-claim-pre-pr-check.sh` (timeout, exit 124, run:linux)
+- `test-claim-redirect-on-red.sh` (fail, exit 1, run:linux)
+- `test-classify-incident.sh` (fail, exit 1, run:linux)
+- `test-claude-gotchas-expanded.sh` (fail, exit 1, run:linux)
+- `test-claude-retry.sh` (fail, exit 1, run:linux)
+- `test-closed-pr-guard.sh` (fail, exit 1, run:linux)
+- `test-cockpit-action-endpoints.sh` (fail, exit 1, run:linux)
+- `test-cockpit-counter-evidence-actions.sh` (fail, exit 1, run:linux)
+- `test-cockpit-shell.sh` (fail, exit 1, run:linux)
+- `test-consolidate-apply.sh` (fail, exit 1, run:linux)
+- `test-content-bots-toggle.sh` (fail, exit 2, run:linux)
+- `test-cooldown-transient-sweep.sh` (fail, exit 1, run:linux)
+- `test-corr-id-lifecycle.sh` (fail, exit 1, run:linux)
+- `test-credible-001-incremental.sh` (fail, exit 1, run:linux)
+- `test-credible-006-coverage-setup.sh` (fail, exit 1, run:linux)
+- `test-credible-049-operator-leverage.sh` (fail, exit 1, run:linux)
+- `test-credible-801-doc-shell-autoclose-harness.sh` (fail, exit 1, run:linux)
+- `test-credible-959-autoclose-else-branch-logging.sh` (fail, exit 1, run:linux)
+- `test-curator-files-tracking-gaps.sh` (fail, exit 1, run:linux)
+- `test-curator-liveness.sh` (fail, exit 1, run:linux)
+- `test-curator-supervisor.sh` (fail, exit 1, run:linux)
+- `test-daemon-silence-monitor.sh` (fail, exit 1, run:linux)
+- `test-dead-grep-detector.sh` (fail, exit 1, run:linux)
+- `test-decisions-endpoint.sh` (fail, exit 1, run:linux)
+- `test-decompose-loop.sh` (fail, exit 1, run:linux)
+- `test-decompose-uses-ast.sh` (fail, exit 1, run:linux)
+- `test-deep-claim-collision.sh` (fail, exit 1, run:linux)
+- `test-discord-curation.sh` (fail, exit 1, run:linux)
+- `test-disk-critical-reactor.sh` (fail, exit 1, run:linux)
+- `test-doc-cache-architecture-agents.sh` (fail, exit 1, run:linux)
+- `test-doc-doctrine-sync.sh` (fail, exit 1, run:linux)
+- `test-docs-delta-linked-worktree.sh` (fail, exit 1, run:linux)
+- `test-duplicate-pr-detector.sh` (fail, exit 1, run:linux)
+- `test-durable-execution.sh` (timeout, exit 124, run:linux)
+- `test-error-message-doc-links.sh` (fail, exit 1, run:linux)
+- `test-execute-gap-external-routing.sh` (fail, exit 1, run:linux)
+- `test-external-repo-ship-emit.sh` (fail, exit 1, run:linux)
+- `test-farmer-check-auth.sh` (fail, exit 1, run:linux)
+- `test-feedback-curator.sh` (fail, exit 1, run:linux)
+- `test-feedback-event.sh` (fail, exit 1, run:linux)
+- `test-fleet-051-per-worker-cooldown.sh` (fail, exit 1, run:linux)
+- `test-fleet-auth-storm-detector.sh` (fail, exit 1, run:linux)
+- `test-fleet-backend-guard.sh` (fail, exit 1, run:linux)
+- `test-fleet-brief-worktree-ships.sh` (fail, exit 1, run:linux)
+- `test-fleet-doctor-self-hosted-check.sh` (fail, exit 1, run:linux)
+- `test-fleet-dry-run.sh` (fail, exit 1, run:linux)
+- `test-fleet-inline-briefing.sh` (fail, exit 1, run:linux)
+- `test-fleet-pid-invariant.sh` (fail, exit 1, run:linux)
+- `test-fleet-pool-keeper.sh` (fail, exit 1, run:linux)
+- `test-fleet-recorder.sh` (fail, exit 143, run:linux)
+- `test-fleet-session-id-isolation.sh` (fail, exit 1, run:linux)
+- `test-force-push-intent.sh` (fail, exit 1, run:linux)
+- `test-force-stale-base-guard.sh` (fail, exit 1, run:linux)
+- `test-ftue-ollama-gate.sh` (fail, exit 1, run:linux)
+- `test-gap-already-satisfied.sh` (fail, exit 1, run:linux)
+- `test-gap-audit-priorities-closed-at.sh` (fail, exit 1, run:linux)
+- `test-gap-audit-priorities.sh` (fail, exit 1, run:linux)
+- `test-gap-backfill-external-repo.sh` (fail, exit 1, run:linux)
+- `test-gap-closure-consistency.sh` (fail, exit 1, run:linux)
+- `test-gap-dep-clean.sh` (fail, exit 1, run:linux)
+- `test-gap-merged-pr-title-closure.sh` (fail, exit 1, run:linux)
+- `test-gap-opened-date-coverage.sh` (fail, exit 1, run:linux)
+- `test-gap-outcome-migration.sh` (fail, exit 1, run:linux)
+- `test-gap-reserve-almanac-dedupe.sh` (fail, exit 1, run:linux)
+- `test-gap-reserve-similarity.sh` (fail, exit 1, run:linux)
+- `test-gap-ship-auto-fetch.sh` (fail, exit 1, run:linux)
+- `test-gap-ship-integration.sh` (fail, exit 1, run:linux)
+- `test-gap-show-modes.sh` (fail, exit 127, run:linux)
+- `test-gap-show-prefers-yaml.sh` (fail, exit 1, run:linux)
+- `test-gap-strike.sh` (fail, exit 1, run:linux)
+- `test-gap-triage-close.sh` (fail, exit 1, run:linux)
+- `test-gap-triage.sh` (fail, exit 2, run:linux)
+- `test-gh-self-throttle.sh` (fail, exit 1, run:linux)
+- `test-gh-shim-auth-token-cache.sh` (fail, exit 1, run:linux)
+- `test-gh-shim-pr-view-rewrite.sh` (fail, exit 1, run:linux)
+- `test-gh-token-rotate-noop.sh` (fail, exit 1, run:linux)
+- `test-ghost-gap-thrash-fix.sh` (fail, exit 1, run:linux)
+- `test-ghost-lease-handoff.sh` (fail, exit 1, run:linux)
+- `test-github-cache-divergence-audit.sh` (fail, exit 1, run:linux)
+- `test-graphql-exhausted-empty-coercion-guard.sh` (fail, exit 1, run:linux)
+- `test-graphql-exhausted-signal.sh` (fail, exit 1, run:linux)
+- `test-grep-target-sweep.sh` (fail, exit 1, run:linux)
+- `test-growth-worker.sh` (fail, exit 1, run:linux)
+- `test-half-impl-detector.sh` (fail, exit 1, run:linux)
+- `test-heartbeat-learn.sh` (fail, exit 127, run:linux)
+- `test-hidden-gems-schema.sh` (fail, exit 1, run:linux)
+- `test-import-similarity-block.sh` (fail, exit 1, run:linux)
+- `test-inbox-glance.sh` (fail, exit 1, run:linux)
+- `test-inbox-urgent-hook.sh` (fail, exit 1, run:linux)
+- `test-infra-1052-fleet-harness.sh` (fail, exit 1, run:linux)
+- `test-infra-2984-smoke.sh` (fail, exit 127, run:linux)
+- `test-infra-375-376-smoke.sh` (fail, exit 2, run:linux)
+- `test-infra-481-cargo-config-propagation.sh` (fail, exit 1, run:linux)
+- `test-infra-526-autoclose-main-repo.sh` (fail, exit 1, run:linux)
+- `test-infra-changes-smoke.sh` (fail, exit 1, run:linux)
+- `test-infra-watcher-pty-check.sh` (fail, exit 1, run:linux)
+- `test-ingest-backlog-smoke.sh` (fail, exit 1, run:linux)
+- `test-ingest-smoke.sh` (fail, exit 1, run:linux)
+- `test-install-gh-shim.sh` (fail, exit 1, run:linux)
+- `test-install-helsinki-atc.sh` (fail, exit 1, run:linux)
+- `test-install-node-housekeeping.sh` (fail, exit 1, run:linux)
+- `test-intent-overlap-gate.sh` (fail, exit 1, run:linux)
+- `test-last-mile-rescuer.sh` (fail, exit 1, run:linux)
+- `test-lease-breadth-cap.sh` (fail, exit 1, run:linux)
+- `test-log-triage.sh` (fail, exit 1, run:linux)
+- `test-main-worktree-config-stable.sh` (fail, exit 1, run:linux)
+- `test-mass-deletion-guard.sh` (fail, exit 1, run:linux)
+- `test-mcp-gaps-state-db.sh` (fail, exit 1, run:linux)
+- `test-merge-queue-monitor.sh` (fail, exit 1, run:linux)
+- `test-messaging-rust-parity.sh` (fail, exit 1, run:linux)
+- `test-meta-071-parity-doc.sh` (fail, exit 1, run:linux)
+- `test-mission-scoreboard-beast-prereq.sh` (fail, exit 1, run:linux)
+- `test-modern-rust-toolchain.sh` (fail, exit 1, run:linux)
+- `test-multi-auth.sh` (fail, exit 1, run:linux)
+- `test-nextest-sharding.sh` (fail, exit 1, run:linux)
+- `test-no-direct-auto-merge-arm-fixture.sh` (fail, exit 1, run:linux)
+- `test-no-direct-auto-merge-arm.sh` (fail, exit 1, run:linux)
+- `test-node-housekeeping-manifest-fold.sh` (fail, exit 1, run:linux)
+- `test-oauth-refresher.sh` (fail, exit 1, run:linux)
+- `test-offline-check-linter.sh` (fail, exit 1, run:linux)
+- `test-operator-id.sh` (fail, exit 1, run:linux)
+- `test-operator-playbook-structure.sh` (fail, exit 1, run:linux)
+- `test-operator-recall.sh` (timeout, exit 124, run:linux)
+- `test-opus-digest-forecast.sh` (fail, exit 1, run:linux)
+- `test-opus-message-hook.sh` (fail, exit 1, run:linux)
+- `test-opus-shepherd-triage.sh` (fail, exit 1, run:linux)
+- `test-orchestrate-events.sh` (fail, exit 1, run:linux)
+- `test-orchestrate-llm-fallback.sh` (fail, exit 1, run:linux)
+- `test-organ-binary-freshness-selftest.sh` (fail, exit 1, run:linux)
+- `test-orphan-worktree-watchdog.sh` (fail, exit 1, run:linux)
+- `test-outcome-verify-heal-consumer.sh` (fail, exit 1, run:linux)
+- `test-paramedic-rules.sh` (fail, exit 1, run:linux)
+- `test-path-filter-coverage.sh` (fail, exit 1, run:linux)
+- `test-path-filter-stubs.sh` (fail, exit 1, run:linux)
+- `test-pillar-balance-alerts.sh` (fail, exit 1, run:linux)
+- `test-pillar-cap-auto-demote.sh` (fail, exit 1, run:linux)
+- `test-pr-clean-dirty-classifier.sh` (timeout, exit 124, run:linux)
+- `test-pr-dedup-swarm.sh` (fail, exit 1, run:linux)
+- `test-pr-pulse.sh` (fail, exit 1, run:linux)
+- `test-pr-scope-honesty.sh` (fail, exit 1, run:linux)
+- `test-pr-shepherd-launchd-emission.sh` (fail, exit 2, run:linux)
+- `test-pre-commit-claim-contract.sh` (fail, exit 1, run:linux)
+- `test-precommit-gate-auto-skip.sh` (fail, exit 1, run:linux)
+- `test-preflight-content-guard-mirrors.sh` (fail, exit 1, run:linux)
+- `test-preflight-main-red-aware.sh` (fail, exit 1, run:linux)
+- `test-premature-closure-auto-fix.sh` (fail, exit 1, run:linux)
+- `test-prereg-enforce.sh` (fail, exit 1, run:linux)
+- `test-progress-output.sh` (fail, exit 101, run:linux)
+- `test-pwa-auth-middleware.sh` (fail, exit 2, run:linux)
+- `test-pwa-autopilot-toggle.sh` (fail, exit 1, run:linux)
+- `test-pwa-doctor-banner.sh` (fail, exit 2, run:linux)
+- `test-pwa-events-view.sh` (fail, exit 2, run:linux)
+- `test-pwa-gap-list.sh` (fail, exit 1, run:linux)
+- `test-pwa-lease-cleanup.sh` (fail, exit 1, run:linux)
+- `test-pwa-repo-switcher.sh` (fail, exit 2, run:linux)
+- `test-pwa-roadmap.sh` (fail, exit 1, run:linux)
+- `test-pwa-secrets-flow.sh` (fail, exit 2, run:linux)
+- `test-pwa-status-footer.sh` (fail, exit 1, run:linux)
+- `test-pwa-stuck-items.sh` (fail, exit 1, run:linux)
+- `test-pwa-subprocess-errors.sh` (fail, exit 1, run:linux)
+- `test-pwa-visual-diff-workflow.sh` (fail, exit 1, run:linux)
+- `test-pwa-welcome.sh` (fail, exit 1, run:linux)
+- `test-queue-driver-dirty-rescue.sh` (fail, exit 1, run:linux)
+- `test-rating-picker-integration.sh` (fail, exit 1, run:linux)
+- `test-reaper-pty-pressure.sh` (fail, exit 1, run:linux)
+- `test-rebase-stuck.sh` (fail, exit 1, run:linux)
+- `test-recycled-id-guard.sh` (fail, exit 1, run:linux)
+- `test-redundancy-gate.sh` (fail, exit 1, run:linux)
+- `test-registry-pattern8.sh` (fail, exit 1, run:linux)
+- `test-required-checks-non-empty.sh` (fail, exit 2, run:linux)
+- `test-research-cursor-round.sh` (fail, exit 1, run:linux)
+- `test-reserve-glance.sh` (fail, exit 127, run:linux)
+- `test-resilient-1012-node-install-verified.sh` (fail, exit 1, run:linux)
+- `test-resilient-1450-worker-reexec-on-head-change.sh` (fail, exit 1, run:linux)
+- `test-resilient-349-pr-stuck-live-scan.sh` (fail, exit 1, run:linux)
+- `test-resilient-366-organ-roll-call.sh` (fail, exit 1, run:linux)
+- `test-roadmap-update-agent.sh` (fail, exit 1, run:linux)
+- `test-rollup-not-blocked-by-flaky-job.sh` (fail, exit 1, run:linux)
+- `test-routing-no-haiku.sh` (fail, exit 1, run:linux)
+- `test-run-fleet-smoke.sh` (fail, exit 1, run:linux)
+- `test-rust-first-bypass-gate.sh` (fail, exit 1, run:linux)
+- `test-rust-first-gate.sh` (fail, exit 1, run:linux)
+- `test-rust-first-pr-gate.sh` (fail, exit 1, run:linux)
+- `test-scaffold-holes-apply.sh` (fail, exit 1, run:linux)
+- `test-self-doctor-heal.sh` (fail, exit 1, run:linux)
+- `test-self-hosted-toggle-matrix.sh` (fail, exit 1, run:linux)
+- `test-session-export-resume.sh` (fail, exit 127, run:linux)
+- `test-settings-repo-roundtrip.sh` (fail, exit 7, run:linux)
+- `test-shebang-exec-bit.sh` (fail, exit 1, run:linux)
+- `test-shell-set-e-coverage.sh` (fail, exit 1, run:linux)
+- `test-ship-assist-context-hook.sh` (fail, exit 1, run:linux)
+- `test-ship-chassis-round.sh` (fail, exit 1, run:linux)
+- `test-sibling-status.sh` (fail, exit 1, run:linux)
+- `test-slo-breach-gates.sh` (fail, exit 1, run:linux)
+- `test-speculative-execution-isolation.sh` (fail, exit 1, run:linux)
+- `test-stale-branch-reaper-emit.sh` (fail, exit 1, run:linux)
+- `test-stale-claim-reaper.sh` (fail, exit 1, run:linux)
+- `test-stale-worktree-reaper-empty-branch.sh` (fail, exit 1, run:linux)
+- `test-stale-worktree-reaper.sh` (timeout, exit 124, run:linux)
+- `test-status.sh` (fail, exit 2, run:linux)
+- `test-subagent-heartbeat.sh` (fail, exit 1, run:linux)
+- `test-synthesis-truth.sh` (fail, exit 1, run:linux)
+- `test-tauri-filter-scope.sh` (fail, exit 1, run:linux)
+- `test-tier5-self-improve.sh` (fail, exit 1, run:linux)
+- `test-together-routing.sh` (fail, exit 1, run:linux)
+- `test-trunk-loop-e2e.sh` (fail, exit 1, run:linux)
+- `test-urgency-reach.sh` (fail, exit 1, run:linux)
+- `test-wake-recovery.sh` (fail, exit 1, run:linux)
+- `test-web-push-subscribe.sh` (fail, exit 1, run:linux)
+- `test-weekly-digest.sh` (fail, exit 127, run:linux)
+- `test-why-flag.sh` (fail, exit 101, run:linux)
+- `test-worker-doctor-preflight.sh` (fail, exit 1, run:linux)
+- `test-worker-heartbeat-full-cycle.sh` (fail, exit 1, run:linux)
+- `test-worker-prelude-floor-signals.sh` (fail, exit 1, run:linux)
+- `test-worker-stand-down.sh` (fail, exit 1, run:linux)
+- `test-worker-timeout-recovery.sh` (fail, exit 141, run:linux)
+- `test-workflow-cancel-in-progress.sh` (fail, exit 1, run:linux)
+- `test-worktree-base-honored.sh` (fail, exit 1, run:linux)
+- `test-worktree-reaper-heartbeat-protection.sh` (fail, exit 1, run:linux)
+- `test-worktree-root-sibling.sh` (fail, exit 1, run:linux)
+- `test-yaml-lint-guard.sh` (fail, exit 1, run:linux)
+- `test-zero-waste-020.sh` (fail, exit 1, run:linux)
 
-## wired-green (0)
+## wired-green (376)
 
-(none)
+- `test-acp-smoke.sh`
+- `test-admit-ceiling.sh`
+- `test-agent-throughput.sh`
+- `test-agents-md-injection.sh`
+- `test-aggregator-verified.sh`
+- `test-alert-classifier.sh`
+- `test-almanac-summarize-watchdog.sh`
+- `test-ambient-schema.sh`
+- `test-api-chat-cost-kill.sh`
+- `test-api-cost-leaderboard.sh`
+- `test-api-gap-queue-shape.sh`
+- `test-arm-policy-native.sh`
+- `test-arm-policy.sh`
+- `test-attribution-portable.sh`
+- `test-audit-log.sh`
+- `test-audit-step-isolation.sh`
+- `test-audit-workflow-not-cancellable.sh`
+- `test-auth-status.sh`
+- `test-auto-arm-sweeper.sh`
+- `test-auto-merge-armer-red-head.sh`
+- `test-auto-merge-armer.sh`
+- `test-autonomous-ship-rate.sh`
+- `test-autoscale-decisions.sh`
+- `test-back-pressure-hysteresis.sh`
+- `test-backlog-sync-reader-dirty-tree.sh`
+- `test-backlog-sync-registry-remote.sh`
+- `test-bash-portability-lint.sh`
+- `test-bom-old-manifest-regression.sh`
+- `test-book-sync-guard.sh`
+- `test-bootstrap-auto-install.sh`
+- `test-bootstrap-smoke.sh`
+- `test-bot-autonomous.sh`
+- `test-bot-merge-arm-ship-order.sh`
+- `test-bot-merge-auto-close.sh`
+- `test-bot-merge-auto-commit-head-race.sh`
+- `test-bot-merge-conflict-wiring.sh`
+- `test-bot-merge-exit-codes.sh`
+- `test-bot-merge-exit-phases.sh`
+- `test-bot-merge-expired-lease-identity.sh`
+- `test-bot-merge-graphql-preflight.sh`
+- `test-bot-merge-paths-overflow.sh`
+- `test-bot-merge-portability.sh`
+- `test-bot-merge-pr-create-head.sh`
+- `test-bot-merge-recovery-in-progress.sh`
+- `test-bot-merge-recovery-no-clippy.sh`
+- `test-bot-merge-recovery-pr-create.sh`
+- `test-bot-merge-rest-direct.sh`
+- `test-bot-merge-stacked-rebase.sh`
+- `test-bot-merge-watchdog.sh`
+- `test-bounced-pr-detector.sh`
+- `test-branch-protection-gate.sh`
+- `test-broad-canary-coverage.sh`
+- `test-bypass-line-output-audit.sh`
+- `test-bypass-line-required.sh`
+- `test-cache-event-emission.sh`
+- `test-cache-mergestatestatus.sh`
+- `test-cargo-mutex-isolation.sh`
+- `test-cargo-target-no-worktree-default.sh`
+- `test-cargo-target-reaper-class-d.sh`
+- `test-cargo-target-reaper.sh`
+- `test-cascade-cancellation-status-description.sh`
+- `test-cascade-rebase-observability.sh`
+- `test-census-shrink-only.sh`
+- `test-change-approval.sh`
+- `test-changes-job-self-hosted.sh`
+- `test-check-agent-roles-registered.sh`
+- `test-chump-farmer-run-path.sh`
+- `test-chump-fleet-cli.sh`
+- `test-chump-gap-reserve-acceptance-criteria.sh`
+- `test-chump-improve.sh`
+- `test-chump-skill-cli.sh`
+- `test-ci-audit-loop.sh`
+- `test-ci-concurrency-group-key.sh`
+- `test-ci-flake-rerun.sh`
+- `test-ci-heavy-jobs-cross-platform.sh`
+- `test-claim-mode.sh`
+- `test-claude-reaper.sh`
+- `test-cli-aliases.sh`
+- `test-cli-arg-validation.sh`
+- `test-cli-fleet-coord.sh`
+- `test-cli-help.sh`
+- `test-cli-integration.sh`
+- `test-cli-version-debug.sh`
+- `test-cockpit-wake-fleet.sh`
+- `test-cog-043-action-telemetry.sh`
+- `test-conflict-resolver-scenarios.sh`
+- `test-conflict-resolver.sh`
+- `test-coord-assign-launchd.sh`
+- `test-corrective-keyword-exception.sh`
+- `test-cost-enforcement.sh`
+- `test-credential-lifecycle.sh`
+- `test-credential-pattern-guard.sh`
+- `test-credible-061-seed-consistency.sh`
+- `test-cross-judge-guard.sh`
+- `test-css-token-discipline.sh`
+- `test-curator-auto-decompose.sh`
+- `test-curator-decision-logging.sh`
+- `test-curator-freshness.sh`
+- `test-curator-p0-demotion.sh`
+- `test-curator-pillar-no-overlap.sh`
+- `test-default-flip-guard.sh`
+- `test-deliberator-tick-emits.sh`
+- `test-discord-gateway.sh`
+- `test-dispatch-agent-search-guard.sh`
+- `test-dispatch-armed-exit-zero.sh`
+- `test-dispatch-child-lifetime.sh`
+- `test-dispatch-open-pr-repair.sh`
+- `test-dispatch-ship-session-id.sh`
+- `test-dispatch-work-stranded.sh`
+- `test-doc-freshness.sh`
+- `test-doc-only-clippy-skip.sh`
+- `test-docs-delta-commit-msg.sh`
+- `test-doctrine-seam-finder.sh`
+- `test-doctrine-weave-detectors.sh`
+- `test-edit-replay.sh`
+- `test-env-var-coverage.sh`
+- `test-error-path-coverage.sh`
+- `test-event-registry-audit-regression.sh`
+- `test-event-registry-coverage.sh`
+- `test-event-registry-effect-metric.sh`
+- `test-event-registry-guard.sh`
+- `test-event-registry-yaml-parse.sh`
+- `test-farmer-dispatch-orphan-reaper.sh`
+- `test-farmer-stale-lease-heartbeat.sh`
+- `test-flake-autorerun.sh`
+- `test-fleet-binary-aarch64-openssl-vendored.sh`
+- `test-fleet-binary-glibc-floor.sh`
+- `test-fleet-bootstrap.sh`
+- `test-fleet-brief-pillar-table.sh`
+- `test-fleet-brief-ship-count-unavailable.sh`
+- `test-fleet-brief.sh`
+- `test-fleet-fanout.sh`
+- `test-fleet-health-sentinel.sh`
+- `test-fleet-kill-switch.sh`
+- `test-fleet-metrics-snapshot.sh`
+- `test-fleet-pause-autolift.sh`
+- `test-fleet-race-loss.sh`
+- `test-fleet-spec.sh`
+- `test-fleet-starve-auto-action.sh`
+- `test-fleet-state-mutex.sh`
+- `test-fleet-status-rate-limit.sh`
+- `test-gap-ac-requirement.sh`
+- `test-gap-closed-pr-cli.sh`
+- `test-gap-decompose-reslice-guard.sh`
+- `test-gap-divergence-guard.sh`
+- `test-gap-doctor-safe-sweep.sh`
+- `test-gap-id-cross-session.sh`
+- `test-gap-impact-rating.sh`
+- `test-gap-lifecycle-manager.sh`
+- `test-gap-list-domain-summary.sh`
+- `test-gap-list-done-format.sh`
+- `test-gap-list-since-json-schema.sh`
+- `test-gap-profiling.sh`
+- `test-gap-quality-gate.sh`
+- `test-gap-rebalance.sh`
+- `test-gap-reserve-concurrency.sh`
+- `test-gap-reserve-no-stale-collision.sh`
+- `test-gap-run-now.sh`
+- `test-gap-ship-single-source.sh`
+- `test-gap-status-flip.sh`
+- `test-gap-store-single-source.sh`
+- `test-gap-templates.sh`
+- `test-gap-workflow-status.sh`
+- `test-gap-yaml-export-only.sh`
+- `test-gate-promotion-no-regression.sh`
+- `test-gate-telemetry.sh`
+- `test-gen-cost-summary.sh`
+- `test-gh-api-probe.sh`
+- `test-gh-in-ci-guarded.sh`
+- `test-gh-shim-script-attribution.sh`
+- `test-gh-token-guard.sh`
+- `test-git-identity-guard.sh`
+- `test-github-api-telemetry-shim.sh`
+- `test-graphql-debounce.sh`
+- `test-grep-c-echo0-guard.sh`
+- `test-hardcoded-date-guard.sh`
+- `test-harvester-cli.sh`
+- `test-inbox-first-picker.sh`
+- `test-inbox-prune.sh`
+- `test-inbox-watcher-pattern.sh`
+- `test-infra-1025-atomic-claim.sh`
+- `test-infra-1062-clippy-timeout-silent-exit.sh`
+- `test-infra-109-worktree-boundary.sh`
+- `test-infra-119-bot-merge-hang.sh`
+- `test-infra-124-docs-delta-trailer.sh`
+- `test-infra-250-v1-retirement.sh`
+- `test-infra-257-doc-only-guards.sh`
+- `test-infra-258-reaper-partial-delivery.sh`
+- `test-infra-3632-canonical-store-env.sh`
+- `test-infra-779-gitdir-repair.sh`
+- `test-infra-8190-gap-store-single-source-gate.sh`
+- `test-infra-8210-single-branch-refspec-repair.sh`
+- `test-inspect-resume-scrap.sh`
+- `test-install-ambient-hooks.sh`
+- `test-install-gh-shim-worktree-safe.sh`
+- `test-install-pr-auto-rebase.sh`
+- `test-install-script-manifest.sh`
+- `test-install-scripts-executable.sh`
+- `test-install-trunk-sentinel.sh`
+- `test-integrations-yml-concurrency-group-key.sh`
+- `test-invariant-boundary.sh`
+- `test-jit-binary-refresh.sh`
+- `test-keystone-cascade.sh`
+- `test-known-flake-skip.sh`
+- `test-known-flakes-gate.sh`
+- `test-lease-lib.sh`
+- `test-liaison-webhook-cache.sh`
+- `test-lint-handoff-comment.sh`
+- `test-load-aware-deadman.sh`
+- `test-m2-gate-end-to-end.sh`
+- `test-markdown-intra-doc-links.sh`
+- `test-mcp-coord-smoke.sh`
+- `test-md-links-loop.sh`
+- `test-merge-driver-ci-yml-add-row.sh`
+- `test-merge-driver-ci-yml.sh`
+- `test-merge-driver-coverage.sh`
+- `test-merge-driver-gap-yaml.sh`
+- `test-merge-driver-pre-commit.sh`
+- `test-merge-driver-union.sh`
+- `test-merge-group-coverage.sh`
+- `test-merged-check-guard.sh`
+- `test-meta-011-git-stomp.sh`
+- `test-meta-118-daemon-install.sh`
+- `test-migration-pipeline-gates.sh`
+- `test-mission-picker-worker.sh`
+- `test-mission-picker.sh`
+- `test-model-registry.sh`
+- `test-no-claude-leak.sh`
+- `test-no-inline-ambient-printf.sh`
+- `test-no-manual-ship-bypass.sh`
+- `test-no-new-bypass-env-vars.sh`
+- `test-no-raw-gh-in-hot-paths.sh`
+- `test-no-verify-audit.sh`
+- `test-node-admission-ceiling.sh`
+- `test-notify-kind-escalation-coverage.sh`
+- `test-notify-operator.sh`
+- `test-obs-coverage-guard.sh`
+- `test-observability-coverage.sh`
+- `test-observability-loop.sh`
+- `test-one-picker-mission-first.sh`
+- `test-open-pr-dup-detection.sh`
+- `test-opencode-harness-install.sh`
+- `test-opencode-harness-smoke.sh`
+- `test-operator-recovery.sh`
+- `test-ops-organ-census-fixture.sh`
+- `test-ops-organ-census.sh`
+- `test-orchestrate-session-summary.sh`
+- `test-organ-manifest-bom-integration.sh`
+- `test-organ-manifest-run-scope.sh`
+- `test-orphan-branch-sweeper.sh`
+- `test-orphan-pr-closer.sh`
+- `test-orphan-worktree-prune.sh`
+- `test-outcome-gate.sh`
+- `test-parse-token-usage-dead-writer-timeout.sh`
+- `test-per-worktree-target-guard.sh`
+- `test-pick-and-claim-atomic.sh`
+- `test-pick-and-claim-dep-resolution.sh`
+- `test-pick-and-claim-exclusion-reasons.sh`
+- `test-pick-and-claim-lockdir.sh`
+- `test-pick-gap-cooldown.sh`
+- `test-pick-gap-open-only.sh`
+- `test-pick-gap-skips-linked-pr.sh`
+- `test-pick-gap-skips-merged.sh`
+- `test-pick-gap-skips-shipped.sh`
+- `test-pick-gap-sync-overhead.sh`
+- `test-pick-gap-worker-stagger.sh`
+- `test-picker-p0-mission-effort-bypass.sh`
+- `test-picker-pillar-starved-junk-filter.sh`
+- `test-picker-pivot-lock-cleanup.sh`
+- `test-picker-priority.sh`
+- `test-picker-soft-skill-open-pr.sh`
+- `test-pillar-balance-guard.sh`
+- `test-pillar-dashboard.sh`
+- `test-pipefail-race-sweep.sh`
+- `test-plist-no-tmp-paths.sh`
+- `test-pr-auto-rebase.sh`
+- `test-pr-blocked-watch.sh`
+- `test-pr-cost-telemetry.sh`
+- `test-pr-cut-honored.sh`
+- `test-pr-cut-organs.sh`
+- `test-pr-explain-block.sh`
+- `test-pr-failure-auto-rescue.sh`
+- `test-pr-rescue-audit-handler.sh`
+- `test-pr-rescue-noci.sh`
+- `test-pr-scope-title-fallback.sh`
+- `test-pr-stuck-auto-respawn.sh`
+- `test-pr-stuck-cluster-detection.sh`
+- `test-pr-stuck-cluster-observability.sh`
+- `test-pr-terminal-state.sh`
+- `test-pr-triage-bot.sh`
+- `test-pr-watch-auto-resolve.sh`
+- `test-pr-watch-shepherd-smoke.sh`
+- `test-pre-commit-gap-guard-perf.sh`
+- `test-pre-push-force-lease-guard.sh`
+- `test-pre-push-preflight-hook.sh`
+- `test-pre-push-test-gate.sh`
+- `test-precommit-guard-audit.sh`
+- `test-precommit-strict-replay.sh`
+- `test-preflight-ci-parity-auto-recognize.sh`
+- `test-preflight-ci-parity-smoke.sh`
+- `test-preflight-ci-parity.sh`
+- `test-prepush-worktree-cd.sh`
+- `test-prepush-wrapper-discovery-no-config.sh`
+- `test-prereg-content-guard.sh`
+- `test-private-topology-guard.sh`
+- `test-provision-no-host-literals.sh`
+- `test-publisher-platforms.sh`
+- `test-pwa-flake-quarantine.sh`
+- `test-pwa-security.sh`
+- `test-raw-yaml-guard.sh`
+- `test-reaper-bot-merge-live.sh`
+- `test-reaper-spare-recoverable-blocked.sh`
+- `test-reaper-trunk-red-hold.sh`
+- `test-rebase-coordination.sh`
+- `test-refresh-almanac-binary.sh`
+- `test-registry-fragment-no-conflict.sh`
+- `test-registry-fragments.sh`
+- `test-release-lease-flag.sh`
+- `test-required-model.sh`
+- `test-rescue-class-cites-procedure.sh`
+- `test-resilient-1055-role-roster.sh`
+- `test-resilient-1534-organ-dark-audit.sh`
+- `test-resilient-1614-node-pause-invariant.sh`
+- `test-resilient-1615-two-scope-refuse.sh`
+- `test-resilient-1622-structural-subset.sh`
+- `test-review-handoff-reengage.sh`
+- `test-review-handoff-smoke.sh`
+- `test-rollback-gap.sh`
+- `test-rollup-cascade-cancel.sh`
+- `test-rollup-semantic.sh`
+- `test-root-service-is-sandbox-guard.sh`
+- `test-rot-reaper-verified-red-spare.sh`
+- `test-rot-reaper.sh`
+- `test-ruleset-doc-only-pr.sh`
+- `test-run-consolidation.sh`
+- `test-run-fleet-core-cap.sh`
+- `test-runner-autoscale-max-default.sh`
+- `test-sandbox-isolation.sh`
+- `test-schema-version-assert.sh`
+- `test-self-hosted-run-stats-emit.sh`
+- `test-self-hosted-runner-deps.sh`
+- `test-self-reports-registry.sh`
+- `test-speculative-on-speculative-guard.sh`
+- `test-stale-binary-ship-blocked.sh`
+- `test-stale-branch-rebase.sh`
+- `test-stale-pr-rebase-bot.sh`
+- `test-stale-process-watchdog.sh`
+- `test-stale-worktree-reaper-tmp.sh`
+- `test-state-db-yaml-sync.sh`
+- `test-status-flip-proof-of-merge.sh`
+- `test-subagent-budget-kill.sh`
+- `test-subagent-epilogue-ref.sh`
+- `test-subagent-pre-exit-check.sh`
+- `test-submodule-guard.sh`
+- `test-supervision-trees.sh`
+- `test-system-integration.sh`
+- `test-tool-normalize.sh`
+- `test-triage-test-failure.sh`
+- `test-trunk-recovery-reviver.sh`
+- `test-velocity-trending.sh`
+- `test-voice-banlist.sh`
+- `test-waste-tally-domain.sh`
+- `test-worker-circuit-breaker.sh`
+- `test-worker-first-output-watchdog.sh`
+- `test-worker-no-spin.sh`
+- `test-worker-preship-clippy.sh`
+- `test-worker-run-node-aware.sh`
+- `test-worker-timeout-no-commit.sh`
+- `test-worker-timeout-scale.sh`
+- `test-workflow-concurrency-groups.sh`
+- `test-workflow-linux-guard.sh`
+- `test-worktree-contamination-check.sh`
+- `test-worktree-prune-protects-live-edits.sh`
+- `test-worktree-reaper-safety.sh`
+- `test-worktree-show-toplevel.sh`
+- `test-yaml-orphan-prune-state-aware.sh`
 
-## unwired-green (0)
+## unwired-green (903)
 
-(none)
+- `test-a2a-always-on.sh`
+- `test-a2a-capability-registry.sh`
+- `test-a2a-dead-letter.sh`
+- `test-a2a-delivery-receipts.sh`
+- `test-a2a-inbox-routing.sh`
+- `test-a2a-layer1a-chaos.sh`
+- `test-a2a-roadmap-coord.sh`
+- `test-a2a-role-routing.sh`
+- `test-ac-completeness-gate.sh`
+- `test-admin-merge-burst.sh`
+- `test-admin-merge-cycle-noise-class.sh`
+- `test-agent-api-schema.sh`
+- `test-agent-default-prefix.sh`
+- `test-agent-dispatch-guardrail.sh`
+- `test-agent-session-id.sh`
+- `test-almanac-audit.sh`
+- `test-almanac-census-summarize-pct-enforcement.sh`
+- `test-almanac-census.sh`
+- `test-almanac-refresh-guard.sh`
+- `test-ambient-context-inject-leases.sh`
+- `test-ambient-glance-pr-cache-ttl.sh`
+- `test-ambient-glance.sh`
+- `test-ambient-kind-schema.sh`
+- `test-ambient-react-cooldown.sh`
+- `test-ambient-rotate.sh`
+- `test-ambient-schema-consistency.sh`
+- `test-ambient-viewer.sh`
+- `test-apex-watchdog.sh`
+- `test-api-ambient-emit.sh`
+- `test-api-fleet-status-perf.sh`
+- `test-api-health-pillars-timeout.sh`
+- `test-api-rate-limit-gates.sh`
+- `test-api-stack-status-rate-limit.sh`
+- `test-arm-auto-merge.sh`
+- `test-armed-pr-rebaser-orphan-adopt.sh`
+- `test-armed-pr-rebaser-preserve-manual-fix.sh`
+- `test-atomic-binary-swap.sh`
+- `test-audit-allowlist-staleness.sh`
+- `test-audit-gap-state-drift.sh`
+- `test-audit-job-decomposition.sh`
+- `test-audit-opencode-identity-residue.sh`
+- `test-auth-freshness-watchdog.sh`
+- `test-author-time-helpers.sh`
+- `test-auto-adopt.sh`
+- `test-auto-deploy-canary.sh`
+- `test-auto-deploy-worker-verify.sh`
+- `test-auto-flip-on-merge.sh`
+- `test-auto-merge-arm-watcher.sh`
+- `test-auto-merge-rearm-daemon.sh`
+- `test-auto-rerun-out-of-scope.sh`
+- `test-auto-resolve-add-both.sh`
+- `test-auto-widen.sh`
+- `test-autodoc-envvars.sh`
+- `test-autopilot-unified.sh`
+- `test-backfill-gap-id-regex.sh`
+- `test-barnacle-buster.sh`
+- `test-bin-bloat-guard.sh`
+- `test-binary-cache-event-driven.sh`
+- `test-blame-bot.sh`
+- `test-board-cycle-escalate.sh`
+- `test-board-vitals.sh`
+- `test-bootstrap-manifest-organ-pointers.sh`
+- `test-bot-merge-already-claimed.sh`
+- `test-bot-merge-auto-commit-modified.sh`
+- `test-bot-merge-autoclose-no-false-uncaught.sh`
+- `test-bot-merge-chump-doctor-wrap.sh`
+- `test-bot-merge-ci-shell-output.sh`
+- `test-bot-merge-circuit-breaker.sh`
+- `test-bot-merge-doc-only-classifier.sh`
+- `test-bot-merge-done-emit.sh`
+- `test-bot-merge-dup-pr.sh`
+- `test-bot-merge-err-trap-loud-fail.sh`
+- `test-bot-merge-fast-flag.sh`
+- `test-bot-merge-gap-auto-derive.sh`
+- `test-bot-merge-graphql-wedge.sh`
+- `test-bot-merge-grep-c-fix.sh`
+- `test-bot-merge-heartbeat-step-label.sh`
+- `test-bot-merge-heartbeat.sh`
+- `test-bot-merge-hook-auto-install.sh`
+- `test-bot-merge-integrator-systemd-health.sh`
+- `test-bot-merge-liveness.sh`
+- `test-bot-merge-locking.sh`
+- `test-bot-merge-mode-failopen.sh`
+- `test-bot-merge-no-amend-foreign.sh`
+- `test-bot-merge-no-exit-144.sh`
+- `test-bot-merge-no-local-build.sh`
+- `test-bot-merge-pending-gap.sh`
+- `test-bot-merge-phase-duration.sh`
+- `test-bot-merge-policy-integration.sh`
+- `test-bot-merge-pre-push-rebase.sh`
+- `test-bot-merge-preflight.sh`
+- `test-bot-merge-progress-file.sh`
+- `test-bot-merge-requires-gap.sh`
+- `test-bot-merge-scratch-guard.sh`
+- `test-bot-merge-shadow-plan.sh`
+- `test-bot-merge-skip-rebase.sh`
+- `test-bot-merge-staging-only-guard.sh`
+- `test-bot-merge-stale-gate.sh`
+- `test-bot-merge-stale-lock.sh`
+- `test-bot-merge-stall-fallthrough.sh`
+- `test-bot-merge-stall-monitor.sh`
+- `test-bot-merge-step-emits.sh`
+- `test-bot-merge-steps-file.sh`
+- `test-bot-merge-syntax.sh`
+- `test-bot-merge-tee-log.sh`
+- `test-bot-merge-verify-reaches.sh`
+- `test-bot-merge-webhook-wait.sh`
+- `test-bot-merge-zombie-reap.sh`
+- `test-botmerge-circuit.sh`
+- `test-botmerge-poisoned-branch.sh`
+- `test-brain-graph-renderer.sh`
+- `test-branch-delete-on-merge.sh`
+- `test-branch-reaper-emit.sh`
+- `test-branch-reaper-patterns.sh`
+- `test-brand-tokens-schema.sh`
+- `test-break-trunk-cascade.sh`
+- `test-brier-score.sh`
+- `test-broadcast-feedback-fanout.sh`
+- `test-broadcast-reply-to.sh`
+- `test-broadcast-strict-schema.sh`
+- `test-broadcast-urgency-routing.sh`
+- `test-bypass-frequency-audit.sh`
+- `test-bypass-trailer-validator.sh`
+- `test-cache-cold-start-fill.sh`
+- `test-cache-n1-migration.sh`
+- `test-cache-reconcile-launchd.sh`
+- `test-calibration-brier-canonical.sh`
+- `test-calibration-generic.sh`
+- `test-capability-cli.sh`
+- `test-capability-drift-scan.sh`
+- `test-capability-lifecycle.sh`
+- `test-capability-publish.sh`
+- `test-cargo-target-dir.sh`
+- `test-cargo-target-reaper-variant-quoting.sh`
+- `test-cargo-test-rerun-skip.sh`
+- `test-cartographer-smoke.sh`
+- `test-cascade-bandit-extended.sh`
+- `test-cascade-cancellation.sh`
+- `test-cascade-max-slots.sh`
+- `test-cascade-rebase-debounce.sh`
+- `test-cascade-rebase-extended-paths.sh`
+- `test-cascade-rebase-on-cargo.sh`
+- `test-cascade-rebase-skip-redundant.sh`
+- `test-cascade-trigger-paths.sh`
+- `test-cascade-unblock.sh`
+- `test-ceo-driver.sh`
+- `test-chairman-pulse.sh`
+- `test-check-dead-env-vars-broken-pipe.sh`
+- `test-check-pr-scope-title.sh`
+- `test-check-runs-cache.sh`
+- `test-checkout-sync.sh`
+- `test-chump-bench.sh`
+- `test-chump-commit-auto-envvar.sh`
+- `test-chump-commit-auto-fmt.sh`
+- `test-chump-commit-auto-trailers.sh`
+- `test-chump-commit-completes.sh`
+- `test-chump-commit-mutex-fd-not-inherited.sh`
+- `test-chump-consensus-ask.sh`
+- `test-chump-consensus-tally.sh`
+- `test-chump-consensus.sh`
+- `test-chump-curator-subscriber.sh`
+- `test-chump-dashboard-tui.sh`
+- `test-chump-doctor-exit-code.sh`
+- `test-chump-doctor-probe-cascade-ratelimit.sh`
+- `test-chump-gap-set-roundtrip.sh`
+- `test-chump-gen-smoke.sh`
+- `test-chump-gh-subprocess-auth.sh`
+- `test-chump-inbox-read.sh`
+- `test-chump-outcome.sh`
+- `test-chump-pe-suite-demo.sh`
+- `test-chump-pitch.sh`
+- `test-chump-planner-rank.sh`
+- `test-chump-rebase-and-push.sh`
+- `test-chump-shim-wedge.sh`
+- `test-chump-ship-execute-retry.sh`
+- `test-chump-ship-execute.sh`
+- `test-chump-ship-plan.sh`
+- `test-chump-staleness-gate.sh`
+- `test-chump-upgrade-detection.sh`
+- `test-chump-vote.sh`
+- `test-chumpd-worker-sandbox.sh`
+- `test-ci-fleet-health-sweep.sh`
+- `test-ci-health-gate.sh`
+- `test-ci-lesson-propagation.sh`
+- `test-ci-pass-rate-namespaced.sh`
+- `test-ci-qa-score.sh`
+- `test-ci-yml-add-row-adjacent.sh`
+- `test-ci-yml-merge-driver.sh`
+- `test-claim-branch-mismatch.sh`
+- `test-claim-diff-collision.sh`
+- `test-claim-force-recover-wip.sh`
+- `test-claim-intent-gate.sh`
+- `test-claim-lint.sh`
+- `test-claim-open-pr-abort.sh`
+- `test-claude-tmp-cleanup.sh`
+- `test-cli-surface-baseline.sh`
+- `test-close-gaps-from-commit-subjects.sh`
+- `test-close-superseded-prs.sh`
+- `test-closed-pr-integrity.sh`
+- `test-closer-batcher-filing-pr.sh`
+- `test-cluster-auto-hold.sh`
+- `test-cluster-detector-v2.sh`
+- `test-cluster-detector.sh`
+- `test-cockpit-dispatch-gap.sh`
+- `test-cockpit-release-leases.sh`
+- `test-cockpit-repair-drift.sh`
+- `test-cockpit-right-zone-actions.sh`
+- `test-code-reviewer-authskip.sh`
+- `test-code-reviewer-grounding.sh`
+- `test-code-reviewer-spirit.sh`
+- `test-code-reviewer-tier1-gateway.sh`
+- `test-cog-042-delta-reflection.sh`
+- `test-cog-046-embedding-retrieval.sh`
+- `test-cog032-bench-schema.sh`
+- `test-cog032-pilot-harness.sh`
+- `test-cognition-ab.sh`
+- `test-concurrency-primitives.sh`
+- `test-configure-journald-cap.sh`
+- `test-conflict-resolution-consumer.sh`
+- `test-consensus-merge-gate.sh`
+- `test-consensus-pipeline-event-registry.sh`
+- `test-content-bot-fleet-routing.sh`
+- `test-content-bots-dispatcher.sh`
+- `test-content-bots-manifests.sh`
+- `test-content-bots-orchestrate.sh`
+- `test-contract-scan.sh`
+- `test-coord-assign-bootstrap-manifest-entry.sh`
+- `test-coord-lock-lib.sh`
+- `test-cost-cap-watch.sh`
+- `test-credential-sanitization.sh`
+- `test-credible-055-tauri-shadow-input.sh`
+- `test-credible-1258-extract-gap-ids.sh`
+- `test-credible-154-ship-evidence.sh`
+- `test-credible-155.sh`
+- `test-critical-skew-restart.sh`
+- `test-cron-log-watch.sh`
+- `test-cross-daemon-coord.sh`
+- `test-cross-pr-contract-triple-call-guard.sh`
+- `test-curator-agent-productization.sh`
+- `test-curator-gap-ac-filled.sh`
+- `test-curator-jit-scheduler.sh`
+- `test-curator-launch-session-export.sh`
+- `test-curator-launchd.sh`
+- `test-curator-pause-armed.sh`
+- `test-curator-sentinel.sh`
+- `test-curator-wake.sh`
+- `test-custom-element-uniqueness.sh`
+- `test-daemon-contract.sh`
+- `test-daemon-exit-loop-watcher.sh`
+- `test-daemon-silent-noop.sh`
+- `test-daily-self-productize.sh`
+- `test-definition-of-ready-gate.sh`
+- `test-deliberator-loop.sh`
+- `test-deploy-tool.sh`
+- `test-detect-gap-failure-status-filter.sh`
+- `test-digest-delivery-liveness.sh`
+- `test-disk-audit.sh`
+- `test-disk-critical-auto-action.sh`
+- `test-disk-health-fixture.sh`
+- `test-disk-inventory-daemon.sh`
+- `test-disk-pressure-guard.sh`
+- `test-disk-pressure-reaper.sh`
+- `test-disk-reactor-halt-recovery.sh`
+- `test-disk-reactor-shared-target-quiesce.sh`
+- `test-disk-reclaim-actuator.sh`
+- `test-dispatch-hang-detection.sh`
+- `test-dispatch-prompt-self-verify.sh`
+- `test-dispatch-subcommand-shadow.sh`
+- `test-doc-155-changelog-roadmap-freshness.sh`
+- `test-doc-cache-architecture.sh`
+- `test-docs-delta-worktree.sh`
+- `test-drift-flag-extract.sh`
+- `test-drift-flag-triage.sh`
+- `test-dup-close-guard.sh`
+- `test-duty-officer-judgment-tick.sh`
+- `test-duty-officer-loop.sh`
+- `test-effect-verifier.sh`
+- `test-effective-009-help-entrypoint.sh`
+- `test-effective-441-unverified-ship-escalation.sh`
+- `test-emit-subagent-spawn.sh`
+- `test-escalation-tier.sh`
+- `test-eval-098-harness-shape.sh`
+- `test-eval-099-harness-shape.sh`
+- `test-evangelist-smoke.sh`
+- `test-event-registry-effect-metric-hook.sh`
+- `test-execute-gap-always-emits.sh`
+- `test-execute-gap-heartbeat.sh`
+- `test-external-clone-reaper.sh`
+- `test-external-collab-loop.sh`
+- `test-external-scan-reaper.sh`
+- `test-failure-mode-catalog.sh`
+- `test-false-done-sweep.sh`
+- `test-fanout-reference-flag.sh`
+- `test-farmer-drain-guard.sh`
+- `test-feature-smoke-detects-silent-failure.sh`
+- `test-feedback-report.sh`
+- `test-fix-trunk-signal-harness.sh`
+- `test-flake-auto-quarantine.sh`
+- `test-flake-catalog-tracking.sh`
+- `test-flake-detection-tagging.sh`
+- `test-fleet-auth-check.sh`
+- `test-fleet-auto-prune.sh`
+- `test-fleet-auto-restart.sh`
+- `test-fleet-autopilot-worker-pool.sh`
+- `test-fleet-autopilot.sh`
+- `test-fleet-backend-auto-detect.sh`
+- `test-fleet-bootstrap-coverage.sh`
+- `test-fleet-brief-recap.sh`
+- `test-fleet-circuit-breaker.sh`
+- `test-fleet-clone-index.sh`
+- `test-fleet-doctor-auth-probe.sh`
+- `test-fleet-doctor-checkout-parked.sh`
+- `test-fleet-doctor-ops-defect.sh`
+- `test-fleet-doctor-organ-roll-call-live.sh`
+- `test-fleet-doctor-tracked-config-drift.sh`
+- `test-fleet-health-sentinel-system-organs.sh`
+- `test-fleet-jitter-and-starve.sh`
+- `test-fleet-message-component.sh`
+- `test-fleet-passes-api-keys.sh`
+- `test-fleet-prune-worktrees.sh`
+- `test-fleet-pulse.sh`
+- `test-fleet-queue-depth-event.sh`
+- `test-fleet-scrubber.sh`
+- `test-fleet-server.sh`
+- `test-fleet-skew-detect.sh`
+- `test-fleet-snapshot-restore.sh`
+- `test-fleet-staggering.sh`
+- `test-fleet-stalled-alert.sh`
+- `test-fleet-state-batch-writes.sh`
+- `test-fleet-status-json.sh`
+- `test-fleet-wedge-escalation.sh`
+- `test-fleet-whoworkson.sh`
+- `test-fleet-worker-watchdog.sh`
+- `test-fleet029-cache-overlap.sh`
+- `test-floor-temp.sh`
+- `test-frequency-scheduling.sh`
+- `test-fresh-clone-gap-list.sh`
+- `test-fresh-eyes-loop.sh`
+- `test-freshness-preamble.sh`
+- `test-friction-metric.sh`
+- `test-gap-affinity-matching.sh`
+- `test-gap-budget-tracker.sh`
+- `test-gap-closure-reconcile.sh`
+- `test-gap-cooldown.sh`
+- `test-gap-decompose-description.sh`
+- `test-gap-decompose-truncation.sh`
+- `test-gap-decompose-verify-cascade.sh`
+- `test-gap-dedup.sh`
+- `test-gap-drain.sh`
+- `test-gap-drift-source-dedup.sh`
+- `test-gap-failure-detection.sh`
+- `test-gap-gardener-no-ac-placeholder.sh`
+- `test-gap-id-collision.sh`
+- `test-gap-import-spec.sh`
+- `test-gap-lib.sh`
+- `test-gap-list-warning-detector.sh`
+- `test-gap-lock-self-clean.sh`
+- `test-gap-maintenance-rust-parity.sh`
+- `test-gap-pattern-hold-check.sh`
+- `test-gap-pr-status.sh`
+- `test-gap-reopen-guard.sh`
+- `test-gap-reserve-auto-stages.sh`
+- `test-gap-reserve-cross-worktree-write.sh`
+- `test-gap-reserve-no-reuse.sh`
+- `test-gap-reserve-race-isolation.sh`
+- `test-gap-reserve-resilience.sh`
+- `test-gap-reserve-spurious-warning.sh`
+- `test-gap-reserve-timeout-tripwire.sh`
+- `test-gap-scoring.sh`
+- `test-gap-set-auto-regenerates-yaml.sh`
+- `test-gap-ship-stale-gate.sh`
+- `test-gap-sync.sh`
+- `test-gate-signal-audit.sh`
+- `test-generate-organ-registry.sh`
+- `test-get-active-claim-file.sh`
+- `test-gh-mutation-throttle.sh`
+- `test-gh-preempt.sh`
+- `test-gh-run-list-rest.sh`
+- `test-gh-shim-throttle.sh`
+- `test-ghost-gap-reaper.sh`
+- `test-ghost-status-reaper.sh`
+- `test-github-cache-callsite-migration.sh`
+- `test-github-cache-rust-parity.sh`
+- `test-github-liaison.sh`
+- `test-graceful-shutdown.sh`
+- `test-graphql-exhausted-false-positive-guard.sh`
+- `test-gz-archive-compressor.sh`
+- `test-halt-class-emit.sh`
+- `test-halt-predicate-events.sh`
+- `test-handoff-loop.sh`
+- `test-handoff-reactor.sh`
+- `test-harness-dispatch.sh`
+- `test-harness-ship-rate.sh`
+- `test-harvester-private-public-split.sh`
+- `test-health-ambient-preview.sh`
+- `test-hitl-gate.sh`
+- `test-hook-profiles.sh`
+- `test-hook-silent-noop.sh`
+- `test-hook-stdin-drain.sh`
+- `test-hot-file-serialization.sh`
+- `test-in-progress-branches-stale.sh`
+- `test-inbox-check-urgent-pretool.sh`
+- `test-inbox-component.sh`
+- `test-inbox-injector.sh`
+- `test-inbox-lane-filter.sh`
+- `test-inbox-notifications.sh`
+- `test-inbox-poll-session-derivation.sh`
+- `test-index-almanac.sh`
+- `test-inference-router.sh`
+- `test-infra-110-ttl.sh`
+- `test-infra-1111-gh-backoff.sh`
+- `test-infra-1129-check-runs-backfill.sh`
+- `test-infra-1130-bot-merge-cache-checks.sh`
+- `test-infra-1278-fast-path.sh`
+- `test-infra-1451-intent-parser.sh`
+- `test-infra-1667-waste-tally-json.sh`
+- `test-infra-247-worktree-yaml.sh`
+- `test-infra-3808-unverified-ship-cooldown.sh`
+- `test-infra-3832-nonship-cooldown.sh`
+- `test-infra-409-atomic-stagger.sh`
+- `test-infra-4351-organs-manifest-gate.sh`
+- `test-infra-477-session-ledger.sh`
+- `test-infra-483-fleet-waste-cooldown.sh`
+- `test-infra-485-prepush-not-clean.sh`
+- `test-infra-488-waste-tally.sh`
+- `test-infra-490-lease-cleanup.sh`
+- `test-infra-491-silent-dedup.sh`
+- `test-infra-492-session-track-wired.sh`
+- `test-infra-502-worker-gap-show.sh`
+- `test-infra-509-bot-merge-trim.sh`
+- `test-infra-525-checkpoint-on-timeout.sh`
+- `test-infra-5402.sh`
+- `test-infra-544-cross-repo-cleanup.sh`
+- `test-infra-559-checkpoint-integration.sh`
+- `test-infra-689-closed-gap-archive.sh`
+- `test-infra-705-stall-detector.sh`
+- `test-infra-7938.sh`
+- `test-infra-8034-fix-cj-dnsmasq.sh`
+- `test-infra-watcher-loop.sh`
+- `test-ingest-librarian-smoke.sh`
+- `test-ingest-orchestrate-smoke.sh`
+- `test-ingest-preflight-smoke.sh`
+- `test-install-almanac.sh`
+- `test-install-hooks-stable-target.sh`
+- `test-install-postgrest.sh`
+- `test-install-sh-clone.sh`
+- `test-install-sh-user-mode.sh`
+- `test-integration-flake-classes.sh`
+- `test-integration-pr-template.sh`
+- `test-integrator-daemon-activation.sh`
+- `test-integrator-stale-sla.sh`
+- `test-invariant-boundary-fixture.sh`
+- `test-inventory-agent-sync.sh`
+- `test-inventory-pr-backfill.sh`
+- `test-inventory-provenance-backfill.sh`
+- `test-inventory-v2-calibration.sh`
+- `test-inventory.sh`
+- `test-investigate-agent.sh`
+- `test-iter-agenda.sh`
+- `test-jeff-bus-ingest.sh`
+- `test-jeff-bus-outbound.sh`
+- `test-judgment-organ-redteam.sh`
+- `test-keep-chump-online-ollama-guard.sh`
+- `test-keep-mergeable-organ.sh`
+- `test-keep-mergeable.sh`
+- `test-kill-autopost-dms.sh`
+- `test-launchd-installer-paths.sh`
+- `test-lease-auto-extend.sh`
+- `test-lease-auto-release-on-sibling-merge.sh`
+- `test-leases-worktree-no-clobber.sh`
+- `test-lessons-injection-visibility.sh`
+- `test-liaison-offline-mode.sh`
+- `test-liaison-webhook-health.sh`
+- `test-lightning-demo-timeline.sh`
+- `test-lint-gate-checklist.sh`
+- `test-local-merge-queue.sh`
+- `test-local-only-mode.sh`
+- `test-lock-lib.sh`
+- `test-main-health-watchdog.sh`
+- `test-main-preflight-watchdog-parser.sh`
+- `test-main-preflight-watchdog.sh`
+- `test-mcp-gaps-write-tools.sh`
+- `test-mechanism-kappa-guard.sh`
+- `test-merge-queue-armed.sh`
+- `test-merge-serializer.sh`
+- `test-merge-sla-scorecard.sh`
+- `test-merges-24h-canonical.sh`
+- `test-mesh-worker.sh`
+- `test-meta-032-test-lag-guard.sh`
+- `test-meta-040-effectiveness-audit.sh`
+- `test-meta-gap-routing.sh`
+- `test-mission-122-build-storm-autosize.sh`
+- `test-mission-132-worker-budget-integration.sh`
+- `test-mission-doc-keeper.sh`
+- `test-mission-grade.sh`
+- `test-mission-scoreboard-deploy-freshness-sla.sh`
+- `test-mission-scoreboard-modes.sh`
+- `test-mission-scoreboard-zerotouch.sh`
+- `test-model-class-routing.sh`
+- `test-model-ship-rate.sh`
+- `test-multi-machine-lease.sh`
+- `test-nats-merge-lock-cas.sh`
+- `test-nba-dispatch-beat.sh`
+- `test-needs-judgment-panel.sh`
+- `test-net-probe.sh`
+- `test-next-best-action-pane-coverage.sh`
+- `test-nightly-gap-curate.sh`
+- `test-no-deleted-shell-refs.sh`
+- `test-no-escalation-doctrine.sh`
+- `test-no-inline-ambient-printf-fixture.sh`
+- `test-no-new-coord-shell-fixture.sh`
+- `test-no-new-coord-shell.sh`
+- `test-no-new-shell-tests-for-rust-fixture.sh`
+- `test-no-new-shell-tests-for-rust.sh`
+- `test-no-outcomeless-p1-filers.sh`
+- `test-no-ship-loop-detector.sh`
+- `test-no-ship-with-free.sh`
+- `test-node-capacity-plan.sh`
+- `test-node-converge.sh`
+- `test-node-install-async-phases.sh`
+- `test-node-install-batphone-token.sh`
+- `test-node-install-binary-provenance.sh`
+- `test-node-install-bootstrap-creds.sh`
+- `test-node-install-control-plane-mode.sh`
+- `test-node-install-creds-file.sh`
+- `test-node-install-organs-phase.sh`
+- `test-node-main-sync.sh`
+- `test-node-orchestrator-cargo-jobs-cap.sh`
+- `test-node-orchestrator-max-throttle.sh`
+- `test-node-orchestrator-svc-heal.sh`
+- `test-node-refresh-artifact-ancestor.sh`
+- `test-node-refresh-artifact-pull.sh`
+- `test-node-refresh-gh-token-export.sh`
+- `test-node-refresh-green-main.sh`
+- `test-node-refresh-install-path.sh`
+- `test-node-refresh-red-run-skip.sh`
+- `test-node-role-assign.sh`
+- `test-node-script-host-refresh.sh`
+- `test-oauth-token-refresh.sh`
+- `test-obs-alerting.sh`
+- `test-obs-budget-guard.sh`
+- `test-obs-budget-warn-default.sh`
+- `test-offnode-deadman.sh`
+- `test-onboard-agentic-scout.sh`
+- `test-onboard-clone-auth.sh`
+- `test-onboard-scout-scheduler.sh`
+- `test-operational-runbooks.sh`
+- `test-operator-attention-dedup.sh`
+- `test-operator-digest.sh`
+- `test-operator-page-aliveness-gate.sh`
+- `test-operator-page.sh`
+- `test-operator-pages-24h-canonical.sh`
+- `test-operator-recall-autonomy-halt.sh`
+- `test-operator-recall-channel.sh`
+- `test-operator-recall-queue-saturated.sh`
+- `test-operator-recall-zero-ship-active.sh`
+- `test-operator-rules.sh`
+- `test-opus-curator-handles-jq-fail.sh`
+- `test-opus-event-driven.sh`
+- `test-opus-message-inbox-hook.sh`
+- `test-opus-shepherd-playbook.sh`
+- `test-opus-slot-tracker.sh`
+- `test-oracle-event-trigger.sh`
+- `test-oracle-refresh.sh`
+- `test-orchestrate-llm-timeout.sh`
+- `test-orchestrate-resume.sh`
+- `test-orchestrator-agent-md.sh`
+- `test-organ-deploy.sh`
+- `test-organ-manifest-platforms-field.sh`
+- `test-organ-oneshot-timeout.sh`
+- `test-organ-reconcile.sh`
+- `test-organ-success-verifier.sh`
+- `test-organ-watchdog.sh`
+- `test-orphan-allowlist-daemon.sh`
+- `test-orphan-closer-immunity.sh`
+- `test-orphan-closer-pr-diff-check.sh`
+- `test-orphan-pr-closer-evidence.sh`
+- `test-orphan-pr-closer-health-check.sh`
+- `test-outcome-verify-heal-cold-start.sh`
+- `test-outcomes-delivered.sh`
+- `test-paramedic-ci-rescue.sh`
+- `test-paramedic-leader-failover.sh`
+- `test-patch-file-fallback.sh`
+- `test-path-filter-allowlist.sh`
+- `test-pattern-fix-dispatcher.sh`
+- `test-phantom-gap-refs.sh`
+- `test-pi-mesh-installer-shape.sh`
+- `test-pixel-worker-selfheal.sh`
+- `test-planner-ac-parsing.sh`
+- `test-poll-cross-workflow-checks.sh`
+- `test-posse-systemd.sh`
+- `test-posse-watchdog.sh`
+- `test-post-integration-prune.sh`
+- `test-post-push-integrity.sh`
+- `test-posttooluse-inbox-poll.sh`
+- `test-pr-auto-rearm.sh`
+- `test-pr-auto-rebase-blocked.sh`
+- `test-pr-auto-rebase-concurrency.sh`
+- `test-pr-auto-rebase-falsepositive.sh`
+- `test-pr-auto-rebase-local-fallback.sh`
+- `test-pr-blame-file.sh`
+- `test-pr-book.sh`
+- `test-pr-create-gate.sh`
+- `test-pr-dedup.sh`
+- `test-pr-fmt-shepherd.sh`
+- `test-pr-gate-fail-lane.sh`
+- `test-pr-nudge.sh`
+- `test-pr-pulse-consumer.sh`
+- `test-pr-queue-processor.sh`
+- `test-pr-repair-rebase.sh`
+- `test-pr-rescue-cache-migration.sh`
+- `test-pr-rescue-fork-aware.sh`
+- `test-pr-rescue-procedure-doc.sh`
+- `test-pr-rescue-rest-only.sh`
+- `test-pr-rescue.sh`
+- `test-pr-scope-body-mention.sh`
+- `test-pr-shepherd-arm-trust-guard.sh`
+- `test-pr-shepherd-daemon-skeleton.sh`
+- `test-pr-shepherd-daemon.sh`
+- `test-pr-shepherd-vote-request.sh`
+- `test-pr-stuck-announcer.sh`
+- `test-pr-title-drift-detector.sh`
+- `test-pr-triage-bot-rerun.sh`
+- `test-pr-triage.sh`
+- `test-pre-commit-claim-gap-match.sh`
+- `test-pre-push-actionlint-guard.sh`
+- `test-pre-push-bot-merge-bypass.sh`
+- `test-pre-push-cargo-test-timeout.sh`
+- `test-pre-push-fixture-drop.sh`
+- `test-pre-push-fmt-gate.sh`
+- `test-pre-push-hard-timeout.sh`
+- `test-pre-push-head-stability.sh`
+- `test-pre-push-hook-no-sigpipe.sh`
+- `test-pre-push-lint-gate.sh`
+- `test-pre-push-multi-claim.sh`
+- `test-pre-push-nextest-runner.sh`
+- `test-precommit-cargo-check-skip.sh`
+- `test-precommit-gate-budget.sh`
+- `test-precommit-pyyaml-required.sh`
+- `test-preflight-acgate-gate.sh`
+- `test-preflight-cache.sh`
+- `test-preflight-ci-agreement.sh`
+- `test-preflight-ci-parity-synthetic-pr.sh`
+- `test-preflight-coverage.sh`
+- `test-preflight-docsdelta-gate.sh`
+- `test-preflight-envvars-gate.sh`
+- `test-preflight-gapsint-gate.sh`
+- `test-preflight-mdlinks-gate.sh`
+- `test-preflight-registry-gate.sh`
+- `test-preflight-rust-scope.sh`
+- `test-preflight-scope.sh`
+- `test-preflight-subcmdhelp-gate.sh`
+- `test-preflight-vs-origin-main.sh`
+- `test-prepush-bypass-audit.sh`
+- `test-prepush-gap-check-own-claim.sh`
+- `test-prepush-rust-env-immunity.sh`
+- `test-prepush-sccache-probe.sh`
+- `test-prepush-skip-args-unbound.sh`
+- `test-prepush-test-timeout.sh`
+- `test-prereg-required-for-cognition.sh`
+- `test-preregistration-guard.sh`
+- `test-primitive-indexing.sh`
+- `test-process-organ-check.sh`
+- `test-process-organ-heal.sh`
+- `test-product-054-cascade-toggle.sh`
+- `test-product-056-vscode-scaffold.sh`
+- `test-product-059-agents-board.sh`
+- `test-product-094-notifications.sh`
+- `test-provenance-stamp.sh`
+- `test-provider-chain.sh`
+- `test-provider-model-class-manifest.sh`
+- `test-provision-chumpd-host.sh`
+- `test-prune-worktrees-launchd.sh`
+- `test-publish-guard-report-only.sh`
+- `test-pwa-acp-deeplinks.sh`
+- `test-pwa-audit-view.sh`
+- `test-pwa-canvas-cadence.sh`
+- `test-pwa-config-dials.sh`
+- `test-pwa-coord-view.sh`
+- `test-pwa-daily-brief.sh`
+- `test-pwa-error-ux.sh`
+- `test-pwa-first-run-wizard.sh`
+- `test-pwa-fleet-health.sh`
+- `test-pwa-fleet-sidebar.sh`
+- `test-pwa-gap-actions.sh`
+- `test-pwa-gap-search.sh`
+- `test-pwa-impact.sh`
+- `test-pwa-index-merge-driver.sh`
+- `test-pwa-inject-hint.sh`
+- `test-pwa-network-audit.sh`
+- `test-pwa-operator-attention.sh`
+- `test-pwa-orchestrator-sessions-view.sh`
+- `test-pwa-pr-actions.sh`
+- `test-pwa-pr-diff.sh`
+- `test-pwa-pr-list.sh`
+- `test-pwa-prefs.sh`
+- `test-pwa-roadmap-view.sh`
+- `test-pwa-sse-consumer.sh`
+- `test-pwa-state-persistence.sh`
+- `test-pwa-tool-approval-tray.sh`
+- `test-pwa-verb-nav.sh`
+- `test-pwa-worker-routing.sh`
+- `test-quartermaster-audit-loop.sh`
+- `test-quartermaster-auto-fixers.sh`
+- `test-queue-driver-cache-migration.sh`
+- `test-queue-driver-iter-no-repeat.sh`
+- `test-queue-driver-launchd-install.sh`
+- `test-queue-driver-push-rescue.sh`
+- `test-queue-panel-embeds.sh`
+- `test-queue-stagnation-monitor.sh`
+- `test-queue-tender.sh`
+- `test-r2-sccache-lifecycle.sh`
+- `test-race-control.sh`
+- `test-readme-links.sh`
+- `test-reality-check.sh`
+- `test-reap-orphan-fg-detection.sh`
+- `test-reaper-bot-merge-protection.sh`
+- `test-reaper-heartbeat-protection.sh`
+- `test-reaper-instrumentation.sh`
+- `test-reaper-resurrect.sh`
+- `test-reaper-watchdog-self-grade.sh`
+- `test-recovery-queue-checkpoint.sh`
+- `test-recovery-queue.sh`
+- `test-recurring-gap-pattern-detector.sh`
+- `test-refresh-runner-binary-almanac.sh`
+- `test-release-note-voice-lint.sh`
+- `test-render-organ-roster.sh`
+- `test-repo-health-warnings-only.sh`
+- `test-repo-var-audit.sh`
+- `test-required-check-health.sh`
+- `test-required-checks-self-audit.sh`
+- `test-rescue-stale-pr.sh`
+- `test-research032-workflows-schema.sh`
+- `test-resilient-1007-model-ladder-escalation.sh`
+- `test-resilient-1009-model-ladder-single-source.sh`
+- `test-resilient-1013-batphone-worker.sh`
+- `test-resilient-1016-muscle-self-clean.sh`
+- `test-resilient-1035-node-organ-reconcile.sh`
+- `test-resilient-1036-deploy-path-self-sustaining.sh`
+- `test-resilient-1053-self-healer-heartbeat.sh`
+- `test-resilient-1058-gap-store-organ.sh`
+- `test-resilient-1082-farmer-heartbeat-reap.sh`
+- `test-resilient-1083-muscle-worker-survives-reconcile.sh`
+- `test-resilient-1090-muscle-role-rollout.sh`
+- `test-resilient-1198-untracked-collision-cleanup.sh`
+- `test-resilient-1199-merged-reaches-node.sh`
+- `test-resilient-1209-organ-merge-install-fire.sh`
+- `test-resilient-1215-converge-reconciles-organs.sh`
+- `test-resilient-1217-converge-stays-on-main.sh`
+- `test-resilient-1229-worker-per-cycle-log-mkdir.sh`
+- `test-resilient-1230-duty-officer-persistent-escalation.sh`
+- `test-resilient-1258-watch-sentinel-timer-driven.sh`
+- `test-resilient-1295-user-bus-environment.sh`
+- `test-resilient-1327-organ-reconcile-root.sh`
+- `test-resilient-1436-cj-core-organs-install.sh`
+- `test-resilient-1443-sub-auth-precheck.sh`
+- `test-resilient-1449-ship-groundtruth.sh`
+- `test-resilient-1451-title-fallback.sh`
+- `test-resilient-1563-merge-pipeline-driver.sh`
+- `test-resilient-1568-binary-converge.sh`
+- `test-resilient-1571-user-scope-no-user.sh`
+- `test-resilient-1584-offense-ledger.sh`
+- `test-resilient-1585-ship-evidence-hwm.sh`
+- `test-resilient-1590-disk-selfheal.sh`
+- `test-resilient-1592-r2-typed-fk.sh`
+- `test-resilient-206-free-tier-provider-preserved.sh`
+- `test-resilient-259-harness-doc-injection.sh`
+- `test-resilient-320-role-aware-installer.sh`
+- `test-resilient-418-cascade-unblock-cj.sh`
+- `test-resilient-575-sub-fallback.sh`
+- `test-resilient-597-suppress-capability-artifact.sh`
+- `test-resilient-600-floor-config.sh`
+- `test-resilient-746-organ-role-reconcile.sh`
+- `test-retro-prompt.sh`
+- `test-review-handoff-branch-diverged.sh`
+- `test-review-verdict-report.sh`
+- `test-reviewer-routing.sh`
+- `test-roadmap-from-vision-contract.sh`
+- `test-roadmap-inject.sh`
+- `test-roadmap-status-drift.sh`
+- `test-roadmap-status.sh`
+- `test-role-card-emit-and-query.sh`
+- `test-rot-reaper-fix-in-flight.sh`
+- `test-rot-reaper-resolve-first.sh`
+- `test-rot-reaper-systemic-red-hold.sh`
+- `test-rotate-sccache-r2-gh-only.sh`
+- `test-rotate-sccache-r2-token.sh`
+- `test-ruleset-snapshots.sh`
+- `test-run-fleet-backend-default.sh`
+- `test-run-fleet-credit-exhausted-ambient-kind.sh`
+- `test-run-fleet-error-classification.sh`
+- `test-run-fleet-no-orphan.sh`
+- `test-run-fleet-probe-404-not-auth-fail.sh`
+- `test-run-fleet-probe-retry.sh`
+- `test-run-local-ci.sh`
+- `test-runner-ghost-online-detection.sh`
+- `test-rust-aware-deploy.sh`
+- `test-rust-first-worktree-bypass.sh`
+- `test-rustfmt-parity.sh`
+- `test-safe-reopen-gap.sh`
+- `test-sandbox-discipline.sh`
+- `test-sccache-codegen-gating.sh`
+- `test-sccache-dir-selection.sh`
+- `test-sccache-hit-rate-gate.sh`
+- `test-sccache-reaper.sh`
+- `test-sccache-wired.sh`
+- `test-scope-check-subagent-enforce.sh`
+- `test-self-model.sh`
+- `test-self-sync-fleet.sh`
+- `test-semantic-lesson-retrieval.sh`
+- `test-server-survives-slow-endpoint.sh`
+- `test-session-end-outcome.sh`
+- `test-session-start-agent-pointer.sh`
+- `test-session-start-emit.sh`
+- `test-session-summary.sh`
+- `test-shared-service-gate.sh`
+- `test-shared-target-cache-reaper.sh`
+- `test-shared-target-phantom-ref.sh`
+- `test-silent-failure-tax.sh`
+- `test-silent-fleet-death.sh`
+- `test-slo-breach-dedupe.sh`
+- `test-spawn-worker-fleet.sh`
+- `test-sse-filter-and-regret.sh`
+- `test-stale-branch-reaper.sh`
+- `test-stale-claim-reaper-pid-liveness.sh`
+- `test-stale-lease-cleanup.sh`
+- `test-stale-main-guards.sh`
+- `test-stale-pr-reaper-retire-conflicting.sh`
+- `test-stale-worktree-reaper-broad-scan.sh`
+- `test-stale-worktree-reaper-safety.sh`
+- `test-stale-worktree-reaper-wip-safety.sh`
+- `test-stall-detector-build-aware.sh`
+- `test-status-done-requires-closed-pr.sh`
+- `test-stranded-work-detector.sh`
+- `test-strict-mode.sh`
+- `test-stuck-pr-filer-shared-blocker.sh`
+- `test-stuck-pr-filer.sh`
+- `test-subagent-budget.sh`
+- `test-subagent-epilogue-budget-language.sh`
+- `test-subagent-shipping-epilogue.sh`
+- `test-subprocess-auth-smoke.sh`
+- `test-svc-abstraction.sh`
+- `test-system-invariants-fixtures.sh`
+- `test-system-invariants-launchd.sh`
+- `test-systematizer-smoke.sh`
+- `test-systemic-red-detector.sh`
+- `test-take-both-resolver.sh`
+- `test-target-dir-reaper.sh`
+- `test-target-reaper-cold-build-safety.sh`
+- `test-target-reaper-critical-mode.sh`
+- `test-tauri-filter-no-ciyml.sh`
+- `test-the-path-exists.sh`
+- `test-tmux-kill-cleanup.sh`
+- `test-token-anomaly.sh`
+- `test-token-attribution-on-wedge.sh`
+- `test-toolchain-ratchet-detector.sh`
+- `test-transient-retrigger.sh`
+- `test-trek-gatekeeping.sh`
+- `test-triage-cargo-test-failure.sh`
+- `test-trunk-sentinel.sh`
+- `test-unknown-subcommand-guard.sh`
+- `test-urgent-inbox-poll-loop.sh`
+- `test-vector6-schema.sh`
+- `test-vector7-swarm.sh`
+- `test-vital-signs-capability-lifecycle.sh`
+- `test-vital-signs-relocated-collector.sh`
+- `test-vital-signs-verified-working.sh`
+- `test-voice-banlist-self-fixture.sh`
+- `test-voice-banlist-self.sh`
+- `test-voice-subcommand.sh`
+- `test-vscode-chat-panel.sh`
+- `test-vscode-tool-approval.sh`
+- `test-waste-spike-pause.sh`
+- `test-waste-tally-by-domain.sh`
+- `test-waste-tally-tokens.sh`
+- `test-webhook-cache-write.sh`
+- `test-webhook-gap-flip.sh`
+- `test-webhook-health-endpoint.sh`
+- `test-webhook-pr-merge-prune.sh`
+- `test-webhook-receiver.sh`
+- `test-webpush-escalation.sh`
+- `test-wedge-fixer-dispatch.sh`
+- `test-wedge-remediation-real.sh`
+- `test-wedge-state-machine.sh`
+- `test-wizard-daemon-dispatch-outcome.sh`
+- `test-wizard-daemon-dry-run-readonly.sh`
+- `test-wizard-daemon-merge-state-parse.sh`
+- `test-wizard-daemon-plist-dedupe.sh`
+- `test-wizard-daemon.sh`
+- `test-worker-launcher-template.sh`
+- `test-worker-lock-cleanup.sh`
+- `test-worker-oauth-unset.sh`
+- `test-worker-p0-mission-model-override.sh`
+- `test-worker-policy-env.sh`
+- `test-worker-prelude-reads-floor.sh`
+- `test-worker-timeout-kill-after.sh`
+- `test-worker-timeout-multiplier.sh`
+- `test-worktree-build-cache.sh`
+- `test-worktree-gitdir-race.sh`
+- `test-worktree-iter-lib.sh`
+- `test-xml-tool-adapter.sh`
+- `test-yaml-only-pr-guard.sh`
+- `test-zero-waste-014-ambient-only.sh`
 
-## skipped or not run yet (1600)
+## skipped or not run yet (17)
 
 <details><summary>list</summary>
 
-- `test-a2a-always-on.sh` (unwired, not_run)
-- `test-a2a-capability-registry.sh` (unwired, not_run)
-- `test-a2a-consensus-e2e.sh` (unwired, not_run)
-- `test-a2a-dead-letter.sh` (unwired, not_run)
-- `test-a2a-delivery-receipts.sh` (unwired, not_run)
-- `test-a2a-inbox-routing.sh` (unwired, not_run)
-- `test-a2a-layer1a-chaos.sh` (unwired, not_run)
-- `test-a2a-mailbox.sh` (unwired, not_run)
-- `test-a2a-roadmap-coord.sh` (unwired, not_run)
-- `test-a2a-role-routing.sh` (unwired, not_run)
-- `test-a2a-rpc-bash-v0.sh` (unwired, not_run)
-- `test-a2a-rpc-observability.sh` (wired, not_run)
-- `test-ac-completeness-gate.sh` (unwired, not_run)
-- `test-ac-coverage-gate.sh` (unwired, not_run)
-- `test-acp-real-clients.sh` (wired, not_run)
-- `test-acp-smoke.sh` (wired, not_run)
-- `test-admin-merge-burst.sh` (unwired, not_run)
-- `test-admin-merge-cycle-noise-class.sh` (unwired, not_run)
-- `test-admit-ceiling.sh` (wired, not_run)
-- `test-advisory-merge.sh` (wired, not_run)
-- `test-agent-api-schema.sh` (unwired, not_run)
-- `test-agent-default-prefix.sh` (unwired, not_run)
-- `test-agent-dispatch-guardrail.sh` (unwired, not_run)
-- `test-agent-session-id.sh` (unwired, not_run)
-- `test-agent-throughput.sh` (wired, not_run)
-- `test-agents-md-injection.sh` (wired, not_run)
-- `test-aggregator-verified.sh` (wired, not_run)
-- `test-alert-classifier.sh` (wired, not_run)
-- `test-all-gates-force-fire.sh` (unwired, not_run)
-- `test-almanac-audit.sh` (unwired, not_run)
-- `test-almanac-census-summarize-pct-enforcement.sh` (unwired, not_run)
-- `test-almanac-census.sh` (unwired, not_run)
-- `test-almanac-liveness-reindex.sh` (wired, not_run)
-- `test-almanac-refresh-guard.sh` (unwired, not_run)
-- `test-almanac-summarize-watchdog.sh` (wired, not_run)
-- `test-almanac-zero-hits.sh` (unwired, not_run)
-- `test-ambient-context-inject-leases.sh` (unwired, not_run)
-- `test-ambient-emit-coverage.sh` (unwired, not_run)
-- `test-ambient-emit-session-persist.sh` (unwired, not_run)
-- `test-ambient-env-serialization.sh` (unwired, not_run)
-- `test-ambient-glance-pr-cache-ttl.sh` (unwired, not_run)
-- `test-ambient-glance.sh` (unwired, not_run)
-- `test-ambient-kind-schema.sh` (unwired, not_run)
-- `test-ambient-react-cooldown.sh` (unwired, not_run)
-- `test-ambient-rotate.sh` (unwired, not_run)
-- `test-ambient-rotation.sh` (unwired, not_run)
-- `test-ambient-schema-consistency.sh` (unwired, not_run)
-- `test-ambient-schema.sh` (wired, not_run)
-- `test-ambient-viewer.sh` (unwired, not_run)
-- `test-apex-watchdog.sh` (unwired, not_run)
-- `test-api-ambient-emit.sh` (unwired, not_run)
-- `test-api-broadcast.sh` (unwired, not_run)
-- `test-api-chat-cost-kill.sh` (wired, not_run)
-- `test-api-cost-leaderboard.sh` (wired, not_run)
-- `test-api-dashboard-shape.sh` (unwired, not_run)
-- `test-api-fleet-health.sh` (unwired, not_run)
-- `test-api-fleet-status-perf.sh` (unwired, not_run)
-- `test-api-gap-queue-perf.sh` (unwired, not_run)
-- `test-api-gap-queue-shape.sh` (wired, not_run)
-- `test-api-health-pillars-timeout.sh` (unwired, not_run)
-- `test-api-inbox.sh` (unwired, not_run)
-- `test-api-rate-limit-gates.sh` (unwired, not_run)
-- `test-api-release-expired.sh` (unwired, not_run)
-- `test-api-repo-init.sh` (unwired, not_run)
-- `test-api-roadmap.sh` (unwired, not_run)
-- `test-api-stack-status-rate-limit.sh` (unwired, not_run)
-- `test-arm-auto-merge.sh` (unwired, not_run)
-- `test-arm-policy.sh` (unwired, not_run)
-- `test-armed-pr-rebaser-orphan-adopt.sh` (unwired, not_run)
-- `test-armed-pr-rebaser-preserve-manual-fix.sh` (unwired, not_run)
-- `test-ast-crawler-bash.sh` (unwired, not_run)
-- `test-ast-crawler.sh` (unwired, not_run)
-- `test-atomic-binary-swap.sh` (unwired, not_run)
-- `test-atomic-claim-collision.sh` (unwired, not_run)
-- `test-attribution-portable.sh` (wired, not_run)
-- `test-audit-allowlist-staleness.sh` (unwired, not_run)
-- `test-audit-gap-state-drift.sh` (unwired, not_run)
-- `test-audit-job-decomposition.sh` (unwired, not_run)
-- `test-audit-log.sh` (wired, not_run)
-- `test-audit-matrix-shape.sh` (unwired, not_run)
-- `test-audit-opencode-identity-residue.sh` (unwired, not_run)
-- `test-audit-shard-coverage.sh` (unwired, not_run)
-- `test-audit-stale-worktrees.sh` (unwired, not_run)
-- `test-audit-step-isolation.sh` (wired, not_run)
-- `test-audit-workflow-not-cancellable.sh` (wired, not_run)
-- `test-auth-freshness-watchdog.sh` (unwired, not_run)
-- `test-auth-status.sh` (wired, not_run)
-- `test-auth-storm-auto-recovery.sh` (unwired, not_run)
-- `test-auth-tier-audit.sh` (unwired, not_run)
-- `test-author-time-helpers.sh` (unwired, not_run)
-- `test-auto-adopt.sh` (unwired, not_run)
-- `test-auto-arm-sweeper.sh` (wired, not_run)
-- `test-auto-deploy-canary.sh` (unwired, not_run)
-- `test-auto-deploy-worker-verify.sh` (unwired, not_run)
-- `test-auto-flip-on-merge.sh` (unwired, not_run)
-- `test-auto-merge-arm-watcher.sh` (unwired, not_run)
-- `test-auto-merge-armer-red-head.sh` (wired, not_run)
-- `test-auto-merge-policy.sh` (unwired, not_run)
-- `test-auto-merge-rearm-daemon.sh` (unwired, not_run)
-- `test-auto-rerun-out-of-scope.sh` (unwired, not_run)
-- `test-auto-resolve-add-both.sh` (unwired, not_run)
-- `test-auto-widen.sh` (unwired, not_run)
-- `test-autodoc-envvars.sh` (unwired, not_run)
-- `test-autonomous-ship-rate.sh` (wired, not_run)
-- `test-autopilot-unified.sh` (unwired, not_run)
-- `test-autoscale-decisions.sh` (wired, not_run)
-- `test-back-pressure-hysteresis.sh` (wired, not_run)
-- `test-backfill-gap-id-regex.sh` (unwired, not_run)
-- `test-backlog-sync-reader-dirty-tree.sh` (wired, not_run)
-- `test-backlog-sync-registry-remote.sh` (wired, not_run)
-- `test-barnacle-buster.sh` (unwired, not_run)
-- `test-bash-portability-lint.sh` (wired, not_run)
-- `test-bin-bloat-guard.sh` (unwired, not_run)
-- `test-binary-cache-event-driven.sh` (unwired, not_run)
-- `test-binary-refresh.sh` (unwired, not_run)
-- `test-blame-bot.sh` (unwired, not_run)
-- `test-board-cycle-escalate.sh` (unwired, not_run)
-- `test-board-vitals.sh` (unwired, not_run)
-- `test-bom-old-manifest-regression.sh` (wired, not_run)
-- `test-book-sync-guard.sh` (wired, not_run)
-- `test-bootstrap-auto-install.sh` (wired, not_run)
-- `test-bootstrap-manifest-coverage.sh` (unwired, not_run)
-- `test-bootstrap-manifest-organ-pointers.sh` (unwired, not_run)
-- `test-bootstrap-smoke.sh` (wired, not_run)
-- `test-bot-autonomous.sh` (wired, not_run)
-- `test-bot-merge-already-claimed.sh` (unwired, not_run)
-- `test-bot-merge-arm-ship-order.sh` (wired, not_run)
-- `test-bot-merge-auto-close.sh` (wired, not_run)
-- `test-bot-merge-auto-commit-head-race.sh` (wired, not_run)
-- `test-bot-merge-auto-commit-modified.sh` (unwired, not_run)
-- `test-bot-merge-autoclose-no-false-uncaught.sh` (unwired, not_run)
-- `test-bot-merge-bench-mode.sh` (unwired, not_run)
-- `test-bot-merge-chump-doctor-wrap.sh` (unwired, not_run)
-- `test-bot-merge-ci-shell-output.sh` (unwired, not_run)
-- `test-bot-merge-circuit-breaker.sh` (unwired, not_run)
-- `test-bot-merge-conflict-integration.sh` (wired, not_run)
-- `test-bot-merge-conflict-wiring.sh` (wired, not_run)
-- `test-bot-merge-doc-only-classifier.sh` (unwired, not_run)
-- `test-bot-merge-doctor-preflight.sh` (unwired, not_run)
-- `test-bot-merge-done-emit.sh` (unwired, not_run)
-- `test-bot-merge-dup-pr.sh` (unwired, not_run)
-- `test-bot-merge-err-trap-loud-fail.sh` (unwired, not_run)
-- `test-bot-merge-exit-codes.sh` (wired, not_run)
-- `test-bot-merge-exit-phases.sh` (wired, not_run)
-- `test-bot-merge-expired-lease-identity.sh` (wired, not_run)
-- `test-bot-merge-fast-flag.sh` (unwired, not_run)
-- `test-bot-merge-gap-auto-derive.sh` (unwired, not_run)
-- `test-bot-merge-gap-fatal.sh` (unwired, not_run)
-- `test-bot-merge-graphql-preflight.sh` (wired, not_run)
-- `test-bot-merge-graphql-wedge.sh` (unwired, not_run)
-- `test-bot-merge-grep-c-fix.sh` (unwired, not_run)
-- `test-bot-merge-hang-detection.sh` (unwired, not_run)
-- `test-bot-merge-heartbeat-step-label.sh` (unwired, not_run)
-- `test-bot-merge-heartbeat.sh` (unwired, not_run)
-- `test-bot-merge-hook-auto-install.sh` (unwired, not_run)
-- `test-bot-merge-hot-file-warning.sh` (unwired, not_run)
-- `test-bot-merge-integrator-systemd-health.sh` (unwired, not_run)
-- `test-bot-merge-liveness.sh` (unwired, not_run)
-- `test-bot-merge-locking.sh` (unwired, not_run)
-- `test-bot-merge-mode-failopen.sh` (unwired, not_run)
-- `test-bot-merge-mode-routing.sh` (unwired, not_run)
-- `test-bot-merge-no-amend-foreign.sh` (unwired, not_run)
-- `test-bot-merge-no-exit-144.sh` (unwired, not_run)
-- `test-bot-merge-no-local-build.sh` (unwired, not_run)
-- `test-bot-merge-paths-overflow.sh` (wired, not_run)
-- `test-bot-merge-pending-gap.sh` (unwired, not_run)
-- `test-bot-merge-phase-duration.sh` (unwired, not_run)
-- `test-bot-merge-policy-integration.sh` (unwired, not_run)
-- `test-bot-merge-pr-create-head.sh` (wired, not_run)
-- `test-bot-merge-pre-push-rebase.sh` (unwired, not_run)
-- `test-bot-merge-preflight.sh` (unwired, not_run)
-- `test-bot-merge-progress-file.sh` (unwired, not_run)
-- `test-bot-merge-rebase-before-test.sh` (unwired, not_run)
-- `test-bot-merge-recovery-pr-create.sh` (unwired, not_run)
-- `test-bot-merge-requires-gap.sh` (unwired, not_run)
-- `test-bot-merge-scratch-guard.sh` (unwired, not_run)
-- `test-bot-merge-shadow-plan.sh` (unwired, not_run)
-- `test-bot-merge-skip-rebase.sh` (unwired, not_run)
-- `test-bot-merge-stacked-rebase.sh` (wired, not_run)
-- `test-bot-merge-staging-only-guard.sh` (unwired, not_run)
-- `test-bot-merge-stale-gate.sh` (unwired, not_run)
-- `test-bot-merge-stale-lock.sh` (unwired, not_run)
-- `test-bot-merge-stall-fallthrough.sh` (unwired, not_run)
-- `test-bot-merge-stall-monitor.sh` (unwired, not_run)
-- `test-bot-merge-step-emits.sh` (unwired, not_run)
-- `test-bot-merge-steps-file.sh` (unwired, not_run)
-- `test-bot-merge-syntax.sh` (unwired, not_run)
-- `test-bot-merge-tee-log.sh` (unwired, not_run)
-- `test-bot-merge-verify-reaches.sh` (unwired, not_run)
-- `test-bot-merge-watchdog.sh` (wired, not_run)
-- `test-bot-merge-webhook-wait.sh` (unwired, not_run)
-- `test-bot-merge-wedge-live-check.sh` (unwired, not_run)
-- `test-bot-merge-zombie-reap.sh` (unwired, not_run)
-- `test-botmerge-circuit.sh` (unwired, not_run)
-- `test-botmerge-poisoned-branch.sh` (unwired, not_run)
-- `test-bounced-pr-detector.sh` (wired, not_run)
-- `test-brain-graph-renderer.sh` (unwired, not_run)
-- `test-branch-delete-on-merge.sh` (unwired, not_run)
-- `test-branch-protection-gate.sh` (wired, not_run)
-- `test-branch-reaper-emit.sh` (unwired, not_run)
-- `test-branch-reaper-patterns.sh` (unwired, not_run)
-- `test-branch-reaper.sh` (unwired, not_run)
-- `test-brand-tokens-schema.sh` (unwired, not_run)
-- `test-break-trunk-cascade.sh` (unwired, not_run)
-- `test-briefing.sh` (unwired, not_run)
-- `test-brier-score.sh` (unwired, not_run)
-- `test-broad-canary-coverage.sh` (wired, not_run)
-- `test-broadcast-feedback-fanout.sh` (unwired, not_run)
-- `test-broadcast-reply-to.sh` (unwired, not_run)
-- `test-broadcast-strict-schema.sh` (unwired, not_run)
-- `test-broadcast-urgency-routing.sh` (unwired, not_run)
-- `test-bug-fix-auto-promotion.sh` (unwired, not_run)
-- `test-bypass-frequency-audit.sh` (unwired, not_run)
-- `test-bypass-line-output-audit.sh` (wired, not_run)
-- `test-bypass-line-required.sh` (wired, not_run)
-- `test-bypass-trailer-validator.sh` (unwired, not_run)
-- `test-cache-cold-start-fill.sh` (unwired, not_run)
-- `test-cache-event-emission.sh` (wired, not_run)
-- `test-cache-mergestatestatus.sh` (wired, not_run)
-- `test-cache-n1-migration.sh` (unwired, not_run)
-- `test-cache-reconcile-launchd.sh` (unwired, not_run)
-- `test-calibration-brier-canonical.sh` (unwired, not_run)
-- `test-calibration-generic.sh` (unwired, not_run)
-- `test-capabilities-registry.sh` (wired, not_run)
-- `test-capability-cli.sh` (unwired, not_run)
-- `test-capability-drift-scan.sh` (unwired, not_run)
-- `test-capability-lifecycle.sh` (unwired, not_run)
-- `test-capability-publish.sh` (unwired, not_run)
-- `test-cargo-mutex-isolation.sh` (wired, not_run)
-- `test-cargo-path-discipline.sh` (unwired, not_run)
-- `test-cargo-sweep-gc.sh` (unwired, not_run)
-- `test-cargo-target-dir.sh` (unwired, not_run)
-- `test-cargo-target-isolation.sh` (unwired, not_run)
-- `test-cargo-target-reaper-root-orphan.sh` (unwired, not_run)
-- `test-cargo-target-reaper-runner-scope.sh` (unwired, not_run)
-- `test-cargo-target-reaper-scope.sh` (unwired, not_run)
-- `test-cargo-target-reaper-variant-quoting.sh` (unwired, not_run)
-- `test-cargo-target-reaper.sh` (wired, not_run)
-- `test-cargo-test-rerun-skip.sh` (unwired, not_run)
-- `test-cargo-test-tiered.sh` (unwired, not_run)
-- `test-cargo-tests-from-worktree.sh` (unwired, not_run)
-- `test-cartographer-smoke.sh` (unwired, not_run)
-- `test-cascade-all-exhausted-event.sh` (unwired, not_run)
-- `test-cascade-bandit-extended.sh` (unwired, not_run)
-- `test-cascade-cancellation-status-description.sh` (wired, not_run)
-- `test-cascade-cancellation.sh` (unwired, not_run)
-- `test-cascade-exhausted-retry.sh` (unwired, not_run)
-- `test-cascade-graceful-skip.sh` (unwired, not_run)
-- `test-cascade-max-slots.sh` (unwired, not_run)
-- `test-cascade-rebase-debounce.sh` (unwired, not_run)
-- `test-cascade-rebase-extended-paths.sh` (unwired, not_run)
-- `test-cascade-rebase-observability.sh` (wired, not_run)
-- `test-cascade-rebase-on-cargo.sh` (unwired, not_run)
-- `test-cascade-rebase-skip-redundant.sh` (unwired, not_run)
-- `test-cascade-trigger-paths.sh` (unwired, not_run)
-- `test-cascade-unblock.sh` (unwired, not_run)
-- `test-census-shrink-only.sh` (wired, not_run)
-- `test-ceo-driver.sh` (unwired, not_run)
-- `test-chairman-pulse.sh` (unwired, not_run)
-- `test-change-approval.sh` (wired, not_run)
-- `test-changes-job-self-hosted.sh` (wired, not_run)
-- `test-check-agent-roles-registered.sh` (wired, not_run)
-- `test-check-dead-env-vars-broken-pipe.sh` (unwired, not_run)
-- `test-check-pr-scope-title.sh` (unwired, not_run)
-- `test-check-runs-cache.sh` (unwired, not_run)
-- `test-checkout-sync.sh` (unwired, not_run)
-- `test-chump-bench.sh` (unwired, not_run)
-- `test-chump-bootstrap-rust.sh` (wired, not_run)
-- `test-chump-cargo-build-wrapper.sh` (unwired, not_run)
-- `test-chump-ci-image.sh` (unwired, not_run)
-- `test-chump-commit-auto-envvar.sh` (unwired, not_run)
-- `test-chump-commit-auto-fmt.sh` (unwired, not_run)
-- `test-chump-commit-auto-trailers.sh` (unwired, not_run)
-- `test-chump-commit-completes.sh` (unwired, not_run)
-- `test-chump-commit-mutex-fd-not-inherited.sh` (unwired, not_run)
-- `test-chump-config.sh` (unwired, not_run)
-- `test-chump-consensus-aggregator-daemon.sh` (unwired, not_run)
-- `test-chump-consensus-ask.sh` (unwired, not_run)
-- `test-chump-consensus-tally.sh` (unwired, not_run)
-- `test-chump-consensus.sh` (unwired, not_run)
-- `test-chump-cron-install.sh` (unwired, not_run)
-- `test-chump-curator-subscriber.sh` (unwired, not_run)
-- `test-chump-dashboard-tui.sh` (unwired, not_run)
-- `test-chump-demo-smoke.sh` (wired, not_run)
-- `test-chump-doctor-exit-code.sh` (unwired, not_run)
-- `test-chump-doctor-probe-cascade-ratelimit.sh` (unwired, not_run)
-- `test-chump-doctor-probe-resources.sh` (unwired, not_run)
-- `test-chump-farmer-run-path.sh` (wired, not_run)
-- `test-chump-fleet-cli.sh` (wired, not_run)
-- `test-chump-fleet-daemon.sh` (unwired, not_run)
-- `test-chump-fleet-restart.sh` (unwired, not_run)
-- `test-chump-fleet-subcommand.sh` (unwired, not_run)
-- `test-chump-gap-reserve-acceptance-criteria.sh` (wired, not_run)
-- `test-chump-gap-reserve-evidence.sh` (unwired, not_run)
-- `test-chump-gap-set-roundtrip.sh` (unwired, not_run)
-- `test-chump-gen-smoke.sh` (unwired, not_run)
-- `test-chump-gh-subprocess-auth.sh` (unwired, not_run)
-- `test-chump-health.sh` (unwired, not_run)
-- `test-chump-improve.sh` (wired, not_run)
-- `test-chump-inbox-read.sh` (unwired, not_run)
-- `test-chump-init-clean-machine.sh` (wired, not_run)
-- `test-chump-mcp-list.sh` (unwired, not_run)
-- `test-chump-outcome.sh` (unwired, not_run)
-- `test-chump-pe-suite-demo.sh` (unwired, not_run)
-- `test-chump-pitch.sh` (unwired, not_run)
-- `test-chump-planner-rank.sh` (unwired, not_run)
-- `test-chump-playbook-freshness.sh` (unwired, not_run)
-- `test-chump-rebase-and-push.sh` (unwired, not_run)
-- `test-chump-repos.sh` (wired, not_run)
-- `test-chump-revert.sh` (unwired, not_run)
-- `test-chump-scan.sh` (unwired, not_run)
-- `test-chump-shim-wedge.sh` (unwired, not_run)
-- `test-chump-ship-execute-retry.sh` (unwired, not_run)
-- `test-chump-ship-execute.sh` (unwired, not_run)
-- `test-chump-ship-manual.sh` (unwired, not_run)
-- `test-chump-ship-plan.sh` (unwired, not_run)
-- `test-chump-skill-cli.sh` (wired, not_run)
-- `test-chump-staleness-gate.sh` (unwired, not_run)
-- `test-chump-subcommand-help.sh` (wired, not_run)
-- `test-chump-test-sandbox.sh` (unwired, not_run)
-- `test-chump-upgrade-detection.sh` (unwired, not_run)
-- `test-chump-vote.sh` (unwired, not_run)
-- `test-chump-worker-rust.sh` (unwired, not_run)
-- `test-chumpd-worker-sandbox.sh` (unwired, not_run)
-- `test-chumpd.sh` (unwired, not_run)
-- `test-ci-audit-loop.sh` (wired, not_run)
-- `test-ci-concurrency-group-key.sh` (wired, not_run)
-- `test-ci-fixture-coupling.sh` (unwired, not_run)
-- `test-ci-flake-rerun.sh` (wired, not_run)
-- `test-ci-fleet-health-sweep.sh` (unwired, not_run)
-- `test-ci-health-gate.sh` (unwired, not_run)
-- `test-ci-health-weekly.sh` (unwired, not_run)
-- `test-ci-heavy-jobs-cross-platform.sh` (wired, not_run)
-- `test-ci-lesson-propagation.sh` (unwired, not_run)
-- `test-ci-pass-rate-namespaced.sh` (unwired, not_run)
-- `test-ci-qa-score.sh` (unwired, not_run)
-- `test-ci-self-hosted-migration.sh` (unwired, not_run)
-- `test-ci-yml-add-row-adjacent.sh` (unwired, not_run)
-- `test-ci-yml-merge-driver.sh` (unwired, not_run)
-- `test-circuit-breaker.sh` (unwired, not_run)
-- `test-claim-branch-mismatch.sh` (unwired, not_run)
-- `test-claim-diff-collision.sh` (unwired, not_run)
-- `test-claim-force-recover-wip.sh` (unwired, not_run)
-- `test-claim-fuzzy-match.sh` (wired, not_run)
-- `test-claim-hot-file-overlap.sh` (unwired, not_run)
-- `test-claim-import-similarity-nonfatal.sh` (wired, not_run)
-- `test-claim-intent-gate.sh` (unwired, not_run)
-- `test-claim-lint.sh` (unwired, not_run)
-- `test-claim-main-health-gate.sh` (unwired, not_run)
-- `test-claim-mode.sh` (wired, not_run)
-- `test-claim-nugget-prefetch.sh` (unwired, not_run)
-- `test-claim-open-pr-abort.sh` (unwired, not_run)
-- `test-claim-pre-pr-check.sh` (unwired, not_run)
-- `test-claim-redirect-on-red.sh` (unwired, not_run)
-- `test-classify-incident.sh` (unwired, not_run)
-- `test-claude-gotchas-expanded.sh` (unwired, not_run)
-- `test-claude-reaper.sh` (wired, not_run)
-- `test-claude-retry.sh` (unwired, not_run)
-- `test-claude-tmp-cleanup.sh` (unwired, not_run)
-- `test-cli-aliases.sh` (wired, not_run)
-- `test-cli-arg-validation.sh` (wired, not_run)
-- `test-cli-exit-codes.sh` (wired, not_run)
-- `test-cli-fleet-coord.sh` (wired, not_run)
-- `test-cli-help-regression.sh` (wired, not_run)
-- `test-cli-help.sh` (wired, not_run)
-- `test-cli-integration.sh` (wired, not_run)
-- `test-cli-output-format.sh` (wired, not_run)
-- `test-cli-product-surface.sh` (wired, not_run)
-- `test-cli-surface-baseline.sh` (unwired, not_run)
-- `test-cli-version-debug.sh` (wired, not_run)
-- `test-close-gaps-from-commit-subjects.sh` (unwired, not_run)
-- `test-close-superseded-prs.sh` (unwired, not_run)
-- `test-closed-pr-guard.sh` (unwired, not_run)
-- `test-closed-pr-integrity.sh` (unwired, not_run)
-- `test-closer-batcher-filing-pr.sh` (unwired, not_run)
-- `test-cluster-auto-hold.sh` (unwired, not_run)
-- `test-cluster-detector-v2.sh` (unwired, not_run)
-- `test-cluster-detector.sh` (unwired, not_run)
-- `test-cockpit-action-endpoints.sh` (unwired, not_run)
-- `test-cockpit-counter-evidence-actions.sh` (unwired, not_run)
-- `test-cockpit-dispatch-gap.sh` (unwired, not_run)
-- `test-cockpit-release-leases.sh` (unwired, not_run)
-- `test-cockpit-repair-drift.sh` (unwired, not_run)
-- `test-cockpit-right-zone-actions.sh` (unwired, not_run)
-- `test-cockpit-shell.sh` (unwired, not_run)
-- `test-cockpit-wake-fleet.sh` (wired, not_run)
-- `test-code-reviewer-agent.sh` (unwired, not_run)
-- `test-code-reviewer-authskip.sh` (unwired, not_run)
-- `test-code-reviewer-grounding.sh` (unwired, not_run)
-- `test-code-reviewer-spirit.sh` (unwired, not_run)
-- `test-code-reviewer-tier1-gateway.sh` (unwired, not_run)
-- `test-cog-042-delta-reflection.sh` (unwired, not_run)
-- `test-cog-043-action-telemetry.sh` (wired, not_run)
-- `test-cog-046-embedding-retrieval.sh` (unwired, not_run)
-- `test-cog032-bench-schema.sh` (unwired, not_run)
-- `test-cog032-pilot-harness.sh` (unwired, not_run)
-- `test-cognition-ab.sh` (unwired, not_run)
-- `test-concurrency-primitives.sh` (unwired, not_run)
-- `test-configure-journald-cap.sh` (unwired, not_run)
-- `test-conflict-resolution-consumer.sh` (unwired, not_run)
-- `test-conflict-resolver-scenarios.sh` (wired, not_run)
-- `test-conflict-resolver.sh` (wired, not_run)
-- `test-consensus-merge-gate.sh` (unwired, not_run)
-- `test-consensus-pipeline-event-registry.sh` (unwired, not_run)
-- `test-consolidate-apply.sh` (unwired, not_run)
-- `test-content-bot-fleet-routing.sh` (unwired, not_run)
-- `test-content-bots-dispatcher.sh` (unwired, not_run)
-- `test-content-bots-manifests.sh` (unwired, not_run)
-- `test-content-bots-orchestrate.sh` (unwired, not_run)
-- `test-content-bots-toggle.sh` (unwired, not_run)
-- `test-contract-scan.sh` (unwired, not_run)
-- `test-cooldown-transient-sweep.sh` (unwired, not_run)
-- `test-coord-assign-bootstrap-manifest-entry.sh` (unwired, not_run)
-- `test-coord-assign-launchd.sh` (wired, not_run)
-- `test-coord-lock-lib.sh` (unwired, not_run)
-- `test-corr-id-lifecycle.sh` (unwired, not_run)
-- `test-corrective-keyword-exception.sh` (wired, not_run)
-- `test-cost-cap-watch.sh` (unwired, not_run)
-- `test-cost-enforcement.sh` (wired, not_run)
-- `test-cost-per-model.sh` (wired, not_run)
-- `test-cost-watch.sh` (wired, not_run)
-- `test-coupling-cost.sh` (wired, not_run)
-- `test-credential-lifecycle.sh` (wired, not_run)
-- `test-credential-pattern-guard.sh` (wired, not_run)
-- `test-credential-sanitization.sh` (unwired, not_run)
-- `test-credible-001-incremental.sh` (unwired, not_run)
-- `test-credible-006-coverage-setup.sh` (unwired, not_run)
-- `test-credible-049-operator-leverage.sh` (unwired, not_run)
-- `test-credible-055-tauri-shadow-input.sh` (unwired, not_run)
-- `test-credible-061-seed-consistency.sh` (wired, not_run)
-- `test-credible-1258-extract-gap-ids.sh` (unwired, not_run)
-- `test-credible-154-ship-evidence.sh` (unwired, not_run)
-- `test-credible-155.sh` (unwired, not_run)
-- `test-credible-801-doc-shell-autoclose-harness.sh` (unwired, not_run)
-- `test-credible-959-autoclose-else-branch-logging.sh` (unwired, not_run)
-- `test-critical-skew-restart.sh` (unwired, not_run)
-- `test-cron-log-watch.sh` (unwired, not_run)
-- `test-cross-daemon-coord.sh` (unwired, not_run)
-- `test-cross-judge-guard.sh` (wired, not_run)
-- `test-cross-pr-contract-triple-call-guard.sh` (unwired, not_run)
-- `test-cross-pr-contract.sh` (wired, not_run)
-- `test-css-token-discipline.sh` (wired, not_run)
-- `test-curator-agent-productization.sh` (unwired, not_run)
-- `test-curator-auto-decompose.sh` (wired, not_run)
-- `test-curator-decision-logging.sh` (wired, not_run)
-- `test-curator-files-tracking-gaps.sh` (unwired, not_run)
-- `test-curator-freshness.sh` (wired, not_run)
-- `test-curator-gap-ac-filled.sh` (unwired, not_run)
-- `test-curator-jit-scheduler.sh` (unwired, not_run)
-- `test-curator-launch-session-export.sh` (unwired, not_run)
-- `test-curator-launchd.sh` (unwired, not_run)
-- `test-curator-liveness.sh` (unwired, not_run)
-- `test-curator-p0-demotion.sh` (wired, not_run)
-- `test-curator-pause-armed.sh` (unwired, not_run)
-- `test-curator-pillar-no-overlap.sh` (wired, not_run)
-- `test-curator-sentinel.sh` (unwired, not_run)
-- `test-curator-supervisor.sh` (unwired, not_run)
-- `test-curator-wake.sh` (unwired, not_run)
-- `test-cursor-cli-integration.sh` (wired, not_run)
-- `test-custom-element-uniqueness.sh` (unwired, not_run)
-- `test-daemon-contract.sh` (unwired, not_run)
-- `test-daemon-exit-loop-watcher.sh` (unwired, not_run)
-- `test-daemon-silence-monitor.sh` (unwired, not_run)
-- `test-daemon-silent-noop.sh` (unwired, not_run)
-- `test-daily-self-productize.sh` (unwired, not_run)
-- `test-dead-grep-detector.sh` (unwired, not_run)
-- `test-decisions-endpoint.sh` (unwired, not_run)
-- `test-decompose-loop.sh` (unwired, not_run)
-- `test-decompose-uses-ast.sh` (unwired, not_run)
-- `test-deep-claim-collision.sh` (unwired, not_run)
-- `test-default-flip-guard.sh` (wired, not_run)
-- `test-definition-of-ready-gate.sh` (unwired, not_run)
-- `test-deliberator-loop.sh` (unwired, not_run)
-- `test-deliberator-tick-emits.sh` (wired, not_run)
-- `test-deploy-tool.sh` (unwired, not_run)
-- `test-detect-gap-failure-status-filter.sh` (unwired, not_run)
-- `test-digest-delivery-liveness.sh` (unwired, not_run)
-- `test-discord-curation.sh` (unwired, not_run)
-- `test-discord-gateway.sh` (wired, not_run)
-- `test-disk-audit.sh` (unwired, not_run)
-- `test-disk-critical-auto-action.sh` (unwired, not_run)
-- `test-disk-critical-reactor.sh` (unwired, not_run)
-- `test-disk-health-fixture.sh` (unwired, not_run)
-- `test-disk-inventory-daemon.sh` (unwired, not_run)
-- `test-disk-pressure-guard.sh` (unwired, not_run)
-- `test-disk-pressure-reaper.sh` (unwired, not_run)
-- `test-disk-reactor-halt-recovery.sh` (unwired, not_run)
-- `test-disk-reactor-shared-target-quiesce.sh` (unwired, not_run)
-- `test-disk-reclaim-actuator.sh` (unwired, not_run)
-- `test-dispatch-child-lifetime.sh` (wired, not_run)
-- `test-dispatch-hang-detection.sh` (unwired, not_run)
-- `test-dispatch-prompt-self-verify.sh` (unwired, not_run)
-- `test-dispatch-ship-session-id.sh` (wired, not_run)
-- `test-dispatch-subcommand-shadow.sh` (unwired, not_run)
-- `test-doc-155-changelog-roadmap-freshness.sh` (unwired, not_run)
-- `test-doc-cache-architecture-agents.sh` (unwired, not_run)
-- `test-doc-cache-architecture.sh` (unwired, not_run)
-- `test-doc-doctrine-sync.sh` (unwired, not_run)
-- `test-doc-freshness.sh` (wired, not_run)
-- `test-doc-only-clippy-skip.sh` (wired, not_run)
-- `test-docs-delta-commit-msg.sh` (wired, not_run)
-- `test-docs-delta-guard.sh` (wired, not_run)
-- `test-docs-delta-linked-worktree.sh` (unwired, not_run)
-- `test-docs-delta-worktree.sh` (unwired, not_run)
-- `test-doctrine-seam-finder.sh` (wired, not_run)
-- `test-doctrine-weave-detectors.sh` (wired, not_run)
-- `test-drift-flag-extract.sh` (unwired, not_run)
-- `test-drift-flag-triage.sh` (unwired, not_run)
-- `test-dup-close-guard.sh` (unwired, not_run)
-- `test-duplicate-pr-detector.sh` (unwired, not_run)
-- `test-durable-execution.sh` (unwired, not_run)
-- `test-duty-officer-judgment-tick.sh` (unwired, not_run)
-- `test-duty-officer-loop.sh` (unwired, not_run)
-- `test-edit-replay.sh` (wired, not_run)
-- `test-effect-verifier.sh` (unwired, not_run)
-- `test-effective-009-help-entrypoint.sh` (unwired, not_run)
-- `test-effective-010-completion.sh` (wired, not_run)
-- `test-effective-441-unverified-ship-escalation.sh` (unwired, not_run)
-- `test-emit-subagent-spawn.sh` (unwired, not_run)
-- `test-env-var-coverage.sh` (wired, not_run)
-- `test-error-message-doc-links.sh` (unwired, not_run)
-- `test-error-path-coverage.sh` (wired, not_run)
-- `test-escalation-tier.sh` (unwired, not_run)
-- `test-eval-098-harness-shape.sh` (unwired, not_run)
-- `test-eval-099-harness-shape.sh` (unwired, not_run)
-- `test-evangelist-smoke.sh` (unwired, not_run)
-- `test-event-registry-audit-regression.sh` (wired, not_run)
-- `test-event-registry-coverage.sh` (wired, not_run)
-- `test-event-registry-effect-metric-hook.sh` (unwired, not_run)
-- `test-event-registry-guard.sh` (wired, not_run)
-- `test-execute-gap-always-emits.sh` (unwired, not_run)
-- `test-execute-gap-external-routing.sh` (unwired, not_run)
-- `test-execute-gap-heartbeat.sh` (unwired, not_run)
-- `test-external-clone-reaper.sh` (unwired, not_run)
-- `test-external-collab-loop.sh` (unwired, not_run)
-- `test-external-repo-plist-installer.sh` (wired, not_run)
-- `test-external-repo-ship-emit.sh` (unwired, not_run)
-- `test-external-scan-reaper.sh` (unwired, not_run)
-- `test-external-verify-merge.sh` (wired, not_run)
-- `test-failure-mode-catalog.sh` (unwired, not_run)
-- `test-false-done-sweep.sh` (unwired, not_run)
-- `test-fanout-reference-flag.sh` (unwired, not_run)
-- `test-farmer-check-auth.sh` (unwired, not_run)
-- `test-farmer-dispatch-orphan-reaper.sh` (wired, not_run)
-- `test-farmer-drain-guard.sh` (unwired, not_run)
-- `test-farmer-stale-lease-heartbeat.sh` (wired, not_run)
-- `test-farmer.sh` (wired, not_run)
-- `test-feature-smoke-detects-silent-failure.sh` (unwired, not_run)
-- `test-feedback-curator.sh` (unwired, not_run)
-- `test-feedback-event.sh` (unwired, not_run)
-- `test-feedback-report.sh` (unwired, not_run)
-- `test-fix-trunk-signal-harness.sh` (unwired, not_run)
-- `test-flake-auto-quarantine.sh` (unwired, not_run)
-- `test-flake-autorerun.sh` (wired, not_run)
-- `test-flake-catalog-tracking.sh` (unwired, not_run)
-- `test-flake-detection-tagging.sh` (unwired, not_run)
-- `test-fleet-051-per-worker-cooldown.sh` (unwired, not_run)
-- `test-fleet-auth-check.sh` (unwired, not_run)
-- `test-fleet-auth-storm-detector.sh` (unwired, not_run)
-- `test-fleet-auto-prune.sh` (unwired, not_run)
-- `test-fleet-auto-restart.sh` (unwired, not_run)
-- `test-fleet-autopilot-worker-pool.sh` (unwired, not_run)
-- `test-fleet-autopilot.sh` (unwired, not_run)
-- `test-fleet-backend-auto-detect.sh` (unwired, not_run)
-- `test-fleet-backend-guard.sh` (unwired, not_run)
-- `test-fleet-binary-aarch64-openssl-vendored.sh` (wired, not_run)
-- `test-fleet-binary-glibc-floor.sh` (wired, not_run)
-- `test-fleet-bootstrap-coverage.sh` (unwired, not_run)
-- `test-fleet-bootstrap.sh` (wired, not_run)
-- `test-fleet-brief-pillar-table.sh` (wired, not_run)
-- `test-fleet-brief-recap.sh` (unwired, not_run)
-- `test-fleet-brief-ship-count-unavailable.sh` (wired, not_run)
-- `test-fleet-brief-worktree-ships.sh` (unwired, not_run)
-- `test-fleet-brief.sh` (wired, not_run)
-- `test-fleet-circuit-breaker.sh` (unwired, not_run)
-- `test-fleet-clone-index.sh` (unwired, not_run)
-- `test-fleet-doctor-auth-probe.sh` (unwired, not_run)
-- `test-fleet-doctor-checkout-parked.sh` (unwired, not_run)
-- `test-fleet-doctor-ops-defect.sh` (unwired, not_run)
-- `test-fleet-doctor-organ-roll-call-live.sh` (unwired, not_run)
-- `test-fleet-doctor-self-hosted-check.sh` (unwired, not_run)
-- `test-fleet-doctor-tracked-config-drift.sh` (unwired, not_run)
-- `test-fleet-dry-run.sh` (unwired, not_run)
-- `test-fleet-fanout.sh` (wired, not_run)
-- `test-fleet-health-sentinel-system-organs.sh` (unwired, not_run)
-- `test-fleet-health-sentinel.sh` (wired, not_run)
-- `test-fleet-inline-briefing.sh` (unwired, not_run)
-- `test-fleet-jitter-and-starve.sh` (unwired, not_run)
-- `test-fleet-kill-switch.sh` (wired, not_run)
-- `test-fleet-message-component.sh` (unwired, not_run)
-- `test-fleet-metrics-snapshot.sh` (wired, not_run)
-- `test-fleet-passes-api-keys.sh` (unwired, not_run)
-- `test-fleet-pause-autolift.sh` (wired, not_run)
-- `test-fleet-pid-invariant.sh` (unwired, not_run)
-- `test-fleet-pool-keeper.sh` (unwired, not_run)
-- `test-fleet-prune-worktrees.sh` (unwired, not_run)
-- `test-fleet-pulse.sh` (unwired, not_run)
-- `test-fleet-queue-depth-event.sh` (unwired, not_run)
-- `test-fleet-race-loss.sh` (wired, not_run)
-- `test-fleet-recorder.sh` (unwired, not_run)
-- `test-fleet-scrubber.sh` (unwired, not_run)
-- `test-fleet-server.sh` (unwired, not_run)
-- `test-fleet-session-id-isolation.sh` (unwired, not_run)
-- `test-fleet-skew-detect.sh` (unwired, not_run)
-- `test-fleet-snapshot-restore.sh` (unwired, not_run)
-- `test-fleet-spec.sh` (wired, not_run)
-- `test-fleet-staggering.sh` (unwired, not_run)
-- `test-fleet-stalled-alert.sh` (unwired, not_run)
-- `test-fleet-starve-auto-action.sh` (wired, not_run)
-- `test-fleet-state-batch-writes.sh` (unwired, not_run)
-- `test-fleet-state-mutex.sh` (wired, not_run)
-- `test-fleet-status-json.sh` (unwired, not_run)
-- `test-fleet-status-rate-limit.sh` (wired, not_run)
-- `test-fleet-wedge-escalation.sh` (unwired, not_run)
-- `test-fleet-whoworkson.sh` (unwired, not_run)
-- `test-fleet-worker-watchdog.sh` (unwired, not_run)
-- `test-fleet029-cache-overlap.sh` (unwired, not_run)
-- `test-floor-temp.sh` (unwired, not_run)
-- `test-force-push-intent.sh` (unwired, not_run)
-- `test-force-stale-base-guard.sh` (unwired, not_run)
-- `test-frequency-scheduling.sh` (unwired, not_run)
-- `test-fresh-clone-gap-list.sh` (unwired, not_run)
-- `test-fresh-eyes-loop.sh` (unwired, not_run)
-- `test-freshness-preamble.sh` (unwired, not_run)
-- `test-friction-metric.sh` (unwired, not_run)
-- `test-ftue-ollama-gate.sh` (unwired, not_run)
-- `test-gap-ac-requirement.sh` (wired, not_run)
-- `test-gap-add-note.sh` (wired, not_run)
-- `test-gap-affinity-matching.sh` (unwired, not_run)
-- `test-gap-already-satisfied.sh` (unwired, not_run)
-- `test-gap-audit-ac-open.sh` (wired, not_run)
-- `test-gap-audit-priorities-closed-at.sh` (unwired, not_run)
-- `test-gap-audit-priorities.sh` (unwired, not_run)
-- `test-gap-backfill-external-repo.sh` (unwired, not_run)
-- `test-gap-budget-tracker.sh` (unwired, not_run)
-- `test-gap-close-decomposed-integration.sh` (wired, not_run)
-- `test-gap-closed-pr-cli.sh` (wired, not_run)
-- `test-gap-closure-consistency-fixture.sh` (wired, not_run)
-- `test-gap-closure-consistency.sh` (unwired, not_run)
-- `test-gap-closure-reconcile.sh` (unwired, not_run)
-- `test-gap-consolidate.sh` (wired, not_run)
-- `test-gap-cooldown.sh` (unwired, not_run)
-- `test-gap-decompose-description.sh` (unwired, not_run)
-- `test-gap-decompose-reslice-guard.sh` (wired, not_run)
-- `test-gap-decompose-truncation.sh` (unwired, not_run)
-- `test-gap-decompose-verify-cascade.sh` (unwired, not_run)
-- `test-gap-dedup.sh` (unwired, not_run)
-- `test-gap-dep-clean.sh` (unwired, not_run)
-- `test-gap-divergence-guard.sh` (wired, not_run)
-- `test-gap-doctor-safe-sweep.sh` (wired, not_run)
-- `test-gap-drain.sh` (unwired, not_run)
-- `test-gap-drift-source-dedup.sh` (unwired, not_run)
-- `test-gap-failure-detection.sh` (unwired, not_run)
-- `test-gap-gardener-no-ac-placeholder.sh` (unwired, not_run)
-- `test-gap-id-collision.sh` (unwired, not_run)
-- `test-gap-id-cross-session.sh` (wired, not_run)
-- `test-gap-id-lease-uniqueness.sh` (wired, not_run)
-- `test-gap-impact-rating.sh` (wired, not_run)
-- `test-gap-import-spec.sh` (unwired, not_run)
-- `test-gap-lib.sh` (unwired, not_run)
-- `test-gap-lifecycle-manager.sh` (wired, not_run)
-- `test-gap-list-domain-summary.sh` (wired, not_run)
-- `test-gap-list-done-format.sh` (wired, not_run)
-- `test-gap-list-since-json-schema.sh` (wired, not_run)
-- `test-gap-list-since.sh` (wired, not_run)
-- `test-gap-list-warning-detector.sh` (unwired, not_run)
-- `test-gap-lock-self-clean.sh` (unwired, not_run)
-- `test-gap-maintenance-rust-parity.sh` (unwired, not_run)
-- `test-gap-merged-pr-title-closure.sh` (unwired, not_run)
-- `test-gap-opened-date-coverage.sh` (unwired, not_run)
-- `test-gap-outcome-migration.sh` (unwired, not_run)
-- `test-gap-pattern-hold-check.sh` (unwired, not_run)
-- `test-gap-pr-status.sh` (unwired, not_run)
-- `test-gap-preflight-ac-gate.sh` (wired, not_run)
-- `test-gap-profiling.sh` (wired, not_run)
-- `test-gap-quality-gate.sh` (wired, not_run)
-- `test-gap-rebalance.sh` (wired, not_run)
-- `test-gap-reopen-guard.sh` (unwired, not_run)
-- `test-gap-reserve-almanac-dedupe.sh` (unwired, not_run)
-- `test-gap-reserve-auto-stages.sh` (unwired, not_run)
-- `test-gap-reserve-concurrency.sh` (wired, not_run)
-- `test-gap-reserve-cross-worktree-write.sh` (unwired, not_run)
-- `test-gap-reserve-no-reuse.sh` (unwired, not_run)
-- `test-gap-reserve-no-stale-collision.sh` (wired, not_run)
-- `test-gap-reserve-padding.sh` (wired, not_run)
-- `test-gap-reserve-race-isolation.sh` (unwired, not_run)
-- `test-gap-reserve-resilience.sh` (unwired, not_run)
-- `test-gap-reserve-similarity.sh` (unwired, not_run)
-- `test-gap-reserve-spurious-warning.sh` (unwired, not_run)
-- `test-gap-reserve-timeout-tripwire.sh` (unwired, not_run)
-- `test-gap-run-now.sh` (wired, not_run)
-- `test-gap-scoring.sh` (unwired, not_run)
-- `test-gap-set-auto-regenerates-yaml.sh` (unwired, not_run)
-- `test-gap-ship-auto-fetch.sh` (unwired, not_run)
-- `test-gap-ship-integration.sh` (unwired, not_run)
-- `test-gap-ship-stale-gate.sh` (unwired, not_run)
-- `test-gap-show-ac-render.sh` (wired, not_run)
-- `test-gap-show-modes.sh` (unwired, not_run)
-- `test-gap-show-prefers-yaml.sh` (unwired, not_run)
-- `test-gap-show-yaml-validity.sh` (unwired, not_run)
-- `test-gap-status-flip.sh` (wired, not_run)
-- `test-gap-store-single-source.sh` (wired, not_run)
-- `test-gap-strike.sh` (unwired, not_run)
-- `test-gap-sync.sh` (unwired, not_run)
-- `test-gap-templates.sh` (wired, not_run)
-- `test-gap-triage-close.sh` (unwired, not_run)
-- `test-gap-triage.sh` (unwired, not_run)
-- `test-gap-workflow-status.sh` (wired, not_run)
-- `test-gate-promotion-no-regression.sh` (wired, not_run)
-- `test-gate-signal-audit.sh` (unwired, not_run)
-- `test-gate-telemetry.sh` (wired, not_run)
-- `test-gen-cost-summary.sh` (wired, not_run)
-- `test-generate-organ-registry.sh` (unwired, not_run)
-- `test-get-active-claim-file.sh` (unwired, not_run)
-- `test-gh-api-probe.sh` (wired, not_run)
-- `test-gh-in-ci-guarded.sh` (wired, not_run)
-- `test-gh-mutation-throttle.sh` (unwired, not_run)
-- `test-gh-preempt.sh` (unwired, not_run)
-- `test-gh-run-list-rest.sh` (unwired, not_run)
-- `test-gh-self-throttle.sh` (unwired, not_run)
-- `test-gh-shim-auth-token-cache.sh` (unwired, not_run)
-- `test-gh-shim-pr-view-rewrite.sh` (unwired, not_run)
-- `test-gh-shim-script-attribution.sh` (wired, not_run)
-- `test-gh-shim-throttle.sh` (unwired, not_run)
-- `test-gh-token-guard.sh` (wired, not_run)
-- `test-gh-token-rotate-noop.sh` (unwired, not_run)
-- `test-ghost-gap-reaper.sh` (unwired, not_run)
-- `test-ghost-gap-thrash-fix.sh` (unwired, not_run)
-- `test-ghost-lease-handoff.sh` (unwired, not_run)
-- `test-ghost-status-reaper.sh` (unwired, not_run)
-- `test-git-identity-guard.sh` (wired, not_run)
-- `test-github-api-telemetry-shim.sh` (wired, not_run)
-- `test-github-api-telemetry.sh` (wired, not_run)
-- `test-github-cache-callsite-migration.sh` (unwired, not_run)
-- `test-github-cache-divergence-audit.sh` (unwired, not_run)
-- `test-github-cache-rust-parity.sh` (unwired, not_run)
-- `test-github-liaison.sh` (unwired, not_run)
-- `test-graceful-shutdown.sh` (unwired, not_run)
-- `test-graphql-debounce.sh` (wired, not_run)
-- `test-graphql-exhausted-empty-coercion-guard.sh` (unwired, not_run)
-- `test-graphql-exhausted-false-positive-guard.sh` (unwired, not_run)
-- `test-graphql-exhausted-signal.sh` (unwired, not_run)
-- `test-grep-c-echo0-guard.sh` (wired, not_run)
-- `test-grep-target-sweep.sh` (unwired, not_run)
-- `test-growth-worker.sh` (unwired, not_run)
-- `test-gz-archive-compressor.sh` (unwired, not_run)
-- `test-half-impl-detector.sh` (unwired, not_run)
-- `test-halt-class-emit.sh` (unwired, not_run)
-- `test-halt-predicate-events.sh` (unwired, not_run)
-- `test-handoff-loop.sh` (unwired, not_run)
-- `test-handoff-reactor.sh` (unwired, not_run)
-- `test-hardcoded-date-guard.sh` (wired, not_run)
-- `test-harness-dispatch.sh` (unwired, not_run)
-- `test-harness-ship-rate.sh` (unwired, not_run)
-- `test-harvester-cli.sh` (wired, not_run)
-- `test-harvester-private-public-split.sh` (unwired, not_run)
-- `test-health-ambient-preview.sh` (unwired, not_run)
-- `test-heartbeat-learn.sh` (unwired, not_run)
-- `test-hidden-gems-schema.sh` (unwired, not_run)
-- `test-hitl-gate.sh` (unwired, not_run)
-- `test-hook-profiles.sh` (unwired, not_run)
-- `test-hook-silent-noop.sh` (unwired, not_run)
-- `test-hook-stdin-drain.sh` (unwired, not_run)
-- `test-hot-file-serialization.sh` (unwired, not_run)
-- `test-import-similarity-block.sh` (unwired, not_run)
-- `test-in-progress-branches-stale.sh` (unwired, not_run)
-- `test-inbox-check-urgent-pretool.sh` (unwired, not_run)
-- `test-inbox-component.sh` (unwired, not_run)
-- `test-inbox-glance.sh` (unwired, not_run)
-- `test-inbox-injector.sh` (unwired, not_run)
-- `test-inbox-lane-filter.sh` (unwired, not_run)
-- `test-inbox-notifications.sh` (unwired, not_run)
-- `test-inbox-poll-session-derivation.sh` (unwired, not_run)
-- `test-inbox-prune.sh` (wired, not_run)
-- `test-inbox-urgent-hook.sh` (unwired, not_run)
-- `test-inbox-watcher-pattern.sh` (wired, not_run)
-- `test-index-almanac.sh` (unwired, not_run)
-- `test-inference-router.sh` (unwired, not_run)
-- `test-infra-1025-atomic-claim.sh` (wired, not_run)
-- `test-infra-1052-fleet-harness.sh` (unwired, not_run)
-- `test-infra-1062-clippy-timeout-silent-exit.sh` (wired, not_run)
-- `test-infra-109-worktree-boundary.sh` (wired, not_run)
-- `test-infra-110-ttl.sh` (unwired, not_run)
-- `test-infra-1111-gh-backoff.sh` (unwired, not_run)
-- `test-infra-1129-check-runs-backfill.sh` (unwired, not_run)
-- `test-infra-1130-bot-merge-cache-checks.sh` (unwired, not_run)
-- `test-infra-115-lease-ttl-file.sh` (wired, not_run)
-- `test-infra-119-bot-merge-hang.sh` (wired, not_run)
-- `test-infra-124-docs-delta-trailer.sh` (wired, not_run)
-- `test-infra-1278-fast-path.sh` (unwired, not_run)
-- `test-infra-1451-intent-parser.sh` (unwired, not_run)
-- `test-infra-1667-waste-tally-json.sh` (unwired, not_run)
-- `test-infra-247-worktree-yaml.sh` (unwired, not_run)
-- `test-infra-250-v1-retirement.sh` (wired, not_run)
-- `test-infra-254-pwa-root-redirect.sh` (wired, not_run)
-- `test-infra-257-doc-only-guards.sh` (wired, not_run)
-- `test-infra-258-reaper-partial-delivery.sh` (wired, not_run)
-- `test-infra-2984-smoke.sh` (unwired, not_run)
-- `test-infra-3632-canonical-store-env.sh` (wired, not_run)
-- `test-infra-375-376-smoke.sh` (unwired, not_run)
-- `test-infra-3808-unverified-ship-cooldown.sh` (unwired, not_run)
-- `test-infra-3832-nonship-cooldown.sh` (unwired, not_run)
-- `test-infra-409-atomic-stagger.sh` (unwired, not_run)
-- `test-infra-4351-organs-manifest-gate.sh` (unwired, not_run)
-- `test-infra-477-session-ledger.sh` (unwired, not_run)
-- `test-infra-481-cargo-config-propagation.sh` (unwired, not_run)
-- `test-infra-483-fleet-waste-cooldown.sh` (unwired, not_run)
-- `test-infra-485-prepush-not-clean.sh` (unwired, not_run)
-- `test-infra-488-waste-tally.sh` (unwired, not_run)
-- `test-infra-490-lease-cleanup.sh` (unwired, not_run)
-- `test-infra-491-silent-dedup.sh` (unwired, not_run)
-- `test-infra-492-session-track-wired.sh` (unwired, not_run)
-- `test-infra-502-worker-gap-show.sh` (unwired, not_run)
-- `test-infra-509-bot-merge-trim.sh` (unwired, not_run)
-- `test-infra-525-checkpoint-on-timeout.sh` (unwired, not_run)
-- `test-infra-526-autoclose-main-repo.sh` (unwired, not_run)
-- `test-infra-5402.sh` (unwired, not_run)
-- `test-infra-544-cross-repo-cleanup.sh` (unwired, not_run)
-- `test-infra-559-checkpoint-integration.sh` (unwired, not_run)
-- `test-infra-689-closed-gap-archive.sh` (unwired, not_run)
-- `test-infra-705-stall-detector.sh` (unwired, not_run)
-- `test-infra-779-gitdir-repair.sh` (wired, not_run)
-- `test-infra-7938.sh` (unwired, not_run)
-- `test-infra-8034-fix-cj-dnsmasq.sh` (unwired, not_run)
-- `test-infra-8190-gap-store-single-source-gate.sh` (wired, not_run)
-- `test-infra-changes-smoke.sh` (unwired, not_run)
-- `test-infra-watcher-loop.sh` (unwired, not_run)
-- `test-infra-watcher-pty-check.sh` (unwired, not_run)
-- `test-ingest-backlog-smoke.sh` (unwired, not_run)
-- `test-ingest-librarian-smoke.sh` (unwired, not_run)
-- `test-ingest-orchestrate-smoke.sh` (unwired, not_run)
-- `test-ingest-preflight-smoke.sh` (unwired, not_run)
-- `test-ingest-smoke.sh` (unwired, not_run)
-- `test-inspect-resume-scrap.sh` (wired, not_run)
-- `test-install-almanac.sh` (unwired, not_run)
-- `test-install-ambient-hooks.sh` (wired, not_run)
-- `test-install-gap-substrate-idempotent.sh` (unwired, not_run)
-- `test-install-gh-shim-worktree-safe.sh` (wired, not_run)
-- `test-install-gh-shim.sh` (unwired, not_run)
-- `test-install-helsinki-atc.sh` (unwired, not_run)
-- `test-install-hooks-stable-target.sh` (unwired, not_run)
-- `test-install-node-housekeeping.sh` (unwired, not_run)
-- `test-install-postgrest.sh` (unwired, not_run)
-- `test-install-pr-auto-rebase.sh` (wired, not_run)
-- `test-install-script-manifest.sh` (wired, not_run)
-- `test-install-scripts-executable.sh` (wired, not_run)
-- `test-install-sh-clone.sh` (unwired, not_run)
-- `test-install-sh-user-mode.sh` (unwired, not_run)
-- `test-install-trunk-sentinel.sh` (wired, not_run)
-- `test-integration-flake-classes.sh` (unwired, not_run)
-- `test-integration-pr-template.sh` (unwired, not_run)
-- `test-integrations-yml-concurrency-group-key.sh` (wired, not_run)
-- `test-integrator-daemon-activation.sh` (unwired, not_run)
-- `test-integrator-stale-sla.sh` (unwired, not_run)
-- `test-intent-overlap-gate.sh` (unwired, not_run)
-- `test-invariant-boundary-fixture.sh` (unwired, not_run)
-- `test-invariant-boundary.sh` (wired, not_run)
-- `test-inventory-agent-sync.sh` (unwired, not_run)
-- `test-inventory-pr-backfill.sh` (unwired, not_run)
-- `test-inventory-provenance-backfill.sh` (unwired, not_run)
-- `test-inventory-v2-calibration.sh` (unwired, not_run)
-- `test-inventory.sh` (unwired, not_run)
-- `test-investigate-agent.sh` (unwired, not_run)
-- `test-iter-agenda.sh` (unwired, not_run)
-- `test-jeff-bus-ingest.sh` (unwired, not_run)
-- `test-jeff-bus-outbound.sh` (unwired, not_run)
-- `test-jetstream-consumer-roundtrip.sh` (unwired, not_run)
-- `test-jit-binary-refresh.sh` (wired, not_run)
-- `test-judgment-organ-redteam.sh` (unwired, not_run)
-- `test-keep-chump-online-ollama-guard.sh` (unwired, not_run)
-- `test-keep-mergeable-organ.sh` (unwired, not_run)
-- `test-keep-mergeable.sh` (unwired, not_run)
-- `test-keystone-cascade.sh` (wired, not_run)
-- `test-kill-autopost-dms.sh` (unwired, not_run)
-- `test-known-flake-skip.sh` (wired, not_run)
-- `test-known-flakes-gate.sh` (wired, not_run)
-- `test-last-mile-rescuer.sh` (unwired, not_run)
-- `test-launchd-installer-paths.sh` (unwired, not_run)
-- `test-lease-auto-extend.sh` (unwired, not_run)
-- `test-lease-auto-release-on-sibling-merge.sh` (unwired, not_run)
-- `test-lease-breadth-cap.sh` (unwired, not_run)
-- `test-leases-worktree-no-clobber.sh` (unwired, not_run)
-- `test-lessons-injection-visibility.sh` (unwired, not_run)
-- `test-liaison-offline-mode.sh` (unwired, not_run)
-- `test-liaison-webhook-cache.sh` (wired, not_run)
-- `test-liaison-webhook-health.sh` (unwired, not_run)
-- `test-lightning-demo-timeline.sh` (unwired, not_run)
-- `test-lint-gate-checklist.sh` (unwired, not_run)
-- `test-lint-handoff-comment.sh` (wired, not_run)
-- `test-local-merge-queue.sh` (unwired, not_run)
-- `test-local-only-mode.sh` (unwired, not_run)
-- `test-lock-lib.sh` (unwired, not_run)
-- `test-log-triage.sh` (unwired, not_run)
-- `test-m2-gate-end-to-end.sh` (wired, not_run)
-- `test-main-health-watchdog.sh` (unwired, not_run)
-- `test-main-preflight-watchdog-parser.sh` (unwired, not_run)
-- `test-main-preflight-watchdog.sh` (unwired, not_run)
-- `test-main-worktree-config-stable.sh` (unwired, not_run)
-- `test-markdown-intra-doc-links.sh` (wired, not_run)
-- `test-mass-deletion-guard.sh` (unwired, not_run)
-- `test-mcp-coord-smoke.sh` (wired, not_run)
-- `test-mcp-gaps-state-db.sh` (unwired, not_run)
-- `test-mcp-gaps-write-tools.sh` (unwired, not_run)
-- `test-md-links-loop.sh` (wired, not_run)
-- `test-mechanism-kappa-guard.sh` (unwired, not_run)
-- `test-merge-driver-ci-yml-add-row.sh` (wired, not_run)
-- `test-merge-driver-ci-yml.sh` (wired, not_run)
-- `test-merge-driver-coverage.sh` (wired, not_run)
-- `test-merge-driver-gap-yaml.sh` (wired, not_run)
-- `test-merge-driver-pre-commit.sh` (wired, not_run)
-- `test-merge-driver-state-sql.sh` (wired, not_run)
-- `test-merge-group-coverage.sh` (wired, not_run)
-- `test-merge-queue-armed.sh` (unwired, not_run)
-- `test-merge-queue-monitor.sh` (unwired, not_run)
-- `test-merge-serializer.sh` (unwired, not_run)
-- `test-merge-sla-scorecard.sh` (unwired, not_run)
-- `test-merged-check-guard.sh` (wired, not_run)
-- `test-merges-24h-canonical.sh` (unwired, not_run)
-- `test-mesh-worker.sh` (unwired, not_run)
-- `test-messaging-rust-parity.sh` (unwired, not_run)
-- `test-meta-011-git-stomp.sh` (wired, not_run)
-- `test-meta-032-test-lag-guard.sh` (unwired, not_run)
-- `test-meta-040-effectiveness-audit.sh` (unwired, not_run)
-- `test-meta-071-parity-doc.sh` (unwired, not_run)
-- `test-meta-118-daemon-install.sh` (wired, not_run)
-- `test-meta-gap-routing.sh` (unwired, not_run)
-- `test-migration-pipeline-gates.sh` (wired, not_run)
-- `test-mission-122-build-storm-autosize.sh` (unwired, not_run)
-- `test-mission-132-worker-budget-integration.sh` (unwired, not_run)
-- `test-mission-doc-keeper.sh` (unwired, not_run)
-- `test-mission-grade.sh` (unwired, not_run)
-- `test-mission-picker-worker.sh` (wired, not_run)
-- `test-mission-picker.sh` (wired, not_run)
-- `test-mission-scoreboard-beast-prereq.sh` (unwired, not_run)
-- `test-mission-scoreboard-deploy-freshness-sla.sh` (unwired, not_run)
-- `test-mission-scoreboard-modes.sh` (unwired, not_run)
-- `test-mission-scoreboard-zerotouch.sh` (unwired, not_run)
-- `test-mock-services-integration.sh` (wired, not_run)
-- `test-mock-services.sh` (wired, not_run)
-- `test-model-class-routing.sh` (unwired, not_run)
-- `test-model-registry.sh` (wired, not_run)
-- `test-model-ship-rate.sh` (unwired, not_run)
-- `test-modern-rust-toolchain.sh` (unwired, not_run)
-- `test-multi-auth.sh` (unwired, not_run)
-- `test-multi-machine-lease.sh` (unwired, not_run)
-- `test-nats-merge-lock-cas.sh` (unwired, not_run)
-- `test-nba-dispatch-beat.sh` (unwired, not_run)
-- `test-needs-judgment-panel.sh` (unwired, not_run)
-- `test-net-probe.sh` (unwired, not_run)
-- `test-next-best-action-pane-coverage.sh` (unwired, not_run)
-- `test-nextest-sharding.sh` (unwired, not_run)
-- `test-nightly-gap-curate.sh` (unwired, not_run)
-- `test-no-anthropic-smoke.sh` (wired, not_run)
-- `test-no-claude-leak.sh` (wired, not_run)
-- `test-no-deleted-shell-refs.sh` (unwired, not_run)
-- `test-no-direct-auto-merge-arm-fixture.sh` (unwired, not_run)
-- `test-no-direct-auto-merge-arm.sh` (unwired, not_run)
-- `test-no-escalation-doctrine.sh` (unwired, not_run)
-- `test-no-inline-ambient-printf-fixture.sh` (unwired, not_run)
-- `test-no-inline-ambient-printf.sh` (wired, not_run)
-- `test-no-manual-ship-bypass.sh` (wired, not_run)
-- `test-no-new-bypass-env-vars.sh` (wired, not_run)
-- `test-no-new-coord-shell-fixture.sh` (unwired, not_run)
-- `test-no-new-coord-shell.sh` (unwired, not_run)
-- `test-no-new-shell-tests-for-rust-fixture.sh` (unwired, not_run)
-- `test-no-new-shell-tests-for-rust.sh` (unwired, not_run)
-- `test-no-outcomeless-p1-filers.sh` (unwired, not_run)
-- `test-no-raw-gh-in-hot-paths.sh` (wired, not_run)
-- `test-no-ship-loop-detector.sh` (unwired, not_run)
-- `test-no-ship-with-free.sh` (unwired, not_run)
-- `test-no-verify-audit.sh` (wired, not_run)
-- `test-node-capacity-plan.sh` (unwired, not_run)
-- `test-node-converge.sh` (unwired, not_run)
-- `test-node-housekeeping-manifest-fold.sh` (unwired, not_run)
-- `test-node-install-async-phases.sh` (unwired, not_run)
-- `test-node-install-batphone-token.sh` (unwired, not_run)
-- `test-node-install-binary-provenance.sh` (unwired, not_run)
-- `test-node-install-bootstrap-creds.sh` (unwired, not_run)
-- `test-node-install-control-plane-mode.sh` (unwired, not_run)
-- `test-node-install-creds-file.sh` (unwired, not_run)
-- `test-node-install-organs-phase.sh` (unwired, not_run)
-- `test-node-main-sync.sh` (unwired, not_run)
-- `test-node-orchestrator-cargo-jobs-cap.sh` (unwired, not_run)
-- `test-node-orchestrator-max-throttle.sh` (unwired, not_run)
-- `test-node-orchestrator-svc-heal.sh` (unwired, not_run)
-- `test-node-refresh-artifact-ancestor.sh` (unwired, not_run)
-- `test-node-refresh-artifact-pull.sh` (unwired, not_run)
-- `test-node-refresh-gh-token-export.sh` (unwired, not_run)
-- `test-node-refresh-green-main.sh` (unwired, not_run)
-- `test-node-refresh-install-path.sh` (unwired, not_run)
-- `test-node-refresh-red-run-skip.sh` (unwired, not_run)
-- `test-node-role-assign.sh` (unwired, not_run)
-- `test-node-script-host-refresh.sh` (unwired, not_run)
-- `test-notify-kind-escalation-coverage.sh` (wired, not_run)
-- `test-notify-operator.sh` (wired, not_run)
-- `test-oauth-refresher.sh` (unwired, not_run)
-- `test-oauth-token-refresh.sh` (unwired, not_run)
-- `test-obs-alerting.sh` (unwired, not_run)
-- `test-obs-budget-guard.sh` (unwired, not_run)
-- `test-obs-budget-warn-default.sh` (unwired, not_run)
-- `test-obs-coverage-guard.sh` (wired, not_run)
-- `test-observability-coverage.sh` (wired, not_run)
-- `test-observability-loop.sh` (wired, not_run)
-- `test-offline-check-linter.sh` (unwired, not_run)
-- `test-offnode-deadman.sh` (unwired, not_run)
-- `test-onboard-agentic-scout.sh` (unwired, not_run)
-- `test-onboard-clone-auth.sh` (unwired, not_run)
-- `test-onboard-scout-scheduler.sh` (unwired, not_run)
-- `test-open-pr-dup-detection.sh` (wired, not_run)
-- `test-opencode-harness-install.sh` (wired, not_run)
-- `test-opencode-harness-smoke.sh` (wired, not_run)
-- `test-operational-runbooks.sh` (unwired, not_run)
-- `test-operator-attention-dedup.sh` (unwired, not_run)
-- `test-operator-digest.sh` (unwired, not_run)
-- `test-operator-id.sh` (unwired, not_run)
-- `test-operator-page-aliveness-gate.sh` (unwired, not_run)
-- `test-operator-page.sh` (unwired, not_run)
-- `test-operator-pages-24h-canonical.sh` (unwired, not_run)
-- `test-operator-playbook-structure.sh` (unwired, not_run)
-- `test-operator-recall-autonomy-halt.sh` (unwired, not_run)
-- `test-operator-recall-channel.sh` (unwired, not_run)
-- `test-operator-recall-queue-saturated.sh` (unwired, not_run)
-- `test-operator-recall-zero-ship-active.sh` (unwired, not_run)
-- `test-operator-recall.sh` (unwired, not_run)
-- `test-operator-recovery.sh` (wired, not_run)
-- `test-operator-rules.sh` (unwired, not_run)
-- `test-opus-curator-handles-jq-fail.sh` (unwired, not_run)
-- `test-opus-digest-forecast.sh` (unwired, not_run)
-- `test-opus-event-driven.sh` (unwired, not_run)
-- `test-opus-message-hook.sh` (unwired, not_run)
-- `test-opus-message-inbox-hook.sh` (unwired, not_run)
-- `test-opus-shepherd-playbook.sh` (unwired, not_run)
-- `test-opus-shepherd-triage.sh` (unwired, not_run)
-- `test-opus-slot-tracker.sh` (unwired, not_run)
-- `test-oracle-event-trigger.sh` (unwired, not_run)
-- `test-oracle-refresh.sh` (unwired, not_run)
-- `test-orchestrate-events.sh` (unwired, not_run)
-- `test-orchestrate-llm-fallback.sh` (unwired, not_run)
-- `test-orchestrate-llm-timeout.sh` (unwired, not_run)
-- `test-orchestrate-resume.sh` (unwired, not_run)
-- `test-orchestrate-session-summary.sh` (wired, not_run)
-- `test-orchestrator-agent-md.sh` (unwired, not_run)
-- `test-organ-binary-freshness-selftest.sh` (unwired, not_run)
-- `test-organ-deploy.sh` (unwired, not_run)
-- `test-organ-manifest-bom-integration.sh` (wired, not_run)
-- `test-organ-manifest-platforms-field.sh` (unwired, not_run)
-- `test-organ-oneshot-timeout.sh` (unwired, not_run)
-- `test-organ-reconcile.sh` (unwired, not_run)
-- `test-organ-success-verifier.sh` (unwired, not_run)
-- `test-organ-watchdog.sh` (unwired, not_run)
-- `test-orphan-allowlist-daemon.sh` (unwired, not_run)
-- `test-orphan-branch-sweeper.sh` (unwired, not_run)
-- `test-orphan-closer-immunity.sh` (unwired, not_run)
-- `test-orphan-closer-pr-diff-check.sh` (unwired, not_run)
-- `test-orphan-pr-closer-evidence.sh` (unwired, not_run)
-- `test-orphan-pr-closer-health-check.sh` (unwired, not_run)
-- `test-orphan-pr-closer.sh` (wired, not_run)
-- `test-orphan-worktree-prune.sh` (wired, not_run)
-- `test-orphan-worktree-watchdog.sh` (unwired, not_run)
-- `test-outcome-gate.sh` (wired, not_run)
-- `test-outcome-verify-heal-cold-start.sh` (unwired, not_run)
-- `test-outcome-verify-heal-consumer.sh` (unwired, not_run)
-- `test-outcomes-delivered.sh` (unwired, not_run)
-- `test-paramedic-ci-rescue.sh` (unwired, not_run)
-- `test-paramedic-leader-failover.sh` (unwired, not_run)
-- `test-paramedic-rules.sh` (unwired, not_run)
-- `test-parse-token-usage-dead-writer-timeout.sh` (wired, not_run)
-- `test-patch-file-fallback.sh` (unwired, not_run)
-- `test-path-filter-allowlist.sh` (unwired, not_run)
-- `test-path-filter-coverage.sh` (unwired, not_run)
-- `test-path-filter-stubs.sh` (unwired, not_run)
-- `test-pattern-fix-dispatcher.sh` (unwired, not_run)
-- `test-per-worktree-target-guard.sh` (wired, not_run)
-- `test-phantom-gap-refs.sh` (unwired, not_run)
-- `test-pi-mesh-installer-shape.sh` (unwired, not_run)
-- `test-pick-and-claim-atomic.sh` (unwired, not_run)
-- `test-pick-and-claim-dep-resolution.sh` (unwired, not_run)
-- `test-pick-and-claim-lockdir.sh` (wired, not_run)
-- `test-pick-gap-skips-linked-pr.sh` (unwired, not_run)
-- `test-pick-gap-skips-merged.sh` (unwired, not_run)
-- `test-pick-gap-skips-shipped.sh` (unwired, not_run)
-- `test-pick-gap-sync-overhead.sh` (unwired, not_run)
-- `test-picker-pillar-starved-junk-filter.sh` (unwired, not_run)
-- `test-picker-pivot-lock-cleanup.sh` (unwired, not_run)
-- `test-picker-priority.sh` (wired, not_run)
-- `test-pillar-balance-alerts.sh` (unwired, not_run)
-- `test-pillar-balance-guard.sh` (wired, not_run)
-- `test-pillar-balance.sh` (wired, not_run)
-- `test-pillar-cap-auto-demote.sh` (unwired, not_run)
-- `test-pillar-dashboard.sh` (wired, not_run)
-- `test-pipefail-race-sweep.sh` (wired, not_run)
-- `test-pixel-worker-selfheal.sh` (unwired, not_run)
-- `test-planner-ac-parsing.sh` (unwired, not_run)
-- `test-plist-no-tmp-paths.sh` (wired, not_run)
-- `test-poll-cross-workflow-checks.sh` (unwired, not_run)
-- `test-posse-systemd.sh` (unwired, not_run)
-- `test-posse-watchdog.sh` (unwired, not_run)
-- `test-post-integration-prune.sh` (unwired, not_run)
-- `test-post-push-integrity.sh` (unwired, not_run)
-- `test-posttooluse-inbox-poll.sh` (unwired, not_run)
-- `test-pr-ac-coverage.sh` (wired, not_run)
-- `test-pr-auto-rearm.sh` (unwired, not_run)
-- `test-pr-auto-rebase-blocked.sh` (unwired, not_run)
-- `test-pr-auto-rebase-concurrency.sh` (unwired, not_run)
-- `test-pr-auto-rebase-falsepositive.sh` (unwired, not_run)
-- `test-pr-auto-rebase-local-fallback.sh` (unwired, not_run)
-- `test-pr-auto-rebase.sh` (wired, not_run)
-- `test-pr-blame-file.sh` (unwired, not_run)
-- `test-pr-blocked-watch.sh` (wired, not_run)
-- `test-pr-book.sh` (unwired, not_run)
-- `test-pr-clean-dirty-classifier.sh` (unwired, not_run)
-- `test-pr-cost-telemetry.sh` (wired, not_run)
-- `test-pr-create-gate.sh` (unwired, not_run)
-- `test-pr-dedup-swarm.sh` (unwired, not_run)
-- `test-pr-dedup.sh` (unwired, not_run)
-- `test-pr-explain-block.sh` (wired, not_run)
-- `test-pr-failure-auto-rescue.sh` (wired, not_run)
-- `test-pr-fix-clippy.sh` (wired, not_run)
-- `test-pr-fmt-shepherd.sh` (unwired, not_run)
-- `test-pr-gate-fail-lane.sh` (unwired, not_run)
-- `test-pr-nudge.sh` (unwired, not_run)
-- `test-pr-pulse-consumer.sh` (unwired, not_run)
-- `test-pr-pulse.sh` (unwired, not_run)
-- `test-pr-queue-processor.sh` (unwired, not_run)
-- `test-pr-repair-rebase.sh` (unwired, not_run)
-- `test-pr-rescue-audit-handler.sh` (wired, not_run)
-- `test-pr-rescue-cache-migration.sh` (unwired, not_run)
-- `test-pr-rescue-fork-aware.sh` (unwired, not_run)
-- `test-pr-rescue-noci.sh` (wired, not_run)
-- `test-pr-rescue-procedure-doc.sh` (unwired, not_run)
-- `test-pr-rescue-rest-only.sh` (unwired, not_run)
-- `test-pr-rescue.sh` (unwired, not_run)
-- `test-pr-scope-body-mention.sh` (unwired, not_run)
-- `test-pr-scope-honesty.sh` (unwired, not_run)
-- `test-pr-scope-title-fallback.sh` (wired, not_run)
-- `test-pr-shepherd-arm-trust-guard.sh` (unwired, not_run)
-- `test-pr-shepherd-daemon-skeleton.sh` (unwired, not_run)
-- `test-pr-shepherd-daemon.sh` (unwired, not_run)
-- `test-pr-shepherd-launchd-emission.sh` (unwired, not_run)
-- `test-pr-shepherd-vote-request.sh` (unwired, not_run)
-- `test-pr-stuck-announcer.sh` (unwired, not_run)
-- `test-pr-stuck-auto-respawn.sh` (wired, not_run)
-- `test-pr-stuck-cluster-detection.sh` (wired, not_run)
-- `test-pr-stuck-cluster-observability.sh` (wired, not_run)
-- `test-pr-terminal-state.sh` (wired, not_run)
-- `test-pr-title-drift-detector.sh` (unwired, not_run)
-- `test-pr-triage-bot-rerun.sh` (unwired, not_run)
-- `test-pr-triage-bot.sh` (wired, not_run)
-- `test-pr-triage.sh` (unwired, not_run)
-- `test-pr-unstick-observability.sh` (wired, not_run)
-- `test-pr-watch-auto-resolve.sh` (wired, not_run)
-- `test-pr-watch-shepherd-smoke.sh` (wired, not_run)
-- `test-pre-commit-claim-contract.sh` (unwired, not_run)
-- `test-pre-commit-claim-gap-match.sh` (unwired, not_run)
-- `test-pre-push-actionlint-guard.sh` (unwired, not_run)
-- `test-pre-push-bot-merge-bypass.sh` (unwired, not_run)
-- `test-pre-push-cargo-test-timeout.sh` (unwired, not_run)
-- `test-pre-push-fixture-drop.sh` (unwired, not_run)
-- `test-pre-push-fmt-gate.sh` (unwired, not_run)
-- `test-pre-push-force-lease-guard.sh` (wired, not_run)
-- `test-pre-push-hard-timeout.sh` (unwired, not_run)
-- `test-pre-push-head-stability.sh` (unwired, not_run)
-- `test-pre-push-hook-no-sigpipe.sh` (unwired, not_run)
-- `test-pre-push-lint-gate.sh` (unwired, not_run)
-- `test-pre-push-multi-claim.sh` (unwired, not_run)
-- `test-pre-push-nextest-runner.sh` (unwired, not_run)
-- `test-pre-push-preflight-hook.sh` (wired, not_run)
-- `test-pre-push-rebase-allow.sh` (wired, not_run)
-- `test-pre-push-test-gate.sh` (wired, not_run)
-- `test-precommit-cargo-check-skip.sh` (unwired, not_run)
-- `test-precommit-gate-auto-skip.sh` (unwired, not_run)
-- `test-precommit-gate-budget.sh` (unwired, not_run)
-- `test-precommit-guard-audit.sh` (wired, not_run)
-- `test-precommit-pyyaml-required.sh` (unwired, not_run)
-- `test-precommit-strict-replay.sh` (wired, not_run)
-- `test-preflight-acgate-gate.sh` (unwired, not_run)
-- `test-preflight-cache.sh` (unwired, not_run)
-- `test-preflight-ci-agreement.sh` (unwired, not_run)
-- `test-preflight-ci-parity-auto-recognize.sh` (wired, not_run)
-- `test-preflight-ci-parity-smoke.sh` (wired, not_run)
-- `test-preflight-ci-parity-synthetic-pr.sh` (unwired, not_run)
-- `test-preflight-ci-parity.sh` (wired, not_run)
-- `test-preflight-content-guard-mirrors.sh` (unwired, not_run)
-- `test-preflight-coverage.sh` (unwired, not_run)
-- `test-preflight-docsdelta-gate.sh` (unwired, not_run)
-- `test-preflight-envvars-gate.sh` (unwired, not_run)
-- `test-preflight-gapsint-gate.sh` (unwired, not_run)
-- `test-preflight-main-red-aware.sh` (unwired, not_run)
-- `test-preflight-mdlinks-gate.sh` (unwired, not_run)
-- `test-preflight-registry-gate.sh` (unwired, not_run)
-- `test-preflight-rust-scope.sh` (unwired, not_run)
-- `test-preflight-scope.sh` (unwired, not_run)
-- `test-preflight-subcmdhelp-gate.sh` (unwired, not_run)
-- `test-preflight-vs-origin-main.sh` (unwired, not_run)
-- `test-premature-closure-auto-fix.sh` (unwired, not_run)
-- `test-prepush-bypass-audit.sh` (unwired, not_run)
-- `test-prepush-gap-check-own-claim.sh` (unwired, not_run)
-- `test-prepush-rust-env-immunity.sh` (unwired, not_run)
-- `test-prepush-sccache-probe.sh` (unwired, not_run)
-- `test-prepush-skip-args-unbound.sh` (unwired, not_run)
-- `test-prepush-test-timeout.sh` (unwired, not_run)
-- `test-prepush-worktree-cd.sh` (wired, not_run)
-- `test-prereg-content-guard.sh` (wired, not_run)
-- `test-prereg-enforce.sh` (unwired, not_run)
-- `test-prereg-required-for-cognition.sh` (unwired, not_run)
-- `test-preregistration-guard.sh` (unwired, not_run)
-- `test-primitive-indexing.sh` (unwired, not_run)
-- `test-private-topology-guard.sh` (wired, not_run)
-- `test-process-organ-check.sh` (unwired, not_run)
-- `test-process-organ-heal.sh` (unwired, not_run)
-- `test-product-054-cascade-toggle.sh` (unwired, not_run)
-- `test-product-056-vscode-scaffold.sh` (unwired, not_run)
-- `test-product-059-agents-board.sh` (unwired, not_run)
-- `test-product-094-notifications.sh` (unwired, not_run)
-- `test-progress-output.sh` (unwired, not_run)
-- `test-provenance-stamp.sh` (unwired, not_run)
-- `test-provider-chain.sh` (unwired, not_run)
-- `test-provider-model-class-manifest.sh` (unwired, not_run)
-- `test-provision-chumpd-host.sh` (unwired, not_run)
-- `test-prune-worktrees-launchd.sh` (unwired, not_run)
-- `test-public-doc-privacy.sh` (wired, not_run)
-- `test-publish-guard-report-only.sh` (unwired, not_run)
-- `test-publisher-platforms.sh` (wired, not_run)
-- `test-pwa-acp-deeplinks.sh` (unwired, not_run)
-- `test-pwa-audit-view.sh` (unwired, not_run)
-- `test-pwa-auth-middleware.sh` (unwired, not_run)
-- `test-pwa-auth-toast-stream.sh` (wired, not_run)
-- `test-pwa-autopilot-toggle.sh` (unwired, not_run)
-- `test-pwa-canvas-cadence.sh` (unwired, not_run)
-- `test-pwa-config-dials.sh` (unwired, not_run)
-- `test-pwa-coord-view.sh` (unwired, not_run)
-- `test-pwa-cost-ceiling.sh` (wired, not_run)
-- `test-pwa-daily-brief.sh` (unwired, not_run)
-- `test-pwa-doctor-banner.sh` (unwired, not_run)
-- `test-pwa-e2e-gap-workflow.sh` (wired, not_run)
-- `test-pwa-error-ux.sh` (unwired, not_run)
-- `test-pwa-events-view.sh` (unwired, not_run)
-- `test-pwa-first-run-wizard.sh` (unwired, not_run)
-- `test-pwa-flake-quarantine.sh` (wired, not_run)
-- `test-pwa-fleet-health.sh` (unwired, not_run)
-- `test-pwa-fleet-sidebar.sh` (unwired, not_run)
-- `test-pwa-gap-actions.sh` (unwired, not_run)
-- `test-pwa-gap-list.sh` (unwired, not_run)
-- `test-pwa-gap-search.sh` (unwired, not_run)
-- `test-pwa-impact.sh` (unwired, not_run)
-- `test-pwa-index-merge-driver.sh` (unwired, not_run)
-- `test-pwa-inject-hint.sh` (unwired, not_run)
-- `test-pwa-lease-cleanup.sh` (unwired, not_run)
-- `test-pwa-network-audit.sh` (unwired, not_run)
-- `test-pwa-operator-attention.sh` (unwired, not_run)
-- `test-pwa-orchestrator-sessions-view.sh` (unwired, not_run)
-- `test-pwa-parse-gate.sh` (wired, not_run)
-- `test-pwa-pr-actions.sh` (unwired, not_run)
-- `test-pwa-pr-diff.sh` (unwired, not_run)
-- `test-pwa-pr-list.sh` (unwired, not_run)
-- `test-pwa-prefs.sh` (unwired, not_run)
-- `test-pwa-repo-switcher.sh` (unwired, not_run)
-- `test-pwa-roadmap-view.sh` (unwired, not_run)
-- `test-pwa-roadmap.sh` (unwired, not_run)
-- `test-pwa-secrets-flow.sh` (unwired, not_run)
-- `test-pwa-security.sh` (wired, not_run)
-- `test-pwa-sse-consumer.sh` (unwired, not_run)
-- `test-pwa-state-persistence.sh` (unwired, not_run)
-- `test-pwa-status-footer.sh` (unwired, not_run)
-- `test-pwa-stuck-items.sh` (unwired, not_run)
-- `test-pwa-subprocess-errors.sh` (unwired, not_run)
-- `test-pwa-tool-approval-tray.sh` (unwired, not_run)
-- `test-pwa-verb-nav.sh` (unwired, not_run)
-- `test-pwa-version-compat.sh` (wired, not_run)
-- `test-pwa-visual-diff-workflow.sh` (unwired, not_run)
-- `test-pwa-welcome.sh` (unwired, not_run)
-- `test-pwa-worker-routing.sh` (unwired, not_run)
-- `test-pwa-workflow-observability.sh` (wired, not_run)
-- `test-quartermaster-audit-loop.sh` (unwired, not_run)
-- `test-quartermaster-auto-fixers.sh` (unwired, not_run)
-- `test-queue-driver-cache-migration.sh` (unwired, not_run)
-- `test-queue-driver-dirty-rescue.sh` (unwired, not_run)
-- `test-queue-driver-iter-no-repeat.sh` (unwired, not_run)
-- `test-queue-driver-launchd-install.sh` (unwired, not_run)
-- `test-queue-driver-push-rescue.sh` (unwired, not_run)
-- `test-queue-panel-embeds.sh` (unwired, not_run)
-- `test-queue-stagnation-monitor.sh` (unwired, not_run)
-- `test-queue-tender.sh` (unwired, not_run)
-- `test-r2-sccache-lifecycle.sh` (unwired, not_run)
-- `test-race-control.sh` (unwired, not_run)
-- `test-rating-picker-integration.sh` (unwired, not_run)
-- `test-raw-yaml-guard.sh` (wired, not_run)
-- `test-readme-links.sh` (unwired, not_run)
-- `test-reality-check.sh` (unwired, not_run)
-- `test-reap-orphan-fg-detection.sh` (unwired, not_run)
-- `test-reaper-bot-merge-protection.sh` (unwired, not_run)
-- `test-reaper-heartbeat-protection.sh` (unwired, not_run)
-- `test-reaper-instrumentation.sh` (unwired, not_run)
-- `test-reaper-pty-pressure.sh` (unwired, not_run)
-- `test-reaper-resurrect.sh` (unwired, not_run)
-- `test-reaper-spare-recoverable-blocked.sh` (wired, not_run)
-- `test-reaper-trunk-red-hold.sh` (wired, not_run)
-- `test-reaper-watchdog-self-grade.sh` (unwired, not_run)
-- `test-rebase-coordination.sh` (wired, not_run)
-- `test-rebase-stuck.sh` (unwired, not_run)
-- `test-recovery-queue-checkpoint.sh` (unwired, not_run)
-- `test-recovery-queue.sh` (unwired, not_run)
-- `test-recurring-gap-pattern-detector.sh` (unwired, not_run)
-- `test-recycled-id-guard.sh` (unwired, not_run)
-- `test-redundancy-gate.sh` (unwired, not_run)
-- `test-refresh-almanac-binary.sh` (wired, not_run)
-- `test-refresh-runner-binary-almanac.sh` (unwired, not_run)
-- `test-registry-pattern8.sh` (unwired, not_run)
-- `test-release-lease-flag.sh` (wired, not_run)
-- `test-release-note-voice-lint.sh` (unwired, not_run)
-- `test-render-organ-roster.sh` (unwired, not_run)
-- `test-repo-health-warnings-only.sh` (unwired, not_run)
-- `test-repo-var-audit.sh` (unwired, not_run)
-- `test-required-check-health.sh` (unwired, not_run)
-- `test-required-checks-non-empty.sh` (unwired, not_run)
-- `test-required-checks-self-audit.sh` (unwired, not_run)
-- `test-required-model.sh` (wired, not_run)
-- `test-rescue-class-cites-procedure.sh` (wired, not_run)
-- `test-rescue-stale-pr.sh` (unwired, not_run)
-- `test-research-026-preflight.sh` (wired, not_run)
-- `test-research-cursor-round.sh` (unwired, not_run)
-- `test-research032-workflows-schema.sh` (unwired, not_run)
-- `test-reserve-glance.sh` (unwired, not_run)
-- `test-resilient-1007-model-ladder-escalation.sh` (unwired, not_run)
-- `test-resilient-1009-model-ladder-single-source.sh` (unwired, not_run)
-- `test-resilient-1012-node-install-verified.sh` (unwired, not_run)
-- `test-resilient-1013-batphone-worker.sh` (unwired, not_run)
-- `test-resilient-1016-muscle-self-clean.sh` (unwired, not_run)
-- `test-resilient-1035-node-organ-reconcile.sh` (unwired, not_run)
-- `test-resilient-1036-deploy-path-self-sustaining.sh` (unwired, not_run)
-- `test-resilient-1053-self-healer-heartbeat.sh` (unwired, not_run)
-- `test-resilient-1055-role-roster.sh` (wired, not_run)
-- `test-resilient-1058-gap-store-organ.sh` (unwired, not_run)
-- `test-resilient-1082-farmer-heartbeat-reap.sh` (unwired, not_run)
-- `test-resilient-1083-muscle-worker-survives-reconcile.sh` (unwired, not_run)
-- `test-resilient-1090-muscle-role-rollout.sh` (unwired, not_run)
-- `test-resilient-1198-untracked-collision-cleanup.sh` (unwired, not_run)
-- `test-resilient-1199-merged-reaches-node.sh` (unwired, not_run)
-- `test-resilient-1209-organ-merge-install-fire.sh` (unwired, not_run)
-- `test-resilient-1215-converge-reconciles-organs.sh` (unwired, not_run)
-- `test-resilient-1217-converge-stays-on-main.sh` (unwired, not_run)
-- `test-resilient-1229-worker-per-cycle-log-mkdir.sh` (unwired, not_run)
-- `test-resilient-1230-duty-officer-persistent-escalation.sh` (unwired, not_run)
-- `test-resilient-1258-watch-sentinel-timer-driven.sh` (unwired, not_run)
-- `test-resilient-1295-user-bus-environment.sh` (unwired, not_run)
-- `test-resilient-1327-organ-reconcile-root.sh` (unwired, not_run)
-- `test-resilient-1436-cj-core-organs-install.sh` (unwired, not_run)
-- `test-resilient-1443-sub-auth-precheck.sh` (unwired, not_run)
-- `test-resilient-1449-ship-groundtruth.sh` (unwired, not_run)
-- `test-resilient-1450-worker-reexec-on-head-change.sh` (unwired, not_run)
-- `test-resilient-1451-title-fallback.sh` (unwired, not_run)
-- `test-resilient-1534-organ-dark-audit.sh` (wired, not_run)
-- `test-resilient-1563-merge-pipeline-driver.sh` (unwired, not_run)
-- `test-resilient-1568-binary-converge.sh` (unwired, not_run)
-- `test-resilient-1571-user-scope-no-user.sh` (unwired, not_run)
-- `test-resilient-1584-offense-ledger.sh` (unwired, not_run)
-- `test-resilient-1585-ship-evidence-hwm.sh` (unwired, not_run)
-- `test-resilient-1590-disk-selfheal.sh` (unwired, not_run)
-- `test-resilient-1592-r2-typed-fk.sh` (unwired, not_run)
-- `test-resilient-206-free-tier-provider-preserved.sh` (unwired, not_run)
-- `test-resilient-259-harness-doc-injection.sh` (unwired, not_run)
-- `test-resilient-320-role-aware-installer.sh` (unwired, not_run)
-- `test-resilient-349-pr-stuck-live-scan.sh` (unwired, not_run)
-- `test-resilient-366-organ-roll-call.sh` (unwired, not_run)
-- `test-resilient-418-cascade-unblock-cj.sh` (unwired, not_run)
-- `test-resilient-575-sub-fallback.sh` (unwired, not_run)
-- `test-resilient-597-suppress-capability-artifact.sh` (unwired, not_run)
-- `test-resilient-600-floor-config.sh` (unwired, not_run)
-- `test-resilient-746-organ-role-reconcile.sh` (unwired, not_run)
-- `test-retro-prompt.sh` (unwired, not_run)
-- `test-review-handoff-branch-diverged.sh` (unwired, not_run)
-- `test-review-handoff-reengage.sh` (wired, not_run)
-- `test-review-handoff-smoke.sh` (wired, not_run)
-- `test-review-verdict-report.sh` (unwired, not_run)
-- `test-reviewer-routing.sh` (unwired, not_run)
-- `test-roadmap-from-vision-contract.sh` (unwired, not_run)
-- `test-roadmap-inject.sh` (unwired, not_run)
-- `test-roadmap-status-drift.sh` (unwired, not_run)
-- `test-roadmap-status.sh` (unwired, not_run)
-- `test-roadmap-update-agent.sh` (unwired, not_run)
-- `test-role-card-emit-and-query.sh` (unwired, not_run)
-- `test-rollback-gap.sh` (wired, not_run)
-- `test-rollup-cascade-cancel.sh` (wired, not_run)
-- `test-rollup-not-blocked-by-flaky-job.sh` (unwired, not_run)
-- `test-rollup-semantic.sh` (wired, not_run)
-- `test-root-service-is-sandbox-guard.sh` (wired, not_run)
-- `test-rot-reaper-fix-in-flight.sh` (unwired, not_run)
-- `test-rot-reaper-resolve-first.sh` (unwired, not_run)
-- `test-rot-reaper-systemic-red-hold.sh` (unwired, not_run)
-- `test-rot-reaper-verified-red-spare.sh` (wired, not_run)
-- `test-rot-reaper.sh` (wired, not_run)
-- `test-rotate-sccache-r2-gh-only.sh` (unwired, not_run)
-- `test-rotate-sccache-r2-token.sh` (unwired, not_run)
-- `test-routing-no-haiku.sh` (unwired, not_run)
-- `test-ruleset-doc-only-pr.sh` (wired, not_run)
-- `test-ruleset-snapshots.sh` (unwired, not_run)
-- `test-run-consolidation.sh` (wired, not_run)
-- `test-run-fleet-backend-default.sh` (unwired, not_run)
-- `test-run-fleet-core-cap.sh` (wired, not_run)
-- `test-run-fleet-credit-exhausted-ambient-kind.sh` (unwired, not_run)
-- `test-run-fleet-cross-repo.sh` (wired, not_run)
-- `test-run-fleet-error-classification.sh` (unwired, not_run)
-- `test-run-fleet-no-orphan.sh` (unwired, not_run)
-- `test-run-fleet-probe-404-not-auth-fail.sh` (unwired, not_run)
-- `test-run-fleet-probe-retry.sh` (unwired, not_run)
-- `test-run-fleet-smoke.sh` (unwired, not_run)
-- `test-run-local-ci.sh` (unwired, not_run)
-- `test-runner-autoscale-max-default.sh` (wired, not_run)
-- `test-runner-ghost-online-detection.sh` (unwired, not_run)
-- `test-rust-aware-deploy.sh` (unwired, not_run)
-- `test-rust-first-bypass-gate.sh` (unwired, not_run)
-- `test-rust-first-gate.sh` (unwired, not_run)
-- `test-rust-first-pr-gate.sh` (unwired, not_run)
-- `test-rust-first-worktree-bypass.sh` (unwired, not_run)
-- `test-rustfmt-parity.sh` (unwired, not_run)
-- `test-safe-reopen-gap.sh` (unwired, not_run)
-- `test-sandbox-discipline.sh` (unwired, not_run)
-- `test-sandbox-isolation.sh` (wired, not_run)
-- `test-scaffold-holes-apply.sh` (unwired, not_run)
-- `test-sccache-codegen-gating.sh` (unwired, not_run)
-- `test-sccache-dir-selection.sh` (unwired, not_run)
-- `test-sccache-hit-rate-gate.sh` (unwired, not_run)
-- `test-sccache-reaper.sh` (unwired, not_run)
-- `test-sccache-wired.sh` (unwired, not_run)
-- `test-schema-version-assert.sh` (wired, not_run)
-- `test-scope-check-subagent-enforce.sh` (unwired, not_run)
-- `test-self-doctor-heal.sh` (unwired, not_run)
-- `test-self-hosted-run-stats-emit.sh` (wired, not_run)
-- `test-self-hosted-runner-deps.sh` (wired, not_run)
-- `test-self-hosted-toggle-matrix.sh` (unwired, not_run)
-- `test-self-model.sh` (unwired, not_run)
-- `test-self-sync-fleet.sh` (unwired, not_run)
-- `test-semantic-lesson-retrieval.sh` (unwired, not_run)
-- `test-server-survives-slow-endpoint.sh` (unwired, not_run)
-- `test-session-end-outcome.sh` (unwired, not_run)
-- `test-session-export-resume.sh` (unwired, not_run)
-- `test-session-start-agent-pointer.sh` (unwired, not_run)
-- `test-session-start-emit.sh` (unwired, not_run)
-- `test-session-summary.sh` (unwired, not_run)
-- `test-settings-repo-roundtrip.sh` (unwired, not_run)
-- `test-shared-service-gate.sh` (unwired, not_run)
-- `test-shared-target-cache-reaper.sh` (unwired, not_run)
-- `test-shared-target-phantom-ref.sh` (unwired, not_run)
-- `test-shebang-exec-bit.sh` (unwired, not_run)
-- `test-shell-set-e-coverage.sh` (unwired, not_run)
-- `test-ship-assist-context-hook.sh` (unwired, not_run)
-- `test-ship-chassis-round.sh` (unwired, not_run)
-- `test-sibling-status.sh` (unwired, not_run)
-- `test-silent-failure-tax.sh` (unwired, not_run)
-- `test-silent-fleet-death.sh` (unwired, not_run)
-- `test-slo-breach-dedupe.sh` (unwired, not_run)
-- `test-slo-breach-gates.sh` (unwired, not_run)
-- `test-spawn-worker-fleet.sh` (unwired, not_run)
-- `test-speculative-execution-isolation.sh` (unwired, not_run)
-- `test-speculative-on-speculative-guard.sh` (wired, not_run)
-- `test-spike-isolation.sh` (wired, not_run)
-- `test-sse-filter-and-regret.sh` (unwired, not_run)
-- `test-stale-binary-ship-blocked.sh` (wired, not_run)
-- `test-stale-branch-reaper-emit.sh` (unwired, not_run)
-- `test-stale-branch-reaper.sh` (unwired, not_run)
-- `test-stale-branch-rebase.sh` (wired, not_run)
-- `test-stale-claim-reaper-pid-liveness.sh` (unwired, not_run)
-- `test-stale-claim-reaper.sh` (unwired, not_run)
-- `test-stale-lease-cleanup.sh` (unwired, not_run)
-- `test-stale-main-guards.sh` (unwired, not_run)
-- `test-stale-pr-reaper-retire-conflicting.sh` (unwired, not_run)
-- `test-stale-pr-rebase-bot.sh` (wired, not_run)
-- `test-stale-process-watchdog.sh` (wired, not_run)
-- `test-stale-worktree-reaper-broad-scan.sh` (unwired, not_run)
-- `test-stale-worktree-reaper-empty-branch.sh` (unwired, not_run)
-- `test-stale-worktree-reaper-safety.sh` (unwired, not_run)
-- `test-stale-worktree-reaper-tmp.sh` (wired, not_run)
-- `test-stale-worktree-reaper-wip-safety.sh` (unwired, not_run)
-- `test-stale-worktree-reaper.sh` (unwired, not_run)
-- `test-stall-detector-build-aware.sh` (unwired, not_run)
-- `test-state-db-restore.sh` (wired, not_run)
-- `test-state-db-yaml-sync.sh` (wired, not_run)
-- `test-status-done-requires-closed-pr.sh` (unwired, not_run)
-- `test-status-flip-proof-of-merge.sh` (wired, not_run)
-- `test-status.sh` (unwired, not_run)
-- `test-stranded-work-detector.sh` (unwired, not_run)
-- `test-strict-mode.sh` (unwired, not_run)
-- `test-stuck-pr-filer-shared-blocker.sh` (unwired, not_run)
-- `test-stuck-pr-filer.sh` (unwired, not_run)
-- `test-subagent-budget-kill.sh` (wired, not_run)
-- `test-subagent-budget.sh` (unwired, not_run)
-- `test-subagent-epilogue-budget-language.sh` (unwired, not_run)
-- `test-subagent-epilogue-ref.sh` (wired, not_run)
-- `test-subagent-heartbeat.sh` (unwired, not_run)
-- `test-subagent-pre-exit-check.sh` (unwired, not_run)
-- `test-subagent-shipping-epilogue.sh` (unwired, not_run)
-- `test-submodule-guard.sh` (wired, not_run)
-- `test-subprocess-auth-smoke.sh` (unwired, not_run)
-- `test-supervision-trees.sh` (wired, not_run)
-- `test-svc-abstraction.sh` (unwired, not_run)
-- `test-synthesis-truth.sh` (unwired, not_run)
-- `test-system-integration.sh` (wired, not_run)
-- `test-system-invariants-fixtures.sh` (unwired, not_run)
-- `test-system-invariants-launchd.sh` (unwired, not_run)
-- `test-systematizer-smoke.sh` (unwired, not_run)
-- `test-systemic-red-detector.sh` (unwired, not_run)
-- `test-take-both-resolver.sh` (unwired, not_run)
-- `test-target-dir-reaper.sh` (unwired, not_run)
-- `test-target-reaper-cold-build-safety.sh` (unwired, not_run)
-- `test-target-reaper-critical-mode.sh` (unwired, not_run)
-- `test-tauri-filter-no-ciyml.sh` (unwired, not_run)
-- `test-tauri-filter-scope.sh` (unwired, not_run)
-- `test-telemetry-cost.sh` (wired, not_run)
-- `test-the-path-exists.sh` (unwired, not_run)
-- `test-tier5-self-improve.sh` (unwired, not_run)
-- `test-tmux-kill-cleanup.sh` (unwired, not_run)
-- `test-together-routing.sh` (unwired, not_run)
-- `test-token-anomaly.sh` (unwired, not_run)
-- `test-token-attribution-on-wedge.sh` (unwired, not_run)
-- `test-tool-normalize.sh` (wired, not_run)
-- `test-toolchain-ratchet-detector.sh` (unwired, not_run)
-- `test-transient-retrigger.sh` (unwired, not_run)
-- `test-trek-gatekeeping.sh` (unwired, not_run)
-- `test-triage-cargo-test-failure.sh` (unwired, not_run)
-- `test-triage-test-failure.sh` (wired, not_run)
-- `test-trunk-loop-e2e.sh` (unwired, not_run)
-- `test-trunk-recovery-reviver.sh` (wired, not_run)
-- `test-trunk-sentinel.sh` (unwired, not_run)
-- `test-unknown-subcommand-guard.sh` (unwired, not_run)
-- `test-urgency-reach.sh` (unwired, not_run)
-- `test-urgent-inbox-poll-loop.sh` (unwired, not_run)
-- `test-uuid-gap-id-compat.sh` (wired, not_run)
-- `test-vector6-schema.sh` (unwired, not_run)
-- `test-vector7-swarm.sh` (unwired, not_run)
-- `test-velocity-trending.sh` (wired, not_run)
-- `test-vital-signs-capability-lifecycle.sh` (unwired, not_run)
-- `test-vital-signs-relocated-collector.sh` (unwired, not_run)
-- `test-vital-signs-verified-working.sh` (unwired, not_run)
-- `test-voice-banlist-self-fixture.sh` (unwired, not_run)
-- `test-voice-banlist-self.sh` (unwired, not_run)
-- `test-voice-banlist.sh` (wired, not_run)
-- `test-voice-subcommand.sh` (unwired, not_run)
-- `test-vscode-chat-panel.sh` (unwired, not_run)
-- `test-vscode-tool-approval.sh` (unwired, not_run)
-- `test-wake-recovery.sh` (unwired, not_run)
-- `test-war-room-quiet.sh` (unwired, not_run)
-- `test-waste-spike-pause.sh` (unwired, not_run)
-- `test-waste-tally-by-domain.sh` (unwired, not_run)
-- `test-waste-tally-domain.sh` (wired, not_run)
-- `test-waste-tally-tokens.sh` (unwired, not_run)
-- `test-web-push-subscribe.sh` (unwired, not_run)
-- `test-webhook-cache-write.sh` (unwired, not_run)
-- `test-webhook-gap-flip.sh` (unwired, not_run)
-- `test-webhook-health-endpoint.sh` (unwired, not_run)
-- `test-webhook-pr-merge-prune.sh` (unwired, not_run)
-- `test-webhook-receiver.sh` (unwired, not_run)
-- `test-webpush-escalation.sh` (unwired, not_run)
-- `test-wedge-fixer-dispatch.sh` (unwired, not_run)
-- `test-wedge-remediation-real.sh` (unwired, not_run)
-- `test-wedge-state-machine.sh` (unwired, not_run)
-- `test-weekly-digest.sh` (unwired, not_run)
-- `test-why-flag.sh` (unwired, not_run)
-- `test-wizard-daemon-dispatch-outcome.sh` (unwired, not_run)
-- `test-wizard-daemon-dry-run-readonly.sh` (unwired, not_run)
-- `test-wizard-daemon-merge-state-parse.sh` (unwired, not_run)
-- `test-wizard-daemon-plist-dedupe.sh` (unwired, not_run)
-- `test-wizard-daemon.sh` (unwired, not_run)
-- `test-worker-circuit-breaker.sh` (wired, not_run)
-- `test-worker-doctor-preflight.sh` (unwired, not_run)
-- `test-worker-first-output-watchdog.sh` (wired, not_run)
-- `test-worker-heartbeat-full-cycle.sh` (unwired, not_run)
-- `test-worker-launcher-template.sh` (unwired, not_run)
-- `test-worker-lock-cleanup.sh` (unwired, not_run)
-- `test-worker-no-spin.sh` (wired, not_run)
-- `test-worker-oauth-unset.sh` (unwired, not_run)
-- `test-worker-p0-mission-model-override.sh` (unwired, not_run)
-- `test-worker-policy-env.sh` (unwired, not_run)
-- `test-worker-prelude-floor-signals.sh` (unwired, not_run)
-- `test-worker-prelude-reads-floor.sh` (unwired, not_run)
-- `test-worker-preship-clippy.sh` (wired, not_run)
-- `test-worker-run-node-aware.sh` (wired, not_run)
-- `test-worker-stand-down.sh` (unwired, not_run)
-- `test-worker-timeout-kill-after.sh` (unwired, not_run)
-- `test-worker-timeout-multiplier.sh` (unwired, not_run)
-- `test-worker-timeout-no-commit.sh` (wired, not_run)
-- `test-worker-timeout-recovery.sh` (unwired, not_run)
-- `test-worker-timeout-scale.sh` (wired, not_run)
-- `test-workflow-cancel-in-progress.sh` (unwired, not_run)
-- `test-workflow-linux-guard.sh` (wired, not_run)
-- `test-worktree-base-honored.sh` (unwired, not_run)
-- `test-worktree-build-cache.sh` (unwired, not_run)
-- `test-worktree-contamination-check.sh` (wired, not_run)
-- `test-worktree-gitdir-race.sh` (unwired, not_run)
-- `test-worktree-iter-lib.sh` (unwired, not_run)
-- `test-worktree-prune-protects-live-edits.sh` (wired, not_run)
-- `test-worktree-reaper-heartbeat-protection.sh` (unwired, not_run)
-- `test-worktree-reaper-safety.sh` (wired, not_run)
-- `test-worktree-root-sibling.sh` (unwired, not_run)
-- `test-worktree-show-toplevel.sh` (wired, not_run)
-- `test-xml-tool-adapter.sh` (unwired, not_run)
-- `test-yaml-lint-guard.sh` (unwired, not_run)
-- `test-yaml-only-pr-guard.sh` (unwired, not_run)
-- `test-yaml-orphan-prune-state-aware.sh` (wired, not_run)
-- `test-zero-waste-014-ambient-only.sh` (unwired, not_run)
-- `test-zero-waste-020.sh` (unwired, not_run)
+- `test-a2a-consensus-e2e.sh` (unwired, skip)
+- `test-ambient-rotation.sh` (unwired, skip)
+- `test-api-gap-queue-perf.sh` (unwired, skip)
+- `test-cargo-target-reaper-root-orphan.sh` (unwired, skip)
+- `test-cargo-target-reaper-scope.sh` (unwired, skip)
+- `test-chump-demo-smoke.sh` (wired, skip)
+- `test-chump-playbook-freshness.sh` (unwired, skip)
+- `test-chump-subcommand-help.sh` (wired, skip)
+- `test-code-reviewer-agent.sh` (unwired, skip)
+- `test-credible-1520-link-pr-at-open.sh` (wired, skip)
+- `test-external-repo-plist-installer.sh` (wired, skip)
+- `test-farmer.sh` (wired, skip)
+- `test-gap-show-yaml-validity.sh` (unwired, skip)
+- `test-install-gap-substrate-idempotent.sh` (unwired, skip)
+- `test-jetstream-consumer-roundtrip.sh` (unwired, skip)
+- `test-spike-isolation.sh` (wired, skip)
+- `test-war-room-quiet.sh` (unwired, skip)
 
 </details>
