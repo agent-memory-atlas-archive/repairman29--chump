@@ -5282,17 +5282,50 @@ events:
       adjudication; a wrong auto-close would discard real work.
     consumers: [fleet-brief, operator-recall, audit-priorities]
     fields_required: [ts, kind, gap_id, pr_number, reason, source]
-  # ── EFFECTIVE-1543: merged-PR-title closure (queue-drain backstop) ──────────
+  # ── CREDIBLE-1550: merged-PR-LINK closure (typed gap_prs FK, queue-drain) ───
   - kind: gap_closed_from_merged_pr
     effect_metric: self
-    emitter: scripts/coord/gap-doctor-reconcile.py --check-merged-pr-titles (EFFECTIVE-1543)
-    trigger: open gap whose gap-ID leads a MERGED PR title but whose canonical
-      state.db row was never flipped to done (closed_pr NULL) — the async-merge
-      ghost class that --check-closure-drift (needs closed_pr) and
-      --check-already-satisfied (no-op cycle-log signal only) both miss. The
-      picker re-selects these forever; this drains them from GitHub truth.
+    emitter: scripts/coord/gap-doctor-reconcile.py --check-merged-pr-links (CREDIBLE-1550)
+    trigger: open gap that a typed gap_prs row links to a MERGED PR
+      but whose canonical state.db row was never flipped to done (closed_pr NULL)
+      — the async-merge ghost class that --check-closure-drift (needs closed_pr)
+      and --check-already-satisfied (no-op cycle-log signal only) both miss.
+      CREDIBLE-1550 (Phase R R2) replaced the former PR-title match with the
+      gap_prs FK as the ONLY closure proof (a title falsely closed CREDIBLE-1492
+      from a docs PR and CREDIBLE-1520 from its AC1-only slice).
     consumers: [fleet-brief, operator-recall, audit-priorities]
     fields_required: [ts, kind, gap_id, pr_number, merged_at, source]
+  # ── CREDIBLE-1552: fail-closed + report-only companions (PARTIAL heuristic
+  # deleted — a closer must not infer partial-ness from prose) ────────────────
+  - kind: gap_close_skipped_merge_fetch_error
+    effect_metric: self
+    emitter: scripts/coord/gap-doctor-reconcile.py --check-merged-pr-links (CREDIBLE-1552)
+    trigger: open gap whose gap_prs-linked PR could not have its merged flag
+      fetched (gh non-zero / unparseable response, cache miss). The reconcile
+      FAILS CLOSED — it closes nothing and emits this so the skipped close is
+      visible; a later cycle retries once the fetch succeeds.
+    consumers: [fleet-brief, audit-priorities]
+    fields_required: [ts, kind, gap_id, pr_number, source]
+  - kind: pr_without_gap_link
+    effect_metric: self
+    emitter: scripts/coord/gap-doctor-reconcile.py --check-merged-pr-links (CREDIBLE-1552, report-only)
+    trigger: a recently MERGED PR whose title names an OPEN gap but carries NO
+      gap_prs row linking that PR to that gap. The FK closer (correctly) will not
+      close from a title, so this report-only pass surfaces the gap for an
+      operator to add the missing link (chump gap link-pr) or for CREDIBLE-1551
+      to backfill. Closes nothing. Re-emits once per reconcile tick per (gap, PR)
+      pair until the link is added — there is intentionally NO dedupe state; the
+      signal clears when the missing gap_prs row is written.
+    consumers: [fleet-brief, audit-priorities]
+    fields_required: [ts, kind, gap_id, pr_number, source]
+  - kind: gap_pr_unlinked
+    effect_metric: self
+    emitter: chump gap unlink-pr <GAP> <PR> --reason <text> (CREDIBLE-1552, src/main.rs)
+    trigger: an operator removed one gap_prs row through the store's single-writer
+      unlink-pr verb (e.g. a slice PR was mislinked to the umbrella). Carries the
+      gap, pr and the operator-supplied reason so the unlink is auditable.
+    consumers: [fleet-brief, audit-priorities]
+    fields_required: [ts, kind, gap, pr, reason]
   # ── INFRA-1040: graphql exhaustion fleet-wide signal ──────────────────────
   - kind: graphql_exhausted
     effect_metric: self

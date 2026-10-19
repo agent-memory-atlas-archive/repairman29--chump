@@ -3346,7 +3346,9 @@ impl GapStore {
         }
 
         // CREDIBLE-1495 R1: Construct and validate LandingReceipt before status transition.
-        let receipt = chump_ship::LandingReceipt::new(gap_id.to_string(), closed_pr);
+        // CREDIBLE-1550 AC3: stamp the proof-of-merge SHA onto the receipt.
+        let receipt = chump_ship::LandingReceipt::new(gap_id.to_string(), closed_pr)
+            .with_merge_sha(proof_of_merge_sha(&self.repo_root, gap_id, closed_pr));
         receipt
             .validate()
             .map_err(|e| anyhow::anyhow!("CREDIBLE-1495: invalid landing receipt: {e}"))?;
@@ -5606,6 +5608,65 @@ pub fn verify_proof_of_merge(repo_root: &Path, gap_id: &str, closed_pr: Option<i
     !String::from_utf8_lossy(&o.stdout).trim().is_empty()
 }
 
+/// CREDIBLE-1550 (Phase R R2, AC3): the merge commit SHA that proves this gap
+/// landed, so `ship()` can stamp it onto the [`chump_ship::LandingReceipt`].
+/// Returns `Some(sha)` only when a commit on the merge target (`origin/main`,
+/// falling back to local `main`) carries the gap ID or the PR marker `(#N)`.
+/// Returns `None` in every "no provable SHA" case — no `.git` tree (synthetic
+/// test fixtures), a fresh repo with no commits, git unavailable, or simply no
+/// matching commit. This is a *best-effort receipt enrichment*: the hard
+/// proof-of-merge gate stays in [`verify_proof_of_merge`], which keeps its own
+/// fail-open semantics for those edge cases; a `None` here never blocks a ship.
+pub fn proof_of_merge_sha(
+    repo_root: &Path,
+    gap_id: &str,
+    closed_pr: Option<i64>,
+) -> Option<String> {
+    if !repo_root.join(".git").exists() {
+        return None;
+    }
+    let has_origin_main = std::process::Command::new("git")
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            "refs/remotes/origin/main",
+        ])
+        .current_dir(repo_root)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let target_ref = if has_origin_main {
+        "origin/main"
+    } else {
+        "main"
+    };
+    let mut args: Vec<String> = vec![
+        "log".into(),
+        target_ref.into(),
+        "-i".into(),
+        "-F".into(),
+        "-n".into(),
+        "1".into(),
+        "--format=%H".into(),
+    ];
+    push_receipt_greps(&mut args, gap_id, closed_pr);
+    let out = std::process::Command::new("git")
+        .args(&args)
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if sha.is_empty() {
+        None
+    } else {
+        Some(sha)
+    }
+}
+
 /// RESILIENT-1110: redefine "done" = verified running-and-effective on the
 /// target node, not merely merged. `verify_proof_of_merge` above proves the
 /// commit landed on `main` — the exact proxy that hid the all-night CHDIR
@@ -7055,6 +7116,51 @@ impl GapStore {
         Ok(())
     }
 
+    /// CREDIBLE-1552: remove ONE gap_prs row (single-writer). Used to undo a
+    /// mislinked gap→PR edge — e.g. a slice PR that was linked to the umbrella
+    /// gap instead of its own slice. Returns the number of rows removed (0 if
+    /// the link did not exist, which is not an error). Emits kind=gap_pr_unlinked
+    /// to ambient.jsonl carrying the operator-supplied reason so the unlink is
+    /// auditable. The gap row itself is untouched.
+    pub fn unlink_pr(&self, gap_id: &str, pr_number: i64, reason: &str) -> Result<usize> {
+        let removed = self.conn.execute(
+            "DELETE FROM gap_prs WHERE gap_id=?1 AND pr_number=?2",
+            params![gap_id, pr_number],
+        )?;
+        if removed > 0 {
+            self.emit_gap_pr_unlinked(gap_id, pr_number, reason);
+        }
+        Ok(removed)
+    }
+
+    /// Emit a `gap_pr_unlinked` event to `.chump-locks/ambient.jsonl`.
+    // scanner-anchor: "kind":"gap_pr_unlinked"
+    fn emit_gap_pr_unlinked(&self, gap_id: &str, pr_number: i64, reason: &str) {
+        let amb = self.repo_root.join(".chump-locks").join("ambient.jsonl");
+        let ts = unix_to_iso_full(unix_now());
+        let line = format!(
+            "{}\n",
+            serde_json::json!({
+                "ts": ts,
+                "kind": "gap_pr_unlinked",
+                "gap": gap_id,
+                "pr": pr_number,
+                "reason": reason,
+            })
+        );
+        use std::io::Write as _;
+        if let Some(parent) = amb.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&amb)
+        {
+            let _ = f.write_all(line.as_bytes());
+        }
+    }
+
     /// List all PR links recorded for a gap, most-recently-opened first.
     pub fn list_prs_for_gap(&self, gap_id: &str) -> Result<Vec<GapPrRow>> {
         let mut stmt = self.conn.prepare(
@@ -8403,6 +8509,56 @@ mod proof_of_merge_tests {
         ));
     }
 
+    // CREDIBLE-1550 (Phase R R2, AC3): proof_of_merge_sha returns the matched
+    // merge SHA so ship() can stamp it onto the LandingReceipt.
+    #[test]
+    fn proof_of_merge_sha_returns_matched_commit_hash() {
+        let dir = tempdir().unwrap();
+        let init = hermetic_git(dir.path(), &["init", "--initial-branch=main", "--quiet"]);
+        if !init.status.success() {
+            return; // older git without --initial-branch
+        }
+        hermetic_git(dir.path(), &["config", "user.email", "test@test.local"]);
+        hermetic_git(dir.path(), &["config", "user.name", "test"]);
+        let commit = hermetic_git(
+            dir.path(),
+            &[
+                "commit",
+                "--allow-empty",
+                "-m",
+                "CREDIBLE-9551: proof-of-merge-sha fixture (#7777)",
+            ],
+        );
+        assert!(
+            commit.status.success(),
+            "git commit must succeed: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+        // HEAD sha is the commit we just made; proof_of_merge_sha must return it.
+        let head = hermetic_git(dir.path(), &["rev-parse", "HEAD"]);
+        let head_sha = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        assert_eq!(
+            proof_of_merge_sha(dir.path(), "CREDIBLE-9551", None).as_deref(),
+            Some(head_sha.as_str()),
+            "matched by gap ID → returns the merge commit SHA"
+        );
+        // Matched by the (#PR) marker too.
+        assert_eq!(
+            proof_of_merge_sha(dir.path(), "NO-MATCH-9999", Some(7777)).as_deref(),
+            Some(head_sha.as_str())
+        );
+        // No matching commit → None (the receipt simply carries no SHA).
+        assert_eq!(proof_of_merge_sha(dir.path(), "NO-MATCH-9999", None), None);
+    }
+
+    #[test]
+    fn proof_of_merge_sha_none_without_git_tree() {
+        // Synthetic fixture with no `.git` — None, never a panic; the hard
+        // gate stays fail-open in verify_proof_of_merge.
+        let dir = tempdir().unwrap();
+        assert_eq!(proof_of_merge_sha(dir.path(), "INFRA-9502", Some(1)), None);
+    }
+
     #[test]
     fn resilient1592_named_pr_must_itself_be_on_main() {
         let dir = tempdir().unwrap();
@@ -8740,6 +8896,87 @@ mod tests {
     fn get_pr_link_returns_none_when_absent() {
         let (store, _dir) = test_store();
         assert!(store.get_pr_link("INFRA-8192", 1).unwrap().is_none());
+    }
+
+    // ── CREDIBLE-1552: unlink_pr removes exactly one gap_prs row ────────────
+
+    #[test]
+    fn unlink_pr_removes_one_row_and_leaves_siblings() {
+        let (store, _dir) = test_store();
+        store.link_pr("CREDIBLE-1550", 5600, "abc123").unwrap();
+        store.link_pr("CREDIBLE-1552", 5600, "abc123").unwrap();
+
+        // Undo the mislink to the umbrella; the slice's own link survives.
+        let removed = store
+            .unlink_pr("CREDIBLE-1550", 5600, "slice-of-CREDIBLE-1552")
+            .unwrap();
+        assert_eq!(removed, 1, "exactly one row removed");
+
+        assert!(
+            store.get_pr_link("CREDIBLE-1550", 5600).unwrap().is_none(),
+            "umbrella link gone"
+        );
+        assert!(
+            store.get_pr_link("CREDIBLE-1552", 5600).unwrap().is_some(),
+            "slice link preserved"
+        );
+    }
+
+    #[test]
+    fn unlink_pr_absent_link_is_not_an_error() {
+        let (store, _dir) = test_store();
+        let removed = store.unlink_pr("INFRA-8192", 404, "never-linked").unwrap();
+        assert_eq!(
+            removed, 0,
+            "removing a non-existent link returns 0, not Err"
+        );
+    }
+
+    #[test]
+    fn unlink_pr_emits_one_parseable_gap_pr_unlinked_line() {
+        let (store, dir) = test_store();
+        let amb = dir.path().join(".chump-locks").join("ambient.jsonl");
+
+        // Reason intentionally carries a backslash and a double quote so the
+        // serde_json::json! encoder — not hand-escaping — is what makes the
+        // line parse back out cleanly.
+        let reason = r#"mislinked \ to "umbrella""#;
+        store.link_pr("CREDIBLE-1550", 5600, "abc123").unwrap();
+        let removed = store.unlink_pr("CREDIBLE-1550", 5600, reason).unwrap();
+        assert_eq!(removed, 1, "one row removed");
+
+        let body = std::fs::read_to_string(&amb).expect("ambient.jsonl written");
+        let lines: Vec<&str> = body
+            .lines()
+            .filter(|l| l.contains("\"kind\":\"gap_pr_unlinked\""))
+            .collect();
+        assert_eq!(lines.len(), 1, "exactly one gap_pr_unlinked line");
+
+        let v: serde_json::Value = serde_json::from_str(lines[0]).expect("line parses as JSON");
+        assert_eq!(v["kind"], "gap_pr_unlinked");
+        assert_eq!(v["gap"], "CREDIBLE-1550");
+        assert_eq!(v["pr"], 5600);
+        assert_eq!(v["reason"], reason, "reason round-trips with \\ and \"");
+    }
+
+    #[test]
+    fn unlink_pr_absent_link_emits_nothing() {
+        let (store, dir) = test_store();
+        let amb = dir.path().join(".chump-locks").join("ambient.jsonl");
+
+        let removed = store.unlink_pr("INFRA-8192", 404, "never-linked").unwrap();
+        assert_eq!(removed, 0, "nothing removed");
+
+        // No row removed => no event. The file may not exist at all, or (if some
+        // other code created it) must contain zero gap_pr_unlinked lines.
+        let count = std::fs::read_to_string(&amb)
+            .map(|b| {
+                b.lines()
+                    .filter(|l| l.contains("\"kind\":\"gap_pr_unlinked\""))
+                    .count()
+            })
+            .unwrap_or(0);
+        assert_eq!(count, 0, "an absent link writes no gap_pr_unlinked line");
     }
 
     // ── EFFECTIVE-679: idea-drop intake tests ──────────────────────────

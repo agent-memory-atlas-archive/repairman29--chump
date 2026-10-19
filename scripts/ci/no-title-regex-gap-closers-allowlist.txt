@@ -1,0 +1,24 @@
+# scripts/ci/no-title-regex-gap-closers-allowlist.txt
+# CREDIBLE-1550 (Phase R R2, AC4). Files that the TIER-2 co-occurrence heuristic
+# in test-no-title-regex-gap-closers.sh flags because they BOTH parse gap IDs
+# from PR titles/commit subjects AND close a gap somewhere in the same file.
+#
+# Two kinds of entries live here:
+#   - genuinely-legitimate: parse the title only for dispatch/respawn/display,
+#     never to CLOSE (the close routes through the gap_prs FK or a non-title
+#     source). These stay allowlisted.
+#   - KNOWN PRE-EXISTING closers still deriving the closed gap from the title.
+#     These are tracked for conversion to the gap_prs FK; REMOVE the entry when
+#     the conversion ships so the gate goes back to true zero.
+#
+# One repo-relative path per line, then a reason. Mirrors the raw-gh-allowlist
+# idiom (scripts/ci/raw-gh-allowlist.txt).
+
+# KNOWN PRE-EXISTING — convert the CLOSE path to the gap_prs FK under CREDIBLE-1551.
+# stale-pr-reaper.sh INFRA-674 "ghost-status" block parses gap IDs from merged
+# PR title+body and runs `chump gap ship`; it also legitimately parses titles
+# for respawn/retire dispatch. Tracked: CREDIBLE-1551.
+scripts/ops/stale-pr-reaper.sh
+# chump-pr-triage.sh `--apply ship-gap` derives the gap from the PR title then
+# ships it; the rest of the tool is advisory triage. Tracked: CREDIBLE-1551.
+scripts/coord/chump-pr-triage.sh

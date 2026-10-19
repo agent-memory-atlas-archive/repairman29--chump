@@ -411,21 +411,64 @@ def resolve_gh_repo() -> "str | None":
         return None
 
 
+def github_cache_db() -> Path:
+    """Path to the local webhook-fed GitHub cache (INFRA-1081). Reads here are
+    <100ms and don't touch the GraphQL/REST rate limit — so the merged-state
+    check is cache-first, REST only on a cache miss (CLAUDE.md §Cache-first)."""
+    return REPO_ROOT / ".chump" / "github_cache.db"
+
+
+def cache_pr_merged(pr_num) -> "str | None":
+    """Cache-first merged check: returns merged_at (ISO str) iff the local
+    github_cache.db positively shows PR <pr_num> MERGED, else None (miss / not
+    merged / cache absent). Only a POSITIVE merged hit short-circuits REST — a
+    cache 'not merged' or miss falls through to REST ground truth so a stale
+    cache can never permanently block a legitimate close."""
+    db = github_cache_db()
+    if not db.exists() or db.stat().st_size == 0:
+        return None
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        row = con.execute(
+            "SELECT merged_at FROM pr_state WHERE number=?1", (int(pr_num),)
+        ).fetchone()
+    except (sqlite3.Error, ValueError):
+        return None
+    finally:
+        con.close()
+    if row and row[0]:
+        return str(row[0])
+    return None
+
+
 def pr_merged(repo: str, pr_num) -> tuple:
-    """(is_merged: bool, merged_at: str) for repos/<repo>/pulls/<pr_num> via the
-    REST endpoint (costs core bucket, NOT graphql). A PR is 'merged' only when
-    state=closed AND merged_at is a real timestamp — a closed-unmerged PR is NOT
-    evidence the work landed."""
+    """(is_merged, merged_at) for a PR, cache-first then REST ground truth.
+
+    is_merged is tri-state:
+      True   — PR is verified MERGED (cache positive hit, or REST state=closed
+               AND merged_at is a real timestamp). merged_at carries the ISO ts.
+      False  — PR is verified NOT merged (open, or closed-unmerged).
+      None   — the merged-flag fetch ERRORED (gh non-zero / unparseable). The
+               caller MUST fail closed (close nothing) and emit an event.
+
+    Cache reads cost nothing against the rate limit; REST costs the core bucket,
+    NOT graphql. A closed-unmerged PR is never evidence the work landed."""
+    cached = cache_pr_merged(pr_num)
+    if cached is not None:
+        return (True, cached)
     r = subprocess.run(
         ["gh", "api", f"repos/{repo}/pulls/{pr_num}",
          "--jq", '"\\(.state) \\(.merged_at // "-")"'],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
-        return (False, "")
+        return (None, "")
     parts = r.stdout.strip().split(None, 1)
     if len(parts) < 2:
-        return (False, "")
+        return (None, "")
     state, merged_at = parts[0], parts[1]
     if state == "closed" and merged_at != "-":
         return (True, merged_at)
@@ -549,22 +592,60 @@ def check_already_satisfied(state_db: Path, ambient_path: Path, dry_run: bool) -
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# EFFECTIVE-1543 — merged-PR-title closure (the queue-drain backstop).
+# CREDIBLE-1550 (Phase R R2, AC1/AC5) — merged-PR-LINK closure (typed-FK only).
 #
-# The biggest ghost class: a worker shipped REAL work in a PR that MERGED, but
-# the async merge landed after the worker cycle ended, so the canonical state.db
-# gap was never flipped to done (closed_pr stays NULL). check_closure_drift is
-# blind (no closed_pr to scan) and check_already_satisfied only fires on
-# no-op/duplicate cycle-log signals — an actually-implemented gap trips neither.
-# Result: 1,943 open with 0 drained/90min while worker PRs kept merging; the
-# picker re-selects these ghosts forever (EFFECTIVE-449 shipped a DUPLICATE #4527
-# that way). Merged PR titles on origin follow the immutable "<GAP-ID>: <desc>"
-# convention (same source close-gaps-from-commit-subjects.sh trusts on commit
-# subjects) — this pass reads them as ground truth and writes the CANONICAL
-# state.db (not just the YAML mirror), so the picker's queue actually drains.
+# This pass closes the async-merge ghost class (real work shipped, PR merged
+# after the worker cycle ended, canonical state.db left open). It USED to match
+# the gap ID against the merged PR *title* — which on 2026-10-18 falsely closed
+# the R3 umbrella CREDIBLE-1492 from a docs-only receipt PR (#5580) and closed
+# CREDIBLE-1520 whole from its AC1-only slice PR (#5582). A title is not proof
+# the PR implemented the gap. So this pass now trusts ONLY the typed gap_prs FK
+# written at PR-open (CREDIBLE-1520 AC1): a gap closes iff a gap_prs row links a
+# MERGED PR to THAT gap. A slice PR links to its slice gap, never the umbrella,
+# so the umbrella is structurally protected (AC1 fixture). A docs-only PR titled
+# with a gap ID but with no gap_prs row closes nothing (AC5); a merged
+# title-named PR with no row emits a report-only pr_without_gap_link instead.
+# The title-regex path (_GAP_TITLE_RE / merged_pr_gap_map) is
+# deleted; CI grep gate scripts/ci/test-no-title-regex-gap-closers.sh fails on
+# any reintroduction.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_GAP_TITLE_RE = re.compile(r"^([A-Z][A-Z0-9]*-\d+):")
+# CREDIBLE-1552 (Phase R R2): the PARTIAL-body heuristic was DELETED here, not
+# hardened. A closer must not infer partial-ness from prose — that is how an
+# "AC1 only" slice PR was mistaken for a whole-gap close in the first place. The
+# rule that replaces it is structural: a PR closes exactly the gap(s) its
+# gap_prs rows link; a partial delivery is a SLICE gap with its own id; an
+# umbrella closes only through gap-close-decomposed. So this reconcile reads the
+# gap_prs FK plus GitHub's merged state (cache-first REST) and NOTHING else — no
+# body regex, no title match. If the merged-flag fetch errors, it closes nothing
+# and emits kind=gap_close_skipped_merge_fetch_error (fail closed).
+
+
+def gap_pr_links(state_db: Path) -> dict:
+    """gap_id -> [pr_number, ...] from the typed gap_prs table (CREDIBLE-1520
+    AC1), read straight from canonical SQLite. Empty dict when the table is
+    absent (old store) or unreadable — the closer then simply drains nothing,
+    which is the safe outcome (a title match is never used as a fallback)."""
+    if not state_db.exists():
+        return {}
+    try:
+        con = sqlite3.connect(f"file:{state_db}?mode=ro", uri=True)
+    except sqlite3.Error as e:
+        print(f"merged-pr-links: cannot open {state_db}: {e}", file=sys.stderr)
+        return {}
+    try:
+        rows = con.execute(
+            "SELECT gap_id, pr_number FROM gap_prs ORDER BY opened_at DESC"
+        ).fetchall()
+    except sqlite3.Error:
+        # No gap_prs table yet, or schema mismatch — nothing to drain.
+        return {}
+    finally:
+        con.close()
+    out: dict = {}
+    for gid, pr in rows:
+        out.setdefault(gid, []).append(pr)
+    return out
 
 
 def open_gap_ids(state_db: Path) -> list:
@@ -588,120 +669,185 @@ def open_gap_ids(state_db: Path) -> list:
     return [r[0] for r in rows]
 
 
-# Practically-unbounded cap for "scan ALL merged PRs". gh paginates internally,
-# returning min(available, limit), so this simply means "every merged PR there
-# is" without a stale hardcoded repo-size guess. The repo already has ~5,200
-# merged PRs; the previous default of 300 meant any gap shipped before
-# ~PR#4900 never auto-closed and got re-picked forever (EFFECTIVE-1543 ghost
-# thrash). limit<=0 selects this full scan.
-_ALL_MERGED_PRS = 1_000_000
+def check_merged_pr_links(state_db: Path, ambient_path: Path, dry_run: bool) -> int:
+    """CREDIBLE-1550 (AC1/AC5): close open gaps that a typed gap_prs row links to
+    a MERGED PR. Returns count closed.
 
-
-def merged_pr_gap_map(repo: str, limit: int) -> dict:
-    """gap-id -> (pr_number, merged_at) from MERGED PRs whose title leads with
-    '<GAP-ID>:'. Newest PR wins (gh list is newest-first). Filing PRs and
-    [no-close] PRs are skipped (never close on a gap-filing commit).
-
-    `limit <= 0` scans the FULL merged-PR history (see _ALL_MERGED_PRS); a
-    positive limit caps the scan to the most-recent N merged PRs (debug/bounded
-    runs). gh pr list paginates under the hood, so a large effective limit walks
-    the entire history in one invocation."""
-    effective = limit if (limit and limit > 0) else _ALL_MERGED_PRS
-    r = subprocess.run(
-        ["gh", "pr", "list", "--repo", repo, "--state", "merged",
-         "--limit", str(effective), "--json", "number,title,mergedAt"],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        print(f"merged-pr-titles: gh pr list failed: {r.stderr.strip()[:200]}",
-              file=sys.stderr)
-        return {}
-    try:
-        prs = json.loads(r.stdout or "[]")
-    except Exception:
-        return {}
-    out = {}
-    for p in prs:
-        title = p.get("title") or ""
-        if "[no-close]" in title:
-            continue
-        low = title.lower()
-        if low.startswith("chore(gaps): file") or low.startswith("file "):
-            continue
-        m = _GAP_TITLE_RE.match(title)
-        if not m:
-            continue
-        gid = m.group(1)
-        if gid in out:
-            continue  # keep the newest merged PR for this gap
-        out[gid] = (p.get("number"), p.get("mergedAt") or "")
-    return out
-
-
-def check_closed_pr_titles(state_db: Path, ambient_path: Path, dry_run: bool,
-                           limit: int = 0) -> int:
-    """Close open gaps whose gap-ID leads a MERGED PR title. Returns count closed.
-
-    HIGH confidence: the PR is verified merged (gh --state merged) AND its title
-    leads with the exact gap-ID. Writes status=done + closed_pr + closed_date +
-    evidence to the canonical state.db and emits kind=gap_closed_from_merged_pr.
-
-    `limit <= 0` (the default) scans the FULL merged-PR history so a gap shipped
-    at any point in the repo's ~5,200-PR history still auto-closes; a positive
-    limit bounds the scan to the most-recent N merged PRs.
+    The ONLY closure proof is the gap_prs FK (written at PR-open, CREDIBLE-1520
+    AC1) — never a PR title, never a PARTIAL-body regex (CREDIBLE-1552 deleted
+    that heuristic). For each open gap that has gap_prs row(s), the most recently
+    opened linked PR that is verified MERGED on GitHub closes exactly THAT gap
+    (status=done + closed_pr + evidence), emitting kind=gap_closed_from_merged_pr.
+    A slice PR links its slice gap, so an umbrella with no row of its own is never
+    closed (AC1 fixture); a docs-only PR with no row closes nothing (AC5). If the
+    merged-flag fetch ERRORS, the gap is left untouched and
+    kind=gap_close_skipped_merge_fetch_error is emitted (fail closed).
     """
     from datetime import datetime, timezone
 
     repo = resolve_gh_repo()
     if repo is None:
-        print("merged-pr-titles: gh repo unresolved (offline?) — cannot verify "
+        print("merged-pr-links: gh repo unresolved (offline?) — cannot verify "
               "merges, skipping", file=sys.stderr)
         return 0
     open_ids = set(open_gap_ids(state_db))
     if not open_ids:
-        print("merged-pr-titles: no open gaps — nothing to drain")
+        print("merged-pr-links: no open gaps — nothing to drain")
         return 0
-    scope = f"last {limit} merged PRs" if (limit and limit > 0) else "all merged PRs"
-    pr_map = merged_pr_gap_map(repo, limit)
-    ghosts = {gid: pr_map[gid] for gid in open_ids if gid in pr_map}
-    if not ghosts:
-        print(f"merged-pr-titles: scanned {len(open_ids)} open gap(s) against "
-              f"{scope} — no merged-but-open ghosts, clean")
+    links = gap_pr_links(state_db)
+    # Only open gaps that carry at least one typed PR link are candidates.
+    candidates = {gid: links[gid] for gid in open_ids if gid in links}
+    if not candidates:
+        print(f"merged-pr-links: scanned {len(open_ids)} open gap(s) — none carry "
+              f"a gap_prs row (title matching is not a fallback), clean")
         return 0
-    print(f"merged-pr-titles: {len(ghosts)} open gap(s) have a MERGED PR titled "
-          f"with their ID — draining")
+    print(f"merged-pr-links: {len(candidates)} open gap(s) carry a gap_prs row — "
+          f"checking each linked PR for a merged close")
     closed = 0
-    for gid, (pr_num, merged_at) in sorted(ghosts.items()):
-        cd = (merged_at or "")[:10]
-        print(f"  GHOST {gid}: merged PR #{pr_num} ({cd}) — gap still open")
-        if dry_run:
-            closed += 1
-            continue
-        evidence = (
-            f"merged-pr-title closure (EFFECTIVE-1543): PR #{pr_num} titled "
-            f"'{gid}: ...' merged {cd}; canonical gap was left open (closed_pr "
-            f"NULL). Auto-closed by gap-doctor-reconcile --check-merged-pr-titles."
-        )
-        try:
-            subprocess.run(
-                ["chump", "gap", "ship", gid, "--closed-pr", str(int(pr_num))],
-                check=True, capture_output=True, text=True
-            )
-            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            _emit(ambient_path, {
-                "ts": ts, "kind": "gap_closed_from_merged_pr",
-                "gap_id": gid, "pr_number": int(pr_num),
-                "merged_at": merged_at, "source": "gap-doctor-reconcile",
-            })
-            closed += 1
-            print(f"  CLOSED {gid} done (PR #{pr_num} merged {cd}) — drift resolved")
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"  WARN could not close {gid}: {e}", file=sys.stderr)
+    for gid in sorted(candidates):
+        for pr_num in candidates[gid]:
+            merged, merged_at = pr_merged(repo, pr_num)
+            if merged is None:
+                # Fail closed: the merged-flag fetch errored. Close NOTHING and
+                # emit so the skipped close is visible. A later cycle retries.
+                print(f"  SKIP {gid}: linked PR #{pr_num} merged-flag fetch "
+                      f"errored — not closing (fail closed)")
+                if not dry_run:
+                    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    _emit(ambient_path, {
+                        "ts": ts, "kind": "gap_close_skipped_merge_fetch_error",
+                        "gap_id": gid, "pr_number": int(pr_num),
+                        "source": "gap-doctor-reconcile",
+                    })
+                continue  # an older link may still be fetchable + merged
+            if not merged:
+                continue
+            cd = (merged_at or "")[:10]
+            print(f"  GHOST {gid}: gap_prs-linked PR #{pr_num} merged {cd} — gap still open")
+            if dry_run:
+                closed += 1
+                break
+            try:
+                subprocess.run(
+                    ["chump", "gap", "ship", gid, "--closed-pr", str(int(pr_num))],
+                    check=True, capture_output=True, text=True
+                )
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _emit(ambient_path, {
+                    "ts": ts, "kind": "gap_closed_from_merged_pr",
+                    "gap_id": gid, "pr_number": int(pr_num),
+                    "merged_at": merged_at, "source": "gap-doctor-reconcile",
+                })
+                closed += 1
+                print(f"  CLOSED {gid} done (gap_prs-linked PR #{pr_num} merged {cd})")
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                print(f"  WARN could not close {gid}: {e}", file=sys.stderr)
+            break  # one close per gap; newest linked merged PR wins
     if dry_run:
         print(f"  (dry-run — {closed} would close; no writes)")
     else:
-        print(f"  drained {closed} merged-but-open ghost(s)")
+        print(f"  drained {closed} merged-but-open ghost(s) via gap_prs links")
     return closed
+
+
+# CREDIBLE-1552 (Phase R R2, AC1/AC5): gap IDs look like INFRA-123 / CREDIBLE-9.
+# Used ONLY by the report-only pass below to name the open gap a merged PR
+# titles — never to CLOSE anything (closes route exclusively through the
+# gap_prs FK). gap-doctor-reconcile.py is allowlisted in
+# scripts/ci/no-title-regex-gap-closers-allowlist.txt for exactly this reason.
+_GAP_ID_RE = re.compile(r"\b[A-Z][A-Z0-9]*-[0-9]+\b")
+
+
+def recent_merged_prs(repo: str, limit: int = 100) -> list:
+    """Recently merged PRs as [(number, title), ...], cache-first then REST.
+
+    Cache-first: the webhook-fed github_cache.db (INFRA-1081) carries merged_at,
+    so a read here costs nothing against the rate limit. REST fallback uses
+    `gh pr list --state merged` (core bucket). Returns [] on any failure — the
+    report pass then simply has nothing to say (it never closes, so an empty
+    list is always safe)."""
+    db = github_cache_db()
+    if db.exists() and db.stat().st_size > 0:
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                rows = con.execute(
+                    "SELECT number, COALESCE(title,'') FROM pr_state "
+                    "WHERE merged_at IS NOT NULL "
+                    "ORDER BY merged_at DESC LIMIT ?1",
+                    (int(limit),),
+                ).fetchall()
+            finally:
+                con.close()
+            if rows:
+                return [(int(n), str(t)) for n, t in rows]
+        except sqlite3.Error:
+            pass  # fall through to REST
+    r = subprocess.run(
+        ["gh", "pr", "list", "--repo", repo, "--state", "merged",
+         "--limit", str(int(limit)), "--json", "number,title"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return []
+    try:
+        data = json.loads(r.stdout or "[]")
+    except json.JSONDecodeError:
+        return []
+    return [(int(d["number"]), str(d.get("title", ""))) for d in data]
+
+
+def check_unlinked_merged_prs(state_db: Path, ambient_path: Path, dry_run: bool,
+                              limit: int = 100) -> int:
+    """CREDIBLE-1552 (Phase R R2): REPORT-ONLY pass. Lists recently merged PRs
+    (cache-first) and, for any merged PR whose TITLE names an OPEN gap that has
+    NO gap_prs row linking this PR to it, prints 'UNLINKED <gid> PR #N, not
+    closing' and emits kind=pr_without_gap_link. This surfaces the gaps the old
+    title heuristic would have closed but the FK closer (correctly) will not —
+    so an operator can add the missing gap_prs link (chump gap link-pr) or let
+    CREDIBLE-1551 backfill it. It NEVER closes anything.
+
+    Returns the count of unlinked (merged-PR, open-gap) pairs reported."""
+    from datetime import datetime, timezone
+
+    repo = resolve_gh_repo()
+    if repo is None:
+        print("unlinked-merged: gh repo unresolved (offline?) — skipping report",
+              file=sys.stderr)
+        return 0
+    open_ids = set(open_gap_ids(state_db))
+    if not open_ids:
+        print("unlinked-merged: no open gaps — nothing to report")
+        return 0
+    links = gap_pr_links(state_db)  # gap_id -> [pr_number, ...]
+    merged = recent_merged_prs(repo, limit)
+    if not merged:
+        print("unlinked-merged: no recently merged PRs resolvable — nothing to report")
+        return 0
+
+    reported = 0
+    for pr_num, title in merged:
+        for gid in set(_GAP_ID_RE.findall(title)):
+            if gid not in open_ids:
+                continue  # PR names a gap that isn't open — not our concern
+            if pr_num in links.get(gid, []):
+                continue  # already FK-linked — the closer handles it
+            reported += 1
+            print(f"  UNLINKED {gid} PR #{pr_num}, not closing")
+            if not dry_run:
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _emit(ambient_path, {
+                    "ts": ts, "kind": "pr_without_gap_link",
+                    "gap_id": gid, "pr_number": int(pr_num),
+                    "source": "gap-doctor-reconcile",
+                })
+    if reported == 0:
+        print(f"unlinked-merged: scanned {len(merged)} merged PR(s) — "
+              f"every title-named open gap is FK-linked, clean")
+    else:
+        print(f"unlinked-merged: reported {reported} merged PR(s) that name an "
+              f"open gap with no gap_prs row (report-only, closed nothing)")
+    return reported
 
 
 def main():
@@ -722,28 +868,34 @@ def main():
              "shipped in a merged PR, else FLAG low-confidence matches",
     )
     ap.add_argument(
-        "--check-merged-pr-titles", action="store_true",
-        help="EFFECTIVE-1543: close open gaps whose gap-ID leads a MERGED PR "
-             "title (the async-merge ghost class closed_pr-drift + "
-             "already-satisfied both miss); writes canonical state.db",
+        "--check-merged-pr-links", "--check-merged-pr-titles",
+        dest="check_merged_pr_links", action="store_true",
+        help="CREDIBLE-1550: close open gaps that a typed gap_prs row links to a "
+             "MERGED PR (the async-merge ghost class closed_pr-drift "
+             "+ already-satisfied both miss). The gap_prs FK is the ONLY proof — "
+             "a PR title is never used. (--check-merged-pr-titles is a deprecated "
+             "alias kept so the gap-closure-reconcile service keeps working.)",
     )
     ap.add_argument(
         "--merged-pr-limit", type=int, default=0,
-        help="how many recent merged PRs to scan for --check-merged-pr-titles; "
-             "0 (default) scans the FULL merged-PR history so gaps shipped "
-             "anywhere in the repo's ~5,200-PR history still auto-close (the "
-             "old default of 300 left pre-~PR#4900 ships as re-pickable ghosts)",
+        help="DEPRECATED/ignored (CREDIBLE-1550): the link-based closer reads the "
+             "gap_prs FK, not a merged-PR-list scan, so there is no limit to tune. "
+             "Accepted for backward compatibility with stale callers.",
     )
     args = ap.parse_args()
 
     # INFRA-3826: the already-satisfied backstop reads the canonical state.db
     # DIRECTLY (resolve_state_db) and does not need — and must not depend on —
     # the possibly-lying `chump gap list` load_db(). Handle it before that call.
-    if args.check_merged_pr_titles:
+    if args.check_merged_pr_links:
         state_db = resolve_state_db()
         ambient = REPO_ROOT / ".chump-locks" / "ambient.jsonl"
         print(f"Reading gap store directly: {state_db}")
-        check_closed_pr_titles(state_db, ambient, args.dry_run, args.merged_pr_limit)
+        check_merged_pr_links(state_db, ambient, args.dry_run)
+        # CREDIBLE-1552: report-only companion — surface merged PRs that name an
+        # open gap but carry no gap_prs row (the closer never closes from a
+        # title, so these would otherwise be silently invisible). Closes nothing.
+        check_unlinked_merged_prs(state_db, ambient, args.dry_run)
         # Self-healing oneshot: a clean run (even one that closed gaps) is SUCCESS.
         sys.exit(0)
 

@@ -59,7 +59,6 @@ scripts/coord/broadcast.sh
 scripts/coord/chump-ci-retrigger.sh
 scripts/coord/chump-decomposition-propose.sh
 scripts/coord/chump-pr-triage.sh
-scripts/coord/close-gaps-from-commit-subjects.sh
 scripts/coord/detect-gap-failure.sh
 scripts/coord/fleet-doctor-strict.sh
 scripts/coord/gap-normalize-domains.sh

@@ -264,10 +264,17 @@ CHUMP_GAP_CHECK=0 git push -u origin <your-branch> --force-with-lease
 # 2. Open the PR by hand
 gh pr create --base main --title "<title>" --body "<body>"
 
-# 3. Arm auto-merge
+# 3. Write the typed gap→PR link (CREDIBLE-1520 AC1 / CREDIBLE-1552).
+#    bot-merge.sh does this automatically at PR-open (scripts/coord/bot-merge.sh
+#    _bm_link_pr:562, invoked at :4198); on this manual path YOU must do it, or
+#    the FK closer (gap-doctor-reconcile --check-merged-pr-links) will never
+#    close the gap — it trusts the gap_prs row, NEVER the PR title. Idempotent.
+chump gap link-pr <GAP-ID> <PR-number> --sha "$(git rev-parse HEAD)"
+
+# 4. Arm auto-merge
 gh pr merge <PR-number> --auto --squash
 
-# 4. Close the gap in the canonical store (if your PR closes it)
+# 5. Close the gap in the canonical store (if your PR closes it)
 chump gap ship <GAP-ID> --closed-pr <PR-number> --update-yaml
 ```
 

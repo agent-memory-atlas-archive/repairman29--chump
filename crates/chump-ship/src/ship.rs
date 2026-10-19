@@ -56,6 +56,13 @@ pub struct LandingReceipt {
     pub gap_id: String,
     /// GitHub PR number that closed/merged this gap (if available).
     pub closed_pr: Option<i64>,
+    /// CREDIBLE-1550 (Phase R R2, AC3): the merge commit SHA on `origin/main`
+    /// that `verify_proof_of_merge` matched for this gap. `None` when the
+    /// close has no PR-backed proof (reconciler imports, synthetic test repos
+    /// with no `.git`). Carries the proof-of-landing inline on the receipt so a
+    /// later audit does not have to re-run the git-log lookup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_sha: Option<String>,
     /// UTC timestamp of receipt creation.
     pub created_at: DateTime<Utc>,
 }
@@ -66,8 +73,17 @@ impl LandingReceipt {
         LandingReceipt {
             gap_id: gap_id.into(),
             closed_pr,
+            merge_sha: None,
             created_at: Utc::now(),
         }
+    }
+
+    /// CREDIBLE-1550 (AC3): attach the proof-of-merge SHA. Builder-style so the
+    /// common `new(..)` path stays unchanged and callers that have the SHA
+    /// (ship's `proof_of_merge_sha`) chain it on.
+    pub fn with_merge_sha(mut self, merge_sha: Option<String>) -> Self {
+        self.merge_sha = merge_sha;
+        self
     }
 
     /// Validate this receipt: check gap_id is non-empty, closed_pr (if present) is positive.
@@ -469,6 +485,37 @@ mod tests {
         let j = serde_json::to_string(&r).expect("serialize");
         assert!(j.contains("\"gap_id\":\"INFRA-2001\""));
         assert!(j.contains("\"closed_pr\":42"));
+    }
+
+    // CREDIBLE-1550 (Phase R R2, AC3): LandingReceipt carries merge_sha.
+    #[test]
+    fn landing_receipt_merge_sha_defaults_none() {
+        let r = LandingReceipt::new("INFRA-2001", Some(42));
+        assert_eq!(r.merge_sha, None);
+    }
+
+    #[test]
+    fn landing_receipt_with_merge_sha_sets_field() {
+        let r = LandingReceipt::new("INFRA-2001", Some(42))
+            .with_merge_sha(Some("deadbeefcafe".to_string()));
+        assert_eq!(r.merge_sha.as_deref(), Some("deadbeefcafe"));
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn landing_receipt_merge_sha_serializes_when_present_omitted_when_absent() {
+        let with =
+            LandingReceipt::new("INFRA-2001", Some(42)).with_merge_sha(Some("abc123".to_string()));
+        let j = serde_json::to_string(&with).expect("serialize");
+        assert!(j.contains("\"merge_sha\":\"abc123\""));
+
+        let without = LandingReceipt::new("INFRA-2001", Some(42));
+        let j2 = serde_json::to_string(&without).expect("serialize");
+        assert!(!j2.contains("merge_sha"));
+
+        // Round-trips back with the SHA intact.
+        let back: LandingReceipt = serde_json::from_str(&j).expect("deserialize");
+        assert_eq!(back.merge_sha.as_deref(), Some("abc123"));
     }
 
     #[test]

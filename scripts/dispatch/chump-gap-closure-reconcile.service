@@ -2,14 +2,17 @@
 # Runs gap-doctor-reconcile.py in THREE complementary modes each tick:
 #   --check-closure-drift     : gaps still `open` whose closed_pr PR has MERGED
 #                               on GitHub → close (status=done + closed_pr).
-#   --check-merged-pr-titles  : gaps still `open` with NO closed_pr whose gap-ID
-#                               leads a MERGED PR title → close (status=done +
-#                               closed_pr + closed_date) from GitHub truth. This
-#                               is the async-merge ghost class the other two
-#                               passes miss — real work shipped, PR merged after
-#                               the worker cycle ended, canonical state.db left
-#                               open (EFFECTIVE-1543; 25 such ghosts found live
-#                               2026-09-08 while the queue "spun" at 0 drained).
+#   --check-merged-pr-links   : gaps still `open` with NO closed_pr that a typed
+#                               gap_prs row links to a MERGED PR →
+#                               close (status=done + closed_pr + closed_date)
+#                               from GitHub truth. CREDIBLE-1550 (Phase R R2)
+#                               replaced the former PR-TITLE match with the
+#                               gap_prs FK as the ONLY proof — a title falsely
+#                               closed CREDIBLE-1492 (docs PR) and CREDIBLE-1520
+#                               (AC1-only slice). This is the async-merge ghost
+#                               class the other two passes miss — real work
+#                               shipped, PR merged after the worker cycle ended,
+#                               canonical state.db left open.
 #   --check-already-satisfied : gaps still `open` with NO closed_pr whose latest
 #                               worker cycle log shows the work already shipped in
 #                               a merged PR → close already_satisfied (INFRA-3826).
@@ -36,5 +39,5 @@ Type=oneshot
 # run. For this self-healing oneshot every clean outcome must leave the unit
 # green, so the first two passes swallow their rc (|| true) and the
 # already-satisfied pass sets the service's exit code.
-ExecStart=/bin/bash -lc 'set -a; [ -f "$HOME/.chump/providers.env" ] && . "$HOME/.chump/providers.env"; set +a; REPO="${CHUMP_REPO_ROOT:-}"; for c in "$REPO" "$HOME/chump" "$HOME/Projects/chump"; do if [ -n "$c" ] && [ -d "$c/.git" ]; then REPO="$c"; break; fi; done; [ -d "$REPO/.git" ] || { echo "gap-closure-reconcile: no chump repo found (CHUMP_REPO_ROOT/$HOME/chump/$HOME/Projects/chump)" >&2; exit 1; }; cd "$REPO"; python3 scripts/coord/gap-doctor-reconcile.py --check-closure-drift || true; python3 scripts/coord/gap-doctor-reconcile.py --check-merged-pr-titles || true; exec python3 scripts/coord/gap-doctor-reconcile.py --check-already-satisfied'
+ExecStart=/bin/bash -lc 'set -a; [ -f "$HOME/.chump/providers.env" ] && . "$HOME/.chump/providers.env"; set +a; REPO="${CHUMP_REPO_ROOT:-}"; for c in "$REPO" "$HOME/chump" "$HOME/Projects/chump"; do if [ -n "$c" ] && [ -d "$c/.git" ]; then REPO="$c"; break; fi; done; [ -d "$REPO/.git" ] || { echo "gap-closure-reconcile: no chump repo found (CHUMP_REPO_ROOT/$HOME/chump/$HOME/Projects/chump)" >&2; exit 1; }; cd "$REPO"; python3 scripts/coord/gap-doctor-reconcile.py --check-closure-drift || true; python3 scripts/coord/gap-doctor-reconcile.py --check-merged-pr-links || true; exec python3 scripts/coord/gap-doctor-reconcile.py --check-already-satisfied'
 TimeoutStartSec=300

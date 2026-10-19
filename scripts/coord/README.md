@@ -57,7 +57,6 @@ These three are often confused because all three touch the gap store:
 | `gap-doctor-reconcile.py` | Reconcile state.db with state.sql after merge conflicts |
 | `check-gaps-integrity.py` | Read-only integrity audit (no mutations); good for CI spot checks |
 | `resolve-gaps-conflict.py` | 3-way merge driver for `.chump/state.sql` conflicts |
-| `close-gaps-from-commit-subjects.sh` | Parse merged PR commit subjects; auto-close matching gaps |
 | `close-superseded-prs.sh` | INFRA-994: auto-close open PRs for a gap that shipped via another path; invoked by `chump gap ship` |
 | `backfill-ghost-gaps.sh` | Find gaps whose PR merged but status is still `open`; batch-close |
 | `ghost-gap-reaper.sh` | Delete lease files for sessions that no longer exist |

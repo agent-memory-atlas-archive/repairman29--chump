@@ -1784,6 +1784,29 @@ jobs:
         # fails the structural census gate locally (#5582 class). Hermetic, no build.
         run: bash scripts/ci/test-resilient-1622-structural-subset.sh
 
+      - name: no title/subject-regex gap closers (CREDIBLE-1550 AC4)
+        # A gap close must trust the typed gap_prs FK, never a PR title/commit
+        # subject regex (a title falsely closed CREDIBLE-1492 from a docs PR and
+        # CREDIBLE-1520 from its AC1-only slice). Fails on any NEW title/subject
+        # closer; pre-existing ones are tracked in the allowlist. Hermetic grep.
+        run: bash scripts/ci/test-no-title-regex-gap-closers.sh
+
+      - name: gap-doctor-reconcile closes via gap_prs FK only (CREDIBLE-1550 AC1/AC5)
+        # The reconciler closes a gap ONLY via a typed gap_prs row linking a
+        # merged PR — never a title. Fixture proves an umbrella named by a PR
+        # title but unlinked stays open (its merged title-named PR emits a
+        # report-only pr_without_gap_link instead of closing anything), and a
+        # docs PR with no row closes nothing.
+        run: bash scripts/ci/test-credible-1550-gap-prs-closer.sh
+
+      - name: unresolved_deps terminal+dangling resolution (CREDIBLE-1552)
+        # Restored Part 1 of the deleted test-ghost-gap-thrash-fix.sh: done-like
+        # dep statuses (done/superseded/closed/already_satisfied/duplicate) and
+        # dangling dep IDs count as resolved, so stale dep-edges don't pin open
+        # gaps shut and starve workers on ghosts. (Part 2 — title-scan window —
+        # was dropped with the title closer itself.)
+        run: bash scripts/ci/test-unresolved-deps-resolution.sh
+
       - name: CSS token-discipline smoke (INFRA-1590)
         run: bash scripts/ci/test-css-token-discipline.sh
 

@@ -13130,6 +13130,55 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            // CREDIBLE-1552 (Phase R R2): remove ONE gap_prs row through the
+            // store (single-writer). Undoes a mislinked gap→PR edge — e.g. a
+            // slice PR linked to the umbrella instead of its own slice gap.
+            // Emits kind=gap_pr_unlinked carrying the reason.
+            "unlink-pr" => {
+                if args
+                    .iter()
+                    .skip(3)
+                    .any(|a| matches!(a.as_str(), "--help" | "-h"))
+                {
+                    println!(
+                        "Usage: chump gap unlink-pr <GAP-ID> <PR-NUMBER> --reason <text>\n\n\
+                         Remove one typed gap-to-PR link from state.db (gap_prs table).\n\
+                         Idempotent: removing a link that does not exist is a no-op (exit 0)."
+                    );
+                    return Ok(());
+                }
+                let gap_id = args.get(3).cloned().unwrap_or_else(|| {
+                    eprintln!("Usage: chump gap unlink-pr <GAP-ID> <PR-NUMBER> --reason <text>");
+                    std::process::exit(2);
+                });
+                let pr_number: i64 = args
+                    .get(4)
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .filter(|n| *n > 0)
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                            "chump gap unlink-pr: PR-NUMBER must be a positive integer (got {:?})",
+                            args.get(4)
+                        );
+                        std::process::exit(2);
+                    });
+                let reason = flag("--reason").unwrap_or_else(|| {
+                    eprintln!("chump gap unlink-pr: --reason <text> is required");
+                    std::process::exit(2);
+                });
+                match store.unlink_pr(&gap_id, pr_number, &reason) {
+                    Ok(0) => {
+                        println!("no gap_prs link {gap_id} -> PR #{pr_number} to remove (no-op)");
+                    }
+                    Ok(_) => {
+                        println!("unlinked {gap_id} -> PR #{pr_number} (reason: {reason})");
+                    }
+                    Err(e) => {
+                        eprintln!("chump gap unlink-pr: {e:#}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             // EFFECTIVE-038: A2A L2 task-suspension. `suspend` moves a gap
             // into status=waiting_operator carrying a structured question
             // payload — used when an agent hits auth_required (missing
@@ -18265,6 +18314,9 @@ async fn main() -> Result<()> {
                 );
                 eprintln!(
                     "  link-pr          <GAP-ID> <PR-NUMBER> --sha <SHA>  # INFRA-8192: typed gap-to-PR link"
+                );
+                eprintln!(
+                    "  unlink-pr        <GAP-ID> <PR-NUMBER> --reason <text>  # CREDIBLE-1552: remove one gap_prs link"
                 );
                 eprintln!(
                     "  set              <GAP-ID> [--title T] [--description D] [--priority P]"
