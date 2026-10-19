@@ -2928,6 +2928,19 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-resilient-1615-two-scope-refuse.sh"],
             GateKind::Scripts,
         ));
+        // RESILIENT-1636: the cuphead farmer-gate ship wall. Proves the gate
+        // admits a dispatch-held re-claim (bot-merge reaches push) yet still
+        // refuses a NEW claim under a paused farmer, and that the oauth check
+        // reads the credential path claude -p uses (not the stale mirror mtime).
+        // Resolves/builds ${CARGO_TARGET_DIR:-target}/debug/chump when absent.
+        steps.push(step(
+            "farmer-gate-ship-wall",
+            &[
+                "bash",
+                "scripts/ci/test-resilient-1636-farmer-gate-ship-wall.sh",
+            ],
+            GateKind::Scripts,
+        ));
         // INFRA-8193: docs/gaps/*.yaml is an export-only mirror of state.db;
         // fail when a new script or Rust path writes it outside the export.
         steps.push(step(

@@ -2312,18 +2312,46 @@ async fn main() -> Result<()> {
             }
         };
 
-        // RESILIENT-069: farmer readiness gate — admit no NEW (valid) claims
-        // until the farmer is lights-on again. Runs AFTER format validation
-        // (CREDIBLE-291) so a farmer blip never masks a bad-request error.
+        // RESILIENT-069 + RESILIENT-1636: farmer readiness gate. Admit no NEW
+        // claims until the farmer is lights-on — BUT do not re-gate the ship
+        // step of work a dispatch/chain lane already claimed. bot-merge
+        // re-invokes `chump claim` to re-enter the worktree whose lease the
+        // dispatch already holds; on a paused node that re-claim used to die at
+        // the gate (every dispatch shipped only via salvage). The admission
+        // decision (re-entry vs NEW claim) lives in Rust (R6 invariant), keyed
+        // on a live lease for (gap, CHUMP_SESSION_ID). Runs AFTER format
+        // validation (CREDIBLE-291) so a farmer blip never masks a bad-request.
         if !farmer_gate_bypass {
-            let fs = farmer_status::compute(&repo_root);
-            if !fs.green {
-                eprintln!("chump claim: farmer status RED — no new claims admitted.");
-                for r in &fs.reasons {
-                    eprintln!("  - {r}");
+            let env_session = std::env::var("CHUMP_SESSION_ID").ok();
+            match farmer_status::claim_admission(
+                &repo_root,
+                &claim_args.gap_id,
+                env_session.as_deref(),
+            ) {
+                farmer_status::ClaimAdmission::Green => {}
+                farmer_status::ClaimAdmission::ReentryAdmit { note } => {
+                    // Print to STDOUT so bot-merge / `chump dispatch` can surface
+                    // the admission reason (AC: bot-merge prints to stdout).
+                    println!("chump claim: {note}");
                 }
-                eprintln!("Run `chump farmer status` for detail. Bypass: --skip-farmer-gate");
-                std::process::exit(1);
+                farmer_status::ClaimAdmission::Refuse { status } => {
+                    // Print the refusal reason to BOTH stdout (so bot-merge /
+                    // `chump dispatch` carry it in their reason field) and stderr.
+                    let header = if status.paused {
+                        "chump claim: farmer PAUSED — no new claims admitted."
+                    } else {
+                        "chump claim: farmer status RED — no new claims admitted."
+                    };
+                    println!("{header}");
+                    eprintln!("{header}");
+                    for r in &status.reasons {
+                        println!("  - {r}");
+                        eprintln!("  - {r}");
+                    }
+                    println!("Run `chump farmer status` for detail.");
+                    eprintln!("Run `chump farmer status` for detail. Bypass: --skip-farmer-gate");
+                    std::process::exit(1);
+                }
             }
         }
         match atomic_claim::run_claim(claim_args) {

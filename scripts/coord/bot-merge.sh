@@ -2792,6 +2792,15 @@ if [[ ${#GAP_IDS[@]} -gt 0 ]]; then
                     fi
                 else
                     # Some other claim failure — re-emit output and fail.
+                    # RESILIENT-1636: print the refusal reason to STDOUT (not
+                    # only stderr) so `chump dispatch` carries it in its reason
+                    # field instead of swallowing it as a bare "bot-merge.sh
+                    # exited 1". The farmer-gate refusal is the common cuphead
+                    # case; surface it explicitly.
+                    if printf '%s' "$_claim_out" | grep -qiE 'farmer (status RED|PAUSED)|no new claims admitted'; then  # pipefail-sweep-allowed
+                        red "RESILIENT-1636: chump claim refused by the farmer gate for $gid:"
+                    fi
+                    printf '%s\n' "$_claim_out"
                     printf '%s\n' "$_claim_out" >&2
                     _bm_step_done "claim" "$_claim_rc"
                     _BM_TERMINAL_STATE="claim_failed"
