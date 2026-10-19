@@ -1351,6 +1351,14 @@ fn discover_test_scripts(repo_root: &std::path::Path) -> Vec<std::path::PathBuf>
         // `verified` job step itself IS GitHub-context-dependent (needs.*.result)
         // and is allowlisted separately in preflight-ci-parity-exceptions.txt.
         "scripts/ci/test-aggregator-verified.sh",
+        // CREDIBLE-1554: `verified` in-job wait loop guard — proves
+        // scripts/ci/verified-wait.sh reaches the right FIRST verdict under a
+        // merge queue (running/never-seen lane => PENDING keep-polling, FAILURE
+        // only on a real red lane or the 90-min timeout, SUCCESS only all-green)
+        // for both pull_request and merge_group. Stubs the Checks API; pure
+        // bash, no network, ~5s. The ci.yml `verified` job step is exempt from
+        // parity (it lives in CI_YML_INFRA_JOBS) — this test mirrors its logic.
+        "scripts/ci/test-verified-wait.sh",
         // INFRA-1841 (CP-009): mock-services offline-CI fixture smoke test —
         // builds+runs the 4 vendored Anthropic/OpenAI/Stripe/Supabase mocks
         // under tests/fixtures/mock-services and asserts response shape.

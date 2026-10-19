@@ -493,13 +493,23 @@ jobs:
   # (scripts/ci/poll-cross-workflow-checks.sh, since GH Actions `needs:` only
   # sees same-workflow jobs) — then prints a single PASS/FAIL verdict + emits
   # kind=verified_aggregator_decision to ambient.jsonl for offline audit.
-  # RESILIENT-1562: the poll is only a short grace; lanes still running stay
-  # PENDING and .github/workflows/verified-recompute.yml re-runs this job on
-  # Audit/integrations workflow_run completion (event-driven, no 600s window).
+  #
+  # CREDIBLE-1554 (PHASE-R R3): under a GitHub native merge queue (the landing
+  # provider, umbrella CREDIBLE-1555) the FIRST verdict must be the right one —
+  # a merge_group is ejected the instant a required check concludes FAILURE, so
+  # there is no second pass to heal into (the RESILIENT-1562 recompute re-run
+  # lands AFTER ejection). verified now WAITS IN-JOB, on merge_group AND
+  # pull_request alike, for the cross-workflow lanes to CONCLUDE on the event
+  # SHA — up to the ruleset check_response_timeout (90 min) — via
+  # scripts/ci/verified-wait.sh. PENDING (a lane still running OR never-seen)
+  # means keep polling; the job concludes FAILURE only on a real red lane or on
+  # the timeout, and SUCCESS only when every lane is green or legitimately
+  # skipped. RESILIENT-1617's lane-seen rule is folded in: an unposted lane is
+  # PENDING, never FAIL/PASS, for the whole wait. See
+  # docs/design/CI_VERIFIED_AGGREGATOR.md (META-134) §"In-job wait".
   #
   # Branch-protection/ruleset requires ONLY `verified`
   # (gh api repos/repairman29/chump/branches/main/protection → required_status_checks.contexts).
-  # See docs/design/CI_VERIFIED_AGGREGATOR.md (META-134).
   verified:
     name: verified
     needs: [fast-checks, fast-checks-heavy, clippy, cargo-test, pr-hygiene, test]

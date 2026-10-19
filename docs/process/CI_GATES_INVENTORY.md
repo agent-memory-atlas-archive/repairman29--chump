@@ -237,22 +237,33 @@ push to main under runner starvation).
    today; covers the transient where every shard completed but the aggregate
    check-run has not posted yet).
 
-A lane that matches **none** of these at the timeout is genuinely never-seen and
-stays **fail-closed** (`failure`) — the "wedge waiting on a context that'll never
-post" mode (RESILIENT-1561).
+This lane-seen rule still governs the default (non-snapshot) poll mode used by
+other callers. A lane that matches none of these at that mode's timeout stays
+**fail-closed** (`failure`) — the "wedge waiting on a context that'll never post"
+mode (RESILIENT-1561).
 
-**Why the 120s grace is intentionally shorter than the 600s script default.**
-A real audit takes 15-40 min on starved runners, so no fixed poll window can
-outlast it — holding a runner for 600s would still time out and just waste a
-slot. The short window is correct because (a) the lane-seen rule above makes the
-first verdict PENDING (not FAIL), and (b) RESILIENT-1562's
-`.github/workflows/verified-recompute.yml` re-runs `verified` on the
-Audit/integrations `workflow_run=completed` event, so the final verdict reflects
-the audit/ACP terminal state regardless of the poll window.
+**CREDIBLE-1554 (merge-queue first-verdict):** under GitHub's native merge queue
+(landing provider, CREDIBLE-1555) a `merge_group` is ejected the instant a
+required check concludes `FAILURE`, so the old "poll 120s → aggregate once →
+exit 2 (PENDING) → heal via `verified-recompute.yml`" flow ejected the group
+before the heal landed. The `verified` job now **waits in-job** via
+`scripts/ci/verified-wait.sh` for the cross-workflow lanes to conclude on the
+event SHA, up to the ruleset `check_response_timeout` (90 min), on `merge_group`
+and `pull_request` alike. The lane-seen rule is **folded into the wait**: each
+poll uses `poll-cross-workflow-checks.sh --snapshot` (one fetch, no fail-close),
+so a running OR never-seen lane reads `in_progress` → `PENDING` → keep polling;
+the job concludes `FAILURE` only on a real red lane (short-circuit) or on the
+90-min timeout (with a reason naming the unconcluded lanes), and `SUCCESS` only
+when every lane is green or legitimately skipped. `aggregator-verified.sh` keeps
+its `0/1/2/3` exit codes; no new bypass env var; the `verified` job
+`timeout-minutes` is raised to 95. See
+`docs/design/CI_VERIFIED_AGGREGATOR.md` §2.6.
 
 Guarded by `scripts/ci/test-poll-cross-workflow-checks.sh` (shards-in_progress →
 `audit=in_progress` → aggregator exit 2; no-audit-run → `audit=failure` →
-aggregator exit 1).
+aggregator exit 1) and `scripts/ci/test-verified-wait.sh` (in-job wait: running/
+never-seen → PENDING keep-polling, real-red/timeout → FAIL, all-green → PASS,
+both event types).
 
 ## Non-required checks red on main — 7-day sweep (CREDIBLE-1523, 2026-10-18)
 

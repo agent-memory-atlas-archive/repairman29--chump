@@ -35,7 +35,15 @@
 #
 # Usage:
 #   poll-cross-workflow-checks.sh --sha SHA --check "name" [--check "name" ...] \
-#       [--repo owner/repo] [--timeout-s N] [--interval-s N]
+#       [--repo owner/repo] [--timeout-s N] [--interval-s N] [--snapshot]
+#
+# CREDIBLE-1554: --snapshot does exactly ONE Checks-API fetch and prints each
+# lane's current classification with NO fail-close — any not-yet-terminal lane
+# (seen-but-running OR never-seen) reads `in_progress` (which the aggregator
+# classifies PENDING). The in-job wait and the single fail-on-timeout decision
+# live in scripts/ci/verified-wait.sh, which loops this snapshot; a never-seen
+# lane is PENDING here, never FAIL. The default (non-snapshot) mode keeps its
+# own wait loop + fail-closed-at-timeout behavior for existing callers.
 #
 # Requires: gh CLI (authenticated via GH_TOKEN/GITHUB_TOKEN), jq.
 
@@ -46,6 +54,7 @@ SHA=""
 CHECKS=()
 TIMEOUT_S=600
 INTERVAL_S=15
+SNAPSHOT=0
 
 usage() {
     grep '^#' "$0" | sed 's/^# \?//'
@@ -58,6 +67,14 @@ while [[ $# -gt 0 ]]; do
         --repo)        REPO="$2"; shift 2 ;;
         --timeout-s)   TIMEOUT_S="$2"; shift 2 ;;
         --interval-s)  INTERVAL_S="$2"; shift 2 ;;
+        # CREDIBLE-1554: single-pass classification with NO fail-close. One
+        # Checks-API fetch, then print each lane's current state (terminal
+        # conclusion, or `in_progress` for anything not-yet-terminal — whether
+        # seen-but-running OR genuinely never-seen). The wait + timeout decision
+        # moves OUT of this script and INTO scripts/ci/verified-wait.sh, which
+        # owns the 90-min in-job wait under a GitHub merge queue. --timeout-s /
+        # --interval-s are ignored in snapshot mode.
+        --snapshot)    SNAPSHOT=1; shift ;;
         -h|--help)     usage; exit 0 ;;
         *) echo "[poll-cross-workflow-checks] unknown arg: $1" >&2; exit 3 ;;
     esac
@@ -148,6 +165,20 @@ while true; do
             *)                                   RESULT["$c"]="failure" ;;
         esac
     done
+
+    # CREDIBLE-1554: snapshot mode — print the current per-lane classification
+    # after exactly ONE fetch and exit, WITHOUT the post-loop fail-close. Any
+    # not-yet-terminal lane (seen-but-running OR genuinely never-seen) reads
+    # `in_progress`, which aggregator-verified.sh classifies PENDING (exit 2).
+    # verified-wait.sh loops this snapshot and owns the 90-min wait + the single
+    # fail-on-timeout decision, so a lane that has not posted yet is PENDING
+    # here, never FAIL — folding RESILIENT-1617's lane-seen rule into one place.
+    if [[ "$SNAPSHOT" -eq 1 ]]; then
+        for c in "${CHECKS[@]}"; do
+            printf '%s=%s\n' "$c" "${RESULT[$c]}"
+        done
+        exit 0
+    fi
 
     if [[ "$all_terminal" -eq 1 ]]; then
         break

@@ -10,10 +10,14 @@
 > (`fast-checks`, `clippy`, `cargo-test`, `pr-hygiene`, `test`) **plus**
 > `audit` (audit.yml) and `ACP protocol smoke test` (integrations.yml) —
 > those two live in separate workflows, so `verified` polls their Checks-API
-> conclusions cross-workflow via `scripts/ci/poll-cross-workflow-checks.sh`
-> (fail-closed on timeout — never leaves a lane ambiguously "pending"),
+> conclusions cross-workflow via `scripts/ci/poll-cross-workflow-checks.sh`,
 > feeding the result into the same classification logic as a same-workflow
-> lane. `verified` emits `kind=verified_aggregator_decision` to
+> lane. **CREDIBLE-1554 (see §2.6):** under a GitHub merge queue `verified` now
+> WAITS IN-JOB (via `scripts/ci/verified-wait.sh`) for those cross-workflow
+> lanes to conclude on the event SHA, up to 90 min — a lane still running or
+> not-yet-posted is `PENDING` (keep polling), `FAILURE` only on a real red lane
+> or the timeout — so the first verdict is right on `merge_group` and
+> `pull_request` alike. `verified` emits `kind=verified_aggregator_decision` to
 > `ambient.jsonl`. **Branch protection and ruleset 15133729 flip to require
 > ONLY `verified`, confirmed live via `gh api repos/:owner/:repo/branches/main/protection`
 > and ruleset 15133729 — both list exactly one required-status-check entry
@@ -198,6 +202,63 @@ Every lane listed in §2.1 that is gated by a `if: needs.changes.outputs.X == 't
 ### 2.5 What replaces the `*-required` rollup jobs
 
 The current per-lane `audit-required` / `cargo-test-required` / `fast-checks-required` rollups become **dead code** under the aggregator. Migration plan §6 removes them in Week 3.
+
+### 2.6 In-job wait — the first verdict must be right under a merge queue (CREDIBLE-1554)
+
+GitHub's native merge queue is the landing provider (umbrella CREDIBLE-1555). A
+merge queue removes a `merge_group` from the queue the **instant** a required
+check concludes `FAILURE` — there is no second pass to heal into. So the single
+`verified` verdict must be correct the first time it concludes, on `merge_group`
+**and** `pull_request` alike.
+
+Two of the lanes (`audit` from audit.yml, the `ACP protocol smoke test` from
+integrations.yml) live in separate workflows; `needs:` can't see them, so they
+are polled cross-workflow via the Checks API. A real `audit` run takes 15–40 min
+on starved runners. The old `verified` job polled those lanes for only 120s,
+then aggregated once: the first pass returned `PENDING` (aggregator exit 2 → job
+`FAILURE`) while the audit was still running, and relied on
+`verified-recompute.yml` re-running the job on audit/ACP `workflow_run`
+completion. On a PR the failed-then-rerun check heals; in a merge queue the
+ejection already happened and the recompute re-run lands too late.
+
+**The rule.** The `verified` job now **waits in-job** for the cross-workflow
+lanes to CONCLUDE on the event SHA, up to the ruleset `check_response_timeout`
+(90 min), reporting nothing until they conclude. The wait is driven by
+`scripts/ci/verified-wait.sh`, which re-classifies every lane (local
+`needs.*.result` strings + a fresh cross-workflow snapshot) each poll via the
+unchanged decision core `scripts/ci/aggregator-verified.sh`:
+
+```
+PENDING (aggregator exit 2)  — a lane is still running OR has not posted a check
+                               run yet, and nothing is red → KEEP POLLING.
+FAILURE (exit 1)             — a REAL red lane concluded failure (short-circuit;
+                               no reason to wait) OR the 90-min timeout elapsed
+                               while still PENDING (with a reason naming the
+                               lanes that never concluded).
+SUCCESS (exit 0)            — every lane is green or legitimately skipped.
+```
+
+**Lane-seen rule folded in (RESILIENT-1617).** A lane that has not yet posted a
+check run — because its backing workflow (audit.yml) is still running, its shard
+matrix hasn't finished, or it simply hasn't been dispatched yet — is `PENDING`,
+**never FAIL and never PASS**, for the entire wait. The only way a still-pending
+lane becomes a `FAILURE` is the timeout. This is implemented by
+`poll-cross-workflow-checks.sh --snapshot` (one Checks-API fetch, no fail-close:
+any not-yet-terminal lane reads `in_progress`); `verified-wait.sh` owns the
+single wait-and-fail-on-timeout decision. The default (non-snapshot) poll mode
+keeps its own short-wait + fail-closed-at-timeout behavior for other callers.
+
+**Invariants preserved.** `aggregator-verified.sh` keeps its `0/1/2/3` exit
+codes for all existing callers; the wait lives in the job's poll wrapper, not in
+a new bypass/skip env var. The `verified` job `timeout-minutes` is raised to 95
+to cover the 90-min wait plus checkout/aggregate overhead. The behavior is
+pinned by `scripts/ci/test-verified-wait.sh` (stubbed Checks API: in_progress→
+success, in_progress→failure, never-seen→success, never-seen→timeout, and
+red-local short-circuit, for both event types).
+
+> **Retirement note:** with the first verdict now correct on `merge_group`,
+> `verified-recompute.yml`'s **PR path** is retired separately in RESILIENT-1644;
+> its push-event healer stays until CREDIBLE-1521.
 
 ---
 
