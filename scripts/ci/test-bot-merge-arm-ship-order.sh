@@ -533,23 +533,41 @@ for _ma_case in "modea-gate:scripts/ci/x.sh:0:n3" "modea-uncomputable::1:n7"; do
     fi
 done
 
-# Case D (recovery site, internal-lane DEFAULT arm, gate diff): no --auto-merge
-# flag — AUTO_MERGE=1 comes from the internal-lane default, the exact path that
-# self-armed #5602. Must refuse (exit 2) and NEVER reach `gh pr merge`.
+# Case D (recovery site, no --auto-merge flag): CREDIBLE-1580 flipped this case.
+# Before #5614, AUTO_MERGE=1 came from the internal-lane DEFAULT, so a no-flag run
+# armed; #5613's Case D asserted the gate guard refused that default arm. #5614
+# REMOVES the default arm (AUTO_MERGE=0 unless --auto-merge is passed), so a
+# no-flag run now reaches the recovery site and simply does NOT arm — there is
+# nothing to refuse. Per the #5614 review verdict ("flip Case D to 'no flag, no
+# arm, zero merge calls', never delete it"), this case now proves the
+# CREDIBLE-1580 invariant on the recovery arm route: a NON-gate diff (so the gate
+# guard is NOT the thing stopping the arm — only the missing flag is) with no
+# --auto-merge reaches `botmerge_recovery_done` and makes ZERO `gh pr merge`
+# calls. The mutant that RESTORES the default arm (AUTO_MERGE=1 without a flag)
+# would arm this non-gate diff at the recovery site → `gh pr merge` called → the
+# zero-merge assertion fails. (Recovery gate-file refusal WITH the flag stays
+# covered by Case E's sibling path + the --gate-arm-check seam / Case A / Case F.)
 ARM_CALL_LOG="$TMP/arm-D.log"; : > "$ARM_CALL_LOG"; export ARM_CALL_LOG
+# Per-case ambient log so the botmerge_recovery_done "reached" proof reflects
+# THIS run only (the shared $AMBIENT is cumulative across cases).
+_D_AMB="$TMP/arm-D.amb"; : > "$_D_AMB"
 set +e
-_d_out="$( cd "$ARM_REPO" && HOME="$ARM_HOME" PATH="$ARM_MOCK:$PATH" MOCK_GIT_DIFF_FILES="scripts/ci/x.sh" MOCK_GIT_DIFF_RC=0 REPO_ROOT="$ARM_REPO" MAIN_REPO="$ARM_REPO" \
-    CHUMP_BOT_MERGE_RECOVERY_MODE=1 CHUMP_AMBIENT_LOG="$AMBIENT" \
+_d_out="$( cd "$ARM_REPO" && HOME="$ARM_HOME" PATH="$ARM_MOCK:$PATH" MOCK_GIT_DIFF_FILES="docs/note.md" MOCK_GIT_DIFF_RC=0 REPO_ROOT="$ARM_REPO" MAIN_REPO="$ARM_REPO" \
+    CHUMP_BOT_MERGE_RECOVERY_MODE=1 CHUMP_AMBIENT_LOG="$_D_AMB" \
     bash "$BOT_MERGE" --gap TEST-001 2>&1 )"
 _d_rc=$?
 set -e
-# Require the guard's OWN "REFUSED" signal (not just exit 2 + no-merge, which an
-# unrelated downstream failure could also produce) so a dropped call site cannot
-# masquerade as a refusal.
-if [[ "$_d_rc" -eq 2 ]] && printf '%s' "$_d_out" | grep -q 'REFUSED' && ! grep -q 'pr merge' "$ARM_CALL_LOG"; then
-    pass "CREDIBLE-1576 item 1: recovery DEFAULT-lane arm on gate diff refuses (exit 2 + REFUSED), no gh pr merge [m3,m6]"
+# Correct (default arm removed): reaches botmerge_recovery_done, exit 0, zero
+# merge, NO REFUSED. Restore-default-arm mutant: arms the non-gate diff → ≥1
+# `gh pr merge`. The recovery_done marker proves execution reached (and passed)
+# the arm decision — not an early downstream death masquerading as "no arm".
+if [[ "$_d_rc" -eq 0 ]] \
+   && grep -q 'botmerge_recovery_done' "$_D_AMB" \
+   && ! printf '%s' "$_d_out" | grep -q 'REFUSED' \
+   && ! grep -q 'pr merge' "$ARM_CALL_LOG"; then
+    pass "CREDIBLE-1580: recovery site, no --auto-merge → no arm, zero gh pr merge (default-arm removed) [restore-default-arm mutant]"
 else
-    fail "CREDIBLE-1576 item 1: recovery gate arm not refused (rc=$_d_rc, refused=$(printf '%s' "$_d_out" | grep -c 'REFUSED'), merge-calls=$(grep -c 'pr merge' "$ARM_CALL_LOG"))"
+    fail "CREDIBLE-1580: recovery no-flag should not arm (rc=$_d_rc, recovery_done=$(grep -c 'botmerge_recovery_done' "$_D_AMB"), refused=$(printf '%s' "$_d_out" | grep -c 'REFUSED'), merge-calls=$(grep -c 'pr merge' "$ARM_CALL_LOG"))"
 fi
 
 # Case E (recovery site, NON-gate diff + --auto-merge): the guard must ALLOW —
@@ -595,31 +613,41 @@ else
     fail "CREDIBLE-1576 item 1: MAIN arm site not refused (rc=$_f_rc, refused=$(printf '%s' "$_f_out" | grep -c 'REFUSED'), merge-calls=$(grep -c 'pr merge' "$ARM_CALL_LOG"))"
 fi
 
-# ── CREDIBLE-1576 item 2: no-flag internal-lane case at the MAIN arm site ─────
-# The MAIN arm guard (bot-merge.sh:~4374) must key off $AUTO_MERGE, NOT
-# $AUTO_MERGE_EXPLICIT. On the internal lane AUTO_MERGE defaults to 1 with NO
-# --auto-merge flag (RESILIENT-190) — the exact default-arm path that self-armed
-# #5602. A mutant that passes $AUTO_MERGE_EXPLICIT (explicit-flag-only) would
-# NOT refuse here because no flag was given. Case F above covers the main site
-# WITH the flag (which an explicit-flag-only mutant still refuses); this case is
-# the one that fires on the internal default. Drive the full per-PR flow with NO
-# --auto-merge flag on a gate diff; must refuse (exit 2 + REFUSED) and NEVER
-# reach `gh pr merge`. Kills n9 (explicit-flag-only at the main site).
+# ── Case G: MAIN arm site, no --auto-merge flag — CREDIBLE-1580 flipped this ──
+# Before #5614 the MAIN arm fired on the internal-lane DEFAULT (AUTO_MERGE=1 with
+# NO flag — the RESILIENT-190 default that self-armed #5602), and #5613's Case G
+# asserted the gate guard refused it. #5614 REMOVES the default arm, so a no-flag
+# run never enters the `if [[ $AUTO_MERGE -eq 1 ]]` block at the MAIN arm site and
+# never arms — there is nothing to refuse. Per the #5614 review verdict (flip the
+# no-flag default-arm cases to "no flag, no arm, zero merge calls", never delete
+# them), this case now proves the CREDIBLE-1580 invariant on the MAIN arm route:
+# a NON-gate diff (so only the missing flag, not the gate guard, stops the arm)
+# with no --auto-merge REACHES the main arm site (the "consensus merge gate mode="
+# line prints immediately before the AUTO_MERGE guard) and makes ZERO `gh pr merge`
+# calls. GITHUB_REPOSITORY keeps the real armer resolvable, so a mutant that
+# RESTORES the default arm (AUTO_MERGE=1 without a flag) WOULD reach the armer on
+# this non-gate diff and call `gh pr merge` → zero-merge assertion fails. (MAIN
+# gate-file refusal WITH the flag stays covered by Case F; positive arm control
+# by Case H.)
 ARM_CALL_LOG="$TMP/arm-G.log"; : > "$ARM_CALL_LOG"; export ARM_CALL_LOG
 rm -f "$TMP/armed-G.marker"
 set +e
-_g_out="$( cd "$ARM_REPO" && HOME="$ARM_HOME" PATH="$ARM_MOCK:$PATH" MOCK_GIT_DIFF_FILES="scripts/ci/x.sh" MOCK_GIT_DIFF_RC=0 REPO_ROOT="$ARM_REPO" MAIN_REPO="$ARM_REPO" \
+_g_out="$( cd "$ARM_REPO" && HOME="$ARM_HOME" PATH="$ARM_MOCK:$PATH" MOCK_GIT_DIFF_FILES="docs/note.md" MOCK_GIT_DIFF_RC=0 REPO_ROOT="$ARM_REPO" MAIN_REPO="$ARM_REPO" \
     GITHUB_REPOSITORY=testorg/testrepo ARM_ARMED_MARKER="$TMP/armed-G.marker" \
     CHUMP_AMBIENT_LOG="$AMBIENT" CHUMP_MERGE_PIPELINE_LOCK_FILE="$TMP/mpl-G.lock" \
     bash "$BOT_MERGE" --gap TEST-001 --no-local-build 2>&1 )"
 _g_rc=$?
 set -e
-# As in Case F, GITHUB_REPOSITORY makes the armer resolvable, so an n9/x2 mutant
-# that reaches the armer here WOULD call `gh pr merge` → merge-calls≥1 → FAIL.
-if [[ "$_g_rc" -eq 2 ]] && printf '%s' "$_g_out" | grep -q 'REFUSED' && ! grep -q 'pr merge' "$ARM_CALL_LOG"; then
-    pass "CREDIBLE-1576 item 2: MAIN arm site, internal-lane DEFAULT (no --auto-merge) on gate diff refuses (exit 2 + REFUSED), no gh pr merge [n9,x2]"
+# Correct (default arm removed): reaches the "consensus merge gate mode=" line
+# (proves the MAIN arm site was reached — not an early death faking "no arm"),
+# emits NO REFUSED, and makes zero merge calls. Restore-default-arm mutant: arms
+# the non-gate diff → ≥1 `gh pr merge`.
+if printf '%s' "$_g_out" | grep -q 'consensus merge gate mode=' \
+   && ! printf '%s' "$_g_out" | grep -q 'REFUSED' \
+   && ! grep -q 'pr merge' "$ARM_CALL_LOG"; then
+    pass "CREDIBLE-1580: MAIN arm site, no --auto-merge → no arm, zero gh pr merge (default-arm removed) [restore-default-arm mutant]"
 else
-    fail "CREDIBLE-1576 item 2: MAIN arm no-flag internal-lane not refused (rc=$_g_rc, refused=$(printf '%s' "$_g_out" | grep -c 'REFUSED'), merge-calls=$(grep -c 'pr merge' "$ARM_CALL_LOG"))"
+    fail "CREDIBLE-1580: MAIN arm no-flag should not arm (reached_guard=$(printf '%s' "$_g_out" | grep -c 'consensus merge gate mode='), refused=$(printf '%s' "$_g_out" | grep -c 'REFUSED'), merge-calls=$(grep -c 'pr merge' "$ARM_CALL_LOG"))"
 fi
 
 # ── CREDIBLE-1576 item 1 (round 4): MAIN arm site POSITIVE CONTROL (kills x2) ──
@@ -649,46 +677,67 @@ else
     fail "CREDIBLE-1576 item 1: MAIN non-gate positive control should reach gh pr merge (rc=$_h_rc, merge-calls=$(grep -c 'pr merge' "$ARM_CALL_LOG"), refused=$(printf '%s' "$_h_out" | grep -c 'REFUSED'))"
 fi
 
-# ── CREDIBLE-1576 item 4: CHUMP_SHIP_RUST exec shim never arms a gate PR ───────
+# ── CREDIBLE-1576 item 4 + CREDIBLE-1580: CHUMP_SHIP_RUST exec shim guards ─────
 # With CHUMP_SHIP_RUST=1 the top-of-file shim exec's the Rust chump-ship binary
-# (manual_ship.rs arms WITHOUT the gate guard) — but ONLY when the branch diff is
-# SURE to touch no gate file (classifier rc=1). A gate hit (rc=0) or an
-# uncomputable diff (rc=3, fail-closed) MUST fall through to the guarded bash
-# body and never exec chump-ship. A stub chump-ship on PATH records every exec.
-#   n4  shim always execs   → killed by the gate-diff case (chump-ship NOT run).
-#   n8  shim execs on rc=3  → killed by the uncomputable-diff case.
-# The non-gate case is the positive control: it proves the stub records (so the
-# two negative assertions are not vacuous) and that a clean diff still routes to
-# chump-ship. The gate-diff rc is driven through the ARM_MOCK git's
-# MOCK_GIT_DIFF_* knobs — the same diff the live arm guard reads.
-_shim_run() {  # $1=label $2=diff-files $3=diff-rc ; caller sets SHIP_CALL_LOG
-    local _lbl="$1" _df="$2" _rc="$3"
+# (manual_ship.rs arms WITHOUT a gate guard), so the shim must only hand off when
+# BOTH guards hold:
+#   (#5613) the branch diff is SURE to touch no gate file (classifier rc=1); a
+#           gate hit (rc=0) or an uncomputable diff (rc=3) falls through, AND
+#   (#5614/CREDIBLE-1580) --auto-merge was explicitly passed — chump-ship always
+#           arms, so handing off without the flag would be a silent arm route
+#           that bypasses the AUTO_MERGE=0 default. No flag → fall through to the
+#           guarded bash body (which honors default-OFF and opens the PR for
+#           review without arming).
+# A stub chump-ship on PATH records every exec. Covered mutants:
+#   n4  shim always execs            → gate-diff-with-flag case (NOT run).
+#   n8  shim execs on rc=3           → uncomputable-with-flag case (NOT run).
+#   CREDIBLE-1580 shim ignores flag  → the no-flag non-gate case (NOT run).
+# The non-gate WITH --auto-merge case is the positive control: it proves the stub
+# records (so the negative assertions are not vacuous) and that a clean diff with
+# the flag still routes to chump-ship.
+_shim_run() {  # $1=label $2=diff-files $3=diff-rc [extra bot-merge args...]
+    local _lbl="$1" _df="$2" _rc="$3"; shift 3
     ( cd "$ARM_REPO" && HOME="$ARM_HOME" PATH="$ARM_MOCK:$PATH" \
         MOCK_GIT_DIFF_FILES="$_df" MOCK_GIT_DIFF_RC="$_rc" \
         REPO_ROOT="$ARM_REPO" MAIN_REPO="$ARM_REPO" CHUMP_AMBIENT_LOG="$AMBIENT" \
         CHUMP_MERGE_PIPELINE_LOCK_FILE="$TMP/mpl-$_lbl.lock" \
         CHUMP_SHIP_RUST=1 SHIP_CALL_LOG="$SHIP_CALL_LOG" \
-        bash "$BOT_MERGE" --gap TEST-001 --no-local-build ) >/dev/null 2>&1 || true
+        bash "$BOT_MERGE" --gap TEST-001 --no-local-build "$@" ) >/dev/null 2>&1 || true
 }
 
+# Gate diff + --auto-merge: the gate guard (not the missing flag) stops the exec.
 SHIP_CALL_LOG="$TMP/ship-gate.log"; : > "$SHIP_CALL_LOG"; export SHIP_CALL_LOG
-_shim_run shim-gate "scripts/ci/x.sh" 0
+_shim_run shim-gate "scripts/ci/x.sh" 0 --auto-merge
 if ! grep -q 'chump-ship' "$SHIP_CALL_LOG"; then
-    pass "CREDIBLE-1576 item 4: CHUMP_SHIP_RUST shim does NOT exec chump-ship on a gate diff [n4]"
+    pass "CREDIBLE-1576 item 4: CHUMP_SHIP_RUST shim does NOT exec chump-ship on a gate diff (even with --auto-merge) [n4]"
 else
     fail "CREDIBLE-1576 item 4: shim exec'd chump-ship on a gate diff — $(cat "$SHIP_CALL_LOG")"
 fi
 
+# Non-gate + --auto-merge: BOTH guards satisfied → positive control, exec happens.
 SHIP_CALL_LOG="$TMP/ship-nongate.log"; : > "$SHIP_CALL_LOG"; export SHIP_CALL_LOG
-_shim_run shim-nongate "docs/note.md" 0
+_shim_run shim-nongate "docs/note.md" 0 --auto-merge
 if grep -q 'chump-ship' "$SHIP_CALL_LOG"; then
-    pass "CREDIBLE-1576 item 4: CHUMP_SHIP_RUST shim DOES exec chump-ship on a clean non-gate diff (positive control)"
+    pass "CREDIBLE-1576 item 4: CHUMP_SHIP_RUST shim DOES exec chump-ship on a clean non-gate diff WITH --auto-merge (positive control)"
 else
-    fail "CREDIBLE-1576 item 4: shim failed to exec chump-ship on a clean diff — negative assertions would be vacuous"
+    fail "CREDIBLE-1576 item 4: shim failed to exec chump-ship on a clean diff + --auto-merge — negative assertions would be vacuous"
 fi
 
+# CREDIBLE-1580: non-gate but NO --auto-merge → shim must NOT exec chump-ship
+# (chump-ship always arms; handing off without the flag would silently arm).
+# The mutant that drops the --auto-merge requirement from the shim condition
+# would exec here → chump-ship recorded → FAIL.
+SHIP_CALL_LOG="$TMP/ship-nongate-noflag.log"; : > "$SHIP_CALL_LOG"; export SHIP_CALL_LOG
+_shim_run shim-nongate-noflag "docs/note.md" 0
+if ! grep -q 'chump-ship' "$SHIP_CALL_LOG"; then
+    pass "CREDIBLE-1580: CHUMP_SHIP_RUST shim does NOT exec chump-ship on a non-gate diff without --auto-merge [shim-ignores-flag mutant]"
+else
+    fail "CREDIBLE-1580: shim exec'd chump-ship without --auto-merge (silent arm route) — $(cat "$SHIP_CALL_LOG")"
+fi
+
+# Uncomputable diff + --auto-merge: fail-closed, no exec regardless of the flag.
 SHIP_CALL_LOG="$TMP/ship-uncomputable.log"; : > "$SHIP_CALL_LOG"; export SHIP_CALL_LOG
-_shim_run shim-uncomputable "" 1
+_shim_run shim-uncomputable "" 1 --auto-merge
 if ! grep -q 'chump-ship' "$SHIP_CALL_LOG"; then
     pass "CREDIBLE-1576 item 4: CHUMP_SHIP_RUST shim fails closed — no exec on an uncomputable diff [n8]"
 else

@@ -78,26 +78,36 @@ bot_merge_gate_arm_refused() {
 # through bash (Rust BotMergePath is stubbed in Phase 1; Phase 2 sub-gap will port it).
 if [ "${CHUMP_SHIP_RUST:-0}" = "1" ]; then
     _mode_arg=""
+    _bm_shim_has_auto_merge=0
     for ((_i=1; _i<=$#; _i++)); do
         if [ "${!_i}" = "--mode" ]; then
             _j=$((_i+1))
             _mode_arg="${!_j}"
-            break
+        elif [ "${!_i}" = "--auto-merge" ]; then
+            _bm_shim_has_auto_merge=1
         fi
     done
-    if [ -z "$_mode_arg" ] || [ "$_mode_arg" = "manual" ]; then
-        # CREDIBLE-1576 item 4: a gate-file PR must take the guarded bash path,
-        # never the Rust chump-ship exec (manual_ship.rs arms without this
-        # guard). Only exec chump-ship when we are SURE the diff touches no gate
-        # file (rc=1). A gate hit (rc=0) OR an uncomputable diff (rc=3,
-        # fail-closed) falls through to the legacy bash body + its arm guard.
+    # CREDIBLE-1580: chump-ship ALWAYS arms GitHub auto-merge (manual_ship.rs).
+    # Handing off to it without an explicit --auto-merge would make this Rust
+    # shim a silent arm route that bypasses the AUTO_MERGE=0 default (the whole
+    # point of the un-pause gate). So only exec chump-ship when --auto-merge is
+    # actually in argv; otherwise fall through to the legacy bash body, which
+    # honors default-OFF and opens the PR for review without arming.
+    #
+    # CREDIBLE-1576 item 4: AND a gate-file PR must take the guarded bash path,
+    # never the Rust chump-ship exec (manual_ship.rs arms without this guard).
+    # Only exec chump-ship when we are SURE the diff touches no gate file (rc=1).
+    # A gate hit (rc=0) OR an uncomputable diff (rc=3, fail-closed) falls through
+    # to the legacy bash body + its arm guard. Both guards must hold.
+    if { [ -z "$_mode_arg" ] || [ "$_mode_arg" = "manual" ]; } && [ "$_bm_shim_has_auto_merge" = "1" ]; then
         bot_merge_gate_files_touched "origin/main" >/dev/null 2>&1
         _gate_rc=$?
         if [ "$_gate_rc" -eq 1 ]; then
             exec chump-ship "$@"
         fi
     fi
-    # --mode bot-merge falls through to legacy bash (BotMergePath stubbed in Phase 1)
+    # --mode bot-merge, or manual-without-arm, falls through to legacy bash
+    # (BotMergePath stubbed in Phase 1; default-OFF arm honored by the bash body)
 fi
 
 # INFRA-1600: brew util-linux flock not on default PATH on self-hosted CI runners.
@@ -191,14 +201,15 @@ fi
 #                  When unset, any FAILURE/ERROR check blocks auto-merge.
 #                  Env: BM_REQUIRED_CHECKS
 #   --lane {internal,user-facing,critical}
-#                  INFRA-1767: merge-risk tier, gates the auto-merge default
-#                  AND the crates/chump-policy check (`chump-policy check
-#                  --lane ...`). internal (default) auto-merges without
-#                  needing --auto-merge; user-facing needs an explicit
-#                  --auto-merge; critical needs --auto-merge AND an explicit
-#                  operator/repo policy opt-in (chump-policy's Critical
-#                  baseline defaults enabled=false — most-restrictive-wins
-#                  over any permissive fleet/operator/repo scope).
+#                  INFRA-1767: merge-risk tier, gates the crates/chump-policy
+#                  check (`chump-policy check --lane ...`). CREDIBLE-1580:
+#                  auto-merge is default-OFF on EVERY lane — NO lane (not even
+#                  internal) self-arms. Arming requires an explicit --auto-merge
+#                  on every lane; critical ALSO needs an operator/repo policy
+#                  opt-in (chump-policy's Critical baseline defaults
+#                  enabled=false — most-restrictive-wins over any permissive
+#                  fleet/operator/repo scope). The lane only tunes the policy
+#                  gate now, not the arm default.
 #                  Emits kind=bot_merge_lane_resolved to ambient.jsonl.
 #                  Env: BM_LANE
 #
@@ -900,22 +911,26 @@ case "$LANE" in
         ;;
 esac
 if [[ "$LANE" == "user_facing" ]]; then LANE="user-facing"; fi
-if [[ "$AUTO_MERGE_EXPLICIT" -eq 0 ]]; then
-    case "$LANE" in
-        internal)
-            # Auto-merge-by-default lane (RESILIENT-190 doctrine: lowest
-            # blast radius if wrong). Still subject to the chump-policy
-            # gate below like any other lane.
-            AUTO_MERGE=1
-            ;;
-        user-facing|critical)
-            # No auto-merge unless the caller explicitly opts in via
-            # --auto-merge; the chump-policy gate further blocks critical
-            # by default even when opted in.
-            AUTO_MERGE=0
-            ;;
-    esac
-fi
+# ── CREDIBLE-1580: auto-merge is default-OFF on EVERY lane ──────────────────
+# The ONLY way bot-merge arms GitHub auto-merge is an explicit --auto-merge
+# flag (AUTO_MERGE_EXPLICIT=1, set in the arg loop above). The default is the
+# constant AUTO_MERGE=0 from init — no lane, not even `internal`, self-arms,
+# and there is NO env override (Chief standing rule: a safety input like the
+# arm decision is a constant or a CLI flag, never a CHUMP_* env var).
+#
+# This closes the self-arm hole behind the CREDIBLE-1542 review-held gate: a
+# fresh `chump dispatch` run never passes --auto-merge (src/dispatch.rs only
+# appends it when opts.auto_merge is true), yet INFRA-1767's internal-lane
+# "arm by default" armed every dispatched PR unreviewed — #5613 self-armed
+# three times in 95 minutes inside the CREDIBLE-1576 dispatch. With the
+# default-arm removed, the review organ (CREDIBLE-1542) is the only route that
+# passes --auto-merge, and only after a written APPROVE.
+#
+# The lane normalization above is still load-bearing: the chump-policy gate
+# below refuses the critical lane even when --auto-merge IS passed, and the
+# bot_merge_lane_resolved event records the resolved decision. Only the
+# default-arm assignment is gone. (Supersedes INFRA-1767's internal-lane
+# auto-arm-by-default and the RESILIENT-190 lowest-blast-radius doctrine.)
 printf '{"ts":"%s","kind":"bot_merge_lane_resolved","lane":"%s","auto_merge_requested":%s,"auto_merge_explicit":%s,"session":"%s"}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$LANE" "$AUTO_MERGE" "$AUTO_MERGE_EXPLICIT" "${CHUMP_SESSION_ID:-unknown}" \
     >> "${CHUMP_AMBIENT_LOG:-${REPO_ROOT:-.}/.chump-locks/ambient.jsonl}" 2>/dev/null || true
@@ -2482,12 +2497,31 @@ if [[ "$_BM_MODE" == "A" ]] && ! _bm_integrator_healthy; then
     _bm_emit_mode_failopen "${_bm_route_gap:-${GAP_IDS[0]:-unknown}}"
 fi
 
+# ── CREDIBLE-1580: Mode A is an arming route — force Mode B when not armed ────
+# Mode A enqueues to the batched integration queue and exits 0 WITHOUT opening a
+# PR; the chump-integrator-daemon then arms the queued PR with `--auto`
+# (daemon.rs). That integrator arm is an auto-merge that bypasses bot-merge's
+# AUTO_MERGE=0 default — exactly the self-arm hole this gate closes. When
+# --auto-merge was NOT passed (AUTO_MERGE != 1), force Mode B so the change
+# opens through the guarded per-PR flow and simply waits for review; the main
+# arm site below is gated on AUTO_MERGE=1, so a default-OFF run never arms. The
+# CREDIBLE-1542 review-held path (--auto-merge after a written APPROVE) is still
+# the only route that reaches Mode A's integrator arm. (Keys off AUTO_MERGE, the
+# single arm decision assigned only at init and the --auto-merge flag.)
+_bm_substep "mode-a-no-arm-force-b"
+if [[ "$_BM_MODE" == "A" && "$AUTO_MERGE" -ne 1 ]]; then
+    _BM_MODE="B"
+    _BM_MODE_REASON="auto-merge not armed — Mode A would batch-arm via integrator (CREDIBLE-1580)"
+fi
+
 # CREDIBLE-1576: a gate-file PR must NOT route through Mode A — the integrator
 # daemon (crates/chump-integrator) pushes and arms with --auto, bypassing the
 # arm-refusal guard below. Force Mode B so the PR opens through the guarded
 # per-PR flow and the arm is refused there. Fail-closed: an uncomputable diff
 # (rc=3) also forces Mode B. Uses the same classifier the arm guard uses — the
-# gate-file list stays a single constant.
+# gate-file list stays a single constant. (Kept as a separate check from the
+# CREDIBLE-1580 force-B above so BOTH reasons independently hold: a gate-file
+# diff must leave Mode A even if --auto-merge WAS explicitly passed.)
 _bm_substep "mode-a-gate-file-force-b"
 if [[ "$_BM_MODE" == "A" ]]; then
     _bm_gate_rc=0
