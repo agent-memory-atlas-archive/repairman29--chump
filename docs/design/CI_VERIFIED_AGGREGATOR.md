@@ -221,12 +221,16 @@ then aggregated once: the first pass returned `PENDING` (aggregator exit 2 → j
 completion. On a PR the failed-then-rerun check heals; in a merge queue the
 ejection already happened and the recompute re-run lands too late.
 
-**The rule.** The `verified` job now **waits in-job** for the cross-workflow
-lanes to CONCLUDE on the event SHA, up to the ruleset `check_response_timeout`
-(90 min), reporting nothing until they conclude. The wait is driven by
-`scripts/ci/verified-wait.sh`, which re-classifies every lane (local
-`needs.*.result` strings + a fresh cross-workflow snapshot) each poll via the
-unchanged decision core `scripts/ci/aggregator-verified.sh`:
+**The rule.** The `verified` job runs exactly **one** step —
+`bash scripts/ci/verified-wait.sh` — which **waits in-job** for the
+cross-workflow lanes to CONCLUDE on the event SHA, up to the script default of
+5400s (90 min, the ruleset `check_response_timeout`), reporting nothing until
+they conclude. The step passes the six local lanes as `needs.*.result` strings,
+`--pr`, `--event-name`, and the two cross lanes as
+`--cross "audit"` / `--cross "ACP protocol smoke test (Zed / JetBrains compatible)"`.
+`verified-wait.sh` re-classifies every lane (local strings + a fresh
+cross-workflow snapshot) each poll via the unchanged decision core
+`scripts/ci/aggregator-verified.sh`:
 
 ```
 PENDING (aggregator exit 2)  — a lane is still running OR has not posted a check
@@ -248,13 +252,34 @@ any not-yet-terminal lane reads `in_progress`); `verified-wait.sh` owns the
 single wait-and-fail-on-timeout decision. The default (non-snapshot) poll mode
 keeps its own short-wait + fail-closed-at-timeout behavior for other callers.
 
+**One lane set, per-event budget (CREDIBLE-1554 item 5, Chief-binding).** The
+set of lanes `verified` requires — the six local lanes plus the two
+cross-workflow lanes (`audit`, ACP) — is **one list**, classified on the event
+SHA identically for `pull_request`, `merge_group`, `push` and
+`workflow_dispatch`. No event path adds or drops a lane; `verified-wait.sh
+--print-lanes` renders that invariant set and `test-verified-wait.sh` asserts it
+is identical for all four events. Only the **wait budget** differs: a
+`workflow_dispatch` re-run (the INFRA-1395 grace window) is a manual probe, so it
+uses a **short bounded window** (`DISPATCH_TIMEOUT_S`, default 300s) rather than
+the full 90 min — but it **still classifies the cross lanes on the SHA**
+(`required-check-monitor.sh` dispatches `ci.yml` on the PR head, so audit/ACP
+already posted there) and concludes `FAILURE` if any cross lane is red, still
+running, or never-seen at the end of that window — **never a silent PASS** past
+an unseen or red cross lane.
+
 **Invariants preserved.** `aggregator-verified.sh` keeps its `0/1/2/3` exit
-codes for all existing callers; the wait lives in the job's poll wrapper, not in
-a new bypass/skip env var. The `verified` job `timeout-minutes` is raised to 95
-to cover the 90-min wait plus checkout/aggregate overhead. The behavior is
-pinned by `scripts/ci/test-verified-wait.sh` (stubbed Checks API: in_progress→
-success, in_progress→failure, never-seen→success, never-seen→timeout, and
-red-local short-circuit, for both event types).
+codes for all existing callers; the wait lives in `verified-wait.sh`, not in a
+new bypass/skip env var. The `verified` job `timeout-minutes` is 95 — greater
+than the 90-min wait — so the Actions runner outlives the wait plus
+checkout/aggregate overhead rather than killing it mid-poll. The behavior is
+pinned by two tests: `scripts/ci/test-ci-verified-shape.sh` (a PyYAML shape
+guard asserting the `verified` job runs `verified-wait.sh` with both `--cross`
+lanes and `timeout-minutes` ≥ 91, so a comment-only edit can never masquerade as
+wired) and `scripts/ci/test-verified-wait.sh` (stubbed Checks API: in_progress→
+success, in_progress→failure, never-seen→success, never-seen→timeout, red-local
+short-circuit, cross cancelled/timed_out/action_required short-circuit, gh-error
+fail-SAFE→timeout, ACP-green+audit-never-seen→PENDING, temp-ambient isolation,
+and the workflow_dispatch skip, for both event types).
 
 > **Retirement note:** with the first verdict now correct on `merge_group`,
 > `verified-recompute.yml`'s **PR path** is retired separately in RESILIENT-1644;

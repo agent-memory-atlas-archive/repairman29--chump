@@ -486,27 +486,38 @@ jobs:
           echo "All shards green (or appropriately skipped / cascade-cancelled)."
 
   # ── verified: single legible aggregator (CREDIBLE-269, SHIP-INFRA 1/7) ────
-  # The ONLY required status check: one job that classifies every ci.yml-local
-  # lane's result via scripts/ci/aggregator-verified.sh, PLUS the two lanes
-  # that live in separate workflows (audit.yml's `audit`, integrations.yml's
-  # `ACP protocol smoke test`) polled cross-workflow via the Checks API
-  # (scripts/ci/poll-cross-workflow-checks.sh, since GH Actions `needs:` only
-  # sees same-workflow jobs) — then prints a single PASS/FAIL verdict + emits
-  # kind=verified_aggregator_decision to ambient.jsonl for offline audit.
+  # The ONLY required status check. A single step runs scripts/ci/verified-wait.sh,
+  # which classifies every ci.yml-local lane (passed as already-terminal
+  # needs.*.result strings) PLUS the two lanes that live in separate workflows
+  # (audit.yml's `audit`, integrations.yml's
+  # `ACP protocol smoke test (Zed / JetBrains compatible)`) — the latter
+  # re-snapshot each pass via the Checks API, since GH Actions `needs:` only
+  # sees same-workflow jobs. It prints a single PASS/FAIL verdict and emits
+  # kind=verified_aggregator_decision to ambient.jsonl once per terminal verdict.
   #
   # CREDIBLE-1554 (PHASE-R R3): under a GitHub native merge queue (the landing
   # provider, umbrella CREDIBLE-1555) the FIRST verdict must be the right one —
   # a merge_group is ejected the instant a required check concludes FAILURE, so
-  # there is no second pass to heal into (the RESILIENT-1562 recompute re-run
-  # lands AFTER ejection). verified now WAITS IN-JOB, on merge_group AND
-  # pull_request alike, for the cross-workflow lanes to CONCLUDE on the event
-  # SHA — up to the ruleset check_response_timeout (90 min) — via
-  # scripts/ci/verified-wait.sh. PENDING (a lane still running OR never-seen)
+  # there is no second pass to heal into. verified therefore WAITS IN-JOB, on
+  # merge_group AND pull_request alike, for the cross-workflow lanes to CONCLUDE
+  # on the event SHA — up to the verified-wait.sh default of 5400s (90 min), the
+  # ruleset check_response_timeout. PENDING (a lane still running OR never-seen)
   # means keep polling; the job concludes FAILURE only on a real red lane or on
-  # the timeout, and SUCCESS only when every lane is green or legitimately
+  # the 90-min timeout, and SUCCESS only when every lane is green or legitimately
   # skipped. RESILIENT-1617's lane-seen rule is folded in: an unposted lane is
-  # PENDING, never FAIL/PASS, for the whole wait. See
-  # docs/design/CI_VERIFIED_AGGREGATOR.md (META-134) §"In-job wait".
+  # PENDING, never FAIL/PASS, for the whole wait. The SAME lane set — the six
+  # local lanes plus the two cross lanes (audit, ACP) — is classified for EVERY
+  # event (pull_request, merge_group, push, workflow_dispatch); only the wait
+  # BUDGET differs (CREDIBLE-1554 item 5). A workflow_dispatch re-run (the
+  # INFRA-1395 grace window) uses verified-wait.sh's SHORT bounded window instead
+  # of the full 90 min — a manual probe must not block a human — but it STILL
+  # classifies the cross lanes on the SHA (required-check-monitor.sh dispatches
+  # ci.yml on the PR head, so audit/ACP already posted there) and concludes
+  # FAILURE if any is red, still running, or never-seen at the end of that window
+  # — never a silent PASS past an unseen or red cross lane.
+  # timeout-minutes is 95 (> the 90-min in-job wait) so the Actions runner
+  # outlives the wait rather than killing it mid-poll. See
+  # docs/design/CI_VERIFIED_AGGREGATOR.md (META-134) §2.6 "In-job wait".
   #
   # Branch-protection/ruleset requires ONLY `verified`
   # (gh api repos/repairman29/chump/branches/main/protection → required_status_checks.contexts).
@@ -515,51 +526,26 @@ jobs:
     needs: [fast-checks, fast-checks-heavy, clippy, cargo-test, pr-hygiene, test]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 95
     steps:
       - uses: actions/checkout@v7
-      - name: Poll cross-workflow lanes (audit, ACP-smoke) — CREDIBLE-269
-        id: cross
+      - name: Wait in-job for every lane then aggregate (CREDIBLE-1554 / META-134)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          sha="${{ github.event.pull_request.head.sha || github.sha }}"
-          # --timeout-s 120 is INTENTIONALLY shorter than the script default
-          # (600s): it is a short grace window, not a wait-for-audit. A real
-          # audit run takes 15-40 min on starved runners, so no fixed poll window
-          # can outlast it — holding a runner for 600s would still time out and
-          # just waste a slot. Two mechanisms make the short window correct:
-          #   (1) RESILIENT-1617 lane-seen rule — a still-running audit (shards
-          #       in_progress / audit.yml run not completed) reports in_progress
-          #       => verified classifies PENDING, NOT FAIL, on the first pass; and
-          #   (2) RESILIENT-1562 — .github/workflows/verified-recompute.yml
-          #       re-runs this `verified` job on the Audit/integrations
-          #       workflow_run=completed event, so the final verdict reflects the
-          #       audit/ACP terminal state regardless of this poll window.
-          bash scripts/ci/poll-cross-workflow-checks.sh \
-            --sha "$sha" \
-            --check "audit" \
-            --check "ACP protocol smoke test (Zed / JetBrains compatible)" \
-            --timeout-s 120 --interval-s 15 > /tmp/cross-workflow-lanes.txt
-          cat /tmp/cross-workflow-lanes.txt
-          audit_result="$(grep '^audit=' /tmp/cross-workflow-lanes.txt | cut -d= -f2)"
-          acp_result="$(grep '^ACP protocol smoke test' /tmp/cross-workflow-lanes.txt | cut -d= -f2)"
-          echo "audit_result=${audit_result}" >> "$GITHUB_OUTPUT"
-          echo "acp_result=${acp_result}" >> "$GITHUB_OUTPUT"
-      - name: Aggregate lane verdicts (CREDIBLE-269 / META-134)
-        run: |
-          bash scripts/ci/aggregator-verified.sh \
+          bash scripts/ci/verified-wait.sh \
+            --sha "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --event-name "${{ github.event_name }}" \
             --lane "fast-checks=${{ needs.fast-checks.result }}" \
             --lane "fast-checks-heavy=${{ needs.fast-checks-heavy.result }}" \
             --lane "clippy=${{ needs.clippy.result }}" \
             --lane "cargo-test=${{ needs.cargo-test.result }}" \
             --lane "pr-hygiene=${{ needs.pr-hygiene.result }}" \
             --lane "test=${{ needs.test.result }}" \
-            --lane "audit=${{ steps.cross.outputs.audit_result }}" \
-            --lane "ACP-smoke=${{ steps.cross.outputs.acp_result }}" \
-            --pr "${{ github.event.pull_request.number }}" \
-            --sha "${{ github.event.pull_request.head.sha || github.sha }}"
+            --cross "audit" \
+            --cross "ACP protocol smoke test (Zed / JetBrains compatible)"
 
   # ── PR hygiene (CREDIBLE-042/043) ─────────────────────────────────────────
   # Runs on EVERY pull_request regardless of which paths changed. Catches the
@@ -1059,6 +1045,16 @@ jobs:
         # a malformed registry, a self-report whose source or command is not
         # in the tree, or a missing receipt pair. Pure local, ~1s.
         run: bash scripts/ci/test-self-reports-registry.sh
+
+      # CREDIBLE-1554: the sole required `verified` check's two guards must run
+      # in CI, not only in preflight + the nightly census — otherwise a PR that
+      # breaks the wiring (ci.yml shape) or the in-job wait logic can merge.
+      # Both are pure local bash/python, no network (gh is stubbed), ~5s each.
+      - name: verified in-job wait logic guard (CREDIBLE-1554)
+        run: bash scripts/ci/test-verified-wait.sh
+
+      - name: verified ci.yml-shape wiring guard (CREDIBLE-1554)
+        run: bash scripts/ci/test-ci-verified-shape.sh
 
       - name: observability registry YAML-parse gate (CREDIBLE-1516)
         # Parses EVENT_REGISTRY.yaml + SELF_REPORTS.yaml with yaml.safe_load so

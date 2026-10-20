@@ -1359,6 +1359,13 @@ fn discover_test_scripts(repo_root: &std::path::Path) -> Vec<std::path::PathBuf>
         // bash, no network, ~5s. The ci.yml `verified` job step is exempt from
         // parity (it lives in CI_YML_INFRA_JOBS) — this test mirrors its logic.
         "scripts/ci/test-verified-wait.sh",
+        // CREDIBLE-1554 (item 2): PyYAML ci.yml-shape guard — parses the
+        // `verified` job and asserts it runs scripts/ci/verified-wait.sh with
+        // BOTH cross lanes and timeout-minutes >= 91, and that the stale
+        // poll(120s)+aggregate-once pair is gone. Pins the wiring that #5602
+        // claimed in comments but did not contain (a comment-only edit leaves
+        // the job byte-identical). Pure python3+PyYAML, no network, <1s.
+        "scripts/ci/test-ci-verified-shape.sh",
         // INFRA-1841 (CP-009): mock-services offline-CI fixture smoke test —
         // builds+runs the 4 vendored Anthropic/OpenAI/Stripe/Supabase mocks
         // under tests/fixtures/mock-services and asserts response shape.
