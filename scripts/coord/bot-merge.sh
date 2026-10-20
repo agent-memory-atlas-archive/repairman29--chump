@@ -1,6 +1,77 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2001,SC2016,SC2018,SC2019,SC2086,SC1091  # pre-existing file-wide style/info — moved up from line 25 by INFRA-1939 so scope covers source-on-line-24 too
 
+# ── CREDIBLE-1576: gate-file auto-merge arm guard (defined FIRST) ─────────────
+# Defined above the CHUMP_SHIP_RUST shim below so that shim can consult it before
+# exec'ing the Rust chump-ship binary (which arms without this guard). A
+# gate-file change (CI workflow, ci-test, git-hook, chump-preflight crate, or a
+# verified-wait helper) must land under human review — never self-armed. So
+# bot-merge.sh REFUSES to arm --auto-merge (exit 2, named reason) when the PR
+# diff vs the merge base touches any gate file. The branch is still pushed and
+# the PR is still opened; only the unreviewed arm is refused (conductor un-pause
+# gate 3; parent CREDIBLE-1526). #5602 self-armed its own ci.yml gate PR via
+# dispatch --auto-merge and merged unreviewed on 2026-10-19 — this closes the
+# default/recovery arm routes, the Mode A (integrator) route, and the
+# CHUMP_SHIP_RUST exec route.
+#
+# The gate-file list is a single CONSTANT literal here and is NEVER read from an
+# env var (Chief standing rule 2026-10-20: no env override on a safety input).
+BOT_MERGE_GATE_FILE_GLOBS=(
+    '.github/workflows/*'
+    'scripts/ci/*'
+    'scripts/git-hooks/*'
+    'crates/chump-preflight/*'
+    '*verified-wait*'
+)
+
+# Classify the branch diff vs the merge base. Reads NO env var. Returns:
+#   0 + prints the first gate file  → the diff touches a gate file
+#   1                                → diff succeeded, touches NO gate file
+#   3                                → `git diff` FAILED or there is no merge
+#                                      base; callers MUST treat this as fail-closed
+# (CREDIBLE-1576 item 2: a diff we cannot compute must never read as "clean".)
+bot_merge_gate_files_touched() {
+    local base="${1:-origin/main}" f glob _diff
+    if _diff="$(git diff --name-only "${base}...HEAD" 2>/dev/null)"; then
+        :
+    else
+        return 3
+    fi
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        for glob in "${BOT_MERGE_GATE_FILE_GLOBS[@]}"; do
+            # shellcheck disable=SC2254  # intentional glob match, not a literal
+            case "$f" in
+                $glob) printf '%s\n' "$f"; return 0 ;;
+            esac
+        done
+    done <<< "$_diff"
+    return 1
+}
+
+# The single arm-refusal routine, called before EVERY auto-merge arm site so
+# there is no route around it. Reads NO env var. If auto-merge is requested
+# ($1==1) AND the diff either touches a gate file OR cannot be computed
+# (fail-closed), print a named REFUSED reason and return 2 (caller does
+# `|| exit 2`). Otherwise return 0 and let the arm proceed.
+bot_merge_gate_arm_refused() {
+    local auto="${1:-0}" base="${2:-origin/main}" hit rc
+    [[ "$auto" == "1" ]] || return 0
+    if hit="$(bot_merge_gate_files_touched "$base")"; then rc=0; else rc=$?; fi
+    case "$rc" in
+        0)
+            printf '\033[0;31mREFUSED: bot-merge will not arm --auto-merge — PR diff touches gate file %s (CREDIBLE-1576 gate-file guard). The branch is pushed and the PR is open; land it only after review.\033[0m\n' \
+                "$hit" >&2
+            return 2 ;;
+        3)
+            printf '\033[0;31mREFUSED: bot-merge will not arm --auto-merge — cannot compute the %s...HEAD diff (missing ref or no merge base); failing closed per CREDIBLE-1576. The branch is pushed and the PR is open; land it only after review.\033[0m\n' \
+                "$base" >&2
+            return 2 ;;
+        *)
+            return 0 ;;
+    esac
+}
+
 # INFRA-2001: feature-flag shim — when CHUMP_SHIP_RUST=1 AND --mode manual (or unset/default),
 # route to the new Rust chump-ship binary instead of this 3044-LOC bash body. Legacy bash
 # preserved below for parallel-run validation during 1-week soak. Bot-merge mode still routes
@@ -15,7 +86,16 @@ if [ "${CHUMP_SHIP_RUST:-0}" = "1" ]; then
         fi
     done
     if [ -z "$_mode_arg" ] || [ "$_mode_arg" = "manual" ]; then
-        exec chump-ship "$@"
+        # CREDIBLE-1576 item 4: a gate-file PR must take the guarded bash path,
+        # never the Rust chump-ship exec (manual_ship.rs arms without this
+        # guard). Only exec chump-ship when we are SURE the diff touches no gate
+        # file (rc=1). A gate hit (rc=0) OR an uncomputable diff (rc=3,
+        # fail-closed) falls through to the legacy bash body + its arm guard.
+        bot_merge_gate_files_touched "origin/main" >/dev/null 2>&1
+        _gate_rc=$?
+        if [ "$_gate_rc" -eq 1 ]; then
+            exec chump-ship "$@"
+        fi
     fi
     # --mode bot-merge falls through to legacy bash (BotMergePath stubbed in Phase 1)
 fi
@@ -24,6 +104,17 @@ fi
 # shellcheck source=../lib/discover-flock.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/discover-flock.sh"
 # (INFRA-1939: file-wide shellcheck disable moved to line 2 so source-on-line-24 is covered.)
+
+# Test/ops seam (explicit CLI arg — the systemd unit/timer never passes it):
+# `--gate-arm-check [--auto-merge]` runs ONLY the real gate decision against the
+# current branch diff and exits — 2 if arming would be refused, 0 otherwise.
+# Exercises the exact constant + refusal routine the arm path below uses.
+if [[ "${1:-}" == "--gate-arm-check" ]]; then
+    _gac_auto=0
+    for _gac_arg in "$@"; do [[ "$_gac_arg" == "--auto-merge" ]] && _gac_auto=1; done
+    bot_merge_gate_arm_refused "$_gac_auto" || exit $?
+    exit 0
+fi
 #
 # bot-merge.sh — Automated ship pipeline for agent branches.
 #
@@ -2105,6 +2196,9 @@ if [[ "${CHUMP_BOT_MERGE_RECOVERY_MODE:-0}" == "1" ]]; then
     fi
 
     if [[ -n "$_recover_pr_num" && "${AUTO_MERGE:-0}" == "1" ]]; then
+        # CREDIBLE-1576: same refusal on the recovery arm path — the PR is
+        # already created above, so it survives; only the arm is refused.
+        bot_merge_gate_arm_refused "$AUTO_MERGE" || exit 2
         stage_start "recovery: arm auto-merge"
         if arm_policy_allows "$_recover_pr_num" "bot-merge.sh(recovery)"; then
             gh pr merge "$_recover_pr_num" --auto --squash 2>/dev/null || true
@@ -2386,6 +2480,25 @@ if [[ "$_BM_MODE" == "A" ]] && ! _bm_integrator_healthy; then
     _BM_MODE="B"
     _BM_MODE_REASON="integrator daemon unhealthy — fail-open to per-PR (INFRA-2523)"
     _bm_emit_mode_failopen "${_bm_route_gap:-${GAP_IDS[0]:-unknown}}"
+fi
+
+# CREDIBLE-1576: a gate-file PR must NOT route through Mode A — the integrator
+# daemon (crates/chump-integrator) pushes and arms with --auto, bypassing the
+# arm-refusal guard below. Force Mode B so the PR opens through the guarded
+# per-PR flow and the arm is refused there. Fail-closed: an uncomputable diff
+# (rc=3) also forces Mode B. Uses the same classifier the arm guard uses — the
+# gate-file list stays a single constant.
+_bm_substep "mode-a-gate-file-force-b"
+if [[ "$_BM_MODE" == "A" ]]; then
+    _bm_gate_rc=0
+    bot_merge_gate_files_touched "origin/main" >/dev/null 2>&1 || _bm_gate_rc=$?
+    if [[ "$_bm_gate_rc" -ne 1 ]]; then
+        _BM_MODE="B"
+        _BM_MODE_REASON="gate-file diff must open a reviewable PR, never batch-arm via integrator (CREDIBLE-1576)"
+        printf '{"ts":"%s","kind":"bot_merge_mode_failopen","gap_id":"%s","from_mode":"A","to_mode":"B","reason":"gate-file diff must land under human review — never batch-arm via integrator","note":"CREDIBLE-1576"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${_bm_route_gap:-${GAP_IDS[0]:-unknown}}" \
+            >> "${CHUMP_AMBIENT_LOG:-${LOCK_DIR:-${REPO_ROOT:-.}/.chump-locks}/ambient.jsonl}" 2>/dev/null || true
+    fi
 fi
 
 info "INFRA-2133: routing mode=${_BM_MODE} reason=${_BM_MODE_REASON:-default}"
@@ -4255,6 +4368,10 @@ _bm_step_start "pr_merge_arm"
 # is always visible in the run log and auditable.
 info "bot-merge: consensus merge gate mode=${CHUMP_CONSENSUS_MERGE_GATE:-0} (CHUMP_CONSENSUS_MERGE_GATE; shadow-first per CREDIBLE-1524)"
 if [[ $AUTO_MERGE -eq 1 ]]; then
+    # CREDIBLE-1576: refuse to self-arm a gate-file PR. Reached only after the
+    # branch is pushed and the PR is open, so the PR survives — only the arm is
+    # refused (exit 2, named reason). Placed before any gh-pr-merge-arm call.
+    bot_merge_gate_arm_refused "$AUTO_MERGE" || exit 2
     TARGET_PR="${EXISTING_PR:-}"
     if [[ -z "$TARGET_PR" ]]; then
         TARGET_PR=$(gh pr view "$BRANCH" --json number --jq '.number' 2>/dev/null || echo "")
