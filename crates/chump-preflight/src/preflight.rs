@@ -2838,6 +2838,16 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-cargo-target-reaper-class-d.sh"],
             GateKind::Scripts,
         ));
+        // RESILIENT-1635: Class D also reaps idle OPEN-PR dispatch worktree
+        // build dirs + stale bot-merge-active-dispatch-*.path markers.
+        steps.push(step(
+            "cargo-target-reaper-class-d-open-idle",
+            &[
+                "bash",
+                "scripts/ci/test-cargo-target-reaper-class-d-open-idle.sh",
+            ],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "bot-merge-recovery-in-progress-smoke",
             &["bash", "scripts/ci/test-bot-merge-recovery-in-progress.sh"],

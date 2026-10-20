@@ -1305,6 +1305,9 @@ jobs:
       - name: cargo-target-reaper Class D — merged/closed lease-less worktree + disk-health trigger (RESILIENT-1620)
         run: bash scripts/ci/test-cargo-target-reaper-class-d.sh
 
+      - name: cargo-target-reaper Class D — idle open-PR worktree + stale active-dispatch marker reap (RESILIENT-1635)
+        run: bash scripts/ci/test-cargo-target-reaper-class-d-open-idle.sh
+
       - name: worktree-reaper active-worktree safety guard (INFRA-1074)
         run: bash scripts/ci/test-worktree-reaper-safety.sh
 

@@ -48,6 +48,20 @@ case "$branch" in
 esac
 GH
 chmod +x "$BIN/gh"
+# RESILIENT-1635: Class D takes the node build lane lock and passes
+# `chump admit cargo` before deleting anything. Stub chump to admit. The lock
+# path is fixed at $HOME/.chump/architect-lane.lock (no env override), so the
+# reaper runs under a sandbox HOME and takes the sandbox's lock, never the real
+# ~/.chump one.
+cat > "$BIN/chump" <<'CHUMP'
+#!/usr/bin/env bash
+exit 0
+CHUMP
+chmod +x "$BIN/chump"
+SANDBOX_HOME="$TMP/home"
+# shellcheck source=scripts/coord/lib/test-sandbox.sh
+source "$REPO_ROOT/scripts/coord/lib/test-sandbox.sh"
+chump_test_sandbox_setup "$SANDBOX_HOME"
 export PATH="$BIN:$PATH"
 # Force cache-miss so the gh fallback path is exercised deterministically.
 export CHUMP_CACHE_DB="$TMP/nonexistent-cache.db"
@@ -95,6 +109,7 @@ FOREIGN_LOCKS="$TMP/foreign-locks"
 mkdir -p "$FOREIGN_LOCKS"
 
 run_reaper() {
+    HOME="$SANDBOX_HOME" \
     CHUMP_LOCK_DIR="$FOREIGN_LOCKS" \
     CHUMP_STATE_DB="$TMP/foreign-state.db" \
     REAPER_REPO_ROOT="$FAKE_REPO" \
