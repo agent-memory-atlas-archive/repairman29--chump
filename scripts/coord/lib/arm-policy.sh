@@ -59,8 +59,14 @@ _CHUMP_ARM_POLICY_SOURCED=1
 
 # shellcheck disable=SC2034  # public constant for callers/tests
 ARM_POLICY_HOLD_LABEL="no-auto-merge"
-# Space-separated; compared case-insensitively.
-ARM_POLICY_HOLD_LABELS="no-auto-merge hold do-not-merge CHUMP_HOLD"
+# Space-separated; compared case-insensitively. CREDIBLE-1542 adds the
+# independent-review-organ hold labels (review-held / review-needs-mutants) so
+# EVERY existing armer that already calls arm_policy_allows refuses a PR the
+# review organ has marked unreviewed — passive, label-based fleet-wide honoring.
+# (The fail-CLOSED predicate for "no current-head APPROVE even without a label"
+# is scripts/coord/lib/review-hold.sh review_hold_allows, used by the organ's
+# own head-pinned arm; wiring it into the other armers is a filed follow-up.)
+ARM_POLICY_HOLD_LABELS="no-auto-merge hold do-not-merge CHUMP_HOLD review-held review-needs-mutants"
 
 _arm_policy_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

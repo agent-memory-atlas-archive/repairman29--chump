@@ -1,0 +1,13 @@
+  - kind: pr_arm_skipped_review_hold
+    effect_metric: credible
+    emitter: scripts/coord/lib/review-hold.sh review_hold_allows (CREDIBLE-1542)
+    trigger: >-
+      An armer asked the fail-closed independent-review predicate for permission
+      and was refused because the PR's current head has no written VERDICT:
+      APPROVE from the review organ (or carries a review-held / review-needs-
+      mutants label, or its labels/comments could not be read). Fails CLOSED: a
+      brand-new, unreviewed PR is held.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, armer, reason]
+    expected_volume: "0-N per armer tick while a PR lacks a current-head APPROVE"
+    status: stable

@@ -1,0 +1,32 @@
+# CREDIBLE-1542 (PHASE-R R3) — the independent review organ as a user-scope
+# ORGAN on a node instead of the architect running the review by hand with an
+# Agent call. Fires ONE bounded review tick: for each open PR whose current head
+# has no verdict yet, run a read-only `claude -p` review (no write tools, scoped
+# reads, token-scrubbed output), post VERDICT: APPROVE|CHANGES REQUIRED as a PR
+# comment, label review-held until APPROVE, arm HEAD-PINNED (never auto-merge)
+# only on a written current-head APPROVE + verified-green, and dispatch one
+# repair per CHANGES REQUIRED. Paired with chump-review-organ.timer.
+#
+# SCOPE: user-scope (`systemctl --user`). Rendered through crates/chump-provision
+# (__HOME__ / __REPO_ROOT__ placeholders, no host literal, no User=, no %h) so
+# one unit text installs on any node's user manager (sibling of
+# chump-architect-tick.service, RESILIENT-1634).
+#
+# SHIPPED DISABLED: no organ manifest line enables it. Rendering and enabling it
+# is the operator's step (see chump-review-organ.timer's header). One review
+# organ per fleet (the cross-host single-organ lease is a filed follow-up; until
+# it lands, enable the timer on exactly ONE node).
+[Unit]
+Description=Chump independent review organ — one bounded read-only claude -p review tick, post VERDICT, head-pinned arm (CREDIBLE-1542)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=1800
+# Source providers.env for ANTHROPIC/CLAUDE credentials (export format, so
+# source it in a shell rather than systemd EnvironmentFile). HOME is set so the
+# user-scope manager resolves ~/.chump. The review subprocess itself is spawned
+# under a MINIMAL env by review-ro-claude.sh (it does NOT inherit providers.env).
+Environment=HOME=__HOME__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/dispatch/review-organ-tick.sh'

@@ -1,0 +1,12 @@
+  - kind: review_organ_tick
+    effect_metric: credible
+    emitter: scripts/dispatch/review-organ-tick.sh (CREDIBLE-1542)
+    trigger: >-
+      The independent review organ finished one bounded tick: it reviewed open
+      PRs whose current head had no verdict, posted VERDICT comments, labeled
+      review-held where no current-head APPROVE exists, armed head-pinned on an
+      APPROVE + verified-green, and dispatched one repair per CHANGES REQUIRED.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, reviewed, approved, changes_required, held_mutants, armed, dispatched, skipped]
+    expected_volume: "1 per organ tick (every 15 min on the one enabled node)"
+    status: stable

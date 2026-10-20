@@ -1,0 +1,12 @@
+  - kind: pr_review_verdict
+    effect_metric: credible
+    emitter: scripts/dispatch/review-organ-tick.sh post_verdict (CREDIBLE-1542)
+    trigger: >-
+      The independent review organ posted a VERDICT comment on a PR. The verdict
+      is APPROVE or CHANGES_REQUIRED for the named head sha; the mutants line
+      records the mutation-rule reasoning (or NOT RUN for a read-only reviewer /
+      a gate-file PR held for a mutant-capable reviewer).
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, verdict, head, mutants]
+    expected_volume: "0-N per organ tick (one per PR reviewed)"
+    status: stable

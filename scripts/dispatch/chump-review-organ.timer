@@ -1,0 +1,29 @@
+# Pairs with chump-review-organ.service. Fires the independent review organ
+# every 15 minutes so an escalated PR gets a verdict without a human or an
+# architect session (CREDIBLE-1542). SHIPPED DISABLED: no organ manifest line
+# enables it. Enabling it is the operator's step, on ONE node, from its checkout:
+#   cd ~/.chumpnode/repo
+#   chump node render-unit scripts/dispatch/chump-review-organ.service \
+#     --host linux-systemd-user --repo-root "$PWD" \
+#     --out ~/.config/systemd/user/chump-review-organ.service
+#   chump node render-unit scripts/dispatch/chump-review-organ.timer \
+#     --host linux-systemd-user --repo-root "$PWD" \
+#     --out ~/.config/systemd/user/chump-review-organ.timer
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now chump-review-organ.timer
+#   systemctl --user list-timers chump-review-organ.timer   # listing receipt
+[Unit]
+Description=Run the Chump independent review organ every 15 minutes headless (CREDIBLE-1542)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+# RESILIENT-1455: OnUnitInactiveSec pairs with OnUnitActiveSec so this
+# Type=oneshot timer self-perpetuates (a oneshot goes inactive after each run,
+# leaving OnUnitActiveSec with no live "active" anchor). Mirrors
+# chump-architect-tick.timer.
+OnUnitInactiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
