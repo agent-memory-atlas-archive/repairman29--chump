@@ -706,6 +706,14 @@ enabled     chump-worktree-reaper.service  role=janitor requires=file:~/.chump/o
 enabled     chump-disk-monitor.service  role=janitor requires=file:~/.chump/organs/disk-monitor.sh housekeeping=scripts/ops/disk-health-monitor.sh|300| run-scope=system
 enabled     chump-main-health-watchdog.service  role=brain requires=file:~/.chump/organs/main-health-watchdog.sh housekeeping=scripts/ops/main-health-watchdog.sh|600| run-scope=system
 enabled     chump-cargo-sweep-gc.service  role=janitor requires=file:~/.chump/organs/cargo-sweep-gc.sh housekeeping=scripts/ops/cargo-sweep-gc.sh|3600| run-scope=system
+# RESILIENT-1680: scoped prune of the shared cargo target's rebuildable
+# incremental/ caches (never the whole target), floor/budget decided by the
+# script's constants/CLI, guarded by both architect lane locks + chump admit
+# cargo + no live build. Installed as a housekeeping organ so every build node
+# provisions the timer and organ-reconcile's roll-call reports it — closing the
+# RESILIENT-1635 gap where no organ reaped it on cuphead and debug/incremental
+# reached 21G before the architect removed it by hand.
+enabled     chump-shared-target-cache-reaper.service  role=janitor requires=file:~/.chump/organs/shared-target-cache-reaper.sh housekeeping=scripts/coord/shared-target-cache-reaper.sh|1800|--execute run-scope=system
 enabled     chump-reviver.service  role=brain requires=file:~/.chump/organs/reviver.sh housekeeping=scripts/coord/post-push-integrity-watch.sh|60| run-scope=system
 enabled     chump-pr-stuck-live-scan.service  role=brain requires=file:~/.chump/organs/pr-stuck-live-scan.sh housekeeping=scripts/ops/stuck-pr-filer.sh|3600| run-scope=system
 enabled     chump-pr-stuck-cluster-detector.service  role=brain requires=file:~/.chump/organs/pr-stuck-cluster-detector.sh housekeeping=scripts/coord/pr-stuck-cluster-detector.sh|1800|--apply run-scope=system

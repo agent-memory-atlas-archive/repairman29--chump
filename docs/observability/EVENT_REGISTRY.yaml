@@ -14651,4 +14651,42 @@ events:
     expected_volume: "0 on a healthy single-store node; non-zero only during a gap-store split-brain"
     # payload: {ts: string, kind: "review_organ_gap_store_miss", pr: number, gap: string, store: string, head: string}
 
+  # ── RESILIENT-1680: shared cargo target incremental-cache reaper ─────────────
+  - kind: shared_target_incremental_reaped
+    effect_metric: disk_free_gb
+    emitter: scripts/coord/shared-target-cache-reaper.sh (RESILIENT-1680)
+    trigger: >-
+      The shared cargo target cache was over its size budget or free disk was
+      under the floor, no build was in progress, chump admit cargo admitted and
+      both architect lane locks were free, so the reaper deleted every
+      rebuildable incremental/ dir under the target (never the target itself).
+    consumers: [disk-audit, ops-audit]
+    fields_required: [ts, kind, target, incremental_dirs, freed_gb_approx, target_gb_before]
+    expected_volume: "0-N per node per disk-pressure-reaper tick when the cache is hot"
+    status: stable
+  - kind: shared_target_incremental_reap_dryrun
+    effect_metric: disk_free_gb
+    emitter: scripts/coord/shared-target-cache-reaper.sh (RESILIENT-1680)
+    trigger: >-
+      The shared cargo target reaper ran without --execute while a reap was
+      warranted (over budget or under the disk floor) and all guards passed: it
+      reports which incremental/ dirs it would reap but deletes nothing.
+    consumers: [disk-audit, ops-audit]
+    fields_required: [ts, kind, target, incremental_dirs, target_gb, free_gb]
+    expected_volume: "0-N per node per dry-run tick when the cache is hot"
+    status: stable
+  - kind: shared_target_incremental_reap_skipped
+    effect_metric: disk_free_gb
+    emitter: scripts/coord/shared-target-cache-reaper.sh (RESILIENT-1680)
+    trigger: >-
+      A reap of the shared cargo target was warranted but a guard refused it: a
+      cargo/rustc/cargo-nextest/rustdoc build was in progress, chump admit cargo
+      refused, one of the two architect lane locks was held, a required tool
+      (flock/chump) was absent, or there were no incremental/ dirs to reap. The
+      reason token is carried on the event; nothing was deleted.
+    consumers: [disk-audit, ops-audit]
+    fields_required: [ts, kind, target, reason]
+    expected_volume: "0-N per node per tick while a build or lane holder is active"
+    status: stable
+
   # ── INFRA-2156 (META-125/C5): chump consensus ask ───────────────────────────
