@@ -268,4 +268,152 @@ done
 grep -q "organ_unit_execstart_resolves" "$ATC_INSTALLER" || fail "install-helsinki-atc.sh does not call organ_unit_execstart_resolves before enabling"
 pass "install-helsinki-atc.sh rosters self-doctor/paramedic/conductor and gates enable on organ_unit_execstart_resolves"
 
+# ── 9. RESILIENT-1683: node-refresh renders every system-scope chump unit with ─
+# User=ubuntu and never execs a script outside the two allowed repo roots. The
+# tracked renderer (organ_unit_host_rewrite — the shell mirror node-refresh and
+# install-helsinki-atc.sh share) resolves every placeholder template to an ubuntu
+# node; this section renders every unit in the system-scope SYSTEM_UNITS roster
+# and asserts two safety invariants the un-pause receipt (item 8) gates on:
+#   (a) a non-empty, non-root User= (a hand-installed unit with an empty User ran
+#       as root — the fleet-health-sentinel / node-heartbeat root-write trap);
+#   (b) no EXECUTED script path (ExecStart argv[0], and the `exec <script>` target
+#       of a `/bin/bash -c '…'` wrapper) lies outside /home/ubuntu/chump or
+#       /home/ubuntu/.chumpnode/repo — the "chump-coo-gateway execs
+#       /home/ubuntu/coo/run.sh" class. Sourced config (~/.chump/providers.env)
+#       and built binaries (~/.cargo/bin/chump-integrator) are NOT executed
+#       scripts and are not in scope — only a shell-script path is.
+# Each assertion is killed by a mutant below (render one unit without a User;
+# point one `exec` at /home/ubuntu/coo/run.sh).
+R1683_ROOT_A="/home/ubuntu/chump"
+R1683_ROOT_B="/home/ubuntu/.chumpnode/repo"
+
+# _r1683_user_value <rendered-unit> -> first User= value (empty string if none)
+_r1683_user_value() { sed -n 's/^User=//p' "$1" | head -1; }
+
+# _r1683_user_ok <rendered-unit> -> 0 if User= is present and neither empty nor
+# root; 1 otherwise. A [Service] unit with no User= line (the root-write trap)
+# yields the empty string and fails.
+_r1683_user_ok() {
+  local u; u="$(_r1683_user_value "$1")"
+  [ -n "$u" ] && [ "$u" != root ]
+}
+
+# _r1683_exec_scripts <rendered-unit> -> the EXECUTED shell-script paths of every
+# ExecStart*/ExecStart line: the line's argv[0], plus the `exec <token>` target of
+# a `/bin/bash -c '…; exec <script>'` wrapper. Only tokens that are a shell script
+# (end in .sh, or name a repo `/scripts/` path) are emitted — a bare `chump`, a
+# /usr/bin/python3 interpreter, a ~/.cargo/bin binary and a `source`d env file are
+# not executed scripts and are deliberately excluded.
+_r1683_exec_scripts() {
+  local line val argv0 execs p
+  while IFS= read -r line; do
+    val="${line#*=}"
+    argv0="$(printf '%s' "$val" | awk '{print $1}')"
+    execs="$(printf '%s\n' "$val" | grep -oE 'exec "?[^ "'"'"';]+' | sed -E 's/^exec "?//')"
+    for p in "$argv0" $execs; do
+      p="${p%\'}"; p="${p%\"}"
+      case "$p" in
+        *.sh|*/scripts/*) printf '%s\n' "$p" ;;
+      esac
+    done
+  done < <(grep -E '^ExecStart' "$1")
+}
+
+# _r1683_path_allowed <path> -> 0 if under an allowed repo root (or a system
+# interpreter path), 1 otherwise.
+_r1683_path_allowed() {
+  case "$1" in
+    "$R1683_ROOT_A"|"$R1683_ROOT_A"/*|"$R1683_ROOT_B"|"$R1683_ROOT_B"/*) return 0 ;;
+    /bin/*|/usr/*|/sbin/*|/lib/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# _r1683_render <template> <dest> -> render a tracked template to an ubuntu node,
+# system scope (User injected), repo at the first allowed root. keep_root=0, so a
+# keep-root organ's deliberate root-ness (applied by the installer, not the
+# template) is never asserted here — every template must render to User=ubuntu.
+_r1683_render() { organ_unit_host_rewrite "$1" "$2" "ubuntu" "/home/ubuntu" 0 "$R1683_ROOT_A"; }
+
+# Self-test the two assertions against their mutants BEFORE trusting them on the
+# real roster — an assertion that cannot fail proves nothing.
+R1683_T="$TMP/r1683"; mkdir -p "$R1683_T"
+cat > "$R1683_T/mut-nouser.service" <<'EOF'
+[Unit]
+Description=x
+[Service]
+Environment=HOME=/home/ubuntu
+ExecStart=/bin/bash -c 'exec /home/ubuntu/chump/scripts/x.sh'
+EOF
+_r1683_user_ok "$R1683_T/mut-nouser.service" \
+  && fail "mutant: a rendered unit with NO User= line must fail the user assertion"
+cat > "$R1683_T/mut-rootuser.service" <<'EOF'
+[Service]
+User=root
+ExecStart=/home/ubuntu/chump/scripts/x.sh
+EOF
+_r1683_user_ok "$R1683_T/mut-rootuser.service" \
+  && fail "mutant: a rendered unit with User=root must fail the user assertion"
+cat > "$R1683_T/mut-coo.service" <<'EOF'
+[Service]
+User=ubuntu
+ExecStart=/bin/bash -c 'set -a; source /home/ubuntu/.chump/providers.env; set +a; exec /home/ubuntu/coo/run.sh'
+EOF
+_coo_flagged=0
+while IFS= read -r _p; do _r1683_path_allowed "$_p" || _coo_flagged=1; done < <(_r1683_exec_scripts "$R1683_T/mut-coo.service")
+[ "$_coo_flagged" = 1 ] || fail "mutant: an ExecStart that execs /home/ubuntu/coo/run.sh must fail the exec-path assertion"
+# and the clean shape (User=ubuntu, repo exec, sourced env) must PASS both.
+_r1683_user_ok "$R1683_T/mut-coo.service" || fail "self-test: User=ubuntu must pass the user assertion"
+cat > "$R1683_T/ok.service" <<'EOF'
+[Service]
+User=ubuntu
+ExecStart=/bin/bash -c 'set -a; source /home/ubuntu/.chump/providers.env; set +a; exec /home/ubuntu/chump/scripts/ops/x.sh'
+EOF
+_ok_flagged=0
+while IFS= read -r _p; do _r1683_path_allowed "$_p" || _ok_flagged=1; done < <(_r1683_exec_scripts "$R1683_T/ok.service")
+[ "$_ok_flagged" = 0 ] || fail "self-test: a repo-rooted exec must pass the exec-path assertion"
+pass "RESILIENT-1683 assertions are mutant-killed: no-User and User=root fail the user check; an /home/ubuntu/coo exec fails the path check; repo-rooted + sourced-env passes"
+
+# Render EVERY system-scope chump unit (the SYSTEM_UNITS roster install-helsinki-
+# atc.sh deploys) and assert both invariants on each.
+R1683_ROSTER="$(sed -n '/^SYSTEM_UNITS=(/,/^)/p' "$ATC_INSTALLER" | grep -oE 'chump-[a-z0-9-]+\.service')"
+[ -n "$R1683_ROSTER" ] || fail "RESILIENT-1683: SYSTEM_UNITS roster came back empty — cannot render every unit"
+r1683_checked=0
+for u in $R1683_ROSTER; do
+  f="$REPO_ROOT/scripts/dispatch/$u"; [ -f "$f" ] || f="$REPO_ROOT/scripts/setup/$u"
+  [ -f "$f" ] || fail "RESILIENT-1683: roster unit $u has no tracked template under scripts/dispatch or scripts/setup"
+  out="$R1683_T/$u"
+  _r1683_render "$f" "$out" || fail "RESILIENT-1683: renderer refused roster unit $u (host literal?) — a system-scope unit must render cleanly"
+  grep -q '^\[Service\]' "$out" || continue   # a bare [Unit]-only file has no User to assert
+  _r1683_user_ok "$out" || fail "RESILIENT-1683: roster unit $u rendered with an empty or root User= (got '$(_r1683_user_value "$out")') — the root-write trap"
+  while IFS= read -r p; do
+    _r1683_path_allowed "$p" || fail "RESILIENT-1683: roster unit $u execs a script outside the allowed repo roots: $p"
+  done < <(_r1683_exec_scripts "$out")
+  r1683_checked=$((r1683_checked + 1))
+done
+[ "$r1683_checked" -ge 20 ] || fail "RESILIENT-1683: only rendered $r1683_checked roster services — the roster scan is broken"
+pass "RESILIENT-1683: all $r1683_checked system-scope roster services render User=ubuntu and exec only repo-rooted scripts"
+
+# ── 9b. RESILIENT-1683 (AC2): the three named units render ONLY from a repo path
+# or not at all. chump-coo-gateway and chump-node1-worker carry no tracked
+# template (not at all); chump-discord-gateway's tracked template execs a repo
+# script. Any tracked *.service for these names that renders is held to the
+# exec-path invariant.
+for name in chump-coo-gateway chump-node1-worker chump-discord-gateway; do
+  found=0
+  for f in "$REPO_ROOT"/scripts/dispatch/"$name".service "$REPO_ROOT"/scripts/setup/"$name".service; do
+    [ -f "$f" ] || continue
+    found=1
+    out="$R1683_T/named-$name.service"
+    if _r1683_render "$f" "$out" 2>/dev/null; then
+      while IFS= read -r p; do
+        _r1683_path_allowed "$p" || fail "RESILIENT-1683 (AC2): $name ($f) execs a script outside the allowed repo roots: $p"
+      done < <(_r1683_exec_scripts "$out")
+    fi
+  done
+  [ "$name" = chump-discord-gateway ] && [ "$found" = 0 ] \
+    && fail "RESILIENT-1683 (AC2): chump-discord-gateway has no tracked template to render from the repo path"
+done
+pass "RESILIENT-1683 (AC2): coo-gateway/node1-worker render not-at-all; discord-gateway renders a repo-rooted exec"
+
 echo "ALL PASS"
