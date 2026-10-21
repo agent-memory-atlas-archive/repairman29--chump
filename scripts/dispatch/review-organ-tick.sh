@@ -67,18 +67,16 @@ done
 
 cd "$REPO_ROOT" || { echo "[review-organ] cannot cd repo root" >&2; exit 1; }
 
-# The gate-file list is a single CONSTANT literal (mirrors bot-merge.sh's
-# BOT_MERGE_GATE_FILE_GLOBS, CREDIBLE-1576). NEVER read from an env var.
-REVIEW_GATE_FILE_GLOBS=(
-    '.github/workflows/*'
-    'scripts/ci/*'
-    'scripts/git-hooks/*'
-    'crates/chump-preflight/*'
-    'crates/chump-ship/*'
-    'scripts/coord/bot-merge.sh'
-    'scripts/coord/code-reviewer-agent.sh'
-    '*verified-wait*'
-)
+# The gate-file list is the single shared source of truth (CREDIBLE-1590 AC3):
+# scripts/coord/lib/ship-gate-files.sh, the same TRUE ship gates CREDIBLE-1576's
+# bot-merge arm guard enforces. NEVER read from an env var. scripts/ci/* is NOT a
+# gate here — a scripts/ci test change is REVIEWED normally; the organ IS the
+# reviewer. Listing scripts/ci/* (the CREDIBLE-1590 bug) held every fleet PR as
+# "needs mutants" (nearly all touch a scripts/ci test), so the organ never
+# approved and gate 4 never armed.
+# shellcheck source=scripts/coord/lib/ship-gate-files.sh
+source "$REPO_ROOT/scripts/coord/lib/ship-gate-files.sh"
+REVIEW_GATE_FILE_GLOBS=("${CHUMP_SHIP_GATE_GLOBS[@]}")
 # A sandboxed mutant runner does not exist yet; until it does, gate-file PRs are
 # held for a mutant-capable reviewer (repair item 8). This is a CONSTANT, not an
 # env read — flipping it on without a real runner would defeat the mutation rule.

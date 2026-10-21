@@ -493,7 +493,16 @@ ORGAN_SELF=organbot
 case "$1 $2" in
   "api user") echo "$ORGAN_SELF"; exit 0;;
   "pr view")
-    if [[ "$a" == *"--json files"* ]]; then [[ "$pr" == 201 ]] && echo ".github/workflows/ci.yml" || echo "src/foo.rs"; exit 0; fi
+    if [[ "$a" == *"--json files"* ]]; then
+      # 201 = a TRUE ship gate (ci.yml) → held for mutants; 205 = a scripts/ci
+      # test change ONLY → reviewed normally (CREDIBLE-1590); else a plain non-gate.
+      case "$pr" in
+        201) echo ".github/workflows/ci.yml" ;;
+        205) echo "scripts/ci/test-example-1590.sh" ;;
+        *)   echo "src/foo.rs" ;;
+      esac
+      exit 0
+    fi
     if [[ "$a" == *isDraft* ]]; then cross=false; [[ "$pr" == 202 ]] && cross=true
       echo "{\"isDraft\":false,\"isCrossRepository\":$cross,\"headRefOid\":\"deadbeef1234567890abcdef1234567890abcdef\",\"author\":{\"login\":\"botx\"},\"headRefName\":\"claude/credible-9${pr}-x\"}"; exit 0; fi
     # Serves both review_hold_allows (labels,comments) and current_head_verdict (comments).
@@ -599,6 +608,61 @@ grep -qiE '^mutants: NOT RUN' "$ORGLOG.cmt.201" && ok "organ AC5: verdict carrie
 [[ "$(sed -n '1p' "$ORGLOG.cmt.201")" == "VERDICT: CHANGES REQUIRED" ]] && ok "organ AC5: gate-file verdict is CHANGES REQUIRED (not APPROVE)" \
     || bad "organ AC5: gate-file verdict was not CHANGES REQUIRED"
 [[ -s "$ORGLOG.merges" ]] && bad "organ AC5: a gate-file PR was merged" || ok "organ AC5: gate-file PR not merged"
+
+# CREDIBLE-1590 AC1/AC2: a PR whose ONLY gate-adjacent change is a scripts/ci
+# test is REVIEWED by the model — scripts/ci is NOT a ship gate (the organ IS the
+# reviewer) — while the ci.yml PR above (201) stays HELD for mutants. PR 205's
+# stub diff is clean, so the stub reviewer APPROVEs; the point is that the model
+# review RAN and the PR was not blanket-held. MUTANT (killed here): restoring the
+# broad gate list — adding 'scripts/ci/*' back to scripts/coord/lib/ship-gate-files.sh —
+# would hold PR 205 for mutants, so no model review would run and
+# review-needs-mutants would be applied, failing all three checks below.
+organ_run --pr 205
+[[ "$(sed -n '1p' "$ORGLOG.cmt.205" 2>/dev/null)" == "VERDICT: APPROVE" ]] \
+    && ok "organ CREDIBLE-1590: scripts/ci-test-only PR got a real model review (APPROVE), not a blanket hold" \
+    || bad "organ CREDIBLE-1590: scripts/ci PR was not model-reviewed (first line: $(sed -n '1p' "$ORGLOG.cmt.205" 2>/dev/null))"
+grep -q 'add-label review-needs-mutants' "$ORGLOG.edits" \
+    && bad "organ CREDIBLE-1590: scripts/ci PR was held review-needs-mutants (broad gate list restored)" \
+    || ok "organ CREDIBLE-1590: scripts/ci PR not held review-needs-mutants"
+grep -qiE '^mutants: NOT RUN .*gate-file' "$ORGLOG.cmt.205" 2>/dev/null \
+    && bad "organ CREDIBLE-1590: scripts/ci verdict is a gate-file hold, not a model review" \
+    || ok "organ CREDIBLE-1590: scripts/ci verdict is a model review (no gate-file hold line)"
+
+# CREDIBLE-1590 AC3: the review organ's gate list is ONE shared source with
+# CREDIBLE-1576's bot-merge arm guard. The organ consumes
+# scripts/coord/lib/ship-gate-files.sh (CHUMP_SHIP_GATE_GLOBS) verbatim — no
+# private copy; bot-merge.sh keeps its own literal BOT_MERGE_GATE_FILE_GLOBS (its
+# guard must read no variable, CREDIBLE-1576 item 5). The two lists are pinned to
+# this one source: they may differ ONLY by the two documented, intentional
+# entries, nothing else.
+echo "[CREDIBLE-1590] review-organ ↔ bot-merge gate list: one source"
+SGF="$REPO_ROOT/scripts/coord/lib/ship-gate-files.sh"
+BOTMERGE="$REPO_ROOT/scripts/coord/bot-merge.sh"
+[[ -f "$SGF" ]] && ok "CREDIBLE-1590: ship-gate-files.sh exists (the one source)" \
+    || bad "CREDIBLE-1590: ship-gate-files.sh missing"
+grep -qF 'REVIEW_GATE_FILE_GLOBS=("${CHUMP_SHIP_GATE_GLOBS[@]}")' "$ORGAN" \
+    && ok "CREDIBLE-1590: review organ consumes CHUMP_SHIP_GATE_GLOBS (no private gate list)" \
+    || bad "CREDIBLE-1590: review organ does not consume the shared CHUMP_SHIP_GATE_GLOBS"
+# The shared list is a single literal constant — no env read on a safety input.
+sgf_assigns="$(grep -cE '^CHUMP_SHIP_GATE_GLOBS=\(' "$SGF" || true)"
+sgf_body="$(awk '/^CHUMP_SHIP_GATE_GLOBS=\(/{f=1;next} f&&/^\)/{f=0} f{print}' "$SGF")"
+{ [[ "$sgf_assigns" == "1" ]] && ! printf '%s' "$sgf_body" | grep -q '\$'; } \
+    && ok "CREDIBLE-1590: CHUMP_SHIP_GATE_GLOBS is a single literal constant (no env read)" \
+    || bad "CREDIBLE-1590: CHUMP_SHIP_GATE_GLOBS not a single literal (assigns=$sgf_assigns)"
+# Symmetric difference of the two glob sets must be EXACTLY the two intentional
+# entries. Restoring the broad list (scripts/ci/* in the shared source) or
+# dropping any shared gate from either list changes the sym-diff and fails.
+shared_globs="$(printf '%s\n' "$sgf_body" | grep -oE "'[^']+'" | tr -d "'" | sort -u)"
+bm_body="$(awk '/^BOT_MERGE_GATE_FILE_GLOBS=\(/{f=1;next} f&&/^\)/{f=0} f{print}' "$BOTMERGE")"
+bm_globs="$(printf '%s\n' "$bm_body" | grep -oE "'[^']+'" | tr -d "'" | sort -u)"
+only_shared="$(comm -23 <(printf '%s\n' "$shared_globs") <(printf '%s\n' "$bm_globs"))"
+only_bm="$(comm -13 <(printf '%s\n' "$shared_globs") <(printf '%s\n' "$bm_globs"))"
+[[ "$only_shared" == "scripts/coord/bot-merge.sh" ]] \
+    && ok "CREDIBLE-1590: only the shared list holds scripts/coord/bot-merge.sh (review of the merge script)" \
+    || bad "CREDIBLE-1590: shared-only gate globs unexpected: [$only_shared]"
+[[ "$only_bm" == "scripts/ci/*" ]] \
+    && ok "CREDIBLE-1590: only bot-merge gates scripts/ci/* (test change must not blind-auto-merge)" \
+    || bad "CREDIBLE-1590: bot-merge-only gate globs unexpected: [$only_bm]"
 
 # A fork (cross-repository) PR is never armed, even on APPROVE.
 organ_run --pr 202
