@@ -59,6 +59,25 @@ AGE_DAYS="${CHUMP_ORPHAN_BRANCH_AGE_DAYS:-14}"
 BASE_BRANCH="${CHUMP_ORPHAN_BRANCH_BASE:-main}"
 STASH_MANIFEST="${CHUMP_STASH_MANIFEST:-$REPO_ROOT/docs/process/STASHED_BRANCHES.md}"
 
+# CREDIBLE-1604 (AC2): the default manifest is a TRACKED file
+# (docs/process/STASHED_BRANCHES.md). Appending to it IN PLACE dirties whatever
+# checkout the sweeper runs from — in production the node checkout
+# (~/.chumpnode/repo) — and that standing ` M docs/process/STASHED_BRANCHES.md`
+# edit is exactly what blocked `chump gap ship`'s INFRA-2423 auto-fetch, leaving
+# every organ landing's gap open (cuphead 2026-10-21). So the node checkout must
+# carry NO local edit: when writing the DEFAULT in-tree manifest, record the rows
+# through an EPHEMERAL WORKTREE committed via a PR (never an in-place edit of the
+# live checkout). When CHUMP_STASH_MANIFEST points elsewhere (the test seam / an
+# operator-chosen out-of-tree path), write there directly as before — that path
+# is not the live checkout's tracked file, so it cannot strand the node. The env
+# only selects the test seam; the production default (unset) takes the PR path.
+if [[ -z "${CHUMP_STASH_MANIFEST:-}" ]]; then
+    MANIFEST_VIA_PR=1
+else
+    MANIFEST_VIA_PR=0
+fi
+declare -a PENDING_MANIFEST_ROWS=()
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)  DRY_RUN=1 ;;
@@ -151,6 +170,12 @@ SKIPPED_PROTECTED=0
 # ── Stash manifest helpers ────────────────────────────────────────────────────
 ensure_manifest() {
     [[ -f "$STASH_MANIFEST" ]] && return 0
+    write_manifest_header "$STASH_MANIFEST"
+}
+
+# AC2: write the manifest header into a file that does not yet have one. Shared
+# by the direct path (ensure_manifest) and the worktree path (flush_manifest_via_pr).
+write_manifest_header() {  # $1 = target file
     {
         echo "# Stashed branches manifest"
         echo
@@ -163,7 +188,55 @@ ensure_manifest() {
         echo
         echo "| stashed_at | stash_ref | branch | sha | last_commit_days |"
         echo "|---|---|---|---|---|"
-    } > "$STASH_MANIFEST" 2>/dev/null || true
+    } > "$1" 2>/dev/null || true
+}
+
+# CREDIBLE-1604 (AC2): record the accumulated manifest rows WITHOUT dirtying the
+# live checkout. Carve an ephemeral worktree off origin/main (not the possibly-
+# stale local main), append the rows to docs/process/STASHED_BRANCHES.md THERE,
+# commit, push, and open an auto-merge PR; then remove the worktree. The node
+# checkout never gains a tracked local edit, so the organ's post-merge
+# `chump gap ship` auto-fetch is never blocked by a standing manifest diff.
+# Best-effort throughout: any failure logs a WARN and preserves the stash refs
+# (already pushed) — it never fails the sweep.
+flush_manifest_via_pr() {
+    (( ${#PENDING_MANIFEST_ROWS[@]} )) || return 0
+    local wt branch rel="docs/process/STASHED_BRANCHES.md"
+    branch="chump/credible-1604-stash-manifest-$SWEEP_RUN_ID"
+    wt="$(mktemp -d "${TMPDIR:-/tmp}/stash-manifest-wt.XXXXXX")" || {
+        echo "[orphan-sweeper] WARN: mktemp failed — manifest rows not recorded (stash refs preserved)" >&2; return 0; }
+    git -C "$MAIN_REPO" fetch origin "$BASE_BRANCH" -q 2>/dev/null || true
+    if ! git -C "$MAIN_REPO" worktree add -q -b "$branch" "$wt" "origin/$BASE_BRANCH" 2>/dev/null; then
+        echo "[orphan-sweeper] WARN: worktree add failed — manifest rows not recorded (stash refs preserved)" >&2
+        rmdir "$wt" 2>/dev/null || true
+        return 0
+    fi
+    [[ -f "$wt/$rel" ]] || { mkdir -p "$wt/$(dirname "$rel")" 2>/dev/null || true; write_manifest_header "$wt/$rel"; }
+    local row
+    for row in "${PENDING_MANIFEST_ROWS[@]}"; do
+        printf '%s\n' "$row" >> "$wt/$rel" 2>/dev/null || true
+    done
+    if git -C "$wt" add "$rel" 2>/dev/null \
+        && git -C "$wt" commit -q -m "ZERO-WASTE: orphan-branch-sweeper stash manifest (${#PENDING_MANIFEST_ROWS[@]} row(s), $SWEEP_RUN_ID)" 2>/dev/null \
+        && git -C "$wt" push -u origin "$branch" -q 2>/dev/null; then
+        # Open the PR and let the fleet's standard arm/merge flow (review organ +
+        # auto-arm-sweeper) land it — the sweeper NEVER self-arms (no
+        # `gh pr merge --auto` here), so it stays outside the arm-policy surface
+        # and the review organ's hold labels are always honored.
+        if gh pr create --repo "$NWO" --base "$BASE_BRANCH" --head "$branch" \
+            --title "ZERO-WASTE: orphan-branch-sweeper stash manifest ($SWEEP_RUN_ID)" \
+            --body "Automated: ${#PENDING_MANIFEST_ROWS[@]} stashed-branch row(s) appended to docs/process/STASHED_BRANCHES.md by scripts/coord/orphan-branch-sweeper.sh (CREDIBLE-1604 AC2 — recorded via worktree+PR so the node checkout carries no local edit)." >/dev/null 2>&1; then
+            echo "[orphan-sweeper] manifest: opened PR for ${#PENDING_MANIFEST_ROWS[@]} stash row(s) on branch $branch"
+            printf '{"ts":"%s","kind":"orphan_branch_manifest_pr","branch":"%s","rows":%d,"sweep_run_id":"%s"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$branch" "${#PENDING_MANIFEST_ROWS[@]}" "$SWEEP_RUN_ID" \
+                >> "$AMBIENT" 2>/dev/null || true
+        else
+            echo "[orphan-sweeper] WARN: gh pr create failed for $branch (manifest rows pushed to the branch; stash refs preserved)" >&2
+        fi
+    else
+        echo "[orphan-sweeper] WARN: could not commit/push manifest rows (stash refs preserved)" >&2
+    fi
+    git -C "$MAIN_REPO" worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt" 2>/dev/null || true
 }
 
 while IFS= read -r branch; do
@@ -237,10 +310,16 @@ while IFS= read -r branch; do
     STASH_REF="refs/stash/$branch"
     if gh api "repos/$NWO/git/refs" -X POST \
         -f "ref=$STASH_REF" -f "sha=$SHA" --silent 2>/dev/null; then
-        ensure_manifest
-        printf '| %s | %s | %s | %s | %d |\n' \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$STASH_REF" "$branch" "$SHA" "$LAST_DAYS" \
-            >> "$STASH_MANIFEST" 2>/dev/null || true
+        MANIFEST_ROW="$(printf '| %s | %s | %s | %s | %d |' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$STASH_REF" "$branch" "$SHA" "$LAST_DAYS")"
+        if [[ "$MANIFEST_VIA_PR" -eq 1 ]]; then
+            # AC2: accumulate; flushed through an ephemeral worktree + PR at the
+            # end of the run so the live checkout is never dirtied in place.
+            PENDING_MANIFEST_ROWS+=("$MANIFEST_ROW")
+        else
+            ensure_manifest
+            printf '%s\n' "$MANIFEST_ROW" >> "$STASH_MANIFEST" 2>/dev/null || true
+        fi
         (( STASHED++ )) || true
         echo "[orphan-sweeper] STASHED: $branch -> $STASH_REF"
         printf '{"ts":"%s","kind":"orphan_branch_stashed","branch":"%s","stash_ref":"%s","sha":"%s","last_commit_age_days":%d,"sweep_run_id":"%s"}\n' \
@@ -262,6 +341,10 @@ while IFS= read -r branch; do
         echo "[orphan-sweeper] WARN: failed to delete $branch (tip stashed at $STASH_REF)" >&2
     fi
 done <<< "$ALL_BRANCHES"
+
+# CREDIBLE-1604 (AC2): record any accumulated manifest rows through a worktree+PR
+# (default in-tree manifest) so the live/node checkout is never dirtied in place.
+flush_manifest_via_pr
 
 echo "[orphan-sweeper] done: candidates=$CANDIDATES (merged=$MERGED_CANDIDATES stash=$STASH_CANDIDATES) deleted=$DELETED (merged=$MERGED_DELETED stashed=$STASHED) skipped_open_pr=$SKIPPED_OPEN_PR skipped_recent=$SKIPPED_RECENT skipped_protected=$SKIPPED_PROTECTED"
 

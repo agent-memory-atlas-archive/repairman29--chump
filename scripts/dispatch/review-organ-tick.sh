@@ -156,6 +156,7 @@ emit() { printf '%s\n' "$1" >> "$AMBIENT" 2>/dev/null || true; }
 # scanner-anchor: "kind":"pr_review_verdict"
 # scanner-anchor: "kind":"review_organ_label_error"
 # scanner-anchor: "kind":"review_organ_gap_store_miss"
+# scanner-anchor: "kind":"review_organ_gap_ship_failed"
 
 REVIEWED=0; APPROVED=0; CHANGES=0; HELD_MUTANTS=0; ARMED=0; DISPATCHED=0; SKIPPED=0
 # CREDIBLE-1602: set to 1 when the post-merge gap step hits a loud failure (a
@@ -835,19 +836,43 @@ ship_merged_gap() {
     # paged/observable. Pinning CHUMP_STATE_DB on every chump call keeps cwd from
     # retargeting a different store mid-step (AC1: resolve through ONE function,
     # never from cwd).
-    if ! CHUMP_STATE_DB="$ORGAN_GAP_STORE" chump gap show "$gap" >/dev/null 2>&1; then
+    #
+    # CREDIBLE-1604 (AC1): CHUMP_STATE_DB pins the STORE, but `chump gap ship`'s
+    # INFRA-2423 auto-fetch runs `git fetch/pull` in the GapStore's repo_root,
+    # which `chump` derives from CHUMP_REPO/CHUMP_HOME/cwd — NOT from
+    # CHUMP_STATE_DB. In production the organ runs FROM the node checkout
+    # (~/.chumpnode/repo), so the auto-fetch targeted that clone — which carries a
+    # standing local edit (docs/process/STASHED_BRANCHES.md) and lags main — and
+    # refused ("local main is N commits behind origin/main; cannot auto-pull with
+    # uncommitted changes"), leaving every organ landing's gap open (cuphead
+    # 2026-10-21, #5624 et al.). Pin CHUMP_REPO to the CANONICAL checkout
+    # ($CHECKOUT) on every post-merge chump call so the auto-fetch runs against the
+    # clean, current canonical repo, never the node-checkout cwd. This is the
+    # same sanctioned-constant pin as CHUMP_STATE_DB (resolved from the $HOME
+    # sandbox seam / --checkout CLI arg, NEVER a tunable env read on a safety
+    # input; Chief 2026-10-20), not an env knob the systemd unit passes.
+    if ! CHUMP_REPO="$CHECKOUT" CHUMP_STATE_DB="$ORGAN_GAP_STORE" chump gap show "$gap" >/dev/null 2>&1; then
         emit "$(printf '{"ts":"%s","kind":"review_organ_gap_store_miss","pr":%s,"gap":"%s","store":"%s","head":"%s"}' \
             "$(ts)" "$pr" "$(json_str "$gap")" "$(json_str "$ORGAN_GAP_STORE")" "$(json_str "$head")")"
         log "FAIL: PR #$pr merged but gap $gap is NOT in the canonical store $ORGAN_GAP_STORE — the organ resolved the WRONG gap store (CREDIBLE-1602). NOT shipping; tick fails loud."
         ORGAN_TICK_FAIL=1
         return 1
     fi
-    CHUMP_STATE_DB="$ORGAN_GAP_STORE" chump gap link-pr "$gap" "$pr" --sha "$head" >/dev/null 2>&1 \
+    CHUMP_REPO="$CHECKOUT" CHUMP_STATE_DB="$ORGAN_GAP_STORE" chump gap link-pr "$gap" "$pr" --sha "$head" >/dev/null 2>&1 \
         || log "WARN: PR #$pr link-pr $gap failed (reconciler FK backstop may miss it)"
-    if CHUMP_STATE_DB="$ORGAN_GAP_STORE" chump gap ship "$gap" --closed-pr "$pr" >/dev/null 2>&1; then
+    # CREDIBLE-1604 (AC4): a ship REFUSAL (e.g. the auto-fetch still blocks, or a
+    # proof-of-merge guard trips) now FAILS LOUD — emit review_organ_gap_ship_failed
+    # and mark the tick failed so the oneshot exits non-zero — instead of the old
+    # WARN that let every organ landing silently leave its gap open and undercount
+    # the PHASE-R rollup. It is NEVER a WARN anymore.
+    if CHUMP_REPO="$CHECKOUT" CHUMP_STATE_DB="$ORGAN_GAP_STORE" chump gap ship "$gap" --closed-pr "$pr" >/dev/null 2>&1; then
         log "PR #$pr: shipped $gap --closed-pr $pr (organ landing recorded in $ORGAN_GAP_STORE)"
     else
-        log "WARN: PR #$pr merged but 'chump gap ship $gap --closed-pr $pr' failed — reconciler backstop must close it"
+        emit "$(printf '{"ts":"%s","kind":"review_organ_gap_ship_failed","pr":%s,"gap":"%s","store":"%s","checkout":"%s","head":"%s"}' \
+            "$(ts)" "$pr" "$(json_str "$gap")" "$(json_str "$ORGAN_GAP_STORE")" "$(json_str "$CHECKOUT")" "$(json_str "$head")")"
+        log "FAIL: PR #$pr merged but 'chump gap ship $gap --closed-pr $pr' was REFUSED against $CHECKOUT — the organ landing left its gap open (CREDIBLE-1604). Tick fails loud."
+        ORGAN_TICK_FAIL=1
+        return 1
     fi
 }
 
@@ -871,12 +896,13 @@ for pr in "${prs[@]}"; do process_pr "$pr"; done
 emit "$(printf '{"ts":"%s","kind":"review_organ_tick","reviewed":%s,"approved":%s,"changes_required":%s,"held_mutants":%s,"armed":%s,"dispatched":%s,"skipped":%s}' \
     "$(ts)" "$REVIEWED" "$APPROVED" "$CHANGES" "$HELD_MUTANTS" "$ARMED" "$DISPATCHED" "$SKIPPED")"
 log "tick done (reviewed=$REVIEWED approved=$APPROVED changes=$CHANGES held_mutants=$HELD_MUTANTS armed=$ARMED dispatched=$DISPATCHED skipped=$SKIPPED)"
-# CREDIBLE-1602 (AC4): a post-merge gap step that could not find its gap in the
-# canonical store already emitted review_organ_gap_store_miss; surface it as a
+# CREDIBLE-1602/1604 (AC4): a post-merge gap step that could not find its gap in
+# the canonical store (review_organ_gap_store_miss) or had its ship REFUSED
+# (review_organ_gap_ship_failed) already emitted its event; surface it as a
 # non-zero tick status too, so the oneshot unit's ExecStart fails loud instead
-# of exiting 0 over a silent split-brain.
+# of exiting 0 over a silently-unshipped landing.
 if [[ "$ORGAN_TICK_FAIL" -ne 0 ]]; then
-    log "tick FAILED: a post-merge gap step could not resolve its gap in the canonical store (CREDIBLE-1602) — exiting non-zero"
+    log "tick FAILED: a post-merge gap step could not resolve its gap in the canonical store or was refused shipping (CREDIBLE-1602/1604) — exiting non-zero"
     exit 1
 fi
 exit 0

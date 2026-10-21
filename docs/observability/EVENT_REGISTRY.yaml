@@ -14651,6 +14651,41 @@ events:
     expected_volume: "0 on a healthy single-store node; non-zero only during a gap-store split-brain"
     # payload: {ts: string, kind: "review_organ_gap_store_miss", pr: number, gap: string, store: string, head: string}
 
+  - kind: review_organ_gap_ship_failed
+    effect_metric: credible
+    emitter: scripts/dispatch/review-organ-tick.sh (CREDIBLE-1604)
+    # scanner-anchor: "kind":"review_organ_gap_ship_failed"
+    trigger: >
+      The review organ merged a PR head-pinned, resolved its gap in the canonical
+      store, but `chump gap ship --closed-pr` was REFUSED against the canonical
+      checkout (e.g. the INFRA-2423 auto-fetch still blocks, or a proof-of-merge
+      guard trips). Before CREDIBLE-1604 this was a WARN that let every organ
+      landing silently leave its gap open and undercount the PHASE-R rollup
+      (cuphead 2026-10-21, #5624 et al. — the ship ran against the node-checkout
+      cwd whose standing docs/process/STASHED_BRANCHES.md edit blocked the
+      auto-fetch). The post-merge gap step now FAILS LOUD (this event plus a
+      non-zero tick status) instead of log-and-continuing.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, gap, store, checkout, head]
+    expected_volume: "0 on a healthy node; non-zero only when a merged PR's gap could not be shipped"
+    # payload: {ts: string, kind: "review_organ_gap_ship_failed", pr: number, gap: string, store: string, checkout: string, head: string}
+
+  - kind: orphan_branch_manifest_pr
+    effect_metric: zero_waste
+    emitter: scripts/coord/orphan-branch-sweeper.sh (CREDIBLE-1604)
+    # scanner-anchor: "kind":"orphan_branch_manifest_pr"
+    trigger: >
+      The orphan-branch-sweeper stashed one or more unmerged stale branches and
+      recorded their rows in docs/process/STASHED_BRANCHES.md through an ephemeral
+      worktree + PR (CREDIBLE-1604 AC2), rather than appending to the live
+      checkout in place. This keeps the node checkout free of a standing tracked
+      edit that would otherwise block the review organ's post-merge
+      `chump gap ship` auto-fetch.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, branch, rows, sweep_run_id]
+    expected_volume: "one per sweep run that stashed at least one branch (default in-tree manifest)"
+    # payload: {ts: string, kind: "orphan_branch_manifest_pr", branch: string, rows: number, sweep_run_id: string}
+
   # ── RESILIENT-1680: shared cargo target incremental-cache reaper ─────────────
   - kind: shared_target_incremental_reaped
     effect_metric: disk_free_gb

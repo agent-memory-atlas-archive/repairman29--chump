@@ -195,6 +195,86 @@ echo "$OUTPUT2" | grep -q "deleted=2 (merged=1 stashed=1)" \
     && ok "apply: summary deleted=2 (merged=1 stashed=1)" \
     || fail "apply: wrong deletion counts (got: $(echo "$OUTPUT2" | grep done))"
 
+# ── 3b. CREDIBLE-1604 (AC2): DEFAULT (unset-manifest) path records the stash rows
+# via an ephemeral worktree + PR, so the live/node checkout gains NO tracked edit ─
+# Production runs the sweeper FROM the node checkout (~/.chumpnode/repo) with
+# CHUMP_STASH_MANIFEST UNSET, so STASH_MANIFEST defaults to the TRACKED in-tree
+# docs/process/STASHED_BRANCHES.md. Appending to it in place is exactly the
+# standing ` M docs/process/STASHED_BRANCHES.md` that blocked `chump gap ship`'s
+# INFRA-2423 auto-fetch (cuphead 2026-10-21). The sweeper must instead carve an
+# ephemeral worktree off origin/main, commit the rows there, and open a PR —
+# leaving the live checkout pristine. Section 3 above forces the in-place seam via
+# CHUMP_STASH_MANIFEST, so it can NEVER exercise this path; this section runs the
+# production default against a real local origin+clone (git for real, gh stubbed).
+# MUTANT (killed here): force MANIFEST_VIA_PR=0 always (revert to the in-place
+# write) → the clone gains a tracked edit to docs/process/STASHED_BRANCHES.md AND
+# no orphan_branch_manifest_pr is emitted; both assertions below fail.
+echo
+echo "--- CREDIBLE-1604 AC2: default manifest path writes via worktree+PR, live checkout stays clean ---"
+WT_DIR="$TMPDIR_TEST/wt"; mkdir -p "$WT_DIR"
+ORIGIN="$WT_DIR/origin.git"
+SEED="$WT_DIR/seed"
+CLONE="$WT_DIR/clone"
+git init -q --bare "$ORIGIN"
+git init -q "$SEED"
+mkdir -p "$SEED/docs/process"
+printf '# Stashed branches manifest\n\n| stashed_at | stash_ref | branch | sha | last_commit_days |\n|---|---|---|---|---|\n' \
+    > "$SEED/docs/process/STASHED_BRANCHES.md"
+git -C "$SEED" add -A >/dev/null 2>&1
+git -C "$SEED" -c user.email=t@t -c user.name=t commit -q -m seed >/dev/null 2>&1
+git -C "$SEED" branch -M main >/dev/null 2>&1
+git -C "$SEED" remote add origin "$ORIGIN" >/dev/null 2>&1
+git -C "$SEED" push -q origin main >/dev/null 2>&1
+git clone -q "$ORIGIN" "$CLONE" >/dev/null 2>&1
+git -C "$CLONE" config user.email t@t >/dev/null 2>&1
+git -C "$CLONE" config user.name t >/dev/null 2>&1
+
+# gh stub for the PR path: one unmerged stale branch, stub stash-POST / DELETE /
+# pr-create so flush_manifest_via_pr's `gh pr create` succeeds (git push is REAL,
+# to the local bare origin). pr-create success is what emits orphan_branch_manifest_pr.
+AMB3="$WT_DIR/ambient3.jsonl"; : > "$AMB3"
+GH_LOG3="$WT_DIR/gh3.log"; : > "$GH_LOG3"
+cat > "$WT_DIR/gh" <<GHSTUB3
+#!/usr/bin/env bash
+echo "\$@" >> "$GH_LOG3"
+case "\$*" in
+  "pr create"*)                      echo "https://example/pr/1"; exit 0 ;;
+  *"-X DELETE"*)                     echo deleted; exit 0 ;;
+  *"git/refs"*"-X POST"*)            echo stash-created; exit 0 ;;
+  *"branches?per_page=100&page=1"*)  printf 'chump/unmerged-old\n'; exit 0 ;;
+  *"branches?per_page=100&page="*)   echo ""; exit 0 ;;
+  *"pulls?state=open"*)              echo ""; exit 0 ;;
+  *"compare/"*)                      echo "3"; exit 0 ;;
+  *"branches/chump/unmerged-old"*)   printf 'deadbeefsha\t%s\n' "$OLD_DATE"; exit 0 ;;
+  *) echo ""; exit 0 ;;
+esac
+GHSTUB3
+chmod +x "$WT_DIR/gh"
+
+# Run the sweeper FROM the clone (the "node checkout"), CHUMP_STASH_MANIFEST UNSET
+# so the production default in-tree manifest path is taken.
+( cd "$CLONE" && CHUMP_AMBIENT_LOG="$AMB3" CHUMP_ORPHAN_BRANCH_AGE_DAYS=14 \
+    PATH="$WT_DIR:$PATH" bash "$SWEEPER" --apply ) >/dev/null 2>&1 || true
+
+# AC2 assert 1: the live/node checkout gained NO tracked edit — the default
+# in-tree manifest was NOT written in place (it went through the worktree+PR).
+if [[ -z "$(git -C "$CLONE" status --porcelain 2>/dev/null)" ]]; then
+    ok "AC2: default path left the live checkout clean (no in-place manifest edit)"
+else
+    fail "AC2: live checkout dirtied by the sweep: $(git -C "$CLONE" status --porcelain 2>/dev/null | tr '\n' '|')"
+fi
+git -C "$CLONE" diff --quiet -- docs/process/STASHED_BRANCHES.md 2>/dev/null \
+    && ok "AC2: tracked docs/process/STASHED_BRANCHES.md unchanged in the live checkout" \
+    || fail "AC2: tracked STASHED_BRANCHES.md was modified in place in the live checkout"
+
+# AC2 assert 2: the rows were recorded via a worktree+PR — orphan_branch_manifest_pr emitted.
+grep -q '"kind":"orphan_branch_manifest_pr"' "$AMB3" 2>/dev/null \
+    && ok "AC2: orphan_branch_manifest_pr emitted (rows recorded via worktree+PR)" \
+    || fail "AC2: no orphan_branch_manifest_pr emitted (amb: $(tr '\n' '|' <"$AMB3" 2>/dev/null))"
+grep -q "pr create" "$GH_LOG3" 2>/dev/null \
+    && ok "AC2: sweeper opened a PR (gh pr create) for the manifest rows" \
+    || fail "AC2: sweeper never called gh pr create for the manifest rows"
+
 # ── 4. Event registry check ──────────────────────────────────────────────────
 echo
 REGISTRY="$REPO_ROOT/docs/observability/EVENT_REGISTRY.yaml"
