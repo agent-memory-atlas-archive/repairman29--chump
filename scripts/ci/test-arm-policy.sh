@@ -544,6 +544,12 @@ echo "gh $*" >>"$ORGLOG"; a="$*"; pr="$(grep -oE ' [0-9]{3} ' <<<" $a " | tr -d 
 # as, and therefore the ONLY author whose VERDICT it trusts. gh api user returns
 # it; pr comment stores it as the comment author (CREDIBLE-1542 review REQUIRED).
 ORGAN_SELF=organbot
+# CREDIBLE-1599 capture: the branch-reconcile calls the organ makes on an
+# APPROVEd-but-unmergeable head — the BEHIND update-branch (REST PUT with
+# expected_head_sha) and the DIRTY shell-only rebase (gh pr update-branch --rebase).
+# These do not exit, so the main dispatch below still runs (e.g. `api user`).
+[[ "$1 $2" == "api --method" && "$a" == *update-branch* ]] && echo "$a" >>"$ORGLOG.updatebranch"
+[[ "$1 $2" == "pr update-branch" ]] && echo "$a" >>"$ORGLOG.rebase"
 case "$1 $2" in
   "api user") echo "$ORGAN_SELF"; exit 0;;
   "pr view")
@@ -554,8 +560,18 @@ case "$1 $2" in
         201) echo ".github/workflows/ci.yml" ;;
         205) echo "scripts/ci/test-example-1590.sh" ;;
         210|211|212|213|214) echo "scripts/git-hooks/pre-push" ;;  # CREDIBLE-1600 gate file
+        220|222|224) echo "scripts/foo.sh" ;;  # CREDIBLE-1599 shell-only PR range
+        223) echo "src/foo.rs" ;;              # CREDIBLE-1599 Rust PR range (DIRTY → held)
         *)   echo "src/foo.rs" ;;
       esac
+      exit 0
+    fi
+    # CREDIBLE-1599: mergeStateStatus drives the organ's branch-reconcile decision.
+    # 220 is BEHIND, 222/223 are DIRTY, everything else is CLEAN (so the existing
+    # AC3 head-pinned merge path is unchanged for the pre-1599 PRs).
+    if [[ "$a" == *mergeStateStatus* ]]; then
+      case "$pr" in 220) m=BEHIND ;; 222|223) m=DIRTY ;; *) m=CLEAN ;; esac
+      if [[ "$a" == *--jq* ]]; then echo "$m"; else echo "{\"mergeStateStatus\":\"$m\"}"; fi
       exit 0
     fi
     if [[ "$a" == *isDraft* ]]; then cross=false; [[ "$pr" == 202 ]] && cross=true
@@ -581,6 +597,10 @@ case "$1 $2" in
       214)
         # CREDIBLE-1600: a REAL unified diff carrying FORCE_CHANGES → stub model CHANGES.
         printf 'diff --git a/scripts/git-hooks/pre-push b/scripts/git-hooks/pre-push\nindex ccccccc..ddddddd 100755\n--- a/scripts/git-hooks/pre-push\n+++ b/scripts/git-hooks/pre-push\n@@ -1,2 +1,3 @@\n #!/usr/bin/env bash\n set -e\n+echo FORCE_CHANGES\n' ;;
+      224)
+        # CREDIBLE-1599: a REAL, clean shell unified diff → a non-empty STABLE
+        # patch-id so the same-patch-id re-arm path can be driven deterministically.
+        printf 'diff --git a/scripts/foo.sh b/scripts/foo.sh\nindex 1111111..2222222 100755\n--- a/scripts/foo.sh\n+++ b/scripts/foo.sh\n@@ -1,2 +1,3 @@\n #!/usr/bin/env bash\n set -e\n+echo credible-1599\n' ;;
       204|206) echo "FORCE_CHANGES diff" ;;
       *) echo "clean diff" ;;
     esac
@@ -1419,6 +1439,118 @@ grep -q -- '--remove-label review-needs-mutants' "$ORGLOG.edits" \
 [[ ! -s "$ORGLOG.merges" ]] \
     && ok "organ CREDIBLE-1597: gate-file PR does NOT arm while review-needs-mutants held" \
     || bad "organ CREDIBLE-1597: a gate-file PR armed despite review-needs-mutants (merges: $(cat "$ORGLOG.merges"))"
+echo '{"labels":[],"comments":[]}' >"$ORGCMT"  # restore clean state for later blocks
+
+# ── CREDIBLE-1599: an organ-APPROVEd head that is BEHIND or DIRTY never used to
+# land — the head-pinned merge failed against strict up-to-date branch protection
+# and the organ just WARNed and left the branch stale (receipt: #5630/#5627/#5623
+# sat approved-but-unlanded for hours). Now the organ reconciles the branch FIRST,
+# then the NEXT tick arms the updated head WITHOUT a fresh model review when its
+# PR-diff patch-id is unchanged. Each case is driven with stub gh + stub claude and
+# killed by a named mutant on review-organ-tick.sh.
+echo "[d/CREDIBLE-1599] BEHIND → update-branch; DIRTY shell-only → rebase; DIRTY Rust → held; same patch-id → arm, different → re-review"
+C1599_HEAD=deadbeef1234567890abcdef1234567890abcdef
+C1599_OLDHEAD=cafef00dcafef00dcafef00dcafef00dcafef00d
+
+# A current-head organ APPROVE with NO hold labels → review_hold_allows passes, so
+# the arm path is reached and the mergeStateStatus branch is the sole decider.
+seed_approve_1599() { # <pr-head>
+    HEAD1599="$1" python3 - "$ORGCMT" <<'PY'
+import json, os, sys
+head = os.environ["HEAD1599"]
+body = "VERDICT: APPROVE\nhead: %s\nblockers: none\nmutants: ok\nVERDICT: APPROVE" % head
+json.dump({"labels": [], "comments": [{"body": body, "author": {"login": "organbot"},
+          "createdAt": "2026-10-21T00:00:00Z"}]}, open(sys.argv[1], "w"))
+PY
+}
+# A PRIOR organ APPROVE for an OLD head carrying a recorded patch-id: the current
+# head differs (so current_head_verdict does NOT short-circuit), and ONLY the
+# patch-id equality decides whether the updated head re-arms or is re-reviewed.
+seed_approved_pid_1599() { # <old-head> <recorded-patch-id>
+    OH="$1" PID="$2" python3 - "$ORGCMT" <<'PY'
+import json, os, sys
+oh = os.environ["OH"]; pid = os.environ["PID"]
+body = "VERDICT: APPROVE\nhead: %s\nblockers: none\nmutants: ok\npatch-id: %s\nVERDICT: APPROVE" % (oh, pid)
+json.dump({"labels": [], "comments": [{"body": body, "author": {"login": "organbot"},
+          "createdAt": "2026-10-21T00:00:00Z"}]}, open(sys.argv[1], "w"))
+PY
+}
+run_1599() { # <pr> — one organ tick WITHOUT resetting the seeded ORGCMT; captures logs
+    : >"$ORGLOG.merges"; : >"$ORGLOG.chump"; : >"$ORGLOG.edits"
+    : >"$ORGLOG.updatebranch"; : >"$ORGLOG.rebase"; rm -f "$ORGLOG.cmt.$1"
+    ( export PATH="$D/bin:$PATH" CHUMP_AMBIENT_LOG="$D/amb.jsonl"
+      bash "$ORGAN" --claude-bin "$D/bin/claude" --checkout "$D/checkout" --pr "$1" ) >"$D/organ-1599.out" 2>&1 || true
+}
+
+# (1) BEHIND → update-branch with expected_head_sha, never a head-pinned merge.
+# MUTANT (killed here): delete the BEHIND case (skip update-branch) → the organ
+# falls through and the no-update-branch assert fails (and a BEHIND merge is wrong).
+seed_approve_1599 "$C1599_HEAD"
+run_1599 220
+{ grep -q 'update-branch' "$ORGLOG.updatebranch" && grep -q "expected_head_sha=$C1599_HEAD" "$ORGLOG.updatebranch"; } \
+    && ok "CREDIBLE-1599 BEHIND: organ-APPROVEd BEHIND head → update-branch with expected_head_sha (mutant: skip update-branch)" \
+    || bad "CREDIBLE-1599 BEHIND: no update-branch with expected_head_sha (updatebranch: $(cat "$ORGLOG.updatebranch"))"
+[[ ! -s "$ORGLOG.merges" ]] \
+    && ok "CREDIBLE-1599 BEHIND: a BEHIND head is NOT head-pinned merged (it would fail strict up-to-date protection)" \
+    || bad "CREDIBLE-1599 BEHIND: a BEHIND head was merged ($(cat "$ORGLOG.merges"))"
+
+# (2) same patch-id on the updated head → ARMS without a new model review. The
+# prior APPROVE is for an OLD head but records patch-id == 224's current PR-diff
+# patch-id. MUTANT (killed here): drop the patch-id re-arm block → 224 gets a full
+# review instead of a re-stamp → the "re-approved after a branch update" marker is
+# absent.
+P224="$("$D/bin/gh" pr diff 224 2>/dev/null | git patch-id --stable 2>/dev/null | awk 'NR==1{print $1}')"
+[[ "$P224" =~ ^[0-9a-f]{40}$ ]] && ok "CREDIBLE-1599: PR 224 diff patch-id computed (stable, ${P224:0:12})" \
+    || bad "CREDIBLE-1599: PR 224 patch-id not computed ($P224)"
+seed_approved_pid_1599 "$C1599_OLDHEAD" "$P224"
+run_1599 224
+grep -q '^MERGE pr merge 224 --squash --match-head-commit' "$ORGLOG.merges" \
+    && ok "CREDIBLE-1599 same patch-id: updated head (new sha, same diff) ARMS head-pinned" \
+    || bad "CREDIBLE-1599 same patch-id: updated head did not arm (merges: $(cat "$ORGLOG.merges"))"
+grep -q 're-approved after a branch update' "$ORGLOG.cmt.224" \
+    && ok "CREDIBLE-1599 same patch-id: armed WITHOUT a new model review (re-stamp verdict; mutant: skip the patch-id re-arm)" \
+    || bad "CREDIBLE-1599 same patch-id: no re-stamp verdict — a fresh review ran (cmt: $(sed -n '1,6p' "$ORGLOG.cmt.224" 2>/dev/null | tr '\n' '|'))"
+
+# (3) different patch-id on the updated head → a FULL model review, not a blind
+# re-arm. The recorded patch-id differs from 224's current PR-diff patch-id. MUTANT
+# (killed here): arm on a changed patch-id (make the equality always true) → 224 is
+# re-stamped without review → the "re-approved after a branch update" marker appears
+# and the "model body ran" assert fails.
+seed_approved_pid_1599 "$C1599_OLDHEAD" ffffffffffffffffffffffffffffffffffffffff
+run_1599 224
+{ grep -q 'LGTM.' "$ORGLOG.cmt.224" && ! grep -q 're-approved after a branch update' "$ORGLOG.cmt.224"; } \
+    && ok "CREDIBLE-1599 different patch-id: a DIFFERING patch-id gets a FULL model review, not a blind re-arm (mutant: arm on a changed patch-id)" \
+    || bad "CREDIBLE-1599 different patch-id: did not run a full review (cmt: $(sed -n '1,6p' "$ORGLOG.cmt.224" 2>/dev/null | tr '\n' '|'))"
+grep -q '^MERGE pr merge 224 --squash --match-head-commit' "$ORGLOG.merges" \
+    && ok "CREDIBLE-1599 different patch-id: the re-reviewed head still lands once APPROVEd" \
+    || bad "CREDIBLE-1599 different patch-id: re-reviewed head did not land (merges: $(cat "$ORGLOG.merges"))"
+
+# (4) DIRTY shell-only → the shell-only rebase (gh pr update-branch --rebase),
+# NEVER a merge and NEVER the BEHIND merge-update path. MUTANT (killed here): merge
+# instead of rebase → the rebase assert fails and a merge appears.
+seed_approve_1599 "$C1599_HEAD"
+run_1599 222
+{ grep -q -- '--rebase' "$ORGLOG.rebase" && [[ ! -s "$ORGLOG.merges" ]]; } \
+    && ok "CREDIBLE-1599 DIRTY shell-only: → shell-only rebase (gh pr update-branch --rebase), never a merge (mutant: merge instead of rebase)" \
+    || bad "CREDIBLE-1599 DIRTY shell-only: no rebase / a merge happened (rebase: $(cat "$ORGLOG.rebase"); merges: $(cat "$ORGLOG.merges"))"
+[[ ! -s "$ORGLOG.updatebranch" ]] \
+    && ok "CREDIBLE-1599 DIRTY shell-only: used the rebase, not the BEHIND merge-update path" \
+    || bad "CREDIBLE-1599 DIRTY shell-only: wrongly used the BEHIND update-branch path ($(cat "$ORGLOG.updatebranch"))"
+
+# (5) DIRTY Rust (.rs/Cargo.*/workspace-hack) → HELD with a named reason: never
+# merged, rebased or update-branched. MUTANT (killed here): treat a Rust DIRTY PR
+# as shell-only → it rebases → the no-rebase assert fails.
+seed_approve_1599 "$C1599_HEAD"
+run_1599 223
+{ [[ ! -s "$ORGLOG.merges" ]] && [[ ! -s "$ORGLOG.rebase" ]] && [[ ! -s "$ORGLOG.updatebranch" ]]; } \
+    && ok "CREDIBLE-1599 DIRTY Rust: HELD — never merged, rebased or update-branched (mutant: treat Rust DIRTY as shell-only)" \
+    || bad "CREDIBLE-1599 DIRTY Rust: a Rust DIRTY PR was merged/rebased/updated (merges: $(cat "$ORGLOG.merges"); rebase: $(cat "$ORGLOG.rebase"); updatebranch: $(cat "$ORGLOG.updatebranch"))"
+grep -q -- '--add-label review-held' "$ORGLOG.edits" \
+    && ok "CREDIBLE-1599 DIRTY Rust: labeled review-held (hold applied)" \
+    || bad "CREDIBLE-1599 DIRTY Rust: review-held not applied ($(cat "$ORGLOG.edits"))"
+grep -q 'DIRTY and touches Rust' "$D/organ-1599.out" \
+    && ok "CREDIBLE-1599 DIRTY Rust: the hold carries a NAMED reason (Rust conflict needs manual resolution)" \
+    || bad "CREDIBLE-1599 DIRTY Rust: no named reason logged for the hold"
 echo '{"labels":[],"comments":[]}' >"$ORGCMT"  # restore clean state for later blocks
 
 # Structural arm-site gate: the organ's arm path is guarded by the fail-closed
