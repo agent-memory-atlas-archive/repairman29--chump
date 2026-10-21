@@ -18,6 +18,13 @@
 #
 # Idempotent: re-running rewrites the units and re-enables the timer.
 #
+# RESILIENT-1685: the ExecStart is resolved to a STABLE checkout only (see
+# _resolve_stable_script) — never a reaped-prone .claude/worktrees/ or /tmp
+# path. Re-running this installer to re-render chump-node-refresh.service onto a
+# live node (replacing a unit that was mis-installed from a worktree) is the
+# operator-approved un-pause step (AC4); the installer does not apply itself to
+# a running node on its own.
+#
 # Env:
 #   CHUMP_NODE_REPO   passed through to the service (mirror to build from)
 #   CHUMP_NODE_BIN    passed through to the service (install destination)
@@ -34,16 +41,40 @@ USER="${USER:-$(id -un 2>/dev/null || echo root)}"
 
 CADENCE_MIN="${CADENCE_MIN:-30}"
 UNIT_DIR="$HOME/.config/systemd/user"
-SCRIPT_SRC=""
-for candidate in \
+
+# RESILIENT-1685: resolve a tracked script to a STABLE checkout path, never a
+# reaped-prone dispatch worktree (…/.claude/worktrees/…) or /tmp. The cuphead
+# trap (2026-10-21): this installer was invoked from a dispatch worktree, the
+# `$(dirname "$0")/..` fallback baked that worktree path into ExecStart, the
+# worktree was later reaped, and chump-node-refresh.service exited 127 every
+# tick on a missing script — the node binary never refreshed and the review
+# organ ran stale code for days. So: try the canonical durable checkouts first
+# (…/.chumpnode/repo, ~/chump), SKIP any candidate that resolves under a
+# worktree or /tmp, and fail LOUDLY if the only copy on disk lives under one —
+# a loud install failure beats a silent exit-127 timer.
+_resolve_stable_script() {
+    local candidate resolved
+    for candidate in "$@"; do
+        [[ -n "$candidate" && -f "$candidate" ]] || continue
+        resolved="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
+        case "$resolved" in
+            */.claude/worktrees/*|/tmp|/tmp/*) continue ;;
+        esac
+        printf '%s\n' "$resolved"
+        return 0
+    done
+    return 1
+}
+
+SCRIPT_SRC="$(_resolve_stable_script \
     "${CHUMP_NODE_REPO:-}/scripts/ops/node-refresh-chump.sh" \
+    "$HOME/.chumpnode/repo/scripts/ops/node-refresh-chump.sh" \
+    "$HOME/chump/scripts/ops/node-refresh-chump.sh" \
     "$HOME/chump-host/scripts/ops/node-refresh-chump.sh" \
     "$HOME/Projects/Chump/scripts/ops/node-refresh-chump.sh" \
-    "$(dirname "$0")/../ops/node-refresh-chump.sh"; do
-    if [[ -f "$candidate" ]]; then SCRIPT_SRC="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"; break; fi
-done
+    "$(dirname "$0")/../ops/node-refresh-chump.sh")" || SCRIPT_SRC=""
 if [[ -z "$SCRIPT_SRC" ]]; then
-    echo "FATAL: cannot locate node-refresh-chump.sh (set CHUMP_NODE_REPO)" >&2
+    echo "FATAL: cannot locate node-refresh-chump.sh under a stable checkout (CHUMP_NODE_REPO, ~/.chumpnode/repo, or ~/chump); refusing to install the refresh timer from a dispatch worktree (.claude/worktrees/…) or /tmp — that is the exit-127-every-tick trap (RESILIENT-1685). Set CHUMP_NODE_REPO to a durable checkout and re-run." >&2
     exit 1
 fi
 chmod +x "$SCRIPT_SRC" 2>/dev/null || true
@@ -120,13 +151,12 @@ mkdir -p "$UNIT_DIR"
 # every 5 min — much tighter than the refresh cadence — so a stalled or
 # timed-out refresh surfaces fast instead of silently leaving the node on a
 # stale binary (AC #2).
-WATCHDOG_SRC=""
-for candidate in \
+# RESILIENT-1685: same stable-checkout guard as SCRIPT_SRC — SCRIPT_SRC is now
+# guaranteed off-worktree, so its dirname-relative candidate is safe too.
+WATCHDOG_SRC="$(_resolve_stable_script \
     "$(dirname "$SCRIPT_SRC")/../coord/node-deploy-lag-watchdog.sh" \
     "${CHUMP_NODE_REPO:-}/scripts/coord/node-deploy-lag-watchdog.sh" \
-    "$(dirname "$0")/../coord/node-deploy-lag-watchdog.sh"; do
-    if [[ -n "$candidate" && -f "$candidate" ]]; then WATCHDOG_SRC="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"; break; fi
-done
+    "$(dirname "$0")/../coord/node-deploy-lag-watchdog.sh")" || WATCHDOG_SRC=""
 
 if [[ -n "$WATCHDOG_SRC" ]]; then
     chmod +x "$WATCHDOG_SRC" 2>/dev/null || true
@@ -170,13 +200,11 @@ fi
 # WITHOUT the destructive `reset --hard` node-main-sync.sh uses — preserving
 # node-local tracked customizations (the muscle-node organ-manifest.txt stopgap)
 # and untracked hand-deployed files, and refusing to touch a diverged checkout.
-SCRIPTHOST_SRC=""
-for candidate in \
+# RESILIENT-1685: stable-checkout guard (see _resolve_stable_script).
+SCRIPTHOST_SRC="$(_resolve_stable_script \
     "$(dirname "$SCRIPT_SRC")/node-script-host-refresh.sh" \
     "${CHUMP_NODE_REPO:-}/scripts/ops/node-script-host-refresh.sh" \
-    "$(dirname "$0")/../ops/node-script-host-refresh.sh"; do
-    if [[ -n "$candidate" && -f "$candidate" ]]; then SCRIPTHOST_SRC="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"; break; fi
-done
+    "$(dirname "$0")/../ops/node-script-host-refresh.sh")" || SCRIPTHOST_SRC=""
 
 # Resolve the SCRIPT-HOST checkout the worker actually runs from (NOT the binary
 # mirror). Precedence: explicit override → first of the canonical worker

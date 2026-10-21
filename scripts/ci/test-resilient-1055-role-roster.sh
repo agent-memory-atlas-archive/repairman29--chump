@@ -492,6 +492,13 @@ _r1683_exec_scripts() {
 # interpreter path), 1 otherwise.
 _r1683_path_allowed() {
   case "$1" in
+    # RESILIENT-1685: a reaped dispatch worktree lives UNDER the repo root
+    # (/home/ubuntu/chump/.claude/worktrees/…), and /tmp is ephemeral — an
+    # ExecStart under either is the cuphead exit-127-every-tick trap (a unit
+    # installed from a worktree that was later reaped). Refuse both BEFORE the
+    # allowed-root match, which would otherwise accept the worktree path as
+    # "under /home/ubuntu/chump".
+    */.claude/worktrees/*|/tmp|/tmp/*) return 1 ;;
     "$R1683_ROOT_A"|"$R1683_ROOT_A"/*|"$R1683_ROOT_B"|"$R1683_ROOT_B"/*) return 0 ;;
     /bin/*|/usr/*|/sbin/*|/lib/*) return 0 ;;
     *) return 1 ;;
@@ -543,6 +550,31 @@ while IFS= read -r _p; do _r1683_path_allowed "$_p" || _ok_flagged=1; done < <(_
 [ "$_ok_flagged" = 0 ] || fail "self-test: a repo-rooted exec must pass the exec-path assertion"
 pass "RESILIENT-1683 assertions are mutant-killed: no-User and User=root fail the user check; an /home/ubuntu/coo exec fails the path check; repo-rooted + sourced-env passes"
 
+# RESILIENT-1685 (AC2): the exec-path assertion must ALSO refuse a unit RENDERED
+# from a reaped-prone dispatch worktree. A worktree checkout
+# (/home/ubuntu/chump/.claude/worktrees/…) sits UNDER the allowed repo root, so
+# before this slice _r1683_path_allowed accepted it — exactly the cuphead
+# exit-127 trap, where chump-node-refresh.service execed a script in a worktree
+# that was later reaped. Mutant: render one unit with the repo_root pointed at a
+# dispatch worktree; the rendered exec MUST be flagged. (The renderer bakes
+# __REPO_ROOT__ verbatim, so the worktree path need not exist on disk here.)
+cat > "$R1683_T/mut-worktree.service" <<'EOF'
+[Unit]
+Description=x
+[Service]
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env >/dev/null; set +a; exec __REPO_ROOT__/scripts/ops/x.sh'
+EOF
+R1683_WT_ROOT="$R1683_ROOT_A/.claude/worktrees/infra-8571"
+organ_unit_host_rewrite "$R1683_T/mut-worktree.service" "$R1683_T/mut-worktree.out" "ubuntu" "/home/ubuntu" 0 "$R1683_WT_ROOT" \
+  || fail "self-test: renderer should render a placeholder template even with a worktree repo_root"
+_wt_flagged=0
+while IFS= read -r _p; do _r1683_path_allowed "$_p" || _wt_flagged=1; done < <(_r1683_exec_scripts "$R1683_T/mut-worktree.out")
+[ "$_wt_flagged" = 1 ] || fail "mutant: an ExecStart rendered from a .claude/worktrees/ repo root must fail the exec-path assertion (RESILIENT-1685)"
+# A bare /tmp exec must also be refused (the other ephemeral ExecStart class).
+_r1683_path_allowed "/tmp/infra-8571/scripts/ops/x.sh" \
+  && fail "mutant: an ExecStart under /tmp must fail the exec-path assertion (RESILIENT-1685)"
+pass "RESILIENT-1685 (AC2): an ExecStart rendered from a .claude/worktrees/ repo root (and any /tmp path) fails the exec-path assertion"
+
 # Render EVERY system-scope chump unit (the SYSTEM_UNITS roster install-helsinki-
 # atc.sh deploys) and assert both invariants on each.
 R1683_ROSTER="$(sed -n '/^SYSTEM_UNITS=(/,/^)/p' "$ATC_INSTALLER" | grep -oE 'chump-[a-z0-9-]+\.service')"
@@ -584,5 +616,58 @@ for name in chump-coo-gateway chump-node1-worker chump-discord-gateway; do
     && fail "RESILIENT-1683 (AC2): chump-discord-gateway has no tracked template to render from the repo path"
 done
 pass "RESILIENT-1683 (AC2): coo-gateway/node1-worker render not-at-all; discord-gateway renders a repo-rooted exec"
+
+# ── 10. RESILIENT-1685 (AC1/AC3): install-node-refresh-systemd.sh must never
+# bake an ExecStart that execs node-refresh-chump.sh from a reaped-prone
+# dispatch worktree (.claude/worktrees/…) or /tmp. LIVE ROOT CAUSE (cuphead
+# 2026-10-21): the installer was invoked from a dispatch worktree, its
+# `$(dirname "$0")/../ops/…` fallback resolved SCRIPT_SRC inside that worktree,
+# the worktree was later reaped, and chump-node-refresh.service exited 127 every
+# tick on a missing script — the node binary never refreshed and the review
+# organ ran stale code for days. The installer must instead refuse LOUDLY
+# (non-zero, no worktree ExecStart written) when the only copy on disk lives
+# under a worktree/tmp and no stable checkout is available. Mutant: drop the
+# _resolve_stable_script worktree-skip and the installer silently bakes the
+# worktree path (exit 0) → this section fails.
+R1685_INSTALLER="$REPO_ROOT/scripts/setup/install-node-refresh-systemd.sh"
+[ -f "$R1685_INSTALLER" ] || fail "RESILIENT-1685: install-node-refresh-systemd.sh missing"
+R1685_T="$TMP/r1685"
+# A fake dispatch-worktree checkout holding the installer + the scripts it bakes.
+R1685_WT="$R1685_T/host/chump/.claude/worktrees/infra-8571"
+mkdir -p "$R1685_WT/scripts/setup" "$R1685_WT/scripts/ops" "$R1685_WT/scripts/coord"
+cp "$R1685_INSTALLER" "$R1685_WT/scripts/setup/install-node-refresh-systemd.sh"
+for s in scripts/ops/node-refresh-chump.sh scripts/coord/node-deploy-lag-watchdog.sh scripts/ops/node-script-host-refresh.sh; do
+  [ -f "$REPO_ROOT/$s" ] && cp "$REPO_ROOT/$s" "$R1685_WT/$s"
+done
+# A fake HOME with NO stable checkout (~/.chumpnode/repo, ~/chump, …) so the only
+# resolvable copy is the worktree one — the exact cuphead condition.
+R1685_HOME="$R1685_T/fakehome"; mkdir -p "$R1685_HOME"
+# Stub systemctl/loginctl so a guard-less (mutant) installer completes to exit 0
+# rather than dying on a missing systemd user bus for the wrong reason.
+R1685_BIN="$R1685_T/bin"; mkdir -p "$R1685_BIN"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$R1685_BIN/systemctl"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$R1685_BIN/loginctl"
+chmod +x "$R1685_BIN/systemctl" "$R1685_BIN/loginctl"
+
+r1685_rc=0
+env -u CHUMP_NODE_REPO -u CHUMP_NODE_BIN -u GH_TOKEN \
+  HOME="$R1685_HOME" \
+  PATH="$R1685_BIN:/usr/bin:/bin" \
+  bash "$R1685_WT/scripts/setup/install-node-refresh-systemd.sh" > "$R1685_T/out.log" 2>&1 || r1685_rc=$?
+
+R1685_UNIT="$R1685_HOME/.config/systemd/user/chump-node-refresh.service"
+# (a) No unit may be written that execs from a worktree or /tmp.
+if [ -f "$R1685_UNIT" ]; then
+  r1685_exec="$(grep '^ExecStart=' "$R1685_UNIT" | head -1 || true)"
+  case "$r1685_exec" in
+    *.claude/worktrees/*|*/tmp/*)
+      fail "RESILIENT-1685: installer baked a worktree/tmp ExecStart (the exit-127 trap): $r1685_exec" ;;
+  esac
+fi
+# (b) With only a worktree copy and no stable checkout, the installer must refuse
+# loudly (non-zero) — a loud install failure beats a silent exit-127 timer.
+[ "$r1685_rc" -ne 0 ] \
+  || fail "RESILIENT-1685: installer did NOT refuse to install from a reaped-prone dispatch worktree with no stable checkout (exit $r1685_rc) — the exit-127 trap would recur. out: $(cat "$R1685_T/out.log")"
+pass "RESILIENT-1685 (AC1/AC3): install-node-refresh-systemd.sh refuses a worktree/tmp ExecStart and fails loudly when no stable checkout exists"
 
 echo "ALL PASS"
