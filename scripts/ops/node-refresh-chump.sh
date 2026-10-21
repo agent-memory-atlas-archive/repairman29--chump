@@ -637,6 +637,43 @@ else
     fi
 fi
 
+# --- CREDIBLE-1568/1570: install + verify the load-aware dead-man every run --
+# RESILIENT-1611's node-level dead-man was "shipped != installed" (same class as
+# INFRA-1865): the installer existed but nothing in node-refresh or provisioning
+# called it, so it sat code-on-disk on every node. Run its idempotent installer
+# EVERY refresh (before the binary-idempotency skip below, so a bash-only merge
+# that fires the skip still converges the dead-man) and verify the timer is
+# actually active. Best-effort: a failure here must never block the binary
+# refresh. A node that lacks it self-heals; fleet-doctor's deadman check RED'd it.
+_install_and_verify_deadman() {
+    local installer="$REPO_ROOT/scripts/setup/install-load-aware-deadman.sh"
+    local timer="chump-load-aware-deadman.timer"
+    if [[ ! -f "$installer" ]]; then
+        log "WARN: $installer not found; skipping dead-man install"
+        return 0
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        log "SKIP: systemctl unavailable — not a systemd host, skipping dead-man install"
+        return 0
+    fi
+    if bash "$installer" >>"$LOG" 2>&1; then
+        log "OK: install-load-aware-deadman.sh ran (idempotent)"
+    else
+        log "WARN: install-load-aware-deadman.sh exited non-zero (non-fatal)"
+        emit node_deadman_install_failed "\"installer\":\"$installer\""
+        return 0
+    fi
+    if systemctl --user is-active --quiet "$timer" 2>/dev/null; then
+        log "OK: $timer is active"
+        emit node_deadman_verified "\"timer\":\"$timer\",\"state\":\"active\""
+    else
+        log "WARN: $timer is NOT active after install — dead-man not running"
+        emit node_deadman_timer_inactive "\"timer\":\"$timer\""
+    fi
+    return 0
+}
+_install_and_verify_deadman
+
 INSTALLED_SHA="none"
 if [[ -x "$TARGET_BIN" ]]; then
     INSTALLED_SHA="$("$TARGET_BIN" --version 2>/dev/null | grep -oE '\(([a-f0-9]+) built' | head -1 | sed 's/[( ]//g;s/built//' || echo unknown)"

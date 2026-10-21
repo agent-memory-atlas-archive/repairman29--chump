@@ -3,20 +3,20 @@
 #
 # When a node enters memory/CPU thrash (load > 3x nproc, or MemAvailable < 5%),
 # this daemon proactively kills the newest claude -p and cargo processes before
-# sshd becomes unresponsive. If sshd is unresponsive for 15 minutes, systemd
-# watchdog or kernel softdog reboots the node.
+# sshd becomes unresponsive.
+#
+# NO AUTOMATIC REBOOT (CREDIBLE-1568/1570): earlier versions of this header
+# claimed that 15 minutes of unresponsive sshd would trigger a systemd-watchdog
+# or kernel-softdog reboot. NO fleet node actually configures that watchdog
+# (there is no RuntimeWatchdogSec / softdog on any node), so the reboot never
+# happened — a documented capability that did not exist. The SSH-unresponsive
+# path below therefore only LOGS and emits an ambient signal; it does not reboot.
+# Configuring a real watchdog is tracked as item (c) of the CJ hardening umbrella.
 #
 # THRESHOLDS:
 #   - Load spike: 1m load > 3x nproc for 10 consecutive minutes → kill newest claude -p/cargo
 #   - Memory pressure: MemAvailable < 5% of MemTotal for 5 consecutive minutes → kill newest claude -p/cargo
-#   - SSH unresponsive: 15 minutes without an ssh command returning immediately → reboot
-#
-# SYSTEMD WATCHDOG:
-#   - This script is meant to be run as a service that kicks in when systemd
-#     watchdog starts. To enable: systemctl set-default multi-user.target,
-#     then add `SystemdOptions=WatchdogSec=60` to the service file.
-#   - If the script doesn't kick systemd watchdog within 60 seconds, systemd
-#     will reboot the node automatically.
+#   - SSH unresponsive: 15 minutes without an ssh command returning immediately → log + emit a critical ambient signal (no reboot; see NO AUTOMATIC REBOOT above)
 #
 # CONFIG (env, or ~/.chump/providers.env):
 #   CHUMP_DEADMAN_LOAD_ENABLED        set to 0 to disable (default: 1)
@@ -59,7 +59,16 @@ DRY_RUN="${CHUMP_DEADMAN_DRY_RUN:-0}"
 LOAD_STATE="$STATE_DIR/deadman-load.state"
 MEM_STATE="$STATE_DIR/deadman-mem.state"
 SSH_STATE="$STATE_DIR/deadman-ssh.state"
-AMBIENT_LOG="${CHUMP_AMBIENT_LOG:-$STATE_DIR/../.chump-locks/ambient.jsonl}"
+# Canonical node ambient log (CREDIBLE-1570, AC3): this organ is installed to
+# ~/.local/bin, so it CANNOT self-locate the repo the way in-repo organs do
+# ($SCRIPT_DIR/../.. would be $HOME). It must default to the SAME canonical node
+# log that fleet-doctor's check_load_aware_deadman reads, or every healthy node
+# false-REDs. That canonical log is $HOME/chump/.chump-locks/ambient.jsonl — the
+# repo-root log every other organ heartbeat lands in — derived from $HOME (not a
+# CHUMP_* path env default, per the standing safety-input rule) so a sandbox-HOME
+# test exercises the real default. The old $STATE_DIR/../.chump-locks default
+# resolved to $HOME/.chump-locks — a DIFFERENT directory the check never reads.
+AMBIENT_LOG="${CHUMP_AMBIENT_LOG:-$HOME/chump/.chump-locks/ambient.jsonl}"
 
 log() {
     printf '%s [load-aware-deadman] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
@@ -127,6 +136,14 @@ kill_newest_process() {
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
+# ── Per-run liveness heartbeat (CREDIBLE-1568/1570) ───────────────────────────
+# RESILIENT-1611's dead-man was SILENT when healthy — a run that killed nothing
+# emitted nothing, so there was no way to prove the organ was alive on a node.
+# Emit one heartbeat EVERY run (even a fully-healthy one), so fleet-doctor can
+# read the last deadman_tick and RED a node whose dead-man has gone dark.
+# scanner-anchor: "kind":"deadman_tick"
+emit_ambient "deadman_tick" "load-aware dead-man liveness tick (nproc=$(get_nproc) load=$(get_load) mem_avail_pct=$(get_mem_pressure))"
+
 # ── Load check ───────────────────────────────────────────────────────────────
 if [[ "$LOAD_ENABLED" == "1" ]]; then
     load=$(get_load)
@@ -184,11 +201,12 @@ else
         first_unresponsive=$(cat "$SSH_STATE")
         duration=$(( now - first_unresponsive ))
         if [[ "$duration" -ge "$SSH_UNRESPONSIVE_DUR_SECS" ]]; then
-            log "CRITICAL: SSH unresponsive for ${duration}s — systemd watchdog will reboot"
+            log "CRITICAL: SSH unresponsive for ${duration}s — logging + signalling (no node configures a watchdog reboot; see header)"
             # scanner-anchor: "kind":"deadman_ssh_unresponsive_critical"
             emit_ambient "deadman_ssh_unresponsive_critical" "duration_secs=$duration"
-            # Explicitly kick systemd watchdog so it knows we're alive (and intentionally not resetting it)
-            # This allows systemd to proceed with reboot.
+            # Best-effort watchdog notify IF a node ever configures one. No node
+            # currently does (no RuntimeWatchdogSec/softdog), so this is a no-op
+            # today — it does NOT itself reboot anything.
             if command -v systemd-notify >/dev/null 2>&1; then
                 systemd-notify --ready 2>/dev/null || true
             fi

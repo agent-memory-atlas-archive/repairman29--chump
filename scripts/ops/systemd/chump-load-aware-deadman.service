@@ -1,6 +1,6 @@
 [Unit]
 Description=Chump load-aware node dead-man (RESILIENT-1611)
-Documentation=https://github.com/anthropics/chump/blob/main/scripts/ops/load-aware-deadman.sh
+Documentation=https://github.com/repairman29/chump/blob/main/scripts/ops/load-aware-deadman.sh
 After=network.target
 PartOf=chump-load-aware-deadman.timer
 

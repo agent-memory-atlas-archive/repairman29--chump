@@ -1668,6 +1668,77 @@ check_node_env_no_export() {
     fi
 }
 
+# ── Check 21 (CREDIBLE-1568/1570): load-aware dead-man installed + alive ──────
+# RESILIENT-1611's node-level dead-man was "shipped != installed" (code-on-disk
+# on zero nodes) AND silent when healthy (nothing could prove it alive). This
+# check closes both: RED when chump-load-aware-deadman.timer is missing/inactive
+# on a systemd host, OR when the last deadman_tick heartbeat in ambient.jsonl is
+# older than 5 minutes — so a node that lacks the organ, or whose dead-man has
+# gone dark, is a paged/observable condition instead of a silent hole.
+# The 5-minute staleness threshold is fixed, not env-tunable (it is a safety
+# input): the timer runs every 60s, so 5 minutes is five missed ticks.
+check_load_aware_deadman() {
+    # CREDIBLE-1570 (AC3): read the SAME canonical node log the installed
+    # dead-man writes. The dead-man lives in ~/.local/bin and cannot know
+    # $REPO_ROOT, so it defaults to $HOME/chump/.chump-locks/ambient.jsonl; this
+    # reader must resolve identically or a healthy node false-REDs. On the main
+    # checkout $REPO_ROOT already IS $HOME/chump, so this is equivalent there and
+    # strictly more correct from a worktree. Derived from $HOME (not a CHUMP_*
+    # path env default) so a sandbox-HOME test exercises the real default.
+    local amb="${CHUMP_AMBIENT_LOG:-$HOME/chump/.chump-locks/ambient.jsonl}"
+    local timer="chump-load-aware-deadman.timer"
+    local stale_s=300   # 5 minutes — RED past this (AC: older than 5 minutes)
+
+    # Non-systemd node legitimately has no timer — not applicable, skip.
+    if ! command -v systemctl >/dev/null 2>&1; then
+        register_check "load-aware-deadman" "skip" "systemctl unavailable — not a systemd host, dead-man not applicable" ""
+        return
+    fi
+
+    # 1. Timer must be installed and active.
+    if ! systemctl --user is-active --quiet "$timer" 2>/dev/null; then
+        register_check "load-aware-deadman" "fail" \
+            "$timer missing or inactive — the RESILIENT-1611 node dead-man is not installed/running on this node (shipped != installed)" \
+            "bash scripts/setup/install-load-aware-deadman.sh; systemctl --user status $timer"
+        return
+    fi
+
+    # 2. Heartbeat must be fresh (newest deadman_tick within $stale_s).
+    if [[ ! -f "$amb" ]]; then
+        register_check "load-aware-deadman" "fail" \
+            "$timer active but no ambient.jsonl at $amb to read a deadman_tick heartbeat from — cannot prove the dead-man is alive" \
+            "ls -l $amb; systemctl --user status $timer"
+        return
+    fi
+    local tick_line ts last_tick
+    tick_line="$(grep '"kind":"deadman_tick"' "$amb" 2>/dev/null | tail -1 || true)"
+    if [[ -z "$tick_line" ]]; then
+        register_check "load-aware-deadman" "fail" \
+            "$timer active but no deadman_tick heartbeat ever seen in $amb — the dead-man is not emitting its liveness signal" \
+            "journalctl --user -u $timer --no-pager | tail; systemctl --user status $timer"
+        return
+    fi
+    ts="$(printf '%s' "$tick_line" | grep -oE '"ts":"[^"]*"' | head -1 | cut -d'"' -f4)"
+    last_tick="$(date -u -d "$ts" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$ts" +%s 2>/dev/null || echo 0)"
+    if [[ -z "$last_tick" || "$last_tick" -eq 0 ]]; then
+        register_check "load-aware-deadman" "fail" \
+            "$timer active but the newest deadman_tick timestamp ('$ts') could not be parsed — heartbeat freshness unknown" \
+            "tail $amb; journalctl --user -u $timer --no-pager | tail"
+        return
+    fi
+    local now_ts age
+    now_ts="$(date -u +%s)"
+    age=$(( now_ts - last_tick ))
+    if (( age >= stale_s )); then
+        register_check "load-aware-deadman" "fail" \
+            "$timer active but last deadman_tick was ${age}s ago (threshold ${stale_s}s) — the dead-man has gone dark (heartbeat stale)" \
+            "journalctl --user -u $timer --no-pager | tail; systemctl --user restart $timer"
+        return
+    fi
+    register_check "load-aware-deadman" "pass" \
+        "$timer active, last deadman_tick ${age}s ago (threshold ${stale_s}s)" ""
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -1698,6 +1769,7 @@ check_fetch_refspec_single_branch
 check_second_scope
 check_admission_ceiling
 check_node_env_no_export
+check_load_aware_deadman
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

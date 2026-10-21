@@ -158,4 +158,73 @@ case "$CARGO_VER" in
         fail "unexpected ~/.cargo/bin/chump version: $CARGO_VER" ;;
 esac
 
+# ── Test 4 (CREDIBLE-1568/1570): node-refresh installs + verifies the dead-man ─
+# RESILIENT-1611's load-aware dead-man was "shipped != installed" — the installer
+# existed but nothing in node-refresh called it, so it was code-on-disk on zero
+# nodes. node-refresh must now run install-load-aware-deadman.sh EVERY cycle and
+# verify chump-load-aware-deadman.timer is active. A mutant that drops that call
+# leaves no installed dead-man and no verification event → this test fails.
+#
+# Self-contained fixture: the installer (and the files it copies) must live IN
+# the mirror, because node-refresh resolves it under its REPO_ROOT and
+# `converge_mirror_hard_reset` git-resets the mirror (wiping any uncommitted
+# seed). So we commit the real deadman files into the mirror + push to origin.
+DM_ORIGIN="$TMP/dm-origin.git"
+DM_MIRROR="$TMP/dm-mirror"
+git init --bare -q "$DM_ORIGIN"
+git clone -q "$DM_ORIGIN" "$DM_MIRROR"
+git -C "$DM_MIRROR" config user.email test@example.com
+git -C "$DM_MIRROR" config user.name "Test"
+mkdir -p "$DM_MIRROR/scripts/setup" "$DM_MIRROR/scripts/ops/systemd"
+cp "$REPO_ROOT/scripts/setup/install-load-aware-deadman.sh" "$DM_MIRROR/scripts/setup/"
+cp "$REPO_ROOT/scripts/ops/load-aware-deadman.sh" "$DM_MIRROR/scripts/ops/"
+cp "$REPO_ROOT/scripts/ops/systemd/chump-load-aware-deadman.service" "$DM_MIRROR/scripts/ops/systemd/"
+cp "$REPO_ROOT/scripts/ops/systemd/chump-load-aware-deadman.timer" "$DM_MIRROR/scripts/ops/systemd/"
+echo "v1" > "$DM_MIRROR/f.txt"
+git -C "$DM_MIRROR" add -A
+git -C "$DM_MIRROR" commit -q -m "seed deadman organ"
+git -C "$DM_MIRROR" push -q origin HEAD:main
+DM_GREEN_SHA="$(git -C "$DM_MIRROR" rev-parse HEAD)"
+
+# Stub systemctl: `--user is-active --quiet <timer>` succeeds (dead-man active);
+# every other systemctl call (daemon-reload/enable/start/status) is a no-op 0.
+mkdir -p "$TMP/dm-bin"
+cat > "$TMP/dm-bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+for a in "$@"; do [[ "$a" == "is-active" ]] && exit 0; done
+exit 0
+STUB
+chmod +x "$TMP/dm-bin/systemctl"
+cp "$TMP/bin/cargo" "$TMP/dm-bin/cargo"
+
+DM_HOME="$TMP/dm-home"
+mkdir -p "$DM_HOME/.cargo/bin"
+DM_AMBIENT="$TMP/dm-ambient.jsonl"
+mkdir -p "$TMP/dm-locks"
+
+env -u CHUMP_NODE_BIN \
+CHUMP_NODE_REPO="$DM_MIRROR" \
+NODE_AMBIENT="$DM_AMBIENT" \
+CHUMP_NODE_REFRESH_LOGDIR="$TMP/dm-logs" \
+CHUMP_NODE_REFRESH_TEST_GREEN_SHA="$DM_GREEN_SHA" \
+HOME="$DM_HOME" \
+PATH="$TMP/dm-bin:/usr/bin:/bin" \
+    bash "$SCRIPT" > "$TMP/out4.log" 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || fail "deadman run exited $rc: $(cat "$TMP/out4.log")"
+
+# The installer must have copied the dead-man script into the fake HOME.
+if [ -x "$DM_HOME/.local/bin/load-aware-deadman.sh" ]; then
+    ok "node-refresh ran install-load-aware-deadman.sh (dead-man installed under HOME)"
+else
+    fail "node-refresh did NOT run the dead-man installer — load-aware-deadman.sh missing from \$HOME/.local/bin (AC1)"
+fi
+
+# And it must have VERIFIED the timer is active (emitting node_deadman_verified).
+if grep -q '"kind":"node_deadman_verified"' "$DM_AMBIENT" 2>/dev/null; then
+    ok "node-refresh verified chump-load-aware-deadman.timer is active (node_deadman_verified emitted)"
+else
+    fail "node-refresh did not emit node_deadman_verified — the timer-active verification is missing (AC1)"
+fi
+
 exit 0

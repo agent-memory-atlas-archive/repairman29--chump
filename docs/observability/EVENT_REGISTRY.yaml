@@ -14471,6 +14471,15 @@ events:
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, message]
 
+  - kind: deadman_tick
+    status: active
+    effect_metric: self
+    emitter: scripts/ops/load-aware-deadman.sh (CREDIBLE-1568/1570)
+    emitter_paths: [scripts/ops/load-aware-deadman.sh]
+    trigger: per-run liveness heartbeat from the load-aware node dead-man, emitted on EVERY run (even a fully-healthy one that killed nothing) so the organ's presence can be verified remotely; fleet-doctor reads the newest deadman_tick and goes RED when the timer is missing or the heartbeat is older than 5 minutes
+    consumers: [ambient, fleet-brief]
+    fields_required: [ts, kind, message]
+
   - kind: olive_monitor_baseline_initialized
     status: active
     effect_metric: self
