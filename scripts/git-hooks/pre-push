@@ -1245,14 +1245,34 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
             # worktree, not the invoking shell's cwd (main checkout). Without this,
             # GIT_DIR overrides cause tests to run against main's source tree even
             # when pushing from a linked worktree.
-            # INFRA-1138: use per-worktree target directory for the test run to
-            # prevent phantom fingerprint contamination from sibling worktrees that
-            # share the same CARGO_TARGET_DIR (set by install-sccache.sh / INFRA-481).
-            # The shared sccache (via rustc-wrapper in .cargo/config.toml) still
-            # provides cross-worktree object-code caching; only fingerprints are
-            # isolated. Per-worktree path ensures each linked worktree's test run
-            # sees only its own source file set.
-            _WT_TEST_TARGET="$REPO_ROOT_T/.cargo-test-target"
+            # INFRA-1138: isolate the test run's fingerprints from sibling
+            # worktrees that share one CARGO_TARGET_DIR (set by install-sccache.sh
+            # / INFRA-481) — phantom-fingerprint contamination otherwise false-reds
+            # the gate. The shared sccache rustc-wrapper still gives cross-worktree
+            # object-code caching; only fingerprints need isolating.
+            #
+            # RESILIENT-1669 (RESILIENT-1642 AC2): isolation needs a DISTINCT
+            # dir per worktree, NOT one INSIDE the worktree. The old
+            # <worktree>/.cargo-test-target grew a private ~6.5 GB build tree per
+            # push beside the shared cache (cuphead receipt: 27 GB across four
+            # worktrees). Resolve the shared target via the SAME resolver as
+            # CARGO_TARGET_DIR (scripts/ci/lib/resolve-cargo-target-dir.sh) and
+            # key a per-worktree subdir UNDER it, so a node keeps ONE cache root
+            # and fingerprints stay isolated. Guard: the block is fenced by the
+            # RESILIENT-1669 markers below and exercised by the Part 3 fixture in
+            # scripts/ci/test-cargo-target-no-worktree-default.sh.
+            # RESILIENT-1669:BEGIN-TEST-TARGET
+            if [[ -f "$REPO_ROOT_T/scripts/ci/lib/resolve-cargo-target-dir.sh" ]]; then
+                # shellcheck source=../ci/lib/resolve-cargo-target-dir.sh
+                # shellcheck disable=SC1091
+                source "$REPO_ROOT_T/scripts/ci/lib/resolve-cargo-target-dir.sh"
+                _WT_TEST_TARGET="$(chump_cargo_target_dir)/cargo-test-target/$(basename "$REPO_ROOT_T")"
+            else
+                # Old checkout without the resolver: still never a worktree-local
+                # build tree — fall back to the inherited/shared default directly.
+                _WT_TEST_TARGET="${CARGO_TARGET_DIR:-${HOME:-/tmp}/.cargo/chump-shared-target}/cargo-test-target/$(basename "$REPO_ROOT_T")"
+            fi
+            # RESILIENT-1669:END-TEST-TARGET
             # INFRA-1316: bash 3.2 + `set -u` aborts on `"${arr[@]}"` when
             # the array is empty. KNOWN_FLAKES.yaml has zero entries today,
             # so the subshell crashed before cargo test ever ran and the

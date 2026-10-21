@@ -106,5 +106,42 @@ ann="$(cd "$WT" && env -i HOME="$FAKE_HOME" PATH="$PATH" bash -c '
   REPO_ROOT="$1"; eval "$(cat "$2")"; eval "$(cat "$2")"' x "$WT" "$TMP/hook-block.sh" 2>&1 >/dev/null | grep -c '^\[cargo-target\]')"
 [[ "$ann" == "1" ]] && ok "announces the chosen dir exactly once" || bad "expected 1 announce line, got $ann"
 
+# ── Part 3: pre-push cargo-test gate keys its target UNDER the shared resolver,
+#    never a <worktree>/.cargo-test-target build tree (RESILIENT-1669 / RESILIENT-1642
+#    AC2/AC3). Mirrors Part 2: extract the real resolution block from the pre-push
+#    hook, eval it with REPO_ROOT_T pointed at a fake .claude/worktrees/* worktree,
+#    and assert the resolved target lives OUTSIDE the worktree (under the shared
+#    resolver) and that no .cargo-test-target dir is created inside the worktree.
+#    Mutant guard: reverting the block to "$REPO_ROOT_T/.cargo-test-target" resolves
+#    inside the worktree and fails the "resolves under the shared resolver" check.
+WT3="$TMP/.claude/worktrees/wt3"
+mkdir -p "$WT3/scripts/ci/lib"
+cp "$RESOLVER" "$WT3/scripts/ci/lib/"
+awk 'index($0,"RESILIENT-1669:BEGIN-TEST-TARGET"){f=1;next} index($0,"RESILIENT-1669:END-TEST-TARGET"){f=0} f{print}' \
+    scripts/git-hooks/pre-push >"$TMP/test-target-block.sh"
+if [[ -s "$TMP/test-target-block.sh" ]]; then
+  ok "extracted pre-push cargo-test-target resolution block"
+else
+  bad "cannot extract pre-push cargo-test-target block (RESILIENT-1669 markers missing)"
+fi
+
+got_tt="$(cd "$WT3" && env -i HOME="$FAKE_HOME" PATH="$PATH" bash -c '
+    set -euo pipefail
+    REPO_ROOT_T="$1"; eval "$(cat "$2")"; printf "%s\n" "$_WT_TEST_TARGET"' \
+    x "$WT3" "$TMP/test-target-block.sh" 2>/dev/null)"
+case "$got_tt" in
+  "$WT3"/*)
+    bad "pre-push cargo-test target resolves INSIDE the worktree ($got_tt) — must be a subdir under the shared resolver" ;;
+  "$FAKE_HOME"/.cargo/chump-shared-target/*)
+    ok "pre-push cargo-test target resolves under the shared resolver ($got_tt)" ;;
+  *)
+    bad "pre-push cargo-test target resolved to unexpected '$got_tt' (expected a subdir of $FAKE_HOME/.cargo/chump-shared-target)" ;;
+esac
+if [[ ! -e "$WT3/.cargo-test-target" ]]; then
+  ok "pre-push block creates no .cargo-test-target build tree under .claude/worktrees/*"
+else
+  bad ".cargo-test-target build tree created under .claude/worktrees/* ($WT3/.cargo-test-target)"
+fi
+
 if [[ "$FAILS" -gt 0 ]]; then echo "test-cargo-target-no-worktree-default: $FAILS failure(s)" >&2; exit 1; fi
 echo "test-cargo-target-no-worktree-default: PASS"
