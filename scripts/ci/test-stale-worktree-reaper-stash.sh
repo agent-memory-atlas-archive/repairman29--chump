@@ -393,6 +393,72 @@ else
 fi
 truncate -s 0 "$AMBIENT"
 
+# ─── DOC-164: stash-manifest.sh generates the STASHED_WORK.md table ─────────────
+# The stash-manifest generator is the read side of this same refs/stash/* surface
+# (the reaper writes stash refs; stash-manifest.sh lists them into the doc). Feed
+# it a STUBBED `git ls-remote` fixture via its --input seam and assert the table
+# lists every input ref — so a mutant that drops a ref from the generated table
+# fails here.
+echo ""
+echo "DOC-164: stash-manifest.sh regenerates the table from a stubbed ls-remote"
+MANIFEST="$REAL_REPO_ROOT/scripts/coord/stash-manifest.sh"
+
+[[ -x "$MANIFEST" ]] && ok "DOC-164: stash-manifest.sh is executable" \
+    || fail "DOC-164: stash-manifest.sh not executable: $MANIFEST"
+
+# Stubbed `git ls-remote origin 'refs/stash/*'` output: one sha<TAB>ref per line,
+# covering every reason/date/gap shape the generator must parse.
+FIX="$TMPBASE/ls-remote.txt"
+cat > "$FIX" <<'LSREMOTE'
+11faca97ec3c0ea39b2f73947f3d1c2b93619b76	refs/stash/2026-07-27/almanac-integration
+7a98fcf194602151b8eb2649dc1419492e613490	refs/stash/2026-07-27/infra-2248-mesh-localprocess-transport
+bb9a10bf0c01987f8cb21774df00090b4dd19e19	refs/stash/ceo-bench-2026-08-15
+65508d78f72721b35980a1b14acedd2c494fc4ef	refs/stash/chump/resilient-1494-fleet-1-20261013-034319
+debd3626f29de5df4ef7e1c571c0657dd3ecbf12	refs/stash/credible-1551-wip
+4411da09c8a02acf10be2555ea4db0c8e58f65ba	refs/stash/credible-1578-wip-20261021T0030Z
+bfa5547a3d0b05237c227d64aca303fa3bd9a285	refs/stash/credible-1554-uncommitted-5605
+c1b61662af3be951467c3beae347ae86cc0b6a29	refs/stash/resilient-1652-wip-20261020T1302Z
+LSREMOTE
+EXPECTED_ROWS=$(grep -c 'refs/stash/' "$FIX")
+
+MANIFEST_OUT=$(bash "$MANIFEST" --print --input "$FIX" 2>&1) || true
+
+# Every input ref must appear as a row in the generated table (mutant that drops
+# any ref fails this).
+GEN_ROWS=$(printf '%s\n' "$MANIFEST_OUT" | grep -c '^| `refs/stash/' || true)
+if [[ "$GEN_ROWS" == "$EXPECTED_ROWS" ]]; then
+    ok "DOC-164: table has one row per input ref ($GEN_ROWS of $EXPECTED_ROWS)"
+else
+    fail "DOC-164: row count $GEN_ROWS != input ref count $EXPECTED_ROWS (a ref was dropped)"
+fi
+
+MANIFEST_MISSING=0
+while IFS=$'\t' read -r _sha _ref; do
+    [[ -z "${_ref:-}" ]] && continue
+    if ! printf '%s\n' "$MANIFEST_OUT" | grep -qF "| \`$_ref\` |"; then
+        fail "DOC-164: generated table is missing ref $_ref"
+        MANIFEST_MISSING=1
+    fi
+done < "$FIX"
+[[ "$MANIFEST_MISSING" == "0" ]] && ok "DOC-164: every stubbed ref is present in the table"
+
+# Parsing spot-checks: gap, date, and reason inferred from the ref shape.
+if printf '%s\n' "$MANIFEST_OUT" | grep -qE '`refs/stash/credible-1578-wip-20261021T0030Z` \| CREDIBLE-1578 \| 2026-10-21 \|'; then
+    ok "DOC-164: wip ref parsed to gap+date (CREDIBLE-1578 / 2026-10-21)"
+else
+    fail "DOC-164: wip ref gap/date parse wrong"
+fi
+if printf '%s\n' "$MANIFEST_OUT" | grep -q 'stash-wip.sh WIP snapshot'; then
+    ok "DOC-164: stash-wip reason inferred"
+else
+    fail "DOC-164: stash-wip reason not inferred"
+fi
+if printf '%s\n' "$MANIFEST_OUT" | grep -qE '`refs/stash/chump/resilient-1494-fleet-1-20261013-034319` \| RESILIENT-1494 \| 2026-10-13 \|.*fleet worktree-reaper salvage'; then
+    ok "DOC-164: fleet-reaper ref parsed to gap+date+reason"
+else
+    fail "DOC-164: fleet-reaper ref parse wrong"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
