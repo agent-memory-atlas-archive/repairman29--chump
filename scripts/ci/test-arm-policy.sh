@@ -612,6 +612,21 @@ if grep -qE '^MERGE pr merge 203 --squash --match-head-commit deadbeef' "$ORGLOG
 else bad "organ AC3: no head-pinned merge for APPROVEd PR 203 (merges: $(cat "$ORGLOG.merges"))"; fi
 grep -q -- '--auto' "$ORGLOG.merges" && bad "organ AC3: merge used --auto (left auto-merge on)" \
     || ok "organ AC3: merge never used --auto (no auto-merge window)"
+# CREDIBLE-1598 AC1/AC3: a head-pinned merge must close its gap THROUGH `chump
+# gap` so an organ landing never leaves the gap open + PHASE-R undercounting.
+# PR 203's head branch is claude/credible-9203-x → gap CREDIBLE-9203. The organ
+# must (a) write the typed gap_prs link and (b) ship with the merged PR as
+# closed_pr — both via `chump gap`, never a direct state.db write. MUTANT (killed
+# here): delete the `chump gap ship …` line in ship_merged_gap (review-organ-tick.sh)
+# → the gap is never shipped and this fails.
+grep -qE '^chump gap ship CREDIBLE-9203 --closed-pr 203( |$)' "$ORGLOG.chump" \
+    && ok "organ CREDIBLE-1598 AC1/AC3: merged PR 203 ships its gap (chump gap ship CREDIBLE-9203 --closed-pr 203)" \
+    || bad "organ CREDIBLE-1598 AC1/AC3: merged PR 203 did NOT ship its gap (chump calls: $(tr '\n' '|' <"$ORGLOG.chump"))"
+grep -qE '^chump gap link-pr CREDIBLE-9203 203 ' "$ORGLOG.chump" \
+    && ok "organ CREDIBLE-1598 AC1: merged PR 203 writes the typed gap_prs link (chump gap link-pr CREDIBLE-9203 203) so the reconciler FK backstop sees it" \
+    || bad "organ CREDIBLE-1598 AC1: merged PR 203 did NOT write a gap_prs link (chump calls: $(tr '\n' '|' <"$ORGLOG.chump"))"
+grep -qE 'state\.db|sqlite3' "$ORGLOG.chump" && bad "organ CREDIBLE-1598 AC1: close path touched state.db directly (must go through chump gap)" \
+    || ok "organ CREDIBLE-1598 AC1: close path never writes state.db directly (routes through chump gap)"
 # AC1: the posted verdict comment first AND last line is exactly the verdict.
 [[ "$(sed -n '1p' "$ORGLOG.cmt.203")" == "VERDICT: APPROVE" ]] && ok "organ AC1: comment first line is exactly VERDICT: APPROVE" \
     || bad "organ AC1: comment first line not VERDICT: APPROVE ($(sed -n '1p' "$ORGLOG.cmt.203" 2>/dev/null))"

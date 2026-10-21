@@ -43,13 +43,19 @@ git init --quiet "$TMP" 2>/dev/null || { echo "SKIP: git init failed"; exit 0; }
 
 STATE_DB="$TMP/state.db"
 sqlite3 "$STATE_DB" <<'SQL'
-CREATE TABLE gaps (id TEXT PRIMARY KEY, status TEXT, title TEXT);
-INSERT INTO gaps VALUES ('CREDIBLE-9000','open','umbrella');
-INSERT INTO gaps VALUES ('CREDIBLE-9001','open','slice one');
-INSERT INTO gaps VALUES ('CREDIBLE-9002','open','docs gap');
-INSERT INTO gaps VALUES ('CREDIBLE-9003','open','slice three');
-INSERT INTO gaps VALUES ('CREDIBLE-9004','open','slice four');
-INSERT INTO gaps VALUES ('CREDIBLE-9005','open','slice five');
+-- closed_pr mirrors the real state.db schema: the head-branch backstop keys on
+-- "open gaps with no closed_pr", so the fixture must carry the column (all NULL).
+CREATE TABLE gaps (id TEXT PRIMARY KEY, status TEXT, title TEXT, closed_pr INTEGER);
+INSERT INTO gaps(id,status,title) VALUES ('CREDIBLE-9000','open','umbrella');
+INSERT INTO gaps(id,status,title) VALUES ('CREDIBLE-9001','open','slice one');
+INSERT INTO gaps(id,status,title) VALUES ('CREDIBLE-9002','open','docs gap');
+INSERT INTO gaps(id,status,title) VALUES ('CREDIBLE-9003','open','slice three');
+INSERT INTO gaps(id,status,title) VALUES ('CREDIBLE-9004','open','slice four');
+INSERT INTO gaps(id,status,title) VALUES ('CREDIBLE-9005','open','slice five');
+-- CREDIBLE-1598: 9006 is OPEN with NO gap_prs row, but a MERGED PR's lane head
+-- branch names it (claude/credible-9006-x). The FK pass can't see it; the
+-- head-branch backstop must close it.
+INSERT INTO gaps(id,status,title) VALUES ('CREDIBLE-9006','open','head-branch only');
 CREATE TABLE gap_prs (gap_id TEXT, pr_number INTEGER, head_sha TEXT,
                       opened_at INTEGER, state TEXT,
                       PRIMARY KEY (gap_id, pr_number));
@@ -78,12 +84,17 @@ if [[ "\$1" == "api" ]]; then
     *) echo "closed -"; exit 0 ;;
   esac
 fi
-# pr list --state merged → recently merged PRs for the report-only pass
+# pr list --state merged → recently merged PRs. Serves BOTH the report-only
+# title pass (reads number,title) and the CREDIBLE-1598 head-branch pass (reads
+# number,headRefName,mergedAt). #100/#300 carry no headRefName so the head-branch
+# pass skips them (title still reports them unlinked); #600 carries a lane head
+# branch naming the still-open, FK-less CREDIBLE-9006.
 if [[ "\$1" == "pr" && "\$2" == "list" ]]; then
   cat <<'JSON'
 [
-  {"number":100,"title":"CREDIBLE-9000 umbrella shipped"},
-  {"number":300,"title":"CREDIBLE-9002 docs addendum"}
+  {"number":100,"title":"CREDIBLE-9000 umbrella shipped","headRefName":"","mergedAt":"2026-10-18T00:00:00Z"},
+  {"number":300,"title":"CREDIBLE-9002 docs addendum","headRefName":"","mergedAt":"2026-10-18T00:30:00Z"},
+  {"number":600,"title":"a title that names no gap","headRefName":"claude/credible-9006-x","mergedAt":"2026-10-20T02:00:00Z"}
 ]
 JSON
   exit 0
@@ -114,7 +125,8 @@ export CHUMP_REPO_ROOT="$TMP"
 mkdir -p "$TMP/.chump-locks"
 AMBIENT="$TMP/.chump-locks/ambient.jsonl"
 
-( cd "$TMP" && python3 "$SCRIPT" --check-merged-pr-links ) >/dev/null 2>&1 || true
+RECON_OUT="$TMP/recon.out"
+( cd "$TMP" && python3 "$SCRIPT" --check-merged-pr-links ) >"$RECON_OUT" 2>&1 || true
 
 SHIPPED="$(cat "$TMP/shipped.txt" 2>/dev/null || true)"
 shipped_gap() { grep -qE "^$1( |\$)" <<<"$SHIPPED"; }
@@ -186,6 +198,40 @@ if grep -q '"kind":"pr_without_gap_link"' "$AMBIENT" 2>/dev/null \
   pass "report-only: pr_without_gap_link emitted for CREDIBLE-9000 and CREDIBLE-9002"
 else
   fail "report-only: pr_without_gap_link not emitted for both unlinked merged PRs"
+fi
+
+# ── CREDIBLE-1598: head-branch backstop ───────────────────────────────────────
+# AC2: an open gap whose MERGED PR is identified by its lane HEAD BRANCH (not a
+# title, not a gap_prs FK) is shipped. CREDIBLE-9006 has no gap_prs row; merged
+# #600's branch claude/credible-9006-x names it. MUTANT (killed here): delete the
+# check_merged_pr_head_branch call in main() → 9006 stays open and this fails.
+if grep -qE '^CREDIBLE-9006 600$' <<<"$SHIPPED"; then
+  pass "CREDIBLE-1598 AC2: FK-less CREDIBLE-9006 closed via merged PR #600's head branch"
+else
+  fail "CREDIBLE-1598 AC2: head-branch gap CREDIBLE-9006 NOT closed via #600 (shipped='$SHIPPED')"
+fi
+# the head-branch close is NOT a title close: #600's title names no gap, so only
+# the branch could have closed 9006 — proves the branch path, not a title leak.
+# AC2: the receipt is logged and tagged via=head_branch (distinct from the FK pass).
+if grep -q '"kind":"gap_closed_from_merged_pr"' "$AMBIENT" 2>/dev/null \
+   && grep -q '"gap_id":"CREDIBLE-9006"' "$AMBIENT" 2>/dev/null \
+   && grep -q '"via":"head_branch"' "$AMBIENT" 2>/dev/null; then
+  pass "CREDIBLE-1598 AC2: gap_closed_from_merged_pr receipt for CREDIBLE-9006 tagged via=head_branch"
+else
+  fail "CREDIBLE-1598 AC2: no via=head_branch gap_closed_from_merged_pr receipt for CREDIBLE-9006 ($(cat "$AMBIENT" 2>/dev/null))"
+fi
+# AC4: the head-branch pass REPORTS the drift it fixes and must never print
+# 'clean' while a merged-PR gap is open. MUTANT (killed here): make the pass emit
+# its clean summary unconditionally (found>0 → still 'clean') → this fails.
+if grep -qE 'GHOST CREDIBLE-9006: head-branch' "$RECON_OUT"; then
+  pass "CREDIBLE-1598 AC4: head-branch pass reports the CREDIBLE-9006 drift it fixes"
+else
+  fail "CREDIBLE-1598 AC4: head-branch pass did not report CREDIBLE-9006 drift ($(grep -i head-branch "$RECON_OUT" 2>/dev/null))"
+fi
+if grep -qE 'merged-pr-head-branch:.*, clean$' "$RECON_OUT"; then
+  fail "CREDIBLE-1598 AC4: head-branch pass printed 'clean' while a merged-PR gap (CREDIBLE-9006) was open"
+else
+  pass "CREDIBLE-1598 AC4: head-branch pass never printed 'clean' while CREDIBLE-9006 drift was open"
 fi
 
 # Source-level guarantee: no body regex / body fetch remains in the reconciler.

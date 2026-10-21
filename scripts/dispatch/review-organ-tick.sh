@@ -280,16 +280,23 @@ _label_op_failed() {
 }
 
 # dispatch_repair <pr> <head> — exactly ONE repair to the author lane, NEVER with
+# derive_gap_from_branch <branch> — prints the gap id a lane branch encodes, or
+# nothing. Every real lane branch is `claude/<gap-lowercase>-…` (e.g.
+# claude/credible-1542); the legacy `chump/<GAP>-…` form and a bare gap id are
+# also accepted. The match is case-insensitive via [A-Za-z] and the derived id is
+# upper-cased (CREDIBLE-1542 review: the old `[A-Z]+` regex matched no real
+# branch). Shared by dispatch_repair (CHANGES path) and ship_merged_gap
+# (CREDIBLE-1598 merge path) so the two never drift.
+derive_gap_from_branch() {
+    printf '%s' "$1" | sed -nE 's#^(chump/|claude/)?([A-Za-z]+-[0-9]+).*#\2#p' | tr '[:lower:]' '[:upper:]'
+}
+
 # --auto-merge (AC4 / repair item 9). Derives the gap from the head branch name
-# and dispatches it; if no gap can be derived, logs and skips. Every real lane
-# branch is `claude/<gap-lowercase>-…` (e.g. claude/credible-1542); the legacy
-# `chump/<GAP>-…` form and a bare gap id are also accepted. The match is
-# case-insensitive via [A-Za-z] and the derived id is upper-cased for `chump
-# dispatch` (CREDIBLE-1542 review: the old `[A-Z]+` regex matched no real branch).
+# and dispatches it; if no gap can be derived, logs and skips.
 dispatch_repair() {
     local pr="$1" head="$2" branch gap
     branch="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json headRefName --jq '.headRefName' 2>/dev/null || true)"
-    gap="$(printf '%s' "$branch" | sed -nE 's#^(chump/|claude/)?([A-Za-z]+-[0-9]+).*#\2#p' | tr '[:lower:]' '[:upper:]')"
+    gap="$(derive_gap_from_branch "$branch")"
     if [[ -z "$gap" ]]; then
         log "PR #$pr: CHANGES REQUIRED but no gap id in branch '$branch' — no repair dispatched"
         return 0
@@ -496,8 +503,34 @@ maybe_arm() {
     fi
     log "PR #$pr: APPROVE for head ${head:0:12} + verified green → head-pinned squash merge (no auto-merge)"
     GH pr merge "$pr" ${REPO:+--repo "$REPO"} --squash --match-head-commit "$head" >/dev/null 2>&1 \
-        && { ARMED=$((ARMED+1)); log "PR #$pr: merged head-pinned"; } \
+        && { ARMED=$((ARMED+1)); log "PR #$pr: merged head-pinned"; ship_merged_gap "$pr" "$head"; } \
         || log "WARN: PR #$pr head-pinned merge did not succeed (head moved or not mergeable)"
+}
+
+# ship_merged_gap <pr> <head> — CREDIBLE-1598. A head-pinned merge that stops at
+# `gh pr merge` leaves the PR's gap `open` with closed_pr NULL, so every organ
+# landing undercounts the PHASE-R rollup (receipt: #5620 merged CREDIBLE-1592 at
+# 04:44Z, gap left open, reconciler reported "clean"). After a merge lands, map
+# the PR back to its gap via the head branch and close it THROUGH `chump gap`
+# (never a direct state.db write): first write the typed gap_prs link (idempotent,
+# CREDIBLE-1520) so the closure reconciler's FK backstop can also see it, then
+# ship with the merged PR as closed_pr. A failure is logged, not fatal — the
+# gap-closure reconciler's head-branch pass is the durable backstop.
+ship_merged_gap() {
+    local pr="$1" head="$2" branch gap
+    branch="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json headRefName --jq '.headRefName' 2>/dev/null || true)"
+    gap="$(derive_gap_from_branch "$branch")"
+    if [[ -z "$gap" ]]; then
+        log "PR #$pr: merged but no gap id in branch '$branch' — gap not auto-shipped (reconciler backstop covers a linked PR)"
+        return 0
+    fi
+    chump gap link-pr "$gap" "$pr" --sha "$head" >/dev/null 2>&1 \
+        || log "WARN: PR #$pr link-pr $gap failed (reconciler FK backstop may miss it)"
+    if chump gap ship "$gap" --closed-pr "$pr" >/dev/null 2>&1; then
+        log "PR #$pr: shipped $gap --closed-pr $pr (organ landing recorded)"
+    else
+        log "WARN: PR #$pr merged but 'chump gap ship $gap --closed-pr $pr' failed — reconciler backstop must close it"
+    fi
 }
 
 # ── list of PRs to process ──

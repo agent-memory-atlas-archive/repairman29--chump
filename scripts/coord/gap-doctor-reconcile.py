@@ -750,6 +750,123 @@ def check_merged_pr_links(state_db: Path, ambient_path: Path, dry_run: bool) -> 
     return closed
 
 
+# CREDIBLE-1598: head-branch backstop. A lane branch deterministically encodes
+# the one gap it was cut for (`claude/<gap-lowercase>-…`, legacy `chump/<GAP>-…`,
+# or a bare id) — this is the branch/lease gap-id the no-title-regex gate
+# (CREDIBLE-1550) explicitly BLESSES as a legitimate close source, NOT the PR
+# title it bans. Mirrors scripts/dispatch/review-organ-tick.sh:derive_gap_from_branch.
+_BRANCH_GAP_RE = re.compile(r"^(?:chump/|claude/)?([A-Za-z]+-[0-9]+)")
+
+
+def gap_from_branch(branch: str) -> "str | None":
+    m = _BRANCH_GAP_RE.match(branch or "")
+    return m.group(1).upper() if m else None
+
+
+def recent_merged_prs_with_branch(repo: str, limit: int = 100) -> list:
+    """Recently merged PRs as [(number, head_ref, merged_at), ...], cache-first
+    then REST. Fetches the HEAD BRANCH (never the title), so the no-title-regex
+    gate (CREDIBLE-1550) stays green: closing keys on the lane branch, not prose.
+    Returns [] on any failure — the head-branch pass then has nothing to scan."""
+    db = github_cache_db()
+    if db.exists() and db.stat().st_size > 0:
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                rows = con.execute(
+                    "SELECT number, COALESCE(head_ref,''), COALESCE(merged_at,'') "
+                    "FROM pr_state WHERE merged_at IS NOT NULL "
+                    "ORDER BY merged_at DESC LIMIT ?1",
+                    (int(limit),),
+                ).fetchall()
+            finally:
+                con.close()
+            if rows:
+                return [(int(n), str(h), str(m)) for n, h, m in rows]
+        except sqlite3.Error:
+            pass  # fall through to REST
+    r = subprocess.run(
+        ["gh", "pr", "list", "--repo", repo, "--state", "merged",
+         "--limit", str(int(limit)), "--json", "number,headRefName,mergedAt"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        return []
+    try:
+        data = json.loads(r.stdout or "[]")
+    except json.JSONDecodeError:
+        return []
+    return [(int(d["number"]), str(d.get("headRefName", "")),
+             str(d.get("mergedAt", ""))) for d in data]
+
+
+def check_merged_pr_head_branch(state_db: Path, ambient_path: Path, dry_run: bool,
+                                limit: int = 100) -> int:
+    """CREDIBLE-1598 (AC2/AC4): close an open gap whose MERGED PR is identified by
+    its HEAD BRANCH, even with NO gap_prs FK. This is the exact class the organ
+    left behind (merge without link/ship) that check_merged_pr_links (needs the
+    FK) and check_closure_drift (needs closed_pr) both miss. Keys on the lane
+    branch `claude/<gap>-…` — the deterministic id the worker cut the branch for,
+    not a title — and ships the still-open gap through `chump gap ship --closed-pr`
+    (never a direct state.db write), logging a gap_closed_from_merged_pr receipt
+    tagged via=head_branch. Reports the drift it fixes; prints 'clean' ONLY when
+    no merged-PR head branch names an open gap (AC4 — never 'clean' while a
+    merged-PR gap is open). Returns the count of drift cases found."""
+    from datetime import datetime, timezone
+
+    repo = resolve_gh_repo()
+    if repo is None:
+        print("merged-pr-head-branch: gh repo unresolved (offline?) — skipping",
+              file=sys.stderr)
+        return 0
+    open_ids = {r["id"] for r in open_gaps_without_closed_pr(state_db)}
+    if not open_ids:
+        print("merged-pr-head-branch: no open gaps without closed_pr — clean")
+        return 0
+    merged = recent_merged_prs_with_branch(repo, limit)
+    if not merged:
+        print("merged-pr-head-branch: no recently merged PRs resolvable — "
+              "nothing to scan")
+        return 0
+    found = 0
+    closed = 0
+    for pr_num, head_ref, merged_at in merged:
+        gid = gap_from_branch(head_ref)
+        if gid is None or gid not in open_ids:
+            continue
+        found += 1
+        open_ids.discard(gid)  # one close per gap even if two branches name it
+        cd = (merged_at or "")[:10]
+        print(f"  GHOST {gid}: head-branch '{head_ref}' PR #{pr_num} merged {cd} "
+              f"— gap still open, no closed_pr")
+        if dry_run:
+            continue
+        try:
+            subprocess.run(
+                ["chump", "gap", "ship", gid, "--closed-pr", str(int(pr_num))],
+                check=True, capture_output=True, text=True,
+            )
+            ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            _emit(ambient_path, {
+                "ts": ts, "kind": "gap_closed_from_merged_pr",
+                "gap_id": gid, "pr_number": int(pr_num),
+                "merged_at": merged_at or "", "source": "gap-doctor-reconcile",
+                "via": "head_branch",
+            })
+            closed += 1
+            print(f"  CLOSED {gid} done (head-branch PR #{pr_num} merged {cd})")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            print(f"  WARN could not close {gid}: {e}", file=sys.stderr)
+    if found == 0:
+        print(f"merged-pr-head-branch: scanned {len(merged)} merged PR(s) — "
+              f"no open gap matches a merged PR's head branch, clean")
+    elif dry_run:
+        print(f"  (dry-run — {found} head-branch ghost(s) would close; no writes)")
+    else:
+        print(f"  found {found} head-branch merged-but-open ghost(s), closed {closed}")
+    return found
+
+
 # CREDIBLE-1552 (Phase R R2, AC1/AC5): gap IDs look like INFRA-123 / CREDIBLE-9.
 # Used ONLY by the report-only pass below to name the open gap a merged PR
 # titles — never to CLOSE anything (closes route exclusively through the
@@ -892,6 +1009,12 @@ def main():
         ambient = REPO_ROOT / ".chump-locks" / "ambient.jsonl"
         print(f"Reading gap store directly: {state_db}")
         check_merged_pr_links(state_db, ambient, args.dry_run)
+        # CREDIBLE-1598: head-branch backstop — close an open gap whose MERGED PR
+        # is identified by its lane head branch even when NO gap_prs FK exists
+        # (the organ-merge-without-link class the FK pass above can't see). Keyed
+        # on the branch, never the title, so it ships+reports instead of
+        # report-only. Runs AFTER the FK pass so FK-linked gaps are already done.
+        check_merged_pr_head_branch(state_db, ambient, args.dry_run)
         # CREDIBLE-1552: report-only companion — surface merged PRs that name an
         # open gap but carry no gap_prs row (the closer never closes from a
         # title, so these would otherwise be silently invisible). Closes nothing.
