@@ -564,16 +564,19 @@ grep -q -- '--auto' "$ORGLOG.merges" && bad "organ AC3: merge used --auto (left 
 [[ "$(tail -1 "$ORGLOG.cmt.203")" == "VERDICT: APPROVE" ]] && ok "organ AC1: comment ends in VERDICT: APPROVE" \
     || bad "organ AC1: comment does not end in VERDICT: APPROVE"
 
-# verified_green BEHAVIORAL pinning (CREDIBLE-1542 review REQUIRED). The arm gate
-# is APPROVE (read from the comment) AND verified-green for the exact head. PR 203
-# is the AC3 PR: a clean APPROVE that arms. Here only the CHECK ROLLUP changes, so
-# any non-arm is attributable to verified_green alone. A NEUTRAL, SKIPPED, still-
-# running, empty, or head-mismatched rollup must HOLD the arm (no merge). This
-# kills the two surviving arm-gate mutants: H (verified_green counts NEUTRAL/
-# SKIPPED as green — repair item 12 N1) and I (verified_green gutted to return 0).
+# verified_green BEHAVIORAL pinning (CREDIBLE-1542 / CREDIBLE-1595 review REQUIRED).
+# The arm gate is APPROVE (read from the comment) AND verified-green for the exact
+# head. PR 203 is the AC3 PR: a clean APPROVE that arms. Here only the CHECK ROLLUP
+# changes, so any non-arm is attributable to verified_green alone.
+#
+# CREDIBLE-1595: a path-filtered check conclusion is SKIPPED and every chump PR
+# carries ~16 of them, so SKIPPED is now GREEN; the teeth are a branch-protection
+# required-check presence test ("verified" must be COMPLETED+SUCCESS). A NEUTRAL /
+# FAILURE / still-running / empty / head-mismatched rollup, OR a SKIPPED / absent
+# required check, must HOLD the arm (no merge).
 echo "[d/verified_green] non-green check rollups hold the head-pinned arm"
 VG_HEAD=deadbeef1234567890abcdef1234567890abcdef
-# Positive control: the all-SUCCESS rollup still arms 203 (same as AC3).
+# Positive control: an all-SUCCESS rollup with the required check arms 203 (AC3).
 export ORG_ROLLUP='{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS","name":"verified"}],"headRefOid":"'"$VG_HEAD"'"}'
 organ_run --pr 203
 grep -q '^MERGE pr merge 203 --squash --match-head-commit' "$ORGLOG.merges" \
@@ -581,7 +584,7 @@ grep -q '^MERGE pr merge 203 --squash --match-head-commit' "$ORGLOG.merges" \
     || bad "verified_green: all-SUCCESS rollup did not arm 203 (merges: $(cat "$ORGLOG.merges"))"
 for spec in \
     "a NEUTRAL check:{\"statusCheckRollup\":[{\"status\":\"COMPLETED\",\"conclusion\":\"NEUTRAL\",\"name\":\"verified\"}],\"headRefOid\":\"$VG_HEAD\"}" \
-    "a SKIPPED check:{\"statusCheckRollup\":[{\"status\":\"COMPLETED\",\"conclusion\":\"SKIPPED\",\"name\":\"verified\"}],\"headRefOid\":\"$VG_HEAD\"}" \
+    "a SKIPPED required check:{\"statusCheckRollup\":[{\"status\":\"COMPLETED\",\"conclusion\":\"SKIPPED\",\"name\":\"verified\"}],\"headRefOid\":\"$VG_HEAD\"}" \
     "a still-running check:{\"statusCheckRollup\":[{\"status\":\"IN_PROGRESS\",\"conclusion\":\"\",\"name\":\"verified\"}],\"headRefOid\":\"$VG_HEAD\"}" \
     "an empty rollup:{\"statusCheckRollup\":[],\"headRefOid\":\"$VG_HEAD\"}" \
     "a head-mismatched rollup:{\"statusCheckRollup\":[{\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\",\"name\":\"verified\"}],\"headRefOid\":\"cafef00dcafef00dcafef00dcafef00dcafef00d\"}" \
@@ -591,6 +594,79 @@ for spec in \
     organ_run --pr 203
     [[ ! -s "$ORGLOG.merges" ]] \
         && ok "verified_green: $name → NOT armed (head-pinned arm held)" \
+        || bad "verified_green: $name armed 203 (merges: $(cat "$ORGLOG.merges"))"
+done
+unset ORG_ROLLUP
+
+# CREDIBLE-1595: the REAL #5619 rollup shape — 20 SUCCESS + 16 SKIPPED (the
+# path-filtered chump PR shape that GitHub reports CLEAN but the old gate could
+# never arm). The required "verified" check is one of the 20 SUCCESS. This block
+# pins the four CREDIBLE-1595 ACs behaviorally; each is killed by the named mutant
+# applied to verified_green in scripts/dispatch/review-organ-tick.sh:
+#   - real shape arms                 ← mutant: treat SKIPPED as failure
+#   - a non-required FAILURE holds     ← mutant: accept any conclusion
+#   - the required check missing holds ← mutant: skip the required-check presence test
+#   - one check IN_PROGRESS holds      ← mutant: accept a non-COMPLETED status
+echo "[d/verified_green] CREDIBLE-1595: real #5619 shape (20 SUCCESS + 16 SKIPPED)"
+# Build the four rollups with a generator so the 36-check shape stays readable.
+# variant: ok | fail-nonreq | miss-required | in-progress
+mk_rollup() {  # <variant> → prints the rollup JSON for head VG_HEAD
+    VARIANT="$1" VG_HEAD="$VG_HEAD" python3 -c '
+import json, os
+variant = os.environ["VARIANT"]
+checks = []
+# 20 SUCCESS checks; "verified" (the branch-protection required check) is one.
+succ = ["verified", "fast-checks", "fast-checks-required", "fast-checks-heavy",
+        "fast-checks-heavy-required", "clippy-required", "cargo-test",
+        "cargo-test-required", "test", "test-e2e", "audit", "audit-required",
+        "audit-shard (2)", "audit-shard (3)", "audit-shard (4)", "pr-hygiene",
+        "changes", "plan", "flip-on-merge", "Voice ban-list lint"]
+# 16 SKIPPED path-filtered checks (the ~16 every chump PR carries).
+skip = ["arm", "required-check-grace-guard", "build-local-artifacts", "clippy",
+        "build-global-artifacts", "host", "e2e", "announce", "cargo-test-shard",
+        "ACP protocol smoke test (impl)", "ACP real-client", "publish-homebrew-formula",
+        "PWA flake advisory (non-blocking)", "PWA visual diff (advisory)",
+        "Supabase Preview", "ACP force-fire fixture (CREDIBLE-057)"]
+for n in succ:
+    checks.append({"status": "COMPLETED", "conclusion": "SUCCESS", "name": n})
+for n in skip:
+    checks.append({"status": "COMPLETED", "conclusion": "SKIPPED", "name": n})
+if variant == "fail-nonreq":
+    # one NON-required check FAILURE (isolates the accept-any-conclusion mutant).
+    checks[1]["conclusion"] = "FAILURE"
+elif variant == "miss-required":
+    # drop the required "verified" check entirely (isolates the presence test).
+    checks = [c for c in checks if c["name"] != "verified"]
+elif variant == "in-progress":
+    # one check still running (not COMPLETED). conclusion is SUCCESS so the status
+    # gate (status != COMPLETED → fail closed) is the SOLE hold reason — this
+    # isolates the "accept a non-COMPLETED status" mutant; an empty conclusion
+    # would instead be caught by the conclusion gate (already covered by fail-nonreq).
+    checks[5] = {"status": "IN_PROGRESS", "conclusion": "SUCCESS", "name": "cargo-test"}
+print(json.dumps({"statusCheckRollup": checks, "headRefOid": os.environ["VG_HEAD"]}))
+'
+}
+# count sanity: the ok shape is exactly 20 SUCCESS + 16 SKIPPED.
+nsucc="$(mk_rollup ok | python3 -c 'import json,sys; print(sum(1 for c in json.load(sys.stdin)["statusCheckRollup"] if c["conclusion"]=="SUCCESS"))')"
+nskip="$(mk_rollup ok | python3 -c 'import json,sys; print(sum(1 for c in json.load(sys.stdin)["statusCheckRollup"] if c["conclusion"]=="SKIPPED"))')"
+{ [[ "$nsucc" == 20 && "$nskip" == 16 ]] && ok "verified_green: fixture is the real #5619 shape (20 SUCCESS + 16 SKIPPED)"; } \
+    || bad "verified_green: fixture shape wrong ($nsucc SUCCESS + $nskip SKIPPED, want 20 + 16)"
+
+export ORG_ROLLUP="$(mk_rollup ok)"
+organ_run --pr 203
+grep -q '^MERGE pr merge 203 --squash --match-head-commit' "$ORGLOG.merges" \
+    && ok "verified_green: real #5619 shape (20 SUCCESS + 16 SKIPPED) → ARMED (mutant: treat SKIPPED as failure)" \
+    || bad "verified_green: real #5619 shape did not arm 203 (merges: $(cat "$ORGLOG.merges"))"
+for spec in \
+    "a non-required FAILURE in the #5619 shape:fail-nonreq:accept any conclusion" \
+    "the required check missing from the #5619 shape:miss-required:skip the required-check presence test" \
+    "one check IN_PROGRESS in the #5619 shape:in-progress:accept a non-COMPLETED status" \
+  ; do
+    IFS=: read -r name variant mutant <<<"$spec"
+    export ORG_ROLLUP="$(mk_rollup "$variant")"
+    organ_run --pr 203
+    [[ ! -s "$ORGLOG.merges" ]] \
+        && ok "verified_green: $name → NOT armed (mutant: $mutant)" \
         || bad "verified_green: $name armed 203 (merges: $(cat "$ORGLOG.merges"))"
 done
 unset ORG_ROLLUP

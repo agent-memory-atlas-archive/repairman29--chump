@@ -136,10 +136,18 @@ gate_files_touched() {
     return 1
 }
 
-# verified_green <pr> <head> — exit 0 ONLY when the PR's current head has at
-# least one completed check and EVERY check concluded SUCCESS/NEUTRAL/SKIPPED is
-# NOT counted as green: a neutral/skipped or still-running check is NOT green
-# (repair item 12 N1: verified-neutral-or-skipped-counted-as-green is a mutant).
+# verified_green <pr> <head> — exit 0 ONLY when the PR's current head is green
+# under branch protection: every check COMPLETED with conclusion SUCCESS or
+# SKIPPED, AND every branch-protection required check PRESENT with SUCCESS.
+#
+# CREDIBLE-1595: a path-filtered check conclusion is SKIPPED, and every chump PR
+# carries ~16 of them (jobs gated off by the ci.yml path filters). The old gate
+# treated SKIPPED as not-green, so the organ could never arm a real chump PR
+# (#5619: 20 SUCCESS + 16 SKIPPED, GitHub CLEAN, yet never armed). SKIPPED is now
+# green; the teeth move to a required-check presence test so "all skipped" can
+# never pass — a required check that is SKIPPED or absent still fails closed,
+# because its gate never actually ran. FAILURE / CANCELLED / TIMED_OUT /
+# ACTION_REQUIRED / NEUTRAL / "" are still NOT green, on any check.
 verified_green() {
     local pr="$1" head="$2" roll
     roll="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} \
@@ -157,13 +165,26 @@ if (d.get("headRefOid") or "").lower() != os.environ.get("HEAD_SHA","").lower():
 checks = d.get("statusCheckRollup") or []
 if not checks:
     sys.exit(1)
+# Branch-protection required checks, pinned here as a literal constant from the
+# "Protect main" ruleset (repos/.../rulesets/15133729 → required_status_checks).
+# A safety input is NEVER read from an env var (standing rule); update this list
+# by hand only when the ruleset itself changes.
+REQUIRED = {"verified"}
+required_success = set()
 for c in checks:
     status = (c.get("status") or "").upper()
     concl  = (c.get("conclusion") or "").upper()
+    name   = c.get("name") or ""
     if status and status != "COMPLETED":
-        sys.exit(1)       # still running
-    if concl != "SUCCESS":
-        sys.exit(1)       # NEUTRAL/SKIPPED/FAILURE/"" are NOT green
+        sys.exit(1)       # queued / in-progress → not COMPLETED → fail closed
+    if concl not in ("SUCCESS", "SKIPPED"):
+        sys.exit(1)       # FAILURE/CANCELLED/TIMED_OUT/ACTION_REQUIRED/NEUTRAL/"" are NOT green
+    if name in REQUIRED and concl == "SUCCESS":
+        required_success.add(name)
+# Every required check must be PRESENT and SUCCESS. A SKIPPED or missing required
+# check fails closed — a path filter can never satisfy a branch-protection gate.
+if required_success != REQUIRED:
+    sys.exit(1)
 sys.exit(0)
 ' "$roll"
 }
