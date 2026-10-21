@@ -286,6 +286,21 @@ _label_op_failed() {
         "$(ts)" "$pr" "$(json_str "$op")" "$(json_str "$lbl")")"
 }
 
+# approve_clear_holds <pr> <gate_rc> — CREDIBLE-1597: on an APPROVE, ALWAYS clear
+# review-held; clear review-needs-mutants too ONLY when the head touches NO ship
+# gate (gate_rc != 0). A gate-file head KEEPS review-needs-mutants — its mutation
+# rule is still unmet (AC1). This is how a STALE review-needs-mutants from the old
+# pre-CREDIBLE-1590 blanket gate list is finally cleared: the first tick the organ
+# APPROVEs a non-gate head, both holds come off, so review_hold_allows can let the
+# PR arm instead of stranding it held-forever (the bug this slice closes). A
+# removal gh refuses still fails loudly via label_remove (CREDIBLE-1588).
+approve_clear_holds() {
+    local pr="$1" gate_rc="$2"
+    label_remove "$pr" "$REVIEW_HOLD_LABEL"
+    [[ "$gate_rc" != 0 ]] && label_remove "$pr" "$REVIEW_NEEDS_MUTANTS_LABEL"
+    return 0
+}
+
 # dispatch_repair <pr> <head> — exactly ONE repair to the author lane, NEVER with
 # derive_gap_from_branch <branch> — prints the gap id a lane branch encodes, or
 # nothing. Every real lane branch is `claude/<gap-lowercase>-…` (e.g.
@@ -500,6 +515,17 @@ process_pr() {
     if prior="$(current_head_verdict "$pr" "$head")"; then
         if [[ "$prior" == APPROVE ]]; then
             log "PR #$pr: current-head verdict already APPROVE — reconciling arming only (no re-review)"
+            # CREDIBLE-1597: a PR that already carries a current-head organ APPROVE
+            # but a STALE review-needs-mutants (from the pre-CREDIBLE-1590 blanket
+            # gate list) is held forever because review_hold_allows counts that
+            # label. Clear the holds here — gated on a LIVE classification of this
+            # head's diff — so a non-gate head drops the stale label and arms, while
+            # a head that really touches a ship gate keeps it. gate_rc 3 (diff
+            # uncomputable) fails closed → treated as a gate → label kept.
+            local igate_rc
+            if gate_files_touched "$pr" >/dev/null 2>&1; then igate_rc=0; else igate_rc=$?; fi
+            [[ "$igate_rc" == 3 ]] && igate_rc=0
+            approve_clear_holds "$pr" "$igate_rc"
             maybe_arm "$pr" "$head"
         else
             log "PR #$pr: current-head verdict already CHANGES REQUIRED — held, no re-review/re-dispatch"
@@ -569,7 +595,10 @@ process_pr() {
 
     if [[ "$verdict" == APPROVE ]]; then
         APPROVED=$((APPROVED+1))
-        label_remove "$pr" "$REVIEW_HOLD_LABEL"
+        # CREDIBLE-1597: on APPROVE clear review-held AND (for a non-gate head)
+        # review-needs-mutants, so a stale blanket-gate label never strands the PR.
+        # gate_rc is this head's live classification (0 = gate → keep the label).
+        approve_clear_holds "$pr" "$gate_rc"
         maybe_arm "$pr" "$head"
     else
         CHANGES=$((CHANGES+1))

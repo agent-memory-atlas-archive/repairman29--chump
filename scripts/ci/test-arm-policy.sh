@@ -603,6 +603,36 @@ PY
     # cannot satisfy). The organ must REPORT the refusal (WARN log +
     # review_organ_label_error) for EITHER op, not swallow it with `|| true`.
     if [[ -n "${ORG_REJECT_LABEL:-}" && ( "$a" == *"--add-label"* || "$a" == *"--remove-label"* ) ]]; then exit 1; fi
+    # CREDIBLE-1597 fixture: a label op gh ACCEPTS mutates the PR's label set in
+    # ORGCMT, so a later labels,comments read (review_hold_allows) reflects it —
+    # the same as real gh. This lets a test prove that removing a stale
+    # review-needs-mutants actually unblocks the arm gate, and that keeping a
+    # gate-file label keeps the PR held. No-op on labels not present.
+    addlbl=""; rmlbl=""
+    for ((i=1;i<=$#;i++)); do
+      case "${!i}" in
+        --add-label)    j=$((i+1)); addlbl="${!j}" ;;
+        --remove-label) j=$((i+1)); rmlbl="${!j}" ;;
+      esac
+    done
+    if [[ -n "$addlbl" || -n "$rmlbl" ]]; then
+      ADD="$addlbl" RM="$rmlbl" python3 - "$ORGCMT" <<'PYEDIT'
+import json, os, sys
+p = sys.argv[1]
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {"labels": [], "comments": []}
+labels = [l.get("name") if isinstance(l, dict) else l for l in (d.get("labels") or [])]
+add = os.environ.get("ADD", ""); rm = os.environ.get("RM", "")
+if add and add not in labels:
+    labels.append(add)
+if rm:
+    labels = [l for l in labels if l != rm]
+d["labels"] = [{"name": l} for l in labels]
+json.dump(d, open(p, "w"))
+PYEDIT
+    fi
     exit 0;;
   "pr merge") echo "MERGE $a" >>"$ORGLOG.merges"; exit 0;;
 esac
@@ -1227,6 +1257,56 @@ grep -qE 'GATE_LIST_VERSION="\$\(chump_ship_gate_list_version\)"' "$ORGAN" \
 grep -qE 'CHUMP_[A-Z_]*GATE_(LIST_)?VERSION' "$ORGAN" "$SGF" \
     && bad "CREDIBLE-1592: a CHUMP_* env override for the gate-list version exists (safety-input bypass)" \
     || ok "CREDIBLE-1592: no CHUMP_* env override for the gate-list version"
+
+# ── CREDIBLE-1597: the organ clears a STALE review-needs-mutants on APPROVE so a
+# PR it later approves is no longer held forever. A PR carrying a current-head
+# organ APPROVE plus the pre-CREDIBLE-1590 blanket review-needs-mutants label is
+# re-evaluated on this tick: a NON-gate head drops the stale label and ARMS; a
+# head that really touches a ship gate KEEPS the label and does NOT arm (its
+# mutation rule is still unmet). The stub mutates ORGCMT labels on an accepted
+# label op (like real gh), so review_hold_allows reads the post-removal label set.
+echo "[CREDIBLE-1597] stale review-needs-mutants cleared on a non-gate APPROVE; kept on a gate APPROVE"
+C1597_HEAD=deadbeef1234567890abcdef1234567890abcdef
+seed_stale_mutants_1597() { # <pr-head> — labels:[review-needs-mutants] + current-head organ APPROVE
+    HEAD1597="$1" python3 - "$ORGCMT" <<'PY'
+import json, os, sys
+head = os.environ["HEAD1597"]
+body = "VERDICT: APPROVE\nhead: %s\nblockers: none\nmutants: ok\nVERDICT: APPROVE" % head
+json.dump({"labels": [{"name": "review-needs-mutants"}],
+           "comments": [{"body": body, "author": {"login": "organbot"}, "createdAt": "2026-10-20T00:00:00Z"}]},
+          open(sys.argv[1], "w"))
+PY
+}
+run_organ_seeded_1597() { # <pr> — run the organ WITHOUT resetting the seeded ORGCMT
+    : >"$ORGLOG.merges"; : >"$ORGLOG.chump"; : >"$ORGLOG.edits"
+    ( export PATH="$D/bin:$PATH" CHUMP_AMBIENT_LOG="$D/amb.jsonl"
+      bash "$ORGAN" --claude-bin "$D/bin/claude" --checkout "$D/checkout" --pr "$1" ) >/dev/null 2>&1 || true
+}
+# (a) NON-gate stranded PR (203 → src/foo.rs): the stale label is removed and the
+# PR arms on verified green. MUTANT (killed here): approve_clear_holds never
+# removes review-needs-mutants → the label persists in ORGCMT → review_hold_allows
+# HOLDS → no remove-label edit AND no merge.
+seed_stale_mutants_1597 "$C1597_HEAD"
+run_organ_seeded_1597 203
+grep -q -- '--remove-label review-needs-mutants' "$ORGLOG.edits" \
+    && ok "organ CREDIBLE-1597: non-gate APPROVE removes stale review-needs-mutants (mutant: never remove)" \
+    || bad "organ CREDIBLE-1597: non-gate APPROVE did NOT remove review-needs-mutants ($(cat "$ORGLOG.edits"))"
+grep -q '^MERGE pr merge 203 --squash --match-head-commit' "$ORGLOG.merges" \
+    && ok "organ CREDIBLE-1597: non-gate PR arms once the stale label is cleared (verified green)" \
+    || bad "organ CREDIBLE-1597: non-gate PR did not arm after clearing stale label (merges: $(cat "$ORGLOG.merges"))"
+# (b) GATE-file stranded PR (201 → .github/workflows/ci.yml): the label is KEPT
+# (mutation rule unmet) and the PR does NOT arm. MUTANT (killed here):
+# approve_clear_holds removes review-needs-mutants regardless of gate → ORGCMT
+# loses the label → review_hold_allows passes → a gate-file PR merges blind.
+seed_stale_mutants_1597 "$C1597_HEAD"
+run_organ_seeded_1597 201
+grep -q -- '--remove-label review-needs-mutants' "$ORGLOG.edits" \
+    && bad "organ CREDIBLE-1597: gate-file APPROVE wrongly removed review-needs-mutants (mutant: always remove)" \
+    || ok "organ CREDIBLE-1597: gate-file APPROVE keeps review-needs-mutants (mutation rule unmet)"
+[[ ! -s "$ORGLOG.merges" ]] \
+    && ok "organ CREDIBLE-1597: gate-file PR does NOT arm while review-needs-mutants held" \
+    || bad "organ CREDIBLE-1597: a gate-file PR armed despite review-needs-mutants (merges: $(cat "$ORGLOG.merges"))"
+echo '{"labels":[],"comments":[]}' >"$ORGCMT"  # restore clean state for later blocks
 
 # Structural arm-site gate: the organ's arm path is guarded by the fail-closed
 # predicate and is head-pinned; it must NOT contain a `gh pr merge … --auto`.
