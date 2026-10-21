@@ -553,6 +553,7 @@ case "$1 $2" in
       case "$pr" in
         201) echo ".github/workflows/ci.yml" ;;
         205) echo "scripts/ci/test-example-1590.sh" ;;
+        210|211|212|213|214) echo "scripts/git-hooks/pre-push" ;;  # CREDIBLE-1600 gate file
         *)   echo "src/foo.rs" ;;
       esac
       exit 0
@@ -571,7 +572,19 @@ case "$1 $2" in
     if [[ "$a" == *isCrossRepository* ]]; then [[ "$pr" == 202 ]] && echo true || echo false; exit 0; fi
     if [[ "$a" == *headRefName* ]]; then echo "claude/credible-9${pr}-x"; exit 0; fi
     exit 0;;
-  "pr diff") { [[ "$pr" == 204 || "$pr" == 206 ]] && echo "FORCE_CHANGES diff"; } || echo "clean diff"; exit 0;;
+  "pr diff")
+    case "$pr" in
+      210|211|212|213)
+        # CREDIBLE-1600: a REAL, clean unified diff → a non-empty STABLE patch-id
+        # (git patch-id needs diff-shaped input); the stub model APPROVEs it.
+        printf 'diff --git a/scripts/git-hooks/pre-push b/scripts/git-hooks/pre-push\nindex aaaaaaa..bbbbbbb 100755\n--- a/scripts/git-hooks/pre-push\n+++ b/scripts/git-hooks/pre-push\n@@ -1,2 +1,3 @@\n #!/usr/bin/env bash\n set -e\n+echo credible-1600\n' ;;
+      214)
+        # CREDIBLE-1600: a REAL unified diff carrying FORCE_CHANGES → stub model CHANGES.
+        printf 'diff --git a/scripts/git-hooks/pre-push b/scripts/git-hooks/pre-push\nindex ccccccc..ddddddd 100755\n--- a/scripts/git-hooks/pre-push\n+++ b/scripts/git-hooks/pre-push\n@@ -1,2 +1,3 @@\n #!/usr/bin/env bash\n set -e\n+echo FORCE_CHANGES\n' ;;
+      204|206) echo "FORCE_CHANGES diff" ;;
+      *) echo "clean diff" ;;
+    esac
+    exit 0;;
   "pr comment")
     bf=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == "--body-file" ]] && { j=$((i+1)); bf="${!j}"; }; done
     cp "$bf" "$ORGLOG.cmt.$pr" 2>/dev/null
@@ -761,6 +774,124 @@ grep -qiE '^mutants: NOT RUN' "$ORGLOG.cmt.201" && ok "organ AC5: verdict carrie
 [[ "$(sed -n '1p' "$ORGLOG.cmt.201")" == "VERDICT: CHANGES REQUIRED" ]] && ok "organ AC5: gate-file verdict is CHANGES REQUIRED (not APPROVE)" \
     || bad "organ AC5: gate-file verdict was not CHANGES REQUIRED"
 [[ -s "$ORGLOG.merges" ]] && bad "organ AC5: a gate-file PR was merged" || ok "organ AC5: gate-file PR not merged"
+
+# ── CREDIBLE-1600: a gate-file PR CAN land when a mutant-capable review RECORD for
+# THIS exact PR-diff patch-id is posted under the organ marker format by the
+# trusted login. The organ accepts the record ONLY when its patch-id equals the
+# current PR diff patch-id (git diff origin/main...HEAD | git patch-id --stable)
+# AND it names at least one mutant AND it is authored by the trusted login; it then
+# runs its OWN model review and arms on model APPROVE PLUS the record — never the
+# record alone (fail closed on every other case). Each refusal + the accept path is
+# driven with stub gh + stub claude and killed by a named mutant on the organ.
+echo "[d/CREDIBLE-1600] gate-file PR + mutant-capable record for the current patch-id clears the hold"
+GFHEAD=deadbeef1234567890abcdef1234567890abcdef
+# The patch-id the organ computes for each PR's diff (same pipeline as the organ:
+# gh pr diff | git patch-id --stable). 210/211/212/213 share one clean diff; 214 is
+# the FORCE_CHANGES diff, so its id differs.
+GFPID="$("$D/bin/gh" pr diff 210 2>/dev/null | git patch-id --stable 2>/dev/null | awk 'NR==1{print $1}')"
+GFPID214="$("$D/bin/gh" pr diff 214 2>/dev/null | git patch-id --stable 2>/dev/null | awk 'NR==1{print $1}')"
+{ [[ "$GFPID" =~ ^[0-9a-f]{40}$ && "$GFPID214" =~ ^[0-9a-f]{40}$ && "$GFPID" != "$GFPID214" ]] \
+    && ok "CREDIBLE-1600: PR-diff patch-ids computed (stable, non-empty, distinct for the FORCE_CHANGES diff)"; } \
+    || bad "CREDIBLE-1600: patch-id fixture wrong (clean=$GFPID force=$GFPID214)"
+GFVER="$( source "$REPO_ROOT/scripts/coord/lib/ship-gate-files.sh"; chump_ship_gate_list_version )"
+
+# seed_gf_cmt <rec-author> <rec-head> <rec-patch-id> <names-mutants 1|0> <with-prior-hold 1|0> <hold-version>
+# Writes ORGCMT with an optional prior MECHANICAL gate-file hold (organbot, stamped,
+# with review-held+review-needs-mutants labels) followed by a NEWER record comment.
+seed_gf_cmt() {
+    RA="$1" RH="$2" RP="$3" RM="$4" WH="$5" HV="$6" python3 - "$ORGCMT" <<'PY'
+import json, os, sys
+ra=os.environ["RA"]; rh=os.environ["RH"]; rp=os.environ["RP"]
+rm=os.environ["RM"]; wh=os.environ["WH"]; hv=os.environ.get("HV","")
+comments=[]; labels=[]
+if wh=="1":
+    comments.append({"body":("VERDICT: CHANGES REQUIRED\n"
+        "head: %s\n"
+        "mutants: NOT RUN — gate-file change (scripts/git-hooks/pre-push) needs a mutant-capable reviewer; labeled review-needs-mutants\n"
+        "gate-list-version: %s\n"
+        "VERDICT: CHANGES REQUIRED" % (rh, hv)),
+        "author":{"login":"organbot"},"createdAt":"2026-10-21T01:00:00Z"})
+    labels=[{"name":"review-held"},{"name":"review-needs-mutants"}]
+rec=["mutant-capable review record (CREDIBLE-1600)","head: %s"%rh,"patch-id: %s"%rp]
+if rm=="1":
+    rec+=["M1 KILLED","M2 KILLED","M3 SURVIVED — pre-existing loose test, filed CREDIBLE-1601"]
+comments.append({"body":"\n".join(rec),"author":{"login":ra},"createdAt":"2026-10-21T02:00:00Z"})
+json.dump({"labels":labels,"comments":comments},open(sys.argv[1],"w"))
+PY
+}
+# run_gf <pr> — one organ tick on <pr> WITHOUT resetting the seeded ORGCMT.
+run_gf() { : >"$ORGLOG.merges"; : >"$ORGLOG.chump"; : >"$ORGLOG.edits"; rm -f "$ORGLOG.cmt.$1"
+    ( export PATH="$D/bin:$PATH" CHUMP_AMBIENT_LOG="$D/amb.jsonl"
+      bash "$ORGAN" --claude-bin "$D/bin/claude" --checkout "$D/checkout" --pr "$1" ) >/dev/null 2>&1 || true; }
+
+# ACCEPT PATH (PR 210): a prior MECHANICAL hold exists AND a newer trusted record
+# for the current patch-id arrives. The organ re-evaluates, clears the mutant hold
+# label, runs its model review (clean diff → APPROVE) and arms head-pinned. This is
+# the real production scenario (hold posted first, record posted after). MUTANT
+# (killed here): make mutant_record_satisfies always fail → the organ re-posts the
+# mechanical hold and never merges → the merge assert below fails.
+seed_gf_cmt organbot "$GFHEAD" "$GFPID" 1 1 "$GFVER"
+run_gf 210
+grep -q '^MERGE pr merge 210 --squash --match-head-commit deadbeef' "$ORGLOG.merges" \
+    && ok "CREDIBLE-1600 ACCEPT: gate-file PR + valid record for the current patch-id → model APPROVE armed head-pinned (mutant: record never accepted)" \
+    || bad "CREDIBLE-1600 ACCEPT: valid record did not arm 210 (merges: $(cat "$ORGLOG.merges"))"
+grep -q 'remove-label review-needs-mutants' "$ORGLOG.edits" \
+    && ok "CREDIBLE-1600 ACCEPT: the record clears a prior review-needs-mutants hold (so the arm is not blocked)" \
+    || bad "CREDIBLE-1600 ACCEPT: review-needs-mutants not cleared on the record path (edits: $(cat "$ORGLOG.edits"))"
+grep -q 'add-label review-needs-mutants' "$ORGLOG.edits" \
+    && bad "CREDIBLE-1600 ACCEPT: the organ re-held the record-backed PR for mutants" \
+    || ok "CREDIBLE-1600 ACCEPT: the organ did not re-apply review-needs-mutants on the record path"
+[[ "$(sed -n '1p' "$ORGLOG.cmt.210" 2>/dev/null)" == "VERDICT: APPROVE" ]] \
+    && ok "CREDIBLE-1600 ACCEPT: the organ ran its OWN model review (posted VERDICT: APPROVE), it did not arm on the record alone" \
+    || bad "CREDIBLE-1600 ACCEPT: no model APPROVE verdict posted for 210 (first line: $(sed -n '1p' "$ORGLOG.cmt.210" 2>/dev/null))"
+
+# REFUSAL 1 — MISMATCHED patch-id (PR 211): a record naming a DIFFERENT patch-id is
+# ignored (fail closed) → held for mutants, never model-reviewed, never merged.
+# MUTANT (killed here): accept any patch-id (drop the `expect.startswith(...)`
+# compare) → the record is accepted → clean diff → model APPROVE → 211 merges →
+# the no-merge assert fails.
+seed_gf_cmt organbot "$GFHEAD" ffffffffffffffffffffffffffffffffffffffff 1 0 ""
+run_gf 211
+{ [[ ! -s "$ORGLOG.merges" ]] && grep -q 'add-label review-needs-mutants' "$ORGLOG.edits"; } \
+    && ok "CREDIBLE-1600 REFUSAL mismatched-patch-id: wrong patch-id ignored → held for mutants, not merged (mutant: accept a mismatched patch-id)" \
+    || bad "CREDIBLE-1600 REFUSAL mismatched-patch-id: wrong patch-id was accepted (merges: $(cat "$ORGLOG.merges"); edits: $(cat "$ORGLOG.edits"))"
+
+# REFUSAL 2 — NO MUTANT LINES (PR 212): a record with the right patch-id but that
+# names NO mutant (no KILLED/SURVIVED line) is ignored → held, not merged. MUTANT
+# (killed here): drop the `mutline.search(...)` check → the empty record is accepted
+# → model APPROVE → 212 merges → the no-merge assert fails.
+seed_gf_cmt organbot "$GFHEAD" "$GFPID" 0 0 ""
+run_gf 212
+{ [[ ! -s "$ORGLOG.merges" ]] && grep -q 'add-label review-needs-mutants' "$ORGLOG.edits"; } \
+    && ok "CREDIBLE-1600 REFUSAL no-mutants: a record naming no mutant is ignored → held, not merged (mutant: accept a record with no mutant lines)" \
+    || bad "CREDIBLE-1600 REFUSAL no-mutants: a mutant-less record was accepted (merges: $(cat "$ORGLOG.merges"); edits: $(cat "$ORGLOG.edits"))"
+
+# REFUSAL 3 — UNTRUSTED AUTHOR (PR 213): a valid-looking record (right patch-id, real
+# mutant lines) from a NON-organ account is a forgery and is ignored → held, not
+# merged. MUTANT (killed here): drop the `author == trusted` filter → the forged
+# record is accepted → model APPROVE → 213 merges → the no-merge assert fails.
+seed_gf_cmt mallory "$GFHEAD" "$GFPID" 1 0 ""
+run_gf 213
+{ [[ ! -s "$ORGLOG.merges" ]] && grep -q 'add-label review-needs-mutants' "$ORGLOG.edits"; } \
+    && ok "CREDIBLE-1600 REFUSAL untrusted-author: a record from a non-organ account is ignored → held, not merged (mutant: trust any author)" \
+    || bad "CREDIBLE-1600 REFUSAL untrusted-author: a forged record was accepted (merges: $(cat "$ORGLOG.merges"); edits: $(cat "$ORGLOG.edits"))"
+
+# NEVER ARMS ON THE RECORD ALONE (PR 214): a fully VALID record is present, but the
+# organ's own model review returns CHANGES (the 214 diff carries FORCE_CHANGES). The
+# PR must NOT merge (the record is necessary, not sufficient — the model APPROVE is
+# also required) and the organ dispatches exactly ONE repair. MUTANT (killed here):
+# arm directly on a valid record (skip the model review in the record branch) → 214
+# merges despite the model CHANGES → the no-merge assert fails.
+seed_gf_cmt organbot "$GFHEAD" "$GFPID214" 1 0 ""
+run_gf 214
+[[ ! -s "$ORGLOG.merges" ]] \
+    && ok "CREDIBLE-1600 record-alone: valid record + model CHANGES → NOT merged (mutant: arm without the model APPROVE)" \
+    || bad "CREDIBLE-1600 record-alone: a valid record armed 214 without a model APPROVE (merges: $(cat "$ORGLOG.merges"))"
+ndisp1600="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp1600="${ndisp1600:-0}"
+[[ "$ndisp1600" == 1 ]] \
+    && ok "CREDIBLE-1600 record-alone: model CHANGES on a record-backed gate-file PR → exactly one repair dispatched" \
+    || bad "CREDIBLE-1600 record-alone: expected 1 repair dispatch, got $ndisp1600 ($(cat "$ORGLOG.chump"))"
+echo '{"labels":[],"comments":[]}' >"$ORGCMT"  # restore clean state for later blocks
 
 # ── CREDIBLE-1588: the organ creates its hold labels every tick (idempotently)
 # and a label op gh REFUSES fails LOUDLY (log + event), never silently. Before

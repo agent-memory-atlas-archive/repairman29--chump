@@ -7,12 +7,19 @@
 # ONE bounded tick. For each open PR whose CURRENT head has no verdict yet:
 #   (a) skip drafts, fork PRs (never arm a fork), and own-lane PRs;
 #   (b) if the diff touches a GATE FILE and no sandboxed mutant runner exists,
-#       the organ cannot satisfy the mutation rule (AC5), so it posts
-#       VERDICT: CHANGES REQUIRED with `mutants: NOT RUN …` and labels the PR
-#       `review-needs-mutants` — it never APPROVEs a gate-file PR blind
-#       (repair item 8). It does NOT dispatch an author repair for this state
-#       (nothing for the author to fix; it is awaiting a mutant-capable
-#       reviewer);
+#       the organ cannot satisfy the mutation rule read-only. CREDIBLE-1600: it
+#       can still clear the hold when a mutant-capable review RECORD for THIS
+#       exact PR-diff patch-id has been posted under the organ marker format by
+#       the trusted login (`head: <sha>`, `patch-id: <id>`, a line per mutant
+#       stating KILLED or SURVIVED). The organ accepts that record ONLY when its
+#       patch-id equals the current head PR diff patch-id and it names at least
+#       one mutant and it was authored by the trusted login — otherwise it is
+#       ignored (fail closed). With a valid record the organ runs its OWN model
+#       review and arms on model APPROVE PLUS that record (never the record
+#       alone). WITHOUT a valid record it posts VERDICT: CHANGES REQUIRED with
+#       `mutants: NOT RUN …` and labels the PR `review-needs-mutants` — it never
+#       APPROVEs a gate-file PR blind (repair item 8) and does NOT dispatch an
+#       author repair for this state (it is awaiting a mutant-capable reviewer);
 #   (c) otherwise run the independent delta review READ-ONLY via
 #       scripts/dispatch/review-ro-claude.sh (no write tools, scoped reads,
 #       minimal env, token-scrubbed output — AC2) and parse exactly ONE verdict
@@ -391,6 +398,81 @@ print("CHANGES_REQUIRED"); sys.exit(0)
 ' "$payload"
 }
 
+# pr_diff_patch_id <pr> — the STABLE patch-id of the PR's current diff, exactly as
+# AC1 specifies: `git diff origin/main...HEAD | git patch-id --stable`. `gh pr diff`
+# returns the three-dot (merge-base) diff — the same content as that git diff — and
+# `git patch-id` hashes only the hunk content (independent of context line numbers),
+# so the two ids are identical. Using gh keeps this consistent with
+# build_prompt_file and needs no local head ref. Prints the 40-hex id, or nothing
+# when the diff is empty/uncomputable (→ a record can never match → fail closed).
+pr_diff_patch_id() {
+    local pr="$1" id=""
+    id="$(GH pr diff "$pr" ${REPO:+--repo "$REPO"} 2>/dev/null | git patch-id --stable 2>/dev/null | awk 'NR==1{print $1}')" || true
+    printf '%s' "$id"
+}
+
+# mutant_record_satisfies <pr> <head> <expected-patch-id> — CREDIBLE-1600. Exit 0
+# ONLY when a mutant-capable review RECORD for THIS exact patch-id is present on
+# the PR under the organ marker format:
+#   * authored by the ORGAN trusted login ($ORGAN_LOGIN) — a record from any other
+#     account is a forgery (anyone can comment on a public PR) and is ignored;
+#   * carries a `patch-id: <id>` line whose id equals the current PR diff patch-id
+#     (the full computed id starts with the recorded id, >=12 hex, so a 12-hex
+#     short form in a receipt is accepted; a differing id never matches);
+#   * names at least one mutant — a line stating an outcome KILLED or SURVIVED.
+# A record is NOT a model verdict: it carries no `VERDICT:` line, so it never
+# short-circuits current_head_verdict nor satisfies review_hold_allows on its own —
+# the organ still runs its OWN model review and arms on model APPROVE PLUS this
+# record, never the record alone. Fail closed: an empty expected patch-id, an empty
+# trusted login, an unreadable comments payload, or no matching record → return 1.
+mutant_record_satisfies() {
+    local pr="$1" head="$2" pid="$3" payload
+    [[ -n "$pid" ]] || return 1
+    payload="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} \
+        --json comments 2>/dev/null || true)"
+    [[ -n "$payload" ]] || return 1
+    HEAD_SHA="$head" EXPECT_PID="$pid" TRUSTED_AUTHOR="$ORGAN_LOGIN" python3 -c '
+import json, os, re, sys
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(1)
+head    = (os.environ.get("HEAD_SHA","")  or "").lower()
+expect  = (os.environ.get("EXPECT_PID","") or "").strip().lower()
+trusted = (os.environ.get("TRUSTED_AUTHOR","") or "").strip().lower()
+if not trusted or not expect:
+    sys.exit(1)   # trust nobody / no computable patch-id → fail closed
+headmark = re.compile(r"^[ \t]*head:[ \t]*([0-9a-fA-F]{7,40})", re.I | re.M)
+pidmark  = re.compile(r"^[ \t]*patch-id:[ \t]*([0-9a-fA-F]{12,40})", re.I | re.M)
+mutline  = re.compile(r"\b(KILLED|SURVIVED)\b")
+for c in d.get("comments") or []:
+    b = c.get("body","") if isinstance(c, dict) else str(c)
+    author = ""
+    if isinstance(c, dict):
+        a = c.get("author") or {}
+        if isinstance(a, dict):
+            author = (a.get("login") or "")
+    # Only the organ trusted login is a trusted mutant-capable reviewer.
+    if author.strip().lower() != trusted:
+        continue
+    hm = headmark.search(b or "")
+    if not hm or not head.startswith(hm.group(1).lower()):
+        continue
+    pm = pidmark.search(b or "")
+    if not pm:
+        continue
+    # The recorded patch-id must equal the current PR diff patch-id: the full
+    # computed id starts with the recorded id (or they are equal).
+    if not expect.startswith(pm.group(1).lower()):
+        continue
+    # A record that names no mutant (no KILLED/SURVIVED outcome line) is ignored.
+    if not mutline.search(b or ""):
+        continue
+    sys.exit(0)
+sys.exit(1)
+' "$payload"
+}
+
 # process_pr <pr> — the whole per-PR decision. Testable with stub gh + claude.
 process_pr() {
     local pr="$1"
@@ -431,19 +513,34 @@ process_pr() {
     # A diff we cannot compute is fail-closed: treat as a gate change.
     if [[ "$gate_rc" == 3 ]]; then gate_hit="(diff uncomputable — fail closed)"; gate_rc=0; fi
 
-    local verdict mutants
+    local verdict mutants patch_id
     if [[ "$gate_rc" == 0 && "$REVIEW_MUTANT_RUNNER_AVAILABLE" != "1" ]]; then
-        # Gate-file PR, no mutant runner: hold for a mutant-capable reviewer (AC5).
-        verdict="CHANGES_REQUIRED"
-        mutants="NOT RUN — gate-file change ($gate_hit) needs a mutant-capable reviewer; labeled review-needs-mutants"
-        # Stamp the gate-list version (CREDIBLE-1592): this hold is MECHANICAL (no
-        # model review). If the list later changes so this head no longer touches a
-        # gate, the next tick re-evaluates instead of reusing this verdict forever.
-        post_verdict "$pr" "$verdict" "$head" "$mutants" "" "$GATE_LIST_VERSION"
-        label_add "$pr" "$REVIEW_NEEDS_MUTANTS_LABEL"
-        label_add "$pr" "$REVIEW_HOLD_LABEL"
-        HELD_MUTANTS=$((HELD_MUTANTS+1)); REVIEWED=$((REVIEWED+1))
-        rm -rf "$run_dir"; return 0
+        # Gate-file PR, no sandboxed mutant runner. CREDIBLE-1600: the organ can
+        # still clear the hold when a mutant-capable review RECORD for THIS exact
+        # PR-diff patch-id has been posted under the organ marker format by the
+        # trusted login. It then runs its OWN model review and arms on model
+        # APPROVE PLUS that record — never the record alone (the arm path still
+        # gates on review_hold_allows reading back the organ's written APPROVE).
+        patch_id="$(pr_diff_patch_id "$pr")"
+        if mutant_record_satisfies "$pr" "$head" "$patch_id"; then
+            log "PR #$pr: gate-file with a trusted mutant-capable record for patch-id ${patch_id:0:12} → running model review (arms on model APPROVE + record)"
+            # The record satisfies the mutant requirement — clear a prior MECHANICAL
+            # review-needs-mutants hold so it can no longer keep the arm blocked.
+            label_remove "$pr" "$REVIEW_NEEDS_MUTANTS_LABEL"
+            # fall through to the independent model review below; do NOT hold.
+        else
+            # No valid record: hold for a mutant-capable reviewer (AC5, fail closed).
+            verdict="CHANGES_REQUIRED"
+            mutants="NOT RUN — gate-file change ($gate_hit) needs a mutant-capable reviewer; labeled review-needs-mutants"
+            # Stamp the gate-list version (CREDIBLE-1592): this hold is MECHANICAL
+            # (no model review). If the list later changes so this head no longer
+            # touches a gate, the next tick re-evaluates instead of reusing forever.
+            post_verdict "$pr" "$verdict" "$head" "$mutants" "" "$GATE_LIST_VERSION"
+            label_add "$pr" "$REVIEW_NEEDS_MUTANTS_LABEL"
+            label_add "$pr" "$REVIEW_HOLD_LABEL"
+            HELD_MUTANTS=$((HELD_MUTANTS+1)); REVIEWED=$((REVIEWED+1))
+            rm -rf "$run_dir"; return 0
+        fi
     fi
 
     # ── Independent read-only review (AC2). ──
