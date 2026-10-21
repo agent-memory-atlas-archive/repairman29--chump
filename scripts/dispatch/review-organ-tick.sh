@@ -113,6 +113,7 @@ json_str() { printf '%s' "$1" | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g'
 emit() { printf '%s\n' "$1" >> "$AMBIENT" 2>/dev/null || true; }
 # scanner-anchor: "kind":"review_organ_tick"
 # scanner-anchor: "kind":"pr_review_verdict"
+# scanner-anchor: "kind":"review_organ_label_error"
 
 REVIEWED=0; APPROVED=0; CHANGES=0; HELD_MUTANTS=0; ARMED=0; DISPATCHED=0; SKIPPED=0
 
@@ -219,8 +220,35 @@ post_verdict() {
         "$(ts)" "$pr" "$(json_str "$verdict")" "$(json_str "$head")" "$(json_str "$mutants")")"
 }
 
-label_add()    { GH pr edit "$1" ${REPO:+--repo "$REPO"} --add-label "$2" >/dev/null 2>&1 || true; }
-label_remove() { GH pr edit "$1" ${REPO:+--repo "$REPO"} --remove-label "$2" >/dev/null 2>&1 || true; }
+# ensure_review_labels — AC1 (CREDIBLE-1588): the organ creates its two hold
+# labels if absent, idempotently, at the start of EVERY tick (and therefore on
+# the first tick after the organ is installed/enabled). Both review-held and
+# review-needs-mutants were missing from the repo, so every `label_add … || true`
+# below no-oped — the hold the merged organ relies on was never applied. `gh
+# label create --force` creates the label when absent and is an idempotent rewrite
+# when it already exists, so repeated ticks are safe. The label NAMES are the
+# constants from review-hold.sh (not env reads). A create that gh refuses is
+# logged loudly, not swallowed.
+ensure_review_labels() {
+    local lbl
+    for lbl in "$REVIEW_HOLD_LABEL" "$REVIEW_NEEDS_MUTANTS_LABEL"; do
+        GH label create "$lbl" ${REPO:+--repo "$REPO"} --force >/dev/null 2>&1 \
+            || log "WARN: could not ensure label '$lbl' exists (gh label create refused)"
+    done
+}
+
+# label_add / label_remove — AC2 (CREDIBLE-1588): a label op gh REFUSES must fail
+# LOUDLY (a log line AND a review_organ_label_error event), NEVER silently. The
+# old `… || true` swallowed every refusal, so when the hold labels did not exist
+# in the repo the holds no-oped invisibly (the bug this slice closes).
+label_add()    { GH pr edit "$1" ${REPO:+--repo "$REPO"} --add-label "$2"    >/dev/null 2>&1 || _label_op_failed "$1" add "$2"; }
+label_remove() { GH pr edit "$1" ${REPO:+--repo "$REPO"} --remove-label "$2" >/dev/null 2>&1 || _label_op_failed "$1" remove "$2"; }
+_label_op_failed() {
+    local pr="$1" op="$2" lbl="$3"
+    log "WARN: label $op '$lbl' on PR #$pr REFUSED by gh — hold not applied (not silent)"
+    emit "$(printf '{"ts":"%s","kind":"review_organ_label_error","pr":%s,"op":"%s","label":"%s"}' \
+        "$(ts)" "$pr" "$(json_str "$op")" "$(json_str "$lbl")")"
+}
 
 # dispatch_repair <pr> <head> — exactly ONE repair to the author lane, NEVER with
 # --auto-merge (AC4 / repair item 9). Derives the gap from the head branch name
@@ -421,6 +449,9 @@ else
 fi
 
 log "tick start (${#prs[@]} PRs, checkout=$CHECKOUT)"
+# AC1: every tick (re)creates the hold labels if absent, idempotently — so the
+# label_add holds below can never no-op against a repo that lacks them.
+ensure_review_labels
 git -C "$CHECKOUT" fetch origin main -q 2>/dev/null || true
 for pr in "${prs[@]}"; do process_pr "$pr"; done
 

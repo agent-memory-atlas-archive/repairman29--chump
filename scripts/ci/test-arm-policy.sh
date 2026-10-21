@@ -528,7 +528,15 @@ author=os.environ.get("ORGAN_SELF","organbot")
 json.dump({"labels":[],"comments":[{"body":body,"author":{"login":author},"createdAt":"2026-10-20T00:00:00Z"}]},open(sys.argv[2],"w"))
 PY
     exit 0;;
-  "pr edit") echo "EDIT $a" >>"$ORGLOG.edits"; exit 0;;
+  "label create") printf 'LABELCREATE %s\n' "$a" >>"$ORGLOG.labels"; exit 0;;
+  "pr edit")
+    echo "EDIT $a" >>"$ORGLOG.edits"
+    # CREDIBLE-1588 fixture: when ORG_REJECT_LABEL=1, gh REFUSES both --add-label
+    # AND --remove-label (the pre-fix silent-noop surface — a label op the repo
+    # cannot satisfy). The organ must REPORT the refusal (WARN log +
+    # review_organ_label_error) for EITHER op, not swallow it with `|| true`.
+    if [[ -n "${ORG_REJECT_LABEL:-}" && ( "$a" == *"--add-label"* || "$a" == *"--remove-label"* ) ]]; then exit 1; fi
+    exit 0;;
   "pr merge") echo "MERGE $a" >>"$ORGLOG.merges"; exit 0;;
 esac
 exit 0
@@ -608,6 +616,66 @@ grep -qiE '^mutants: NOT RUN' "$ORGLOG.cmt.201" && ok "organ AC5: verdict carrie
 [[ "$(sed -n '1p' "$ORGLOG.cmt.201")" == "VERDICT: CHANGES REQUIRED" ]] && ok "organ AC5: gate-file verdict is CHANGES REQUIRED (not APPROVE)" \
     || bad "organ AC5: gate-file verdict was not CHANGES REQUIRED"
 [[ -s "$ORGLOG.merges" ]] && bad "organ AC5: a gate-file PR was merged" || ok "organ AC5: gate-file PR not merged"
+
+# ── CREDIBLE-1588: the organ creates its hold labels every tick (idempotently)
+# and a label op gh REFUSES fails LOUDLY (log + event), never silently. Before
+# this slice both review-held and review-needs-mutants were missing from the
+# repo, so every `label_add … || true` no-oped and the holds never applied.
+echo "[d/labels] CREDIBLE-1588: hold labels ensured idempotently; refused label op fails loudly"
+# AC1: a tick creates BOTH hold labels with --force (create-if-absent, idempotent
+# rewrite if present). MUTANT (killed here): delete the `ensure_review_labels`
+# call in the tick body → no `gh label create` fires → both asserts below fail.
+: >"$ORGLOG.labels"
+organ_run --pr 203
+grep -q 'label create review-held --force' "$ORGLOG.labels" \
+    && ok "organ CREDIBLE-1588 AC1: tick creates review-held (idempotent --force)" \
+    || bad "organ CREDIBLE-1588 AC1: tick did not create review-held ($(cat "$ORGLOG.labels" 2>/dev/null))"
+grep -q 'label create review-needs-mutants --force' "$ORGLOG.labels" \
+    && ok "organ CREDIBLE-1588 AC1: tick creates review-needs-mutants (idempotent --force)" \
+    || bad "organ CREDIBLE-1588 AC1: tick did not create review-needs-mutants ($(cat "$ORGLOG.labels" 2>/dev/null))"
+# Idempotent: a second tick re-creates with --force and never errors (the tick
+# still exits 0, which organ_run would mask — so assert the --force flag is the
+# mechanism that makes repeat creation safe).
+: >"$ORGLOG.labels"
+organ_run --pr 203
+[[ "$(grep -c 'label create .* --force' "$ORGLOG.labels")" -ge 2 ]] \
+    && ok "organ CREDIBLE-1588 AC1: label create is --force on repeat ticks (idempotent)" \
+    || bad "organ CREDIBLE-1588 AC1: repeat tick did not re-create with --force"
+
+# AC2/AC3: a stub gh that REJECTS an unknown --add-label makes the organ report
+# the failure, never swallow it. PR 201 is a gate-file PR → the tick runs
+# label_add review-needs-mutants / review-held, which the stub refuses. The organ
+# must emit review_organ_label_error. MUTANT (killed here): restore `… || true`
+# on label_add/label_remove → the refusal is swallowed → NO event → this fails.
+: >"$ORGLOG.labels"; : >"$D/amb.jsonl"
+ORG_REJECT_LABEL=1 organ_run --pr 201
+grep -q '"kind":"review_organ_label_error".*"op":"add"' "$D/amb.jsonl" \
+    && ok "organ CREDIBLE-1588 AC2/AC3: refused label_add emits review_organ_label_error (fails loudly)" \
+    || bad "organ CREDIBLE-1588 AC2/AC3: refused label_add was swallowed (no review_organ_label_error event)"
+grep -q '"label":"review-needs-mutants"' "$D/amb.jsonl" \
+    && ok "organ CREDIBLE-1588 AC3: the failing label op names the label it could not apply" \
+    || bad "organ CREDIBLE-1588 AC3: no label name in the label-error event"
+# Negative control: when gh ACCEPTS the label op, NO error event is emitted.
+: >"$D/amb.jsonl"
+organ_run --pr 201
+grep -q '"kind":"review_organ_label_error"' "$D/amb.jsonl" \
+    && bad "organ CREDIBLE-1588: emitted review_organ_label_error even though gh accepted the label op" \
+    || ok "organ CREDIBLE-1588: no label-error event when gh accepts the label op (no false positive)"
+
+# AC2 (remove half): a refused --remove-label must ALSO fail loudly, symmetrically
+# with label_add. PR 203 is the APPROVE path → the organ runs
+# label_remove review-held; the stub refuses it. The organ must emit a
+# review_organ_label_error with "op":"remove" naming review-held. MUTANT (killed
+# here): restore `… || true` on label_remove → the refusal is swallowed → NO
+# event → this fails.
+: >"$D/amb.jsonl"
+ORG_REJECT_LABEL=1 organ_run --pr 203
+grep -q '"kind":"review_organ_label_error".*"op":"remove"' "$D/amb.jsonl" \
+    && ok "organ CREDIBLE-1588 AC2: refused label_remove emits review_organ_label_error op=remove (fails loudly)" \
+    || bad "organ CREDIBLE-1588 AC2: refused label_remove was swallowed (no op=remove review_organ_label_error event)"
+grep -q '"kind":"review_organ_label_error".*"label":"review-held"' "$D/amb.jsonl" \
+    && ok "organ CREDIBLE-1588 AC2: the refused remove op names review-held" \
+    || bad "organ CREDIBLE-1588 AC2: no review-held label name in the remove label-error event"
 
 # CREDIBLE-1590 AC1/AC2: a PR whose ONLY gate-adjacent change is a scripts/ci
 # test is REVIEWED by the model — scripts/ci is NOT a ship gate (the organ IS the

@@ -14605,4 +14605,20 @@ events:
     status: shadow
     # payload: {pr: number, corr_id: string, verdict: "NO_PASSED", mode: "shadow", gap_id: string, proposal_type: "AdminMergeProposal", ts: string}
 
+  # ── CREDIBLE-1588: review-organ label op refused ────────────────────────────
+  - kind: review_organ_label_error
+    effect_metric: credible
+    emitter: scripts/dispatch/review-organ-tick.sh (CREDIBLE-1588)
+    # scanner-anchor: "kind":"review_organ_label_error"
+    trigger: >
+      Emitted when the review organ's label_add/label_remove is REFUSED by gh
+      (e.g. the hold label does not exist in the repo). Before CREDIBLE-1588 the
+      `… || true` swallowed this, so a hold the merged organ relies on no-oped
+      silently. The organ now reports every refused label op loudly (this event
+      plus a WARN log) so a broken hold is visible instead of invisible.
+    consumers: [ops-audit]
+    fields_required: [ts, kind, pr, op, label]
+    expected_volume: "near-zero; any occurrence means a hold label op failed and a review hold may not have applied"
+    # payload: {ts: string, kind: "review_organ_label_error", pr: number, op: "add"|"remove", label: string}
+
   # ── INFRA-2156 (META-125/C5): chump consensus ask ───────────────────────────
