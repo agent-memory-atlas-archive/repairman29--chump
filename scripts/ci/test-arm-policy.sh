@@ -1122,6 +1122,39 @@ ndisp1600="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndi
 [[ "$ndisp1600" == 1 ]] \
     && ok "CREDIBLE-1600 record-alone: model CHANGES on a record-backed gate-file PR → exactly one repair dispatched" \
     || bad "CREDIBLE-1600 record-alone: expected 1 repair dispatch, got $ndisp1600 ($(cat "$ORGLOG.chump"))"
+
+# ── CREDIBLE-1603: the record's `head:` line is INFORMATIONAL — the hold is gated
+# by patch-id ALONE. A record posted for head A that still carries the CURRENT
+# PR-diff patch-id must satisfy the hold after the PR is update-branched to head B
+# (same diff → same patch-id), so an update-branch (by the architect, or post-
+# CREDIBLE-1599 by the organ itself) no longer re-holds the PR. A different patch-id
+# still never matches (fail closed). PR 210's live head is deadbeef…; the records
+# below name a DIFFERENT head (HEADA) so each test isolates head-vs-patch-id.
+echo "[d/CREDIBLE-1603] the record head is informational; patch-id alone gates the hold"
+C1603_HEADA=aaaaaaaa1234567890abcdef1234567890abcdef
+{ [[ "$C1603_HEADA" != "$GFHEAD" ]] \
+    && ok "CREDIBLE-1603: record head A differs from the PR's live head (so a head check, if present, would reject it)"; } \
+    || bad "CREDIBLE-1603: fixture head A must differ from the live head ($C1603_HEADA == $GFHEAD)"
+# ACCEPT (PR 210): record for head A + the CURRENT patch-id → head ignored, patch-id
+# matches → the organ clears the mutant hold, runs its OWN model review (clean diff →
+# APPROVE) and arms head-pinned. MUTANT (killed here): re-require the head (restore the
+# `head.startswith(hm.group(1))` gate in mutant_record_satisfies) → head A != deadbeef…
+# → the record is rejected → 210 held, never merged → this assert fails.
+seed_gf_cmt organbot "$C1603_HEADA" "$GFPID" 1 0 ""
+run_gf 210
+grep -q '^MERGE pr merge 210 --squash --match-head-commit deadbeef' "$ORGLOG.merges" \
+    && ok "CREDIBLE-1603 ACCEPT: record for a stale head A + the current patch-id → armed head-pinned (mutant: require the head)" \
+    || bad "CREDIBLE-1603 ACCEPT: a stale-head record for the current patch-id did not arm 210 (merges: $(cat "$ORGLOG.merges"))"
+# REFUSAL (PR 210): same stale head A but a DIFFERENT patch-id → never matches (fail
+# closed) → held for mutants, never merged. MUTANT (killed here): ignore the patch-id
+# (drop the `expect.startswith(pm.group(1))` compare) → with the head already ignored
+# the record is accepted → 210 merges → this no-merge assert fails.
+seed_gf_cmt organbot "$C1603_HEADA" ffffffffffffffffffffffffffffffffffffffff 1 0 ""
+run_gf 210
+{ [[ ! -s "$ORGLOG.merges" ]] && grep -q 'add-label review-needs-mutants' "$ORGLOG.edits"; } \
+    && ok "CREDIBLE-1603 REFUSAL: stale head A + wrong patch-id ignored → held, not merged (mutant: ignore the patch-id)" \
+    || bad "CREDIBLE-1603 REFUSAL: a wrong-patch-id record was accepted (merges: $(cat "$ORGLOG.merges"); edits: $(cat "$ORGLOG.edits"))"
+
 echo '{"labels":[],"comments":[]}' >"$ORGCMT"  # restore clean state for later blocks
 
 # ── CREDIBLE-1588: the organ creates its hold labels every tick (idempotently)

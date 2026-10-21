@@ -535,7 +535,10 @@ pr_touches_rust() {
 
 # mutant_record_satisfies <pr> <head> <expected-patch-id> — CREDIBLE-1600. Exit 0
 # ONLY when a mutant-capable review RECORD for THIS exact patch-id is present on
-# the PR under the organ marker format:
+# the PR under the organ marker format. (<head> is accepted for call-site symmetry
+# but NOT matched against — CREDIBLE-1603: the record's own `head:` line is
+# informational; the patch-id proves the reviewed diff, so an update-branch to a new
+# head with the same patch-id must not invalidate it.)
 #   * authored by the ORGAN trusted login ($ORGAN_LOGIN) — a record from any other
 #     account is a forgery (anyone can comment on a public PR) and is ignored;
 #   * carries a `patch-id: <id>` line whose id equals the current PR diff patch-id
@@ -548,23 +551,23 @@ pr_touches_rust() {
 # record, never the record alone. Fail closed: an empty expected patch-id, an empty
 # trusted login, an unreadable comments payload, or no matching record → return 1.
 mutant_record_satisfies() {
-    local pr="$1" head="$2" pid="$3" payload
+    local pr="$1" pid="$3" payload   # "$2" (head) intentionally unread — see header
     [[ -n "$pid" ]] || return 1
     payload="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} \
         --json comments 2>/dev/null || true)"
     [[ -n "$payload" ]] || return 1
-    HEAD_SHA="$head" EXPECT_PID="$pid" TRUSTED_AUTHOR="$ORGAN_LOGIN" python3 -c '
+    EXPECT_PID="$pid" TRUSTED_AUTHOR="$ORGAN_LOGIN" python3 -c '
 import json, os, re, sys
 try:
     d = json.loads(sys.argv[1])
 except Exception:
     sys.exit(1)
-head    = (os.environ.get("HEAD_SHA","")  or "").lower()
 expect  = (os.environ.get("EXPECT_PID","") or "").strip().lower()
 trusted = (os.environ.get("TRUSTED_AUTHOR","") or "").strip().lower()
 if not trusted or not expect:
     sys.exit(1)   # trust nobody / no computable patch-id → fail closed
-headmark = re.compile(r"^[ \t]*head:[ \t]*([0-9a-fA-F]{7,40})", re.I | re.M)
+# CREDIBLE-1603: no head regex — the `head:` line is informational; matching is by
+# patch-id (identity of the reviewed diff), not by the head sha it happened to name.
 pidmark  = re.compile(r"^[ \t]*patch-id:[ \t]*([0-9a-fA-F]{12,40})", re.I | re.M)
 mutline  = re.compile(r"\b(KILLED|SURVIVED)\b")
 for c in d.get("comments") or []:
@@ -577,9 +580,12 @@ for c in d.get("comments") or []:
     # Only the organ trusted login is a trusted mutant-capable reviewer.
     if author.strip().lower() != trusted:
         continue
-    hm = headmark.search(b or "")
-    if not hm or not head.startswith(hm.group(1).lower()):
-        continue
+    # CREDIBLE-1603: the `head:` line is INFORMATIONAL only. The patch-id below
+    # proves the reviewed change is byte-for-byte the current PR diff, so a record
+    # satisfies the hold whatever head it names — an update-branch (by the architect
+    # or, post-CREDIBLE-1599, by the organ itself) that produces a new head with the
+    # SAME patch-id must NOT invalidate an already-posted mutant record. Matching on
+    # head would re-hold the PR on every rebase even though nothing in the diff moved.
     pm = pidmark.search(b or "")
     if not pm:
         continue
