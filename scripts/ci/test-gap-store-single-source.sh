@@ -71,6 +71,47 @@ else
   bad "docs/architecture/CANONICAL_GAP_STORE.md missing — the single-source decision must be documented"
 fi
 
+# 5) CREDIBLE-1602 runtime: a node must carry exactly ONE live gap store.
+#    fleet-doctor-strict.sh's check_single_store REDs a node with more than one
+#    live state.db and PASSes once the extras are renamed aside with a
+#    CHUMP_STORE_ARCHIVED marker (scripts/coord/archive-stale-gap-store.sh).
+#    This is the runtime half of the single-source invariant — the live cuphead
+#    split (three state.db on one node, the organ shipping against the wrong one)
+#    that the source checks above cannot see. Scanned from $HOME, so the fixture
+#    runs under a sandbox HOME (the real path, per the standing seam rule).
+#    MUTANT (killed here): change `(( n > 1 ))` to `(( n > 99 ))` in
+#    check_single_store (ignore the extra store) → the three-store case no longer
+#    REDs and the first assertion fails.
+DOCTOR="$ROOT/scripts/coord/fleet-doctor-strict.sh"
+ARCHIVER="$ROOT/scripts/coord/archive-stale-gap-store.sh"
+if [ -f "$DOCTOR" ] && [ -f "$ARCHIVER" ]; then
+  sb="$(mktemp -d "${TMPDIR:-/tmp}/single-store-rt.XXXXXX")"
+  mkdir -p "$sb/chump/.chump" "$sb/.chump" "$sb/.chumpnode/repo/.chump" "$sb/tmp/.scratch/.chump"
+  : > "$sb/chump/.chump/state.db"           # canonical
+  : > "$sb/.chump/state.db"                 # stale home store
+  : > "$sb/.chumpnode/repo/.chump/state.db" # stale node-clone store
+  : > "$sb/tmp/.scratch/.chump/state.db"    # ephemeral — must be pruned, never counted
+  # worktree-style symlink into the canonical store — must NOT count as a store.
+  ln -s "$sb/chump/.chump/state.db" "$sb/wt-state.db" 2>/dev/null || true
+  st_multi="$(FLEET_DOCTOR_SOURCED=1 HOME="$sb" bash -c 'source "$0"; check_single_store; printf "%s" "${STATUSES[-1]:-}"' "$DOCTOR" 2>/dev/null)"
+  if [ "$st_multi" = fail ]; then
+    ok "fleet-doctor check_single_store REDs a node with >1 live state.db"
+  else
+    bad "fleet-doctor check_single_store did NOT RED with 3 live stores (status='$st_multi')"
+  fi
+  bash "$ARCHIVER" "$sb/.chump/state.db"                 --reason "stale home store (CREDIBLE-1602 fixture)" --canonical "$sb/chump/.chump/state.db" >/dev/null 2>&1
+  bash "$ARCHIVER" "$sb/.chumpnode/repo/.chump/state.db" --reason "stale node-clone store (CREDIBLE-1602 fixture)" --canonical "$sb/chump/.chump/state.db" >/dev/null 2>&1
+  st_one="$(FLEET_DOCTOR_SOURCED=1 HOME="$sb" bash -c 'source "$0"; check_single_store; printf "%s" "${STATUSES[-1]:-}"' "$DOCTOR" 2>/dev/null)"
+  if [ "$st_one" = pass ]; then
+    ok "fleet-doctor check_single_store PASSes once the extras carry a CHUMP_STORE_ARCHIVED marker"
+  else
+    bad "fleet-doctor check_single_store did NOT PASS after archiving the extras (status='$st_one')"
+  fi
+  rm -rf "$sb"
+else
+  bad "fleet-doctor-strict.sh or archive-stale-gap-store.sh missing (CREDIBLE-1602)"
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "gap-store single-source invariants VIOLATED"; exit 1
 fi

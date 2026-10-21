@@ -1739,6 +1739,54 @@ check_load_aware_deadman() {
         "$timer active, last deadman_tick ${age}s ago (threshold ${stale_s}s)" ""
 }
 
+# ── Check 22 (CREDIBLE-1602): ONE canonical gap store per node ────────────────
+# cuphead 2026-10-21 carried THREE live state.db on one node (the 41MB store the
+# architect+reconciler actually wrote, a stale ~/.chump Oct-19 store, and the
+# node clone's stale Oct-10 store). The review organ, resolving its store from
+# the node-checkout cwd, shipped a gap against the WRONG one and failed. A node
+# must carry exactly ONE live gap store (PHASE-R R4). A store that has been
+# RETIRED is renamed aside and marked with a CHUMP_STORE_ARCHIVED marker in its
+# .chump dir (scripts/coord/archive-stale-gap-store.sh); a marked archive does
+# NOT count. A worktree's .chump/state.db SYMLINK into the canonical checkout is
+# not a separate store and never counts (only real files are counted). Scanned
+# from $HOME — NOT a CHUMP_* path env, so a sandbox-HOME test exercises the real
+# default; the ephemeral/cache/backup trees under $HOME are pruned so test
+# fixtures under ~/tmp never false-RED a node.
+check_single_store() {
+    if ! command -v find >/dev/null 2>&1; then
+        register_check "single-store" "skip" "find unavailable — cannot scan for node gap stores" ""
+        return
+    fi
+    local scan_root="$HOME"
+    if [[ -z "$scan_root" || ! -d "$scan_root" ]]; then
+        register_check "single-store" "skip" "\$HOME ('$scan_root') is not a directory — cannot scan for node gap stores" ""
+        return
+    fi
+    local -a stores=()
+    local f d
+    # Real files named state.db at */.chump/state.db, bounded to depth 4 (reaches
+    # ~/.chump, ~/<repo>/.chump, ~/.chumpnode/repo/.chump) with the ephemeral
+    # trees pruned. -type f excludes worktree symlinks; the per-file loop then
+    # drops any store sitting next to a CHUMP_STORE_ARCHIVED marker.
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        d="$(dirname "$f")"
+        [[ -e "$d/CHUMP_STORE_ARCHIVED" ]] && continue
+        stores+=("$f")
+    done < <(find "$scan_root" -maxdepth 4 \
+        \( -type d \( -name tmp -o -name '.cache' -o -name 'node_modules' -o -name '*-backup' -o -name '.cargo' -o -name '.rustup' \) -prune \) -o \
+        \( -type f -name state.db -path '*/.chump/state.db' -print \) 2>/dev/null)
+    local n="${#stores[@]}"
+    if (( n > 1 )); then
+        register_check "single-store" "fail" \
+            "node has $n live gap stores (must be exactly ONE): $(printf '%s;' "${stores[@]}") — split-brain: a process that resolves its store from cwd/node.env can ship a gap against the wrong one (CREDIBLE-1602)" \
+            "keep the canonical store; retire each extra with: scripts/coord/archive-stale-gap-store.sh <path> --reason <why> --canonical <canonical-store>  (renames it aside + writes the CHUMP_STORE_ARCHIVED marker this check honors)"
+    else
+        register_check "single-store" "pass" \
+            "exactly $n live gap store(s) on this node (0 or 1 is healthy; CHUMP_STORE_ARCHIVED-marked archives and symlinked worktree stores are not counted)" ""
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -1770,6 +1818,7 @@ check_second_scope
 check_admission_ceiling
 check_node_env_no_export
 check_load_aware_deadman
+check_single_store
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

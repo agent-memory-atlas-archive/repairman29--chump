@@ -14633,4 +14633,22 @@ events:
     expected_volume: "near-zero; any occurrence means a hold label op failed and a review hold may not have applied"
     # payload: {ts: string, kind: "review_organ_label_error", pr: number, op: "add"|"remove", label: string}
 
+  - kind: review_organ_gap_store_miss
+    effect_metric: credible
+    emitter: scripts/dispatch/review-organ-tick.sh (CREDIBLE-1602)
+    # scanner-anchor: "kind":"review_organ_gap_store_miss"
+    trigger: >
+      The review organ merged a PR head-pinned but the merged PR's gap was NOT
+      present in the canonical gap store the organ resolved through the ONE
+      resolver (scripts/coord/lib/state-store.sh) — i.e. the organ is pointed at
+      the WRONG state.db (the cuphead three-store split, where the organ ran from
+      a node checkout whose own .chump/state.db was a stale copy). The post-merge
+      gap step now FAILS LOUD (this event plus a non-zero tick status) instead of
+      log-and-continuing, so the split is paged/observable and the PHASE-R rollup
+      is not silently undercounted.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, gap, store, head]
+    expected_volume: "0 on a healthy single-store node; non-zero only during a gap-store split-brain"
+    # payload: {ts: string, kind: "review_organ_gap_store_miss", pr: number, gap: string, store: string, head: string}
+
   # ── INFRA-2156 (META-125/C5): chump consensus ask ───────────────────────────
