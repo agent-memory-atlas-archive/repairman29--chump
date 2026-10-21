@@ -41,6 +41,24 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# RESILIENT-1652: route this fixture repo through the canonical sandbox primitive
+# so `chump gap reserve` below sees a HEALTHY node instead of RED-ing on a CI
+# runner that has no ~/.chump/oauth-token.json (the farmer readiness gate that
+# `gap reserve` consults correctly reds without one). chump_test_sandbox_setup
+# exports the isolation env (CHUMP_HOME/REPO/REPO_ROOT/STATE_DB/LOCK_DIR/STATE_DIR
+# + marker) all pinned at $TMP; write_sandbox_healthy_node lays the positive node
+# evidence (content-valid oauth token, not-paused node.env, fresh farmer
+# heartbeat) under $TMP/.chump WITHOUT loosening the gate. Neither reads an
+# inherited env. This is the hermetic seam the standing rule mandates.
+# shellcheck source=../coord/lib/test-sandbox.sh
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/coord/lib/test-sandbox.sh"
+# shellcheck source=lib/sandbox-healthy-node.sh
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
+chump_test_sandbox_setup "$TMP"
+write_sandbox_healthy_node "$TMP"
+
 # Isolated fixture repo — never touches the real state.db / docs/gaps.
 mkdir -p "$TMP/scripts/coord/lib" "$TMP/docs/gaps" "$TMP/.chump-locks"
 cp "$SCRIPT" "$TMP/scripts/coord/state-db-yaml-sync.sh"
@@ -59,10 +77,9 @@ chmod +x "$TMP/scripts/coord/chump-commit.sh"
 
 BIN_DIR="$(dirname "$BIN")"
 export PATH="$BIN_DIR:$PATH"
-export CHUMP_REPO="$TMP"
-export CHUMP_HOME="$TMP"
-export CHUMP_REPO_ROOT="$TMP"
-export CHUMP_LOCK_DIR="$TMP/.chump-locks"
+# CHUMP_REPO / CHUMP_HOME / CHUMP_REPO_ROOT / CHUMP_LOCK_DIR / CHUMP_STATE_DIR
+# are exported by chump_test_sandbox_setup above (all pinned at $TMP). Only the
+# non-isolation test flags remain here.
 export CHUMP_ALLOW_MAIN_WORKTREE=1
 export FLEET_029_AMBIENT_GLANCE_SKIP=1
 export CHUMP_RESERVE_NO_AUTOSTAGE=1

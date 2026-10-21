@@ -69,8 +69,25 @@ echo "[balanced fixture]"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# RESILIENT-1652: CHUMP_HOME stays $TMP across the TMP2/3/4 blocks (only
+# CHUMP_REPO changes so each scenario's reserves stay per-repo), so the farmer
+# readiness gate always resolves oauth + node.env from $TMP/.chump. ONE
+# healthy-node fixture there covers every scenario. repair 6: the fixture
+# function now requires the lib's sandbox marker, so go through
+# chump_test_sandbox_setup "$TMP" (which sets CHUMP_HOME/CHUMP_STATE_DIR + the
+# marker to $TMP), write the fixture, THEN unset CHUMP_STATE_DB so reserves
+# resolve per-CHUMP_REPO again (setup pins CHUMP_STATE_DB, which would funnel
+# every scenario into one db and break the per-repo pillar counts). No gate
+# loosening, no skip env var.
+# shellcheck source=../coord/lib/test-sandbox.sh
+source "$REPO_ROOT/scripts/coord/lib/test-sandbox.sh"
+# shellcheck source=scripts/ci/lib/sandbox-healthy-node.sh
+source "$REPO_ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
+chump_test_sandbox_setup "$TMP"
+write_sandbox_healthy_node "$TMP"
+unset CHUMP_STATE_DB          # per-repo reserves (test design); gate still reads $TMP
 export CHUMP_REPO="$TMP"
-export CHUMP_HOME="$TMP"
+export HOME="$TMP"
 export CHUMP_ALLOW_MAIN_WORKTREE=1
 export FLEET_029_AMBIENT_GLANCE_SKIP=1
 export CHUMP_RESERVE_NO_AUTOSTAGE=1

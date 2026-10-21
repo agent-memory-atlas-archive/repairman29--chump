@@ -20,29 +20,38 @@ BIN_DIR="${CARGO_TARGET_DIR:-$ROOT/target}/debug"
 # gap on-the-fly to make the test self-contained.
 TMP="$(mktemp -d)"
 
-# CREDIBLE-163: `chump claim` refuses when the fleet kill switch
-# (~/.chump/AUTONOMY_LEVEL, RESILIENT-073) is 0 or absent — which it is in CI, so
-# claim exited 1 ("fleet stopped") the moment this test actually ran. This smoke
-# test only verifies the claim SURFACE, so set the level to GO for the test and
-# restore the operator's real state on exit. The EXIT trap runs on success AND
-# failure, so we never leave the kill switch flipped — critical for local runs.
-AL_FILE="${HOME:-/tmp}/.chump/AUTONOMY_LEVEL"
-AL_BACKUP="$(mktemp)"
-AL_EXISTED=0
-[[ -f "$AL_FILE" ]] && { cp "$AL_FILE" "$AL_BACKUP"; AL_EXISTED=1; }
-restore_autonomy() {
-  if [[ "$AL_EXISTED" == 1 ]]; then
-    cp "$AL_BACKUP" "$AL_FILE" 2>/dev/null || true
-  else
-    rm -f "$AL_FILE"
-  fi
-  rm -f "$AL_BACKUP"
-}
-trap 'rm -rf "$TMP"; restore_autonomy' EXIT
-mkdir -p "$(dirname "$AL_FILE")"
-echo 5 > "$AL_FILE"
+trap 'rm -rf "$TMP"' EXIT
 
+# RESILIENT-1652: `gap reserve` / `claim` consult the farmer readiness gate,
+# which reads the oauth token + node state from <CHUMP_HOME>/.chump and reds a
+# fresh Linux runner (no oauth-token.json). Redirect ONLY the gate's reads to the
+# temp $TMP and keep CHUMP_REPO + CHUMP_STATE_DB pinned at the real repo so the
+# reserve/claim surface this smoke test deliberately exercises stays real.
+# repair 6: the fixture function now requires the lib's sandbox marker, so go
+# through chump_test_sandbox_setup "$TMP" (which sets CHUMP_HOME/CHUMP_STATE_DIR
+# + the marker to $TMP), write the healthy-node fixture while those hold, THEN
+# re-pin CHUMP_REPO/CHUMP_REPO_ROOT/CHUMP_STATE_DB back to the real repo. The
+# gate keeps reading the sandbox ($TMP) for oauth + node.env; reserve/claim hit
+# the real state.db. No gate loosening, no skip env var; $TMP is removed on EXIT.
+# shellcheck source=../coord/lib/test-sandbox.sh
+source "$ROOT/scripts/coord/lib/test-sandbox.sh"
+# shellcheck source=scripts/ci/lib/sandbox-healthy-node.sh
+source "$ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
+chump_test_sandbox_setup "$TMP"
+write_sandbox_healthy_node "$TMP"
+# Re-pin the REAL repo surface now that the fixture is written (the gate already
+# read its inputs' locations from CHUMP_HOME/CHUMP_STATE_DIR, which stay $TMP).
+export CHUMP_REPO="$ROOT"
+export CHUMP_REPO_ROOT="$ROOT"
+export CHUMP_STATE_DB="$ROOT/.chump/state.db"
 export CHUMP_LOCK_DIR="$TMP"
+export HOME="$TMP"
+# CREDIBLE-163 / CREDIBLE-1573: `chump claim` refuses when the fleet kill switch
+# (AUTONOMY_LEVEL, RESILIENT-073) is 0 or absent — which it is in CI. With HOME
+# redirected to $TMP (above), claim reads $HOME/.chump/AUTONOMY_LEVEL, so write
+# the GO level INSIDE the sandbox $TMP — never the operator's real ~/.chump.
+# $TMP is removed by the EXIT trap, so no restore dance and no real-state touch.
+echo 5 > "$TMP/.chump/AUTONOMY_LEVEL"
 export CHUMP_ALLOW_MAIN_WORKTREE=1
 export CHUMP_SESSION_ID="coord-surfaces-smoke-$$"
 # Smoke test creates an ephemeral gap — skip guards that check for real remote

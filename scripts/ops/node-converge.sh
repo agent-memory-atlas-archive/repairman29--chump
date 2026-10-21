@@ -150,15 +150,39 @@ log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG"
 
 # RESILIENT-1615: honor a node pause BEFORE any mutation. A paused node must
 # converge/install/restart NOTHING — the cuphead receipt (2026-10-17 04:41Z)
-# was converge re-enabling 42 timers on a node the operator had paused. Detect
-# the pause three ways, all of which `chump node pause` / the stopgap set:
-#   * CHUMP_NODE_MODE=paused in node.env
-#   * the .chump/fleet-paused sentinel
-#   * CHUMP_NODE_WORK_ENABLED=0 (the 2026-10-17 hand-edit, honored for compat)
-# Emit organ_skipped_paused once and exit 0 before touching a single unit.
+# was converge re-enabling 42 timers on a node the operator had paused.
+#
+# RESILIENT-1652/1653 (task 3, "one rule"): the authoritative predicate is the
+# Rust one, reached via the read-only `chump node is-paused` verb (exit 0 =
+# paused, 1 = not paused, no writes). Resolve a chump binary and defer to it so
+# this shell no longer carries a divergent rule (it used to treat
+# CHUMP_NODE_WORK_ENABLED=0 ALONE as paused, which the Rust predicate does not —
+# the legacy form needs control-plane + WORK_ENABLED=0 together). The shell
+# checks below remain ONLY as a best-effort fallback when no chump binary is
+# resolvable (or `is-paused` errors, rc>=2), so a binary-less node still honours
+# a pause. With a binary present, is-paused is the single source of truth.
+# (set -e is NOT active here — only `set -uo pipefail` — so capturing rc=$?
+# after an exit-1 `is-paused` is safe.)
 _nc_paused() {
     local sd="${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}"
-    [[ -f "$sd/.chump/fleet-paused" ]] && return 0
+    local chump
+    chump="$(command -v chump 2>/dev/null || true)"
+    [[ -z "$chump" && -x "$REPO_ROOT/target/release/chump" ]] && chump="$REPO_ROOT/target/release/chump"
+    [[ -z "$chump" && -x "$REPO_ROOT/target/debug/chump" ]] && chump="$REPO_ROOT/target/debug/chump"
+    if [[ -n "$chump" ]]; then
+        CHUMP_STATE_DIR="$sd" "$chump" node is-paused >/dev/null 2>&1
+        local rc=$?
+        [[ $rc -eq 0 ]] && return 0   # paused
+        [[ $rc -eq 1 ]] && return 1   # not paused
+        # rc>=2: is-paused errored — fall through to the shell fallback below.
+    fi
+    # Fallback (no chump binary / is-paused errored): the legacy shell checks.
+    # RESILIENT-1653 AC2: derive the node pause sentinel the SAME way
+    # node_pause::node_sentinel_path does — <state_dir>/.chump/fleet-paused —
+    # into a named var rather than hard-coding the literal, so this reader and
+    # the Rust writer can never drift to different paths.
+    local sentinel="$sd/.chump/fleet-paused"
+    [[ -f "$sentinel" ]] && return 0
     local ne="$sd/node.env"
     if [[ -f "$ne" ]]; then
         grep -Eq '^(export )?CHUMP_NODE_MODE=paused([[:space:]]|$)' "$ne" && return 0
@@ -168,6 +192,15 @@ _nc_paused() {
     [[ "${CHUMP_NODE_MODE:-}" == "paused" ]] && return 0
     return 1
 }
+# RESILIENT-1652 (task 5): when this organ is SOURCED (not executed) — so a test
+# can exercise `_nc_paused` against node.env fixtures without running the whole
+# converge body — return before that body runs. This is a source-guard
+# (BASH_SOURCE vs $0), NOT a skip/bypass env var: executed normally
+# (`bash node-converge.sh`) BASH_SOURCE[0] == $0 and this is a no-op.
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    return 0 2>/dev/null || true
+fi
+
 if _nc_paused; then
     log "SKIP: node is paused (CHUMP_NODE_MODE=paused / fleet-paused sentinel / CHUMP_NODE_WORK_ENABLED=0) — converging and installing nothing this tick"
     emit organ_skipped_paused "\"organ\":\"node-converge\",\"reason\":\"node_paused\""

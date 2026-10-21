@@ -76,6 +76,20 @@ trap 'rm -rf "$TMP"' EXIT
 
 export CHUMP_REPO="$TMP"
 export CHUMP_HOME="$TMP"
+# RESILIENT-1652: run chump through the canonical sandbox primitive
+# (chump_test_sandbox_setup, which now also pins CHUMP_STATE_DIR to the sandbox)
+# and lay down a healthy-node fixture INSIDE it via the shared ~20-line function,
+# so the RESILIENT-069 farmer readiness gate (consulted by `gap reserve`/`claim`)
+# reads GREEN by evidence on a fresh Linux runner that has no
+# ~/.chump/oauth-token.json. No gate loosening, no skip env var: a
+# missing/expired token or a paused node.env on a real node still reds.
+# shellcheck source=scripts/coord/lib/test-sandbox.sh
+source "$REPO_ROOT/scripts/coord/lib/test-sandbox.sh"
+# shellcheck source=scripts/ci/lib/sandbox-healthy-node.sh
+source "$REPO_ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
+chump_test_sandbox_setup "$TMP"
+export HOME="$TMP"   # isolate the .credentials.json read to the sandbox too
+write_sandbox_healthy_node "$TMP"
 export CHUMP_ALLOW_MAIN_WORKTREE=1
 export CHUMP_RESERVE_NO_AUTOSTAGE=1
 # Skip gates that require network or git state.

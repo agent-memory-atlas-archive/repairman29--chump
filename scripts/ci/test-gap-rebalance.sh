@@ -23,6 +23,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # full CHUMP_HOME/CHUMP_REPO/CHUMP_REPO_ROOT/CHUMP_STATE_DB/CHUMP_LOCK_DIR
 # isolation set, so this test can't silently bleed into the real state.db.
 source "$REPO_ROOT/scripts/coord/lib/test-sandbox.sh"
+# RESILIENT-1652: healthy-node fixture helper — each sandbox below lays down a
+# content-valid oauth token, a not-paused node.env and a fresh farmer heartbeat
+# INSIDE its own sandbox dir so the RESILIENT-069 farmer readiness gate
+# (consulted by `gap reserve`) reads GREEN by evidence on a fresh Linux runner.
+# No gate loosening, no skip env var.
+# shellcheck source=scripts/ci/lib/sandbox-healthy-node.sh
+source "$REPO_ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
 
 echo "=== INFRA-635 gap rebalance test ==="
 echo
@@ -73,7 +80,7 @@ export CHUMP_GAP_RESERVE_NO_EVIDENCE=1
 
 # ── Scenario 1: over-budget P0 (>5) ─────────────────────────────────────────
 echo "[scenario 1: over-budget P0]"
-TMP1="$(mktemp -d)"; chump_test_sandbox_setup "$TMP1"
+TMP1="$(mktemp -d)"; chump_test_sandbox_setup "$TMP1"; export HOME="$TMP1"; write_sandbox_healthy_node "$TMP1"  # RESILIENT-1652
 
 # 6 P0 gaps (one over budget)
 for i in $(seq 1 6); do
@@ -110,7 +117,7 @@ chump_test_sandbox_cleanup "$TMP1"
 # ── Scenario 2: pillar skew (one dominates >50%) ─────────────────────────────
 echo
 echo "[scenario 2: pillar skew]"
-TMP2="$(mktemp -d)"; chump_test_sandbox_setup "$TMP2"
+TMP2="$(mktemp -d)"; chump_test_sandbox_setup "$TMP2"; export HOME="$TMP2"; write_sandbox_healthy_node "$TMP2"  # RESILIENT-1652
 
 # 10 EFFECTIVE P1 gaps — EFFECTIVE dominates; other pillars starved
 for i in $(seq 1 10); do
@@ -135,7 +142,7 @@ chump_test_sandbox_cleanup "$TMP2"
 # ── Scenario 3: all clean ────────────────────────────────────────────────────
 echo
 echo "[scenario 3: all clean]"
-TMP3="$(mktemp -d)"; chump_test_sandbox_setup "$TMP3"
+TMP3="$(mktemp -d)"; chump_test_sandbox_setup "$TMP3"; export HOME="$TMP3"; write_sandbox_healthy_node "$TMP3"  # RESILIENT-1652
 
 # 2 per pillar → balanced, no P0s
 for p in EFFECTIVE CREDIBLE RESILIENT ZERO-WASTE; do
@@ -168,7 +175,7 @@ chump_test_sandbox_cleanup "$TMP3"
 # ── Scenario 4: no-action-needed (exactly at floor, P0=0) ───────────────────
 echo
 echo "[scenario 4: no-action-needed]"
-TMP4="$(mktemp -d)"; chump_test_sandbox_setup "$TMP4"
+TMP4="$(mktemp -d)"; chump_test_sandbox_setup "$TMP4"; export HOME="$TMP4"; write_sandbox_healthy_node "$TMP4"  # RESILIENT-1652
 
 # Exactly 2 per pillar, 0 P0s → no action
 for p in EFFECTIVE CREDIBLE RESILIENT ZERO-WASTE; do
@@ -188,7 +195,7 @@ chump_test_sandbox_cleanup "$TMP4"
 # ── --json required keys ──────────────────────────────────────────────────────
 echo
 echo "[--json required keys]"
-TMP5="$(mktemp -d)"; chump_test_sandbox_setup "$TMP5"
+TMP5="$(mktemp -d)"; chump_test_sandbox_setup "$TMP5"; export HOME="$TMP5"; write_sandbox_healthy_node "$TMP5"  # RESILIENT-1652
 _j5_out="$(mktemp)"
 "$BIN" gap rebalance --json > "$_j5_out" 2>/dev/null || true
 JSON5="$(cat "$_j5_out")"; rm -f "$_j5_out"

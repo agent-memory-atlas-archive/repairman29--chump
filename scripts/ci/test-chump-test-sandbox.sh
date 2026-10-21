@@ -55,6 +55,15 @@ else
     fail "(a) isolation env vars not set as expected (CHUMP_HOME=$CHUMP_HOME CHUMP_REPO=$CHUMP_REPO CHUMP_REPO_ROOT=$CHUMP_REPO_ROOT CHUMP_STATE_DB=$CHUMP_STATE_DB CHUMP_LOCK_DIR=$CHUMP_LOCK_DIR)"
 fi
 
+# RESILIENT-1652: the lib must pin CHUMP_STATE_DIR to the sandbox's .chump so the
+# farmer gate (which resolves the node state dir from CHUMP_STATE_DIR first) reads
+# the sandbox node.env, never an inherited real one.
+if [ "${CHUMP_STATE_DIR:-}" = "$SANDBOX/.chump" ]; then
+    pass "(a) CHUMP_STATE_DIR pinned to sandbox .chump"
+else
+    fail "(a) CHUMP_STATE_DIR not pinned to sandbox (CHUMP_STATE_DIR=${CHUMP_STATE_DIR:-<unset>})"
+fi
+
 if chump gap list --json 2>/dev/null | grep -q "ZZTEST-001"; then
     pass "(a) fixture gap ZZTEST-001 present in sandbox state.db"
 else
@@ -88,7 +97,7 @@ else
 fi
 
 if [ -z "${CHUMP_HOME:-}" ] && [ -z "${CHUMP_REPO:-}" ] && [ -z "${CHUMP_REPO_ROOT:-}" ] && \
-   [ -z "${CHUMP_STATE_DB:-}" ] && [ -z "${CHUMP_LOCK_DIR:-}" ]; then
+   [ -z "${CHUMP_STATE_DB:-}" ] && [ -z "${CHUMP_LOCK_DIR:-}" ] && [ -z "${CHUMP_STATE_DIR:-}" ]; then
     pass "(c) isolation env vars unset after cleanup"
 else
     fail "(c) isolation env vars still set after cleanup"
@@ -100,6 +109,76 @@ if sqlite3 "$REAL_STATE_DB" "SELECT id FROM gaps;" 2>/dev/null | grep -q "^ZZTES
 else
     pass "(d) real state.db has no ZZTEST- gaps — sandbox never bled through"
 fi
+
+# ── (e) RESILIENT-1652: the lib pins CHUMP_STATE_DIR to the sandbox even when an
+#        inherited CHUMP_STATE_DIR points at a real, paused node state dir, and
+#        that inherited dir is left byte-identical. ───────────────────────────
+source "$REPO_ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
+
+SENTINEL_DIR="$TMPROOT/paused-real-node"
+mkdir -p "$SENTINEL_DIR"
+printf 'CHUMP_NODE_MODE=paused\nCHUMP_NODE_WORK_ENABLED=0\n' >"$SENTINEL_DIR/node.env"
+SENTINEL_BEFORE="$(cd "$SENTINEL_DIR" && find . -type f -exec sha256sum {} \; | sort)"
+
+export CHUMP_STATE_DIR="$SENTINEL_DIR"   # the dangerous inherited env
+SANDBOX2="$TMPROOT/sandbox2"
+chump_test_sandbox_setup "$SANDBOX2"
+
+if [ "${CHUMP_STATE_DIR:-}" = "$SANDBOX2/.chump" ]; then
+    pass "(e) inherited CHUMP_STATE_DIR overridden to sandbox2 .chump"
+else
+    fail "(e) inherited CHUMP_STATE_DIR not overridden (CHUMP_STATE_DIR=${CHUMP_STATE_DIR:-<unset>})"
+fi
+
+# the fixture function writes the 3 healthy-node files, only inside the sandbox
+write_sandbox_healthy_node "$SANDBOX2"
+if [ -f "$SANDBOX2/.chump/oauth-token.json" ] && [ -f "$SANDBOX2/.chump/node.env" ] && \
+   [ -f "$SANDBOX2/.chump/farmer-heartbeat" ]; then
+    pass "(e) fixture wrote oauth-token.json + node.env + farmer-heartbeat in sandbox"
+else
+    fail "(e) fixture did not write the expected files in sandbox2/.chump"
+fi
+if grep -q '"token":"sk-' "$SANDBOX2/.chump/oauth-token.json" 2>/dev/null; then
+    pass "(e) fixture oauth token carries the sk- content shape the gate checks"
+else
+    fail "(e) fixture oauth token missing the sk- content shape"
+fi
+
+SENTINEL_AFTER="$(cd "$SENTINEL_DIR" && find . -type f -exec sha256sum {} \; | sort)"
+if [ "$SENTINEL_BEFORE" = "$SENTINEL_AFTER" ]; then
+    pass "(e) inherited paused state dir byte-identical after setup + fixture"
+else
+    fail "(e) inherited paused state dir was MUTATED (setup/fixture leaked outside the sandbox)"
+fi
+
+# ── (f) the fixture refuses (exit 2) a dir that is not the lib's CHUMP_HOME, and
+#        writes nothing when it refuses. ────────────────────────────────────────
+OUTSIDE_DIR="$TMPROOT/not-the-sandbox"
+mkdir -p "$OUTSIDE_DIR"
+OUTSIDE_BEFORE="$(cd "$OUTSIDE_DIR" && find . | sort)"
+# subshell: `exit 2` in the sourced function would otherwise kill this test
+( write_sandbox_healthy_node "$OUTSIDE_DIR" ) >/dev/null 2>&1
+rc=$?
+if [ "$rc" -eq 2 ]; then
+    pass "(f) fixture refuses a dir != CHUMP_HOME with exit 2"
+else
+    fail "(f) fixture did not exit 2 on a dir != CHUMP_HOME (rc=$rc)"
+fi
+( write_sandbox_healthy_node ) >/dev/null 2>&1
+rc=$?
+if [ "$rc" -eq 2 ]; then
+    pass "(f) fixture refuses a missing argument with exit 2"
+else
+    fail "(f) fixture did not exit 2 on a missing argument (rc=$rc)"
+fi
+OUTSIDE_AFTER="$(cd "$OUTSIDE_DIR" && find . | sort)"
+if [ "$OUTSIDE_BEFORE" = "$OUTSIDE_AFTER" ]; then
+    pass "(f) fixture wrote nothing into the refused dir"
+else
+    fail "(f) fixture wrote into the refused dir despite exiting 2"
+fi
+
+chump_test_sandbox_cleanup "$SANDBOX2"
 
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="

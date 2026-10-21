@@ -139,13 +139,19 @@ fn check_exit78_free(reasons: &mut Vec<String>) -> bool {
 ///          `CLAUDE_CODE_OAUTH_TOKEN` shortcut — a token env var being *set* is
 ///          not evidence it is *valid* (RESILIENT-086). The cache rc=0 branch
 ///          (step 2) is the only "a probe said the token works" fresh path.
-///   5. `~/.chump/oauth-token.json` Keychain mirror — consulted ONLY as a
-///      last-resort fallback when steps 1-4 produced no signal (no api key, no
-///      cache, no free-tier, no `.credentials.json` token at all). A stale
-///      mirror reds here (preserving the old default), but a valid
-///      `.credentials.json` in step 4 short-circuits FIRST, so a stale mirror
-///      never reds a node whose `claude -p` creds are good (the cuphead case).
-///   6. No positive signal of trouble -> fresh (fail-open).
+///   5. `~/.chump/oauth-token.json` — consulted ONLY as a last-resort fallback
+///      when steps 1-4 produced no signal (no api key, no cache, no free-tier,
+///      no `.credentials.json` token at all). On Linux (RESILIENT-1652) this
+///      file IS the credential `claude -p` uses and no macOS-Keychain refresher
+///      keeps its mtime fresh, so it is judged by CONTENT (via
+///      [`oauth_token_json_content_verdict`]): a present, non-empty, `sk-`-shaped
+///      token whose expiry (if present) is in the future reads fresh, while a
+///      missing/empty/expired token reds — mtime is NOT consulted. On macOS
+///      (unchanged) it is the Keychain mirror's mtime (a stale mirror reds,
+///      preserving the old default). A valid `.credentials.json` in step 4
+///      short-circuits FIRST on both platforms, so a stale mirror never reds a
+///      node whose creds are good.
+///   6. No positive signal of trouble -> fresh (fail-open; non-Linux only).
 fn check_oauth_fresh(repo_root: &Path, reasons: &mut Vec<String>) -> bool {
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .ok()
@@ -176,10 +182,17 @@ fn check_oauth_fresh(repo_root: &Path, reasons: &mut Vec<String>) -> bool {
         return true;
     }
 
-    // RESILIENT-1636: validate the credential path `claude -p` actually uses.
+    // RESILIENT-1636/1652: validate the credential path `claude -p` actually
+    // uses. `claude -p` reads `~/.claude/.credentials.json` relative to HOME —
+    // NOT `CHUMP_HOME`. On cuphead `CHUMP_HOME` is set (node.env exports it), so
+    // reading `<CHUMP_HOME>/.claude/.credentials.json` found nothing, fell
+    // through to the stale mirror, and reported oauth_fresh=false while
+    // `claude -p` authenticated fine from `<HOME>/.claude/.credentials.json`
+    // (RESILIENT-1652 evidence). Resolve this one path from HOME.
     // Some(true) => usable; Some(false) => actually-dead creds, RED (restores the
     // stale_token_reds_by_default pin); None => no token, fall through.
-    let creds_path = PathBuf::from(&home).join(".claude/.credentials.json");
+    let creds_path = PathBuf::from(claude_credentials_home().unwrap_or_default())
+        .join(".claude/.credentials.json");
     if let Ok(body) = std::fs::read_to_string(&creds_path) {
         match claude_creds_verdict(&body, now_ms()) {
             Some(true) => return true,
@@ -195,20 +208,124 @@ fn check_oauth_fresh(repo_root: &Path, reasons: &mut Vec<String>) -> bool {
         }
     }
 
-    // RESILIENT-1636: last-resort fallback — the macOS Keychain mirror's mtime.
-    // Only reached when NOTHING above gave a signal (no api key / cache / free-tier
-    // / `.credentials.json` token). A stale mirror reds here (preserving the old
-    // default), but a node with valid `.credentials.json` never gets this far.
+    // The `~/.chump/oauth-token.json` env token — last-resort fallback, reached
+    // only when NOTHING above gave a signal (no api key / cache / free-tier /
+    // `.credentials.json` token).
     let token_path = PathBuf::from(&home).join(".chump/oauth-token.json");
-    if token_path.exists() {
+    if cfg!(target_os = "linux") {
+        // RESILIENT-1652 (task 2): on Linux this file IS the credential
+        // `claude -p` uses — it exports CLAUDE_CODE_OAUTH_TOKEN from it — and NO
+        // macOS-Keychain refresher keeps its mtime fresh (`oauth-token-refresh.sh`
+        // is macOS-only). So mtime is a FALSE death signal (cuphead: a valid env
+        // token reads 45h "stale"). Judge by CONTENT: present + non-empty +
+        // plausible token shape + future expiry IF one is present. A missing /
+        // empty / expired token is a genuine RED (claude -p cannot authenticate).
+        // The raw read result is handed to a pure helper so BOTH the present-file
+        // content arm and the missing-file `Err` RED arm are unit-testable without
+        // touching the host fs/env (the M-A pin).
+        return linux_oauth_token_file_verdict(
+            std::fs::read_to_string(&token_path),
+            now_ms(),
+            reasons,
+        );
+    } else if token_path.exists() {
+        // macOS path UNCHANGED (RESILIENT-1636): the Keychain mirror's mtime.
+        // cfg!(...) (not #[cfg]) keeps this arm compiled on every platform so
+        // mtime_age_s / oauth_token_verdict stay referenced (no dead_code under
+        // -D warnings) and the Linux content helper is likewise always built.
         match mtime_age_s(&token_path) {
             Some(age) => return oauth_token_verdict(age, free_tier_cascade_active(), reasons),
             None => return true,
         }
     }
 
-    // No positive signal of trouble — fail-open (RED only on probed BROKEN above).
+    // No positive signal of trouble — fail-open (non-Linux, token absent).
     true
+}
+
+/// RESILIENT-1652 (task 2): pure verdict for the Linux
+/// `~/.chump/oauth-token.json` fallback — the file `claude -p` reads
+/// `CLAUDE_CODE_OAUTH_TOKEN` from on a Linux node. Takes the RAW
+/// `std::fs::read_to_string` result so BOTH arms are deterministically
+/// unit-testable without touching the host fs/env:
+///   * `Ok(body)` is judged by CONTENT via [`oauth_token_json_content_verdict`]
+///     (present + non-empty + `sk-`-shaped + future expiry ⇒ fresh); any other
+///     content is a RED (empty / malformed / expired);
+///   * `Err(_)` (missing / unreadable) is a genuine RED — `claude -p` has no
+///     `CLAUDE_CODE_OAUTH_TOKEN` source, and NOTHING above gave a signal.
+///
+/// Mirrors the inline arms it replaced byte-for-byte, including the pushed RED
+/// reasons. This is the M-A pin: the `Err` arm must return `false`, NEVER
+/// fail-open to `true`.
+fn linux_oauth_token_file_verdict(
+    read: std::io::Result<String>,
+    now_ms: i64,
+    reasons: &mut Vec<String>,
+) -> bool {
+    match read {
+        Ok(body) => match oauth_token_json_content_verdict(&body, now_ms) {
+            Some(true) => true,
+            _ => {
+                reasons.push(
+                    "~/.chump/oauth-token.json token is empty / malformed / expired \
+                     (claude -p has no usable CLAUDE_CODE_OAUTH_TOKEN)"
+                        .to_string(),
+                );
+                false
+            }
+        },
+        Err(_) => {
+            reasons.push(
+                "~/.chump/oauth-token.json missing (claude -p has no CLAUDE_CODE_OAUTH_TOKEN \
+                 source and no api-key / cache / free-tier / .credentials.json signal)"
+                    .to_string(),
+            );
+            false
+        }
+    }
+}
+
+/// RESILIENT-1652 (task 2): pure CONTENT verdict for the Linux
+/// `~/.chump/oauth-token.json` env token (the file `claude -p` reads
+/// `CLAUDE_CODE_OAUTH_TOKEN` from; written from providers.env-linux, usually
+/// with no expiry field). A token is fresh iff it is present, non-empty, shaped
+/// like an Anthropic token (`sk-` prefix), and — IF an expiry field is present —
+/// not yet expired. `Some(true)` = usable, `Some(false)` =
+/// empty/malformed/expired (RED), `None` = unparseable JSON (caller treats as
+/// RED). Pure (no fs/env) and mtime-independent — content, never mtime.
+fn oauth_token_json_content_verdict(content: &str, now_ms: i64) -> Option<bool> {
+    let v: serde_json::Value = serde_json::from_str(content).ok()?;
+    // Claude Code nests under `claudeAiOauth`; the providers.env-linux writer is
+    // flat (`{"token":"sk-…"}`). Tolerate both.
+    let obj = v.get("claudeAiOauth").unwrap_or(&v);
+    let token = [
+        "token",
+        "accessToken",
+        "access_token",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+    ]
+    .iter()
+    .find_map(|k| obj.get(*k).and_then(|x| x.as_str()))
+    .map(str::trim)
+    .unwrap_or("");
+    // Present + non-empty + plausible Anthropic token shape (`sk-ant-oat01-…`).
+    if token.is_empty() || !token.starts_with("sk-") {
+        return Some(false);
+    }
+    // If an expiry is present it must be in the future (epoch millis; a JSON
+    // number or numeric string). No expiry field at all → usable (the
+    // providers.env-linux shape carries none).
+    let expires = obj
+        .get("expiresAt")
+        .or_else(|| obj.get("expires_at"))
+        .and_then(|x| {
+            x.as_i64()
+                .or_else(|| x.as_str().and_then(|s| s.trim().parse().ok()))
+        });
+    match expires {
+        Some(exp) if exp <= now_ms => Some(false), // expired
+        _ => Some(true),
+    }
 }
 
 /// RESILIENT-1636: pure verdict for the auth-status.sh VALIDITY cache body
@@ -327,6 +444,24 @@ fn chump_state_home() -> Option<String> {
     resolve_state_home(std::env::var("CHUMP_HOME").ok(), std::env::var("HOME").ok())
 }
 
+/// RESILIENT-1652: the home `claude -p` reads `~/.claude/.credentials.json`
+/// from. This is `HOME`, NOT `CHUMP_HOME` — the two differ on a node (cuphead)
+/// whose node.env exports `CHUMP_HOME`, and reading the creds from `CHUMP_HOME`
+/// found nothing and falsely reported oauth_fresh=false. Unlike the chump state
+/// files (`oauth-token.json` mirror, `auth-status-cache`, which live under
+/// `CHUMP_HOME`/`chump_state_home`), the Claude credential store is owned by
+/// the Claude CLI and keyed off `HOME`.
+fn claude_credentials_home() -> Option<String> {
+    resolve_claude_home(std::env::var("HOME").ok())
+}
+
+/// Pure precedence rule for [`claude_credentials_home`]: a non-empty `HOME`
+/// wins; nothing else is consulted (the Claude CLI reads `~` = `HOME`). Split
+/// out so it is unit-testable without mutating process-global env.
+fn resolve_claude_home(home: Option<String>) -> Option<String> {
+    home.filter(|s| !s.is_empty())
+}
+
 /// Pure precedence rule for [`chump_state_home`]: a non-empty `CHUMP_HOME`
 /// wins, else `HOME`. Split out so the precedence is unit-testable without
 /// mutating process-global env (which would race the auth.rs env tests in the
@@ -362,45 +497,58 @@ fn heartbeat_verdict(chump_dir: &Path) -> (bool, Option<u64>) {
     }
 }
 
-/// Node-mode pause detection (RESILIENT-1636 / RESILIENT-1614). A node paused
-/// via `chump node pause` writes `CHUMP_NODE_MODE=paused` to `node.env`; the
-/// env var may also be exported directly. A paused node's stale heartbeat is
-/// EXPECTED (the farmer is deliberately idle), so it is reported as PAUSED.
-fn node_is_paused() -> bool {
-    if let Ok(m) = std::env::var("CHUMP_NODE_MODE") {
-        let m = m.trim();
-        if m == "paused" {
-            return true;
-        }
-        if !m.is_empty() {
-            return false; // explicit non-paused mode wins over the file
-        }
-    }
-    // node.env lives at CHUMP_STATE_DIR (if set) else <state-home>/.chump, the
-    // same resolution `chump node pause` uses in node_mode.rs.
-    let state_dir = std::env::var("CHUMP_STATE_DIR")
+/// RESILIENT-1652 (task 0): resolve the node state dir (where `node.env` and
+/// the node pause sentinel live) the same way `chump node pause` does —
+/// `CHUMP_STATE_DIR` if set, else `<state-home>/.chump`, else `.chump`. This is
+/// the ONE place [`compute`] reads the host env for the pause inputs; tests call
+/// [`compute_at`] with an explicit state dir so they never read the host (the
+/// cuphead trap: the host's `~/.chump/node.env` is `CHUMP_NODE_MODE=paused`, so
+/// a test that let `compute` read the host saw `paused=true` and the
+/// stale-heartbeat reason it was asserting on was suppressed).
+fn resolve_node_state_dir() -> PathBuf {
+    std::env::var("CHUMP_STATE_DIR")
         .ok()
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .or_else(|| chump_state_home().map(|h| PathBuf::from(h).join(".chump")));
-    if let Some(dir) = state_dir {
-        if let Ok(body) = std::fs::read_to_string(dir.join("node.env")) {
-            return node_env_is_paused(&body);
-        }
-    }
-    false
+        .or_else(|| chump_state_home().map(|h| PathBuf::from(h).join(".chump")))
+        .unwrap_or_else(|| PathBuf::from(".chump"))
 }
 
-/// Pure parse of a `node.env` body for `CHUMP_NODE_MODE=paused` (with or
-/// without the `export ` prefix node_mode.rs writes). Split out for unit tests.
-fn node_env_is_paused(content: &str) -> bool {
-    content.lines().any(|l| {
-        let t = l.trim().trim_start_matches("export ").trim();
-        t == "CHUMP_NODE_MODE=paused"
-    })
+/// Node-mode pause detection (RESILIENT-1636 / RESILIENT-1614 / RESILIENT-1652).
+/// Delegates to the ONE paused predicate in [`crate::node_pause`], shared with
+/// the pause detector in `node_mode.rs`, `chump node is-paused`, and
+/// node-converge. A node is paused when the node **state dir** expresses it via
+/// `node.env` (`CHUMP_NODE_MODE=paused` in either line form, OR the legacy
+/// `control-plane` + `CHUMP_NODE_WORK_ENABLED=0` form cuphead carried) OR the
+/// `<state_dir>/.chump/fleet-paused` node pause sentinel is present. A paused
+/// node's stale heartbeat is EXPECTED (the farmer is deliberately idle), so it
+/// is reported as PAUSED. Returns the signal so the gate can attribute the
+/// reason.
+///
+/// RESILIENT-1652 (task 0 + 5): this reads ONLY the passed `state_dir` — it does
+/// NOT consult an exported `CHUMP_NODE_MODE` env var (that override is removed,
+/// so node.env is the sole durable source) and it does NOT resolve the state dir
+/// from the host itself. Both make every caller that passes an explicit (temp)
+/// state dir fully hermetic. The node pause sentinel here is a DIFFERENT file
+/// from the kill switch [`check_sentinel`] reads (`repo_root/.chump`), so a
+/// verb-paused node reports PAUSED without tripping the HARD-RED kill switch.
+fn node_is_paused(state_dir: &Path) -> Option<crate::node_pause::PauseSignal> {
+    crate::node_pause::pause_signal(state_dir)
 }
 
+/// Compute the farmer status, resolving the node state dir from the host env
+/// (`CHUMP_STATE_DIR` / `HOME`). Production entry point.
 pub fn compute(repo_root: &Path) -> FarmerStatus {
+    compute_at(repo_root, &resolve_node_state_dir())
+}
+
+/// RESILIENT-1652 (task 0): compute the farmer status against an EXPLICIT node
+/// state dir (where `node.env` + the node pause sentinel live). Split out from
+/// [`compute`] so tests pass a temp dir and never read the host's (paused)
+/// `~/.chump/node.env`. The kill-switch sentinel stays resolved from
+/// `repo_root/.chump` (it is the ci-health-gate's file, keyed off the repo, not
+/// the node state dir).
+pub fn compute_at(repo_root: &Path, state_dir: &Path) -> FarmerStatus {
     let chump_dir = repo_root.join(".chump");
     let mut reasons = Vec::new();
 
@@ -408,18 +556,26 @@ pub fn compute(repo_root: &Path) -> FarmerStatus {
     let exit78_free = check_exit78_free(&mut reasons);
     let oauth_fresh = check_oauth_fresh(repo_root, &mut reasons);
     let (heartbeat_fresh, heartbeat_age_s) = heartbeat_verdict(&chump_dir);
-    let paused = node_is_paused();
+    let pause_signal = node_is_paused(state_dir);
+    let paused = pause_signal.is_some();
 
     // RESILIENT-1636: a paused node's stale heartbeat is expected — report it
     // as PAUSED, not as a stale-farmer malfunction. A truly-stale heartbeat on
-    // an UN-paused node keeps the original RED reason.
-    if paused {
+    // an UN-paused node keeps the original RED reason. RESILIENT-1652: attribute
+    // the pause accurately (node-env pause vs. the kill-switch sentinel).
+    if let Some(sig) = pause_signal {
         let agenote = heartbeat_age_s
             .map(|a| format!(" (heartbeat age={a}s, staleness expected while paused)"))
             .unwrap_or_default();
-        reasons.push(format!(
-            "farmer paused by node mode (CHUMP_NODE_MODE=paused){agenote}"
-        ));
+        let reason = match sig {
+            crate::node_pause::PauseSignal::NodeEnv => {
+                format!("farmer paused by node mode (CHUMP_NODE_MODE=paused){agenote}")
+            }
+            crate::node_pause::PauseSignal::Sentinel => {
+                format!("farmer paused (fleet-paused sentinel present){agenote}")
+            }
+        };
+        reasons.push(reason);
     } else if !heartbeat_fresh {
         reasons.push(format!(
             "farmer heartbeat stale: age={}s > {HEARTBEAT_MAX_AGE_S}s",
@@ -782,7 +938,13 @@ mod tests {
         // … but the refusal REASON moved into compute()'s stale branch, so the
         // "explains why" assertion must read it where it now lives: an un-paused
         // node's stale heartbeat yields a reason naming "farmer heartbeat stale".
-        let status = compute(dir.path());
+        // RESILIENT-1652 (task 0): isolate the pause inputs with an explicit,
+        // CLEAN (no node.env, no sentinel) state dir so the host's paused
+        // `~/.chump/node.env` can't flip this node to PAUSED and suppress the
+        // stale-heartbeat reason this test asserts on.
+        let clean_state = tempfile::tempdir().unwrap();
+        let status = compute_at(dir.path(), clean_state.path());
+        assert!(!status.paused, "clean state dir must not read as paused");
         assert!(!status.heartbeat_fresh);
         assert!(
             status
@@ -791,6 +953,55 @@ mod tests {
                 .any(|r| r.contains("farmer heartbeat stale")),
             "expected a 'farmer heartbeat stale' reason, got {:?}",
             status.reasons
+        );
+    }
+
+    #[test]
+    fn compute_at_reads_passed_state_dir_not_host() {
+        // RESILIENT-1652 (task 0): the hermetic guarantee. compute_at takes the
+        // node state dir explicitly; the pause verdict depends ONLY on that dir,
+        // never on the host's `~/.chump/node.env` (which on cuphead is
+        // CHUMP_NODE_MODE=paused). Prove both directions in one test:
+        //   * a CLEAN state dir → not paused, so a stale heartbeat reads as a
+        //     malfunction ("farmer heartbeat stale") even if the host is paused;
+        //   * a PAUSED state dir → paused, and the staleness is attributed to
+        //     the pause, not reported as a malfunction.
+        let repo = tempfile::tempdir().unwrap();
+        let chump_dir = repo.path().join(".chump");
+        std::fs::create_dir_all(&chump_dir).unwrap();
+        let hb = chump_dir.join("farmer-heartbeat");
+        let f = std::fs::File::create(&hb).unwrap();
+        let old = SystemTime::now() - std::time::Duration::from_secs(HEARTBEAT_MAX_AGE_S + 1);
+        f.set_modified(old).unwrap();
+
+        // Clean state dir (no node.env, no node sentinel) → not paused.
+        let clean = tempfile::tempdir().unwrap();
+        let s = compute_at(repo.path(), clean.path());
+        assert!(!s.paused, "a clean state dir must not read as paused");
+        assert!(
+            s.reasons
+                .iter()
+                .any(|r| r.contains("farmer heartbeat stale")),
+            "un-paused stale heartbeat must report the malfunction: {:?}",
+            s.reasons
+        );
+
+        // Paused state dir (node.env=paused) → paused; staleness attributed to
+        // the pause, NOT reported as a stale-farmer malfunction.
+        let paused_dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            paused_dir.path().join("node.env"),
+            "CHUMP_NODE_MODE=paused\n",
+        )
+        .unwrap();
+        let s2 = compute_at(repo.path(), paused_dir.path());
+        assert!(s2.paused, "a paused node.env must read as paused");
+        assert!(
+            !s2.reasons
+                .iter()
+                .any(|r| r.contains("farmer heartbeat stale")),
+            "a paused node's stale heartbeat must NOT read as a malfunction: {:?}",
+            s2.reasons
         );
     }
 
@@ -884,14 +1095,119 @@ mod tests {
         assert_eq!(claude_creds_verdict(body, 1), Some(true));
     }
 
+    // ── RESILIENT-1652 (task 2): Linux oauth-token.json judged by CONTENT ─────
+
+    #[test]
+    fn oauth_token_json_content_verdict_cases() {
+        // A long-lived env token (the providers.env-linux shape: flat `token`,
+        // no expiry field) is fresh regardless of mtime — this is pure content.
+        let long = r#"{"token":"sk-ant-oat01-abc","written_at":"2026-10-17T17:58:18Z","source":"providers.env-linux"}"#;
+        assert_eq!(
+            oauth_token_json_content_verdict(long, 9_999_999_999_999),
+            Some(true)
+        );
+        // Empty token → RED.
+        assert_eq!(
+            oauth_token_json_content_verdict(r#"{"token":""}"#, 1),
+            Some(false)
+        );
+        // No token key at all → RED.
+        assert_eq!(
+            oauth_token_json_content_verdict(r#"{"source":"x"}"#, 1),
+            Some(false)
+        );
+        // A non-token-shaped value (no `sk-` prefix) → RED.
+        assert_eq!(
+            oauth_token_json_content_verdict(r#"{"token":"old"}"#, 1),
+            Some(false)
+        );
+        // Future expiry → fresh; past expiry → RED.
+        assert_eq!(
+            oauth_token_json_content_verdict(
+                r#"{"token":"sk-ant-x","expiresAt":9999999999999}"#,
+                1_000
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            oauth_token_json_content_verdict(r#"{"token":"sk-ant-x","expiresAt":1}"#, 1_000_000),
+            Some(false)
+        );
+        // Unparseable JSON → None (caller treats as RED).
+        assert_eq!(oauth_token_json_content_verdict("not json", 1), None);
+        // Nested claudeAiOauth + accessToken key is tolerated.
+        assert_eq!(
+            oauth_token_json_content_verdict(r#"{"claudeAiOauth":{"accessToken":"sk-ant-x"}}"#, 1),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn linux_missing_oauth_token_reds() {
+        // RESILIENT-1652 (task 2): on a Linux node `~/.chump/oauth-token.json` IS
+        // the credential `claude -p` reads CLAUDE_CODE_OAUTH_TOKEN from; a MISSING
+        // file (and no api-key / cache / free-tier / .credentials.json signal
+        // above) is a genuine RED, NOT a fail-open green. Pins the M-A mutant: the
+        // `Err(_)` arm in the Linux fallback must return false, never true.
+        let mut reasons = Vec::new();
+        let missing =
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no such file or directory");
+        assert!(
+            !linux_oauth_token_file_verdict(Err(missing), now_ms(), &mut reasons),
+            "a missing oauth-token.json must RED — claude -p has no token source"
+        );
+        assert!(
+            reasons.iter().any(|r| r.contains("missing")),
+            "the RED reason must explain the token is missing: {reasons:?}"
+        );
+        // A present, valid env token still reads fresh through the SAME helper
+        // (so the refactor is behaviour-identical, not a one-way RED).
+        reasons.clear();
+        assert!(
+            linux_oauth_token_file_verdict(
+                Ok(r#"{"token":"sk-ant-oat01-x"}"#.to_string()),
+                1,
+                &mut reasons
+            ),
+            "a present, sk-shaped token must read fresh"
+        );
+        assert!(reasons.is_empty(), "a fresh token pushes no reason");
+        // A present-but-empty token reds through the content verdict (not the
+        // missing-file arm).
+        assert!(!linux_oauth_token_file_verdict(
+            Ok(r#"{"token":""}"#.to_string()),
+            1,
+            &mut reasons
+        ));
+    }
+
     // ── RESILIENT-1636: paused-node reporting ────────────────────────────────
 
     #[test]
     fn node_env_paused_parse() {
+        // Delegates to the ONE predicate in node_pause (both line forms + the
+        // legacy control-plane form). Kept here so the farmer gate's reliance on
+        // it is guarded at this layer too.
+        use crate::node_pause::node_env_is_paused;
         assert!(node_env_is_paused("export CHUMP_NODE_MODE=paused\n"));
         assert!(node_env_is_paused("CHUMP_NODE_MODE=paused"));
+        assert!(node_env_is_paused(
+            "CHUMP_NODE_MODE=control-plane\nCHUMP_NODE_WORK_ENABLED=0\n"
+        ));
         assert!(!node_env_is_paused("export CHUMP_NODE_MODE=work-ready\n"));
         assert!(!node_env_is_paused("# comment\nexport FOO=bar\n"));
+    }
+
+    #[test]
+    fn resolve_claude_home_is_home_only() {
+        // RESILIENT-1652: the Claude credential store is keyed off HOME, never
+        // CHUMP_HOME. A non-empty HOME wins; empty/absent → None (fail-open).
+        assert_eq!(
+            resolve_claude_home(Some("/home/ubuntu".into())),
+            Some("/home/ubuntu".into())
+        );
+        assert_eq!(resolve_claude_home(Some(String::new())), None);
+        assert_eq!(resolve_claude_home(None), None);
     }
 
     // ── RESILIENT-1636: re-entry admission vs new-claim refusal ──────────────

@@ -15,6 +15,13 @@ cd "$REPO_ROOT"
 # shellcheck source=lib/test-sandbox.sh
 # shellcheck disable=SC1091
 source "$REPO_ROOT/scripts/coord/lib/test-sandbox.sh"
+# RESILIENT-1652: healthy-node fixture helper — each sandbox below lays down a
+# content-valid oauth token, a not-paused node.env and a fresh farmer heartbeat
+# INSIDE its own sandbox dir so the RESILIENT-069 farmer readiness gate
+# (consulted by `gap reserve`) reads GREEN by evidence on a fresh Linux runner.
+# No gate loosening, no skip env var.
+# shellcheck source=scripts/ci/lib/sandbox-healthy-node.sh
+source "$REPO_ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
 
 PASS=0
 FAIL=0
@@ -76,6 +83,9 @@ FLOCK_EOF
     local fixture_file="$sandbox/.fixture-gaps.yaml"
     printf '%s' "$fixture_yaml" | sed '/^gaps:$/d' > "$fixture_file"
     chump_test_sandbox_setup "$sandbox" --seed-yaml "$fixture_file"
+    # RESILIENT-1652: healthy-node fixture inside this sandbox so the reserve
+    # subshell reads the farmer gate GREEN by evidence.
+    export HOME="$sandbox"; write_sandbox_healthy_node "$sandbox"
 }
 
 # EFFECTIVE-466: is_skippable_gap — a gap is "skippable" (already spoken for)

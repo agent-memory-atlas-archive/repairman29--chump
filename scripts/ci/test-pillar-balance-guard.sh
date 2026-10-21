@@ -15,6 +15,23 @@ set -uo pipefail
 CHUMP_BIN="${CHUMP_BIN:-${CARGO_TARGET_DIR:-$(git rev-parse --show-toplevel)/target}/debug/chump}"
 [ -x "$CHUMP_BIN" ] || { echo "FATAL: $CHUMP_BIN not found" >&2; exit 2; }
 
+# RESILIENT-1652: `gap reserve` (without --force) consults the farmer readiness
+# gate, which reds a fresh Linux runner with no oauth token. Source the shared
+# healthy-node fixture function ONCE here — resolved from THIS script's dir, not
+# cwd, since the scenarios `cd` into fresh temp repos — then call
+# chump_test_sandbox_setup "$TMPn" + write_sandbox_healthy_node "$TMPn" after
+# each CHUMP_HOME change so the gate reads GREEN by evidence. repair 6: the
+# fixture function requires the lib's sandbox marker, so each scenario goes
+# through chump_test_sandbox_setup. Here CHUMP_REPO == CHUMP_HOME == $TMPn per
+# scenario, so the CHUMP_STATE_DB setup pins ($TMPn/.chump/state.db) is exactly
+# the per-repo db this test wants — no un-setting needed, no cross-scenario
+# bleed. No gate loosening, no skip env var.
+_GUARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../coord/lib/test-sandbox.sh
+source "$_GUARD_DIR/../coord/lib/test-sandbox.sh"
+# shellcheck source=scripts/ci/lib/sandbox-healthy-node.sh
+source "$_GUARD_DIR/lib/sandbox-healthy-node.sh"
+
 PASS=0
 FAIL=0
 ok()   { printf '\033[0;32mPASS\033[0m %s\n' "$*"; PASS=$((PASS+1)); }
@@ -38,6 +55,9 @@ export CHUMP_REPO="$TMP"
 # isolate via CHUMP_HOME (honored by src/farmer_status.rs) instead.
 export CHUMP_HOME="$TMP"
 export CHUMP_WORKTREE_ROOT="$TMP"
+export HOME="$TMP"
+chump_test_sandbox_setup "$TMP"                     # RESILIENT-1652 repair 6: marker + CHUMP_STATE_DIR=$TMP/.chump
+write_sandbox_healthy_node "$TMP"                   # RESILIENT-1652: healthy node under CHUMP_HOME=$TMP
 export CHUMP_BINARY_STALENESS_CHECK=0
 # Bypass FLEET-029 ambient glance and INFRA-1149 similarity check in seed
 export FLEET_029_AMBIENT_GLANCE_SKIP=1
@@ -112,6 +132,9 @@ git -C "$TMP2" config user.name "CI" 2>/dev/null || true
 export CHUMP_REPO="$TMP2"
 export CHUMP_HOME="$TMP2"  # CREDIBLE-1519: isolate farmer-gate oauth path
 export CHUMP_WORKTREE_ROOT="$TMP2"
+export HOME="$TMP2"
+chump_test_sandbox_setup "$TMP2"                     # RESILIENT-1652 repair 6: marker + CHUMP_STATE_DIR=$TMP2/.chump
+write_sandbox_healthy_node "$TMP2"                   # RESILIENT-1652: healthy node under CHUMP_HOME=$TMP2
 
 # Seed 9 RESILIENT + 1 EFFECTIVE with real ACs
 for i in $(seq 1 9); do
@@ -153,7 +176,11 @@ git init -q -b main . 2>/dev/null || git init -q . 2>/dev/null || true
 git -C "$TMP3" config user.email "test@ci.local" 2>/dev/null || true
 git -C "$TMP3" config user.name "CI" 2>/dev/null || true
 export CHUMP_REPO="$TMP3"
+export CHUMP_HOME="$TMP3"  # RESILIENT-1652: Scenario B rm -rf'd $TMP2; re-home the gate here
 export CHUMP_WORKTREE_ROOT="$TMP3"
+export HOME="$TMP3"
+chump_test_sandbox_setup "$TMP3"                     # RESILIENT-1652 repair 6: marker + CHUMP_STATE_DIR=$TMP3/.chump
+write_sandbox_healthy_node "$TMP3"                   # RESILIENT-1652: healthy node under CHUMP_HOME=$TMP3
 
 # Seed 5 RESILIENT with real ACs (would be 100% if we add one more)
 for i in $(seq 1 5); do
