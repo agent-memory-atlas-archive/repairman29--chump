@@ -212,7 +212,7 @@ would catch it. This PR ${gate_hit:+touches the gate file: $gate_hit}.
 End your review with EXACTLY one block, nothing after it:
 VERDICT: APPROVE        (or: VERDICT: CHANGES REQUIRED)
 head: ${head}
-blockers: <none, or a one-line list>
+blockers: none          (write exactly 'none', or a one-line list of real blockers)
 mutants: <one line: the mutant(s) you reasoned about, or 'NOT RUN — read-only reviewer'>
 PROMPT
     printf '%s' "$pf"
@@ -341,8 +341,28 @@ hits = [("APPROVE" if m.group(1).upper().startswith("APPROVE") else "CHANGES_REQ
         for m in verd.finditer(body)]
 if not hits:
     sys.exit(1)
-print("CHANGES_REQUIRED" if len(set(hits)) > 1 else hits[-1])
-sys.exit(0)
+if len(set(hits)) == 1:
+    print(hits[0]); sys.exit(0)
+# Disagreement WITHIN one organ-authored comment is the parse-downgrade
+# signature (CREDIBLE-1594, #5615 bb2d12c96): the organ wraps its own verdict
+# identically top and bottom around the quoted model review, so the only way a
+# single comment disagrees is organ=CHANGES wrapping an embedded model APPROVE.
+# If every blockers line reads as none under the corrected rule, the CHANGES was
+# a stale parse artifact of the old buggy accept-set — report NO current verdict
+# (exit 1) so the organ re-reviews THIS head with the fixed parser and lands a
+# fresh verdict. No env var, no hand-posted verdict. A real blocker still holds.
+def _blockers_none(raw):
+    v = raw.strip().lower()
+    while len(v) >= 2 and v[0] == v[-1] and v[0] in "\x27\x22\x60":
+        v = v[1:-1].strip()
+    v = v.strip(".").strip()
+    return v in ("", "none", "<none>", "<none, or a one-line list>",
+                 "(none)", "n/a", "na", "-")
+blocker = re.compile(r"^[ \t]*blockers?:[ \t]*(.*)$", re.I | re.M)
+blines = list(blocker.finditer(body))
+if blines and all(_blockers_none(m.group(1)) for m in blines):
+    sys.exit(1)  # parse-downgrade → re-review this head
+print("CHANGES_REQUIRED"); sys.exit(0)
 ' "$payload"
 }
 

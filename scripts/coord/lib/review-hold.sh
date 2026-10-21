@@ -103,11 +103,25 @@ if not hits:
 if len(set(hits)) > 1:
     print("CHANGES_REQUIRED"); sys.exit(0)
 result = hits[-1]  # the LAST verdict block wins
+
+# An empty-blockers line reads as "no blockers". The prompt template invites a
+# handful of placeholder shapes (<none>, <none, or a one-line list>, (none),
+# none., n/a, -) and a model often echoes one verbatim; treat every such shape
+# as none so an APPROVE is not downgraded by its own template boilerplate
+# (CREDIBLE-1594: #5615 bb2d12c96 ended "blockers: <none>" yet was downgraded).
+def _blockers_none(raw):
+    v = raw.strip().lower()
+    # peel any surrounding quotes/backticks the reviewer may have wrapped it in
+    while len(v) >= 2 and v[0] == v[-1] and v[0] in "\x27\x22\x60":
+        v = v[1:-1].strip()
+    v = v.strip(".").strip()
+    return v in ("", "none", "<none>", "<none, or a one-line list>",
+                 "(none)", "n/a", "na", "-")
+
 if result == "APPROVE":
-    # Downgrade an APPROVE whose blockers line lists anything but none.
+    # Downgrade an APPROVE whose blockers line lists a real blocker.
     for m in re.finditer(r"^[ \t]*blockers?:[ \t]*(.*)$", body, re.I | re.M):
-        val = m.group(1).strip().lower().strip(".")
-        if val and val not in ("none", "(none)", "n/a", "na", "-"):
+        if not _blockers_none(m.group(1)):
             print("CHANGES_REQUIRED"); sys.exit(0)
 print(result)
 '
@@ -194,9 +208,17 @@ if len(set(hits)) > 1:
     print("changes-required"); sys.exit(0)
 if hits[-1] != "APPROVE":
     print("changes-required"); sys.exit(0)
+def _blockers_none(raw):
+    # Mirror review_parse_verdict: every empty-blockers placeholder shape the
+    # prompt template could invite reads as none (CREDIBLE-1594).
+    v = raw.strip().lower()
+    while len(v) >= 2 and v[0] == v[-1] and v[0] in "\x27\x22\x60":
+        v = v[1:-1].strip()
+    v = v.strip(".").strip()
+    return v in ("", "none", "<none>", "<none, or a one-line list>",
+                 "(none)", "n/a", "na", "-")
 for m in blocker.finditer(body):
-    v = m.group(1).strip().lower().strip(".")
-    if v and v not in ("none", "(none)", "n/a", "na", "-"):
+    if not _blockers_none(m.group(1)):
         print("changes-required-blockers"); sys.exit(0)
 print("")  # clear: a current-head APPROVE with no blockers
 ' "$payload")"
