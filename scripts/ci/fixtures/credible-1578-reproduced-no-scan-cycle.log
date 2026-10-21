@@ -1,0 +1,5 @@
+[improve] mode=DRY-RUN repo=repairman29/olive guest_mode=guest
+[improve] GUEST mode: will fork + open ONE bounded PR, NEVER self-merge (CHUMP_GUEST_PR_CAP=1)
+
+[improve] Stage 1: PICK — scout repairman29/olive...
+chump improve: no onboard scan found under /tmp/credible-1578-repro/repairman29-olive — run `chump onboard repairman29/olive` first

@@ -1,0 +1,20 @@
+# CREDIBLE-1578 carve manifest — the gate ACs this shell / commit-only slice does
+# NOT deliver, each mapped to a REAL, open tracking gap. Verify any row with
+# `chump gap show <ID>`.
+#
+# Why this file exists (round-3 review, Required item 4): the AC3 / AC4 / AC1-decode
+# "carve to real gaps" was asserted only in prose (commit messages + the salvage
+# body), so the reviewer could not discover the split — "the diff creates no
+# gaps/docs/gaps files ... the split that would justify deferring AC3/AC4 is
+# asserted, not real." This file is that record, committed in-diff; test G9 guards
+# it so a carved AC can never be silently re-marked as delivered here.
+#
+# The three carved items are structurally out of a lane-2 shell, commit-only slice
+# (Rust in src/improve.rs; live external-repo execution against repairman29/olive;
+# re-triage of blocked gap state) — the reviewer agrees each "real fix ... is absent
+# from this diff" and belongs to a follow-up. The tracking gaps below already exist.
+#
+# Format: AC<key>|<status>|<tracking-gap>|<one-line reason it is out of this lane>
+AC1-decode|CARVED|CREDIBLE-1593|historical 945B rc=1 signature behind the 27 Olive blocks needs live Olive runs; those cycle logs did not survive, and the pick gate is closed (INFRA-8090). This slice reproduces ONE rc=1 mechanism (no_onboard_scan, fixture + guard G8); the full historical decode is carved to a NEW follow-up gap (CREDIBLE-1593, open, depends on the INFRA-8090 gate) — NOT to CREDIBLE-1578 itself, because a gate AC deferred to its own parent gap is not delivered (PR #5615 review r4, Required item 1).
+AC3|CARVED|INFRA-8091|fix the pre-agent step so the path reaches the agent or fail-fasts with the named reason instead of looping 3x — Rust (src/improve.rs / improve-loop remediation backend), gated on the pick gate (INFRA-8090).
+AC4|CARVED|INFRA-8606|re-triage the blocked Olive gaps through the fixed pipeline, not by hand — depends_on CREDIBLE-1578, gated on AC1+AC3; no gap unblocked by hand in this PR.

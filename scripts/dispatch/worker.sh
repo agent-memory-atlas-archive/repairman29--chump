@@ -2847,7 +2847,7 @@ Operator or sibling worker can rescue this branch via:
             # it wedged all night. Guard: CHUMP_AUTO_BLOCK_OFFENDERS=0 restores the
             # old cooldown-only behavior. Best-effort: a failed `gap set` leaves the
             # cooldown in place, so the loop is still broken for the backoff window.
-            offense_maybe_block "$GAP_ID" "$_offense_n" "$_cooldown_kind" "$rc" "${_cycle_log_size:-0}"
+            offense_maybe_block "$GAP_ID" "$_offense_n" "$_cooldown_kind" "$rc" "${_cycle_log_size:-0}" "${cycle_log:-}"
 
             # INFRA-826 / FLEET-043: circuit breaker on consecutive non-ship cycles.
             # After CHUMP_DISPATCH_FAIL_THRESHOLD (default 3) consecutive wedge/fail/
@@ -3051,7 +3051,7 @@ Operator or sibling worker can rescue this branch via:
                 # RESILIENT-1584: count rc=0 unverified_ship in the INFRA-3832 ledger.
                 source "${BASH_SOURCE[0]%/*}/lib/offense-ledger.sh"
                 _uv_offense_n="$(offense_bump "$GAP_ID")"
-                offense_maybe_block "$GAP_ID" "$_uv_offense_n" "unverified_ship" "$rc" "${_cycle_log_size:-0}"
+                offense_maybe_block "$GAP_ID" "$_uv_offense_n" "unverified_ship" "$rc" "${_cycle_log_size:-0}" "${cycle_log:-}"
                 printf '{"gap_id":"%s","until":%d,"agent":"%s","ts":"%s","reason":"unverified_ship"}\n' \
                     "$GAP_ID" "$_cd_until" "$AGENT_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
                     > "$_cd_dir/${AGENT_ID}-${GAP_ID}.json" 2>/dev/null || true
