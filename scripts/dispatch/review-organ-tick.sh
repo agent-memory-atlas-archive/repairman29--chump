@@ -77,6 +77,11 @@ cd "$REPO_ROOT" || { echo "[review-organ] cannot cd repo root" >&2; exit 1; }
 # shellcheck source=scripts/coord/lib/ship-gate-files.sh
 source "$REPO_ROOT/scripts/coord/lib/ship-gate-files.sh"
 REVIEW_GATE_FILE_GLOBS=("${CHUMP_SHIP_GATE_GLOBS[@]}")
+# The gate-list version a mechanical hold is stamped with (CREDIBLE-1592). Comes
+# from the shared constant via chump_ship_gate_list_version — NEVER an env var.
+# When the list changes, a head held under the old list is re-evaluated; a real
+# model CHANGES REQUIRED carries no such stamp and is never re-reviewed.
+GATE_LIST_VERSION="$(chump_ship_gate_list_version)"
 # A sandboxed mutant runner does not exist yet; until it does, gate-file PRs are
 # held for a mutant-capable reviewer (repair item 8). This is a CONSTANT, not an
 # env read — flipping it on without a real runner would defeat the mutation rule.
@@ -218,11 +223,13 @@ PROMPT
     printf '%s' "$pf"
 }
 
-# post_verdict <pr> <verdict APPROVE|CHANGES_REQUIRED> <head> <mutants-line> <body-file>
+# post_verdict <pr> <verdict APPROVE|CHANGES_REQUIRED> <head> <mutants-line> <body-file> <gate-list-version>
 # Posts a comment whose FIRST line is exactly the verdict and that ends with the
-# verdict too (AC1), embedding head + mutants (AC5).
+# verdict too (AC1), embedding head + mutants (AC5). When a gate-list-version is
+# given (ONLY the mechanical gate-file hold passes it, CREDIBLE-1592), stamp it so
+# a later tick can detect a list change and re-evaluate the head.
 post_verdict() {
-    local pr="$1" verdict="$2" head="$3" mutants="$4" body_file="${5:-}"
+    local pr="$1" verdict="$2" head="$3" mutants="$4" body_file="${5:-}" gate_list_version="${6:-}"
     local vstr; [[ "$verdict" == APPROVE ]] && vstr="VERDICT: APPROVE" || vstr="VERDICT: CHANGES REQUIRED"
     local cfile; cfile="$(mktemp)"
     {
@@ -230,6 +237,7 @@ post_verdict() {
         printf '🤖 independent review organ (CREDIBLE-1542) — read-only, no write tools.\n'
         printf 'head: %s\n' "$head"
         printf 'mutants: %s\n' "$mutants"
+        [[ -n "$gate_list_version" ]] && printf 'gate-list-version: %s\n' "$gate_list_version"
         if [[ -n "$body_file" && -r "$body_file" ]]; then
             printf '\n---\n'; sed -n '1,400p' "$body_file"
         fi
@@ -305,7 +313,7 @@ current_head_verdict() {
     payload="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} \
         --json comments 2>/dev/null || true)"
     [[ -n "$payload" ]] || return 1
-    HEAD_SHA="$head" TRUSTED_AUTHOR="$ORGAN_LOGIN" python3 -c '
+    HEAD_SHA="$head" TRUSTED_AUTHOR="$ORGAN_LOGIN" GATE_LIST_VERSION="$GATE_LIST_VERSION" python3 -c '
 import json, os, re, sys
 try:
     d = json.loads(sys.argv[1])
@@ -337,6 +345,16 @@ if not cands:
     sys.exit(1)
 cands.sort(key=lambda t: t[0])
 body = cands[-1][1]
+# CREDIBLE-1592: a MECHANICAL gate-file hold stamps the gate-list version it was
+# decided under. If the list has since changed, that hold is stale — treat THIS
+# head as having no current verdict (rc 1) so the organ re-evaluates it. A real
+# model verdict carries no gate-list-version stamp and is therefore never
+# re-reviewed on the same head.
+glv = re.compile(r"^[ \t]*gate-list-version:[ \t]*(\S+)", re.I | re.M)
+gm = glv.search(body)
+cur = (os.environ.get("GATE_LIST_VERSION","") or "").strip()
+if gm and cur and gm.group(1).strip() != cur:
+    sys.exit(1)
 hits = [("APPROVE" if m.group(1).upper().startswith("APPROVE") else "CHANGES_REQUIRED")
         for m in verd.finditer(body)]
 if not hits:
@@ -411,7 +429,10 @@ process_pr() {
         # Gate-file PR, no mutant runner: hold for a mutant-capable reviewer (AC5).
         verdict="CHANGES_REQUIRED"
         mutants="NOT RUN — gate-file change ($gate_hit) needs a mutant-capable reviewer; labeled review-needs-mutants"
-        post_verdict "$pr" "$verdict" "$head" "$mutants"
+        # Stamp the gate-list version (CREDIBLE-1592): this hold is MECHANICAL (no
+        # model review). If the list later changes so this head no longer touches a
+        # gate, the next tick re-evaluates instead of reusing this verdict forever.
+        post_verdict "$pr" "$verdict" "$head" "$mutants" "" "$GATE_LIST_VERSION"
         label_add "$pr" "$REVIEW_NEEDS_MUTANTS_LABEL"
         label_add "$pr" "$REVIEW_HOLD_LABEL"
         HELD_MUTANTS=$((HELD_MUTANTS+1)); REVIEWED=$((REVIEWED+1))

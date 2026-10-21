@@ -1007,6 +1007,81 @@ ndisp3="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp3
 [[ "$ndisp3" == 1 ]] && ok "organ idempotency: forged APPROVE did NOT short-circuit review (organ re-reviewed → 1 repair)" \
     || bad "organ idempotency: forged APPROVE short-circuited the review (dispatches=$ndisp3, want 1)"
 
+# ── CREDIBLE-1592: a MECHANICAL gate-file hold (mutants NOT RUN, no model review)
+# records the gate-list version it was decided under. When the current list
+# differs (e.g. CREDIBLE-1590 narrowed it so this head no longer touches a gate),
+# the organ RE-EVALUATES that head next tick. A REAL model CHANGES REQUIRED carries
+# no version stamp and is still NEVER re-reviewed on the same head. Each direction
+# is killed by a mutant (always-reuse; never-reuse). PR 207 now resolves to a
+# non-gate file list (stub default src/foo.rs), so a re-eval runs a model review.
+echo "[d/CREDIBLE-1592] stale mechanical hold re-evaluated; real CHANGES held"
+CURVER="$( source "$REPO_ROOT/scripts/coord/lib/ship-gate-files.sh"; chump_ship_gate_list_version )"
+[[ -n "$CURVER" ]] && ok "CREDIBLE-1592: gate-list version computed from the shared constant" \
+    || bad "CREDIBLE-1592: chump_ship_gate_list_version produced nothing"
+
+seed_cmt() { # <body> — one organbot-authored current-head verdict comment
+    python3 - "$ORGCMT" "$1" <<'PY'
+import json, sys
+json.dump({"labels": [{"name": "review-held"}],
+           "comments": [{"body": sys.argv[2], "author": {"login": "organbot"},
+                         "createdAt": "2026-10-20T00:00:00Z"}]}, open(sys.argv[1], "w"))
+PY
+}
+run_207() { ( export PATH="$D/bin:$PATH" CHUMP_AMBIENT_LOG="$D/amb.jsonl"
+    bash "$ORGAN" --claude-bin "$D/bin/claude" --checkout "$D/checkout" --pr 207 ) >/dev/null 2>&1 || true; }
+
+# (A) held under a STALE list version → re-reviewed this tick (a new verdict is
+# posted). MUTANT (always-reuse): drop the version-diff check in
+# current_head_verdict and this head short-circuits forever → no cmt.207.
+: >"$ORGLOG.merges"; : >"$ORGLOG.chump"; rm -f "$ORGLOG.cmt.207"
+seed_cmt "VERDICT: CHANGES REQUIRED
+head: $IHEAD
+mutants: NOT RUN — gate-file change (.github/workflows/ci.yml) needs a mutant-capable reviewer
+gate-list-version: STALE-$CURVER-x
+VERDICT: CHANGES REQUIRED"
+run_207
+[[ -e "$ORGLOG.cmt.207" ]] \
+    && ok "CREDIBLE-1592: mechanical hold under a STALE list version → re-reviewed (new verdict posted)" \
+    || bad "CREDIBLE-1592: stale mechanical hold NOT re-reviewed (always-reuse bug)"
+
+# (B) held under the CURRENT list version → still reused, not re-reviewed. MUTANT
+# (re-review on any stamp): re-review whenever the stamp is present → re-posts.
+: >"$ORGLOG.merges"; : >"$ORGLOG.chump"; rm -f "$ORGLOG.cmt.207"
+seed_cmt "VERDICT: CHANGES REQUIRED
+head: $IHEAD
+mutants: NOT RUN — gate-file change (.github/workflows/ci.yml) needs a mutant-capable reviewer
+gate-list-version: $CURVER
+VERDICT: CHANGES REQUIRED"
+run_207
+[[ ! -e "$ORGLOG.cmt.207" ]] \
+    && ok "CREDIBLE-1592: mechanical hold under the CURRENT list version → reused (no re-review)" \
+    || bad "CREDIBLE-1592: current-version mechanical hold was re-reviewed (version-compare bug)"
+
+# (C) a REAL model CHANGES REQUIRED (no gate-list-version stamp) → NEVER re-reviewed
+# or re-dispatched on the same head. MUTANT (never-reuse): always re-review a
+# CHANGES head and this re-posts / re-dispatches.
+: >"$ORGLOG.merges"; : >"$ORGLOG.chump"; rm -f "$ORGLOG.cmt.207"
+seed_cmt "VERDICT: CHANGES REQUIRED
+head: $IHEAD
+blockers: exit code change, no test
+mutants: flipped exit 2->0, test passed
+VERDICT: CHANGES REQUIRED"
+run_207
+[[ ! -e "$ORGLOG.cmt.207" ]] \
+    && ok "CREDIBLE-1592: real model CHANGES REQUIRED (no stamp) → not re-reviewed" \
+    || bad "CREDIBLE-1592: real model CHANGES REQUIRED was re-reviewed (never-reuse bug)"
+ndisp4="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp4="${ndisp4:-0}"
+[[ "$ndisp4" == 0 ]] && ok "CREDIBLE-1592: real model CHANGES REQUIRED → not re-dispatched" \
+    || bad "CREDIBLE-1592: real model CHANGES REQUIRED re-dispatched ($ndisp4)"
+
+# AC3: the version comes from the shared constant, never a CHUMP_* env var.
+grep -qE 'GATE_LIST_VERSION="\$\(chump_ship_gate_list_version\)"' "$ORGAN" \
+    && ok "CREDIBLE-1592: organ derives the version from the shared constant (not an env var)" \
+    || bad "CREDIBLE-1592: organ does not derive the version from chump_ship_gate_list_version"
+grep -qE 'CHUMP_[A-Z_]*GATE_(LIST_)?VERSION' "$ORGAN" "$SGF" \
+    && bad "CREDIBLE-1592: a CHUMP_* env override for the gate-list version exists (safety-input bypass)" \
+    || ok "CREDIBLE-1592: no CHUMP_* env override for the gate-list version"
+
 # Structural arm-site gate: the organ's arm path is guarded by the fail-closed
 # predicate and is head-pinned; it must NOT contain a `gh pr merge … --auto`.
 grep -q 'review_hold_allows' "$ORGAN" && ok "organ: arm path calls review_hold_allows (fail-closed guard)" \

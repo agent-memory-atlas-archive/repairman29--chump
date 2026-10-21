@@ -40,3 +40,15 @@ CHUMP_SHIP_GATE_GLOBS=(
     'crates/chump-preflight/*'
     '*verified-wait*'
 )
+
+# chump_ship_gate_list_version — a stable fingerprint of the gate-file glob list
+# above (CREDIBLE-1592). A ship organ that MECHANICALLY HELD a head — a
+# "mutants: NOT RUN, gate-file" CHANGES REQUIRED with no model review — records
+# this version in its verdict so a later tick can tell the list has since changed
+# (e.g. CREDIBLE-1590 narrowed it) and re-evaluate that head instead of treating a
+# stale hold as the current verdict forever. Computed ONLY from the
+# CHUMP_SHIP_GATE_GLOBS constant above — never from a CHUMP_* env var (Chief
+# standing rule 2026-10-20: no env override on a safety input).
+chump_ship_gate_list_version() {
+    printf '%s\n' "${CHUMP_SHIP_GATE_GLOBS[@]}" | cksum | awk '{print $1 "-" $2}'
+}
