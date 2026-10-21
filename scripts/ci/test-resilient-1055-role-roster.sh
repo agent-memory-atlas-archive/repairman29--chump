@@ -88,6 +88,175 @@ for u in chump-organ-reconcile chump-worker chump-fleet-health-sentinel chump-pr
 done
 pass "node-local exemption list covers worker/heartbeat/sentinel/process-heal + the reconcile's own beat"
 
+# ── 3b. RESILIENT-1687: migrate-root-organs renders the ubuntu drop-ins + the ─
+# chown list for EXACTLY chump-fleet-health-sentinel + chump-node-heartbeat.
+# #5625 (RESILIENT-1683) landed only the render *test*; this locks the tracked
+# RENDERER that actually writes the two units off the /root/.chumpnode install
+# onto User=ubuntu running the repo copies. Portable (grep/sed -E only, no
+# `sed -i`), so it runs here BEFORE the GNU-sed gate below. Each assertion is
+# killed by a mutant inline before it is trusted on real renderer output.
+MIGRATE="$REPO_ROOT/scripts/ops/migrate-root-organs-to-ubuntu.sh"
+HEARTBEAT_ORGAN="$REPO_ROOT/scripts/ops/node-heartbeat.sh"
+[ -f "$MIGRATE" ] || fail "RESILIENT-1687: renderer missing: $MIGRATE"
+[ -f "$HEARTBEAT_ORGAN" ] || fail "RESILIENT-1687: node-heartbeat repo copy missing: $HEARTBEAT_ORGAN (installer wrapper was never a repo file)"
+bash -n "$MIGRATE" || fail "RESILIENT-1687: $MIGRATE fails bash -n"
+bash -n "$HEARTBEAT_ORGAN" || fail "RESILIENT-1687: $HEARTBEAT_ORGAN fails bash -n"
+
+# The repo heartbeat organ resolves its state dir from $HOME ONLY (the standing
+# -rule seam) — never a CHUMP_STATE_DIR env default, which would be a safety
+# -input bypass.
+grep -qE '="\$HOME/\.chump"' "$HEARTBEAT_ORGAN" \
+  || fail "RESILIENT-1687: node-heartbeat.sh must resolve STATE from \$HOME (the standing-rule seam)"
+grep -qE '\$\{?CHUMP_STATE_DIR' "$HEARTBEAT_ORGAN" \
+  && fail "RESILIENT-1687: node-heartbeat.sh must NOT read a \$CHUMP_STATE_DIR env default (safety-input bypass)"
+
+# _r1687_user_ok <dropin-text-file> -> 0 iff a non-empty, non-root User= is set.
+_r1687_user_ok() { local u; u="$(sed -n 's/^User=//p' "$1" | head -1)"; [ -n "$u" ] && [ "$u" != root ]; }
+# _r1687_list_has <list-file> <path> -> 0 iff the chown list contains <path> exactly.
+_r1687_list_has() { grep -qxF "$2" "$1"; }
+
+R1687_T="$TMP/r1687"; mkdir -p "$R1687_T"
+# Mutant 1: a drop-in with NO User= line (the root-write trap) must FAIL the check.
+printf '[Service]\nExecStart=/home/ubuntu/chump/scripts/ops/node-heartbeat.sh\n' > "$R1687_T/mut-nouser.conf"
+_r1687_user_ok "$R1687_T/mut-nouser.conf" && fail "RESILIENT-1687 mutant: a drop-in with no User= must fail the user check"
+printf '[Service]\nUser=root\n' > "$R1687_T/mut-rootuser.conf"
+_r1687_user_ok "$R1687_T/mut-rootuser.conf" && fail "RESILIENT-1687 mutant: a drop-in with User=root must fail the user check"
+# Mutant 2: a chown list missing the heartbeat path must FAIL the contains-check.
+printf '/home/ubuntu/.chump/fleet-health-sentinel.heartbeat\n' > "$R1687_T/mut-droppath.list"
+_r1687_list_has "$R1687_T/mut-droppath.list" "/home/ubuntu/.chump/node-heartbeat" \
+  && fail "RESILIENT-1687 mutant: a chown list missing /home/ubuntu/.chump/node-heartbeat must fail the contains-check"
+pass "RESILIENT-1687 assertions are mutant-killed: no-User / User=root fail the user check; a dropped chown path fails the contains-check"
+
+# Real renderer, production target (User=ubuntu, /home/ubuntu paths) — AC1 shape.
+for u in chump-fleet-health-sentinel chump-node-heartbeat; do
+  d="$R1687_T/$u.conf"
+  bash "$MIGRATE" --home /home/ubuntu --user ubuntu --repo /home/ubuntu/chump --render-dropin "$u" > "$d" \
+    || fail "RESILIENT-1687: renderer failed for $u"
+  grep -qx 'User=ubuntu' "$d" || fail "RESILIENT-1687: $u drop-in missing User=ubuntu (root-write trap): $(cat "$d")"
+  _r1687_user_ok "$d" || fail "RESILIENT-1687: $u drop-in User= is empty or root"
+  grep -qxF 'EnvironmentFile=-/home/ubuntu/.chump/providers.env' "$d" \
+    || fail "RESILIENT-1687: $u drop-in must load providers.env from the ubuntu home: $(grep EnvironmentFile "$d")"
+  # ExecStart must be cleared (reset line) then re-pointed at the repo copy.
+  grep -qx 'ExecStart=' "$d" || fail "RESILIENT-1687: $u drop-in must clear the inherited ExecStart with an empty ExecStart= line"
+  grep -qE "^ExecStart=/usr/bin/env bash /home/ubuntu/chump/scripts/ops/" "$d" \
+    || fail "RESILIENT-1687: $u ExecStart must run the repo copy under /home/ubuntu/chump: $(grep '^ExecStart=' "$d")"
+done
+grep -qE '^ExecStart=/usr/bin/env bash /home/ubuntu/chump/scripts/ops/fleet-health-sentinel\.sh --local --loop$' "$R1687_T/chump-fleet-health-sentinel.conf" \
+  || fail "RESILIENT-1687: the sentinel must run --local --loop from the repo copy"
+grep -qE '^ExecStart=/usr/bin/env bash /home/ubuntu/chump/scripts/ops/node-heartbeat\.sh$' "$R1687_T/chump-node-heartbeat.conf" \
+  || fail "RESILIENT-1687: node-heartbeat must run the repo copy"
+pass "RESILIENT-1687: renderer writes both drop-ins User=ubuntu, providers.env under /home/ubuntu, ExecStart cleared + re-pointed at the repo copies"
+
+# The home/user/repo are an explicit-CLI seam (never a CHUMP_* env) — prove a
+# non-default target flows all the way through the rendered unit.
+bash "$MIGRATE" --home /srv/sbx --user sbxuser --repo /srv/sbx/chump --render-dropin chump-node-heartbeat > "$R1687_T/seam.conf" \
+  || fail "RESILIENT-1687: renderer failed for the seam check"
+grep -qx 'User=sbxuser' "$R1687_T/seam.conf" || fail "RESILIENT-1687: --user must flow into User= (explicit-CLI seam)"
+grep -qxF 'EnvironmentFile=-/srv/sbx/.chump/providers.env' "$R1687_T/seam.conf" || fail "RESILIENT-1687: --home must flow into EnvironmentFile="
+grep -qE '^ExecStart=/usr/bin/env bash /srv/sbx/chump/scripts/ops/node-heartbeat\.sh$' "$R1687_T/seam.conf" || fail "RESILIENT-1687: --repo must flow into ExecStart="
+pass "RESILIENT-1687: home/user/repo are an explicit-CLI seam — a non-default target renders through without any env default"
+
+# Chown list is parsed FROM THE REAL organ scripts in this checkout; resolve
+# against /home/ubuntu. Every state file both organs write must appear.
+bash "$MIGRATE" --home /home/ubuntu --repo "$REPO_ROOT" --chown-list > "$R1687_T/chown.list" \
+  || fail "RESILIENT-1687: --chown-list failed"
+for p in \
+  /home/ubuntu/.chump/node-heartbeat \
+  /home/ubuntu/.chump/fleet-health-sentinel.heartbeat \
+  /tmp/chump-reaper-fleet-health-sentinel.heartbeat; do
+  _r1687_list_has "$R1687_T/chown.list" "$p" \
+    || fail "RESILIENT-1687: chown list (from the scripts) must include $p; got: $(cat "$R1687_T/chown.list")"
+done
+# Nothing under /root must ever appear — the whole point is to leave the root install.
+grep -q '/root/' "$R1687_T/chown.list" && fail "RESILIENT-1687: chown list leaked a /root path: $(cat "$R1687_T/chown.list")"
+pass "RESILIENT-1687: chown list parsed from the organ scripts covers both heartbeat files + the reaper beat, resolved under /home/ubuntu, no /root leak"
+
+# ── 3c. RESILIENT-1687 (AC6/AC7): the node installer EMITS the tracked heartbeat
+# organ VERBATIM — one source, no inline heredoc. #5639 pre-push review: the
+# installer (scripts/setup/chump-node-install.sh) used to generate its OWN inline
+# node-heartbeat.sh wrapper that had already drifted from the repo copy
+# (${CHUMP_STATE_DIR:-$HOME/.chump} vs $HOME-only). This locks that the installer
+# now installs scripts/ops/node-heartbeat.sh byte-for-byte and that no second
+# (inline) source survives. Killed by a mutant on EITHER side.
+NODE_INSTALL="$REPO_ROOT/scripts/setup/chump-node-install.sh"
+[ -f "$NODE_INSTALL" ] || fail "RESILIENT-1687: node installer missing: $NODE_INSTALL"
+
+# _r1687_one_source <installer-file> -> 0 iff it installs the TRACKED
+# scripts/ops/node-heartbeat.sh into $ORGAN_DIR AND carries NO inline heredoc
+# that regenerates the organ (the drift-prone second source).
+_r1687_one_source() {
+  local f="$1"
+  grep -qE 'tracked_heartbeat=.*scripts/ops/node-heartbeat\.sh' "$f" || return 1
+  grep -qE "install -m755 .*tracked_heartbeat.*ORGAN_DIR/node-heartbeat\.sh" "$f" || return 1
+  if grep -qF "cat > '\$ORGAN_DIR/node-heartbeat.sh'" "$f"; then return 1; fi
+  return 0
+}
+
+# Installer-side mutant: a copy that re-grows the inline heredoc must FAIL the
+# one-source check (proving the check is real) before we trust it on the installer.
+R1687_INST_MUT="$TMP/chump-node-install.inline.sh"
+cp "$NODE_INSTALL" "$R1687_INST_MUT"
+cat >> "$R1687_INST_MUT" <<'MUT'
+__mut_second_source(){ cat > '$ORGAN_DIR/node-heartbeat.sh' <<'HB'
+#!/usr/bin/env bash
+STATE="${CHUMP_STATE_DIR:-$HOME/.chump}"
+HB
+}
+MUT
+_r1687_one_source "$R1687_INST_MUT" \
+  && fail "RESILIENT-1687 mutant: an installer that regenerates node-heartbeat.sh inline must fail the one-source check"
+# The real installer passes.
+_r1687_one_source "$NODE_INSTALL" \
+  || fail "RESILIENT-1687 (AC6): chump-node-install.sh must install the tracked scripts/ops/node-heartbeat.sh with no inline heredoc (one source)"
+
+# Byte-identity: the installer emits via `install -m755 <tracked>`; simulate that
+# exact emission and assert it is byte-for-byte the tracked organ (AC7).
+R1687_EMIT="$TMP/r1687-emit"; mkdir -p "$R1687_EMIT"
+install -m755 "$HEARTBEAT_ORGAN" "$R1687_EMIT/node-heartbeat.sh" \
+  || fail "RESILIENT-1687: could not simulate the installer's node-heartbeat emission"
+cmp -s "$R1687_EMIT/node-heartbeat.sh" "$HEARTBEAT_ORGAN" \
+  || fail "RESILIENT-1687 (AC7): installer-emitted node-heartbeat.sh is not byte-identical to the tracked repo copy"
+# Tracked-side mutant: if the tracked organ drifts by even one byte, the emitted
+# copy no longer matches the canonical — proving the cmp check is a real detector.
+R1687_HB_MUT="$TMP/node-heartbeat.mutant.sh"
+cp "$HEARTBEAT_ORGAN" "$R1687_HB_MUT"
+printf '# RESILIENT-1687 tracked-side mutant\n' >> "$R1687_HB_MUT"
+install -m755 "$R1687_HB_MUT" "$R1687_EMIT/node-heartbeat.sh"
+cmp -s "$R1687_EMIT/node-heartbeat.sh" "$HEARTBEAT_ORGAN" \
+  && fail "RESILIENT-1687 mutant: a byte-edited tracked node-heartbeat.sh must break the installer byte-identity check (AC7 detector proven)"
+pass "RESILIENT-1687 (AC6/AC7): installer installs the tracked node-heartbeat.sh byte-for-byte; no inline second source; mutants on either side killed"
+
+# ── 3d. RESILIENT-1687 (AC4): the /root installs are ARCHIVED (move aside +
+# marker), NEVER deleted, and a path a loaded unit still references is HELD (the
+# "once nothing execs them" precondition). archive-plan is read-only; exercise
+# its three verdicts on a sandbox. The path-boundary scan is mutant-killed inline.
+R1687_AR="$TMP/r1687-archive"; mkdir -p "$R1687_AR/root/.chumpnode" "$R1687_AR/root/.chump" "$R1687_AR/units"
+# a unit that still execs /root/.chumpnode -> that path must be HELD.
+printf '[Service]\nExecStart=/bin/bash %s/root/.chumpnode/organs/x.sh\n' "$R1687_AR" > "$R1687_AR/units/chump-x.service"
+
+_r1687_plan() {
+  bash "$MIGRATE" --archive-plan --scan-dir "$R1687_AR/units" \
+    --archive-path "$R1687_AR/root/.chumpnode" \
+    --archive-path "$R1687_AR/root/.chump" \
+    --archive-path "$R1687_AR/root/.absent"
+}
+R1687_PLAN="$R1687_AR/plan.out"
+_r1687_plan > "$R1687_PLAN" || fail "RESILIENT-1687 (AC4): --archive-plan failed"
+# referenced path -> HELD (never archived while a unit execs it).
+grep -qE "^HELD $R1687_AR/root/\.chumpnode " "$R1687_PLAN" \
+  || fail "RESILIENT-1687 (AC4): a /root install a loaded unit still execs must be HELD; got: $(cat "$R1687_PLAN")"
+# the sibling .chump (unreferenced; NOT falsely held by the .chumpnode substring)
+# -> ARCHIVE to a move-aside path, never deleted.
+grep -qE "^ARCHIVE $R1687_AR/root/\.chump -> $R1687_AR/root/\.chump\.archived-resilient-1687\$" "$R1687_PLAN" \
+  || fail "RESILIENT-1687 (AC4): a clear /root install must be ARCHIVEd (move aside), never deleted; got: $(cat "$R1687_PLAN")"
+grep -qE "^SKIP $R1687_AR/root/\.absent\$" "$R1687_PLAN" \
+  || fail "RESILIENT-1687 (AC4): an absent path must be SKIPped; got: $(cat "$R1687_PLAN")"
+# the plan NEVER proposes a destructive op — archived, not removed.
+if grep -qiE '\b(rm|delete|remove|rmdir)\b' "$R1687_PLAN"; then
+  fail "RESILIENT-1687 (AC4): archive-plan must never propose deleting a /root install; got: $(cat "$R1687_PLAN")"
+fi
+pass "RESILIENT-1687 (AC4): archive-plan HELDs a still-referenced install, ARCHIVEs a clear sibling (no substring false-hold), SKIPs absent — never deletes"
+
 # ── 4. host-rewrite core transforms ──────────────────────────────────────────
 # organ_unit_host_rewrite uses GNU `sed -i` (in-place append/insert), which is
 # how the units are placed on their Linux deploy targets. On a non-GNU sed

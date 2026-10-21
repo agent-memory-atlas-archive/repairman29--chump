@@ -1479,21 +1479,25 @@ WK"
   ok "rendered worker launcher (agent_id=$agent_id machine=$machine skills=${skills:-any} domain=${domain:-any} model=$model effort=$effort)"
 }
 install_organs() {
-  # write the heartbeat organ (brain's proof-of-life: refresh heartbeat + node profile)
-  run "cat > '$ORGAN_DIR/node-heartbeat.sh' <<'HB'
-#!/usr/bin/env bash
-# Portable shebang: the earlier /data/data/com.termux/.../env path exists ONLY on
-# Termux, so on any other host (systemd Linux, macOS) exec of this script failed
-# with 126 ("bad interpreter") and the organ crash-looped. /usr/bin/env resolves
-# bash on every supported host, matching the process-organ-heal/fleet-health
-# sentinel wrappers written alongside it below.
-STATE=\"\${CHUMP_STATE_DIR:-\$HOME/.chump}\"
-while true; do
-  date -u +%Y-%m-%dT%H:%M:%SZ > \"\$STATE/node-heartbeat\"
-  sleep 60
-done
-HB"
-  run "chmod +x '$ORGAN_DIR/node-heartbeat.sh'"
+  # RESILIENT-1687 (AC6): emit the TRACKED repo copy of the heartbeat organ
+  # VERBATIM — ONE source. The old inline heredoc was a SECOND copy that had
+  # already drifted: it resolved STATE from ${CHUMP_STATE_DIR:-$HOME/.chump} (a
+  # safety-input env default, banned by the standing rule), while the tracked
+  # copy at scripts/ops/node-heartbeat.sh resolves STATE from $HOME only.
+  # Installing the tracked file makes the on-node organ byte-identical to the
+  # file the migration drop-in (migrate-root-organs-to-ubuntu.sh) points
+  # ExecStart at — genuinely one source, no drift. The byte-identity is locked
+  # by scripts/ci/test-resilient-1055-role-roster.sh (killed by a mutant on
+  # either side). No inline fallback: a second heredoc would reintroduce the
+  # exact drift this fixes, so if the tracked file is somehow absent we refuse
+  # loudly rather than write a divergent copy.
+  local tracked_heartbeat="$NODE_DIR/repo/scripts/ops/node-heartbeat.sh"
+  [ -f "$tracked_heartbeat" ] || tracked_heartbeat="$(dirname "$0")/../ops/node-heartbeat.sh"
+  if [ -f "$tracked_heartbeat" ]; then
+    run "install -m755 '$tracked_heartbeat' '$ORGAN_DIR/node-heartbeat.sh'"
+  else
+    no "node-heartbeat organ source missing (tracked repo copy scripts/ops/node-heartbeat.sh, RESILIENT-1687) — skipping rather than writing a drifted inline copy"
+  fi
   # INFRA-3650: the process-organ heal loop itself — a plain while-true
   # wrapper around the tracked scripts/ops/process-organ-heal.sh (one pass
   # per invocation, testable in isolation), same shape as node-heartbeat.sh
