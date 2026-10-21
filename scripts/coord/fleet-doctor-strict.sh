@@ -74,6 +74,14 @@
 #                        CHUMP_MAX_CONCURRENT_CARGO_JOBS: env > node.env >
 #                        max(1, nproc/2), the src/admit.rs precedence). Counts
 #                        with the same pgrep -f patterns `chump admit` uses.
+#   21. cargo-storage   — RESILIENT-1670 (RESILIENT-1657 item a'): RED when
+#                        readlink -f of CARGO_HOME, CARGO_TARGET_DIR or the
+#                        sccache dir lands on a block device whose `lsblk -no
+#                        TRAN` is `usb` or whose RM (removable) flag is 1 — the
+#                        closetjunky failure mode where ~/.cargo + the build
+#                        target lived on a USB flash stick and writeback stalls
+#                        wedged the whole node. Each path on a fixed disk, or
+#                        absent, passes.
 #
 # Thresholds (override via env)
 #   LEASE_STALE_HOURS         default 2    — leases older than N hours are flagged
@@ -1787,6 +1795,122 @@ check_single_store() {
     fi
 }
 
+# Helper for check_cargo_storage_fixed_disk: pull one KEY="value" field out of a
+# single `lsblk -Pno` pairs line (pairs mode is alignment-safe even when a
+# column such as a partition's TRAN is empty).
+_fd_pairs_val() {
+    # $1 = key, $2 = pairs line. Prepend a space and require one before the key
+    # so PKNAME="" does not satisfy a lookup for NAME (substring collision).
+    printf ' %s\n' "$2" | sed -n "s/.* ${1}=\"\\([^\"]*\\)\".*/\\1/p"
+}
+
+# ── Check 21 (RESILIENT-1670 / RESILIENT-1657 item a'): cargo + sccache storage
+# must sit on a fixed disk, never a removable or USB-transport block device ───
+# closetjunky wedged three times in five days because its ENTIRE ~/.cargo
+# (CARGO_HOME) and the 25G build target lived on a 32G USB flash stick
+# (readlink -f ~/.cargo = /mnt/cjdata1/cargo; lsblk TRAN=usb, RM=1). Every
+# cargo build streamed gigabytes of random writes to a thumb drive, writeback
+# backed up past vm.dirty_ratio, every writer blocked in D state, sshd and
+# tailscaled stalled, and the node "died" with no OOM. This invariant catches
+# that class before the node wedges: CARGO_HOME, CARGO_TARGET_DIR and the
+# sccache dir must each resolve (readlink -f) to a fixed device or not exist at
+# all — never to a device whose `lsblk -no TRAN` is `usb` or whose RM flag is 1.
+#
+# Uses only readlink + lsblk (no df/findmnt), so the ci test stubs exactly those
+# two commands via PATH. Path→device mapping is a longest-mountpoint-prefix
+# match against the `lsblk -P` table; TRAN is a whole-disk property, so a
+# matched partition's parent (PKNAME) row is consulted for transport.
+check_cargo_storage_fixed_disk() {
+    if ! command -v lsblk >/dev/null 2>&1; then
+        register_check "cargo-storage" "skip" \
+            "lsblk not available (not a Linux block-device host)" ""
+        return
+    fi
+
+    # The three real cargo/sccache paths, by their genuine env names + cargo
+    # defaults. These are the audited inputs themselves, not a test seam.
+    local cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    local specs=("CARGO_HOME=$cargo_home")
+    [[ -n "${CARGO_TARGET_DIR:-}" ]] && specs+=("CARGO_TARGET_DIR=$CARGO_TARGET_DIR")
+    specs+=("SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache}")
+
+    # One block-device snapshot (pairs mode = alignment-safe with empty columns).
+    local table
+    table="$(lsblk -Pno NAME,PKNAME,TRAN,RM,MOUNTPOINT 2>/dev/null || true)"
+
+    local offenders="" checked="" spec label path resolved
+    for spec in "${specs[@]}"; do
+        label="${spec%%=*}"
+        path="${spec#*=}"
+        [[ -z "$path" ]] && continue
+        # Absent is explicitly fine (AC 5: "resolve to the internal SSD or absent").
+        [[ -e "$path" ]] || { checked="$checked ${label}:absent"; continue; }
+        resolved="$(readlink -f "$path" 2>/dev/null || printf '%s' "$path")"
+
+        # Longest-mountpoint-prefix match against the block-device table.
+        local best_mnt="" best_name="" best_pk="" best_rm="" best_tran=""
+        local line mnt
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            mnt="$(_fd_pairs_val MOUNTPOINT "$line")"
+            [[ -z "$mnt" || "$mnt" == "[SWAP]" ]] && continue
+            # ${mnt%/} strips a trailing slash so the root mount "/" yields the
+            # glob "/*" (matches any absolute path) instead of "//*" (matches none).
+            if [[ "$resolved" == "$mnt" || "$resolved" == "${mnt%/}"/* ]]; then
+                if (( ${#mnt} > ${#best_mnt} )); then
+                    best_mnt="$mnt"
+                    best_name="$(_fd_pairs_val NAME "$line")"
+                    best_pk="$(_fd_pairs_val PKNAME "$line")"
+                    best_rm="$(_fd_pairs_val RM "$line")"
+                    best_tran="$(_fd_pairs_val TRAN "$line")"
+                fi
+            fi
+        done <<< "$table"
+
+        if [[ -z "$best_name" ]]; then
+            # No block device claims this path (tmpfs/overlay/unknown) — can't
+            # prove it removable, so don't fail on it.
+            checked="$checked ${label}:unknown-dev"
+            continue
+        fi
+
+        # TRAN lives on the whole disk; a matched partition's parent (PKNAME)
+        # row carries the transport (and the removable flag).
+        local tran="$best_tran" disk="$best_name" pline pname prm
+        if [[ -n "$best_pk" ]]; then
+            disk="$best_pk"
+            while IFS= read -r pline; do
+                [[ -z "$pline" ]] && continue
+                pname="$(_fd_pairs_val NAME "$pline")"
+                if [[ "$pname" == "$best_pk" ]]; then
+                    tran="$(_fd_pairs_val TRAN "$pline")"
+                    prm="$(_fd_pairs_val RM "$pline")"
+                    [[ "$prm" == "1" ]] && best_rm="1"
+                    break
+                fi
+            done <<< "$table"
+        fi
+
+        if [[ "$tran" == "usb" || "$best_rm" == "1" ]]; then
+            local flags=""
+            [[ "$tran" == "usb" ]] && flags="TRAN=usb"
+            [[ "$best_rm" == "1" ]] && flags="${flags:+$flags,}RM=1"
+            offenders="$offenders ${label}=${path} (readlink -f=${resolved}, /dev/${disk}, ${flags})"
+        else
+            checked="$checked ${label}:/dev/${disk}(fixed)"
+        fi
+    done
+
+    if [[ -n "$offenders" ]]; then
+        register_check "cargo-storage" "fail" \
+            "cargo/sccache storage on a removable or USB device (RESILIENT-1657 item a'):$offenders" \
+            "move CARGO_HOME, CARGO_TARGET_DIR and the sccache dir onto an internal/fixed disk and retire the removable media; on closetjunky ~/.cargo belongs on the SSD and target+sccache must not live on the USB sticks"
+    else
+        register_check "cargo-storage" "pass" \
+            "cargo/sccache storage on a fixed disk or absent:${checked:- (none set)}" ""
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -1819,6 +1943,7 @@ check_admission_ceiling
 check_node_env_no_export
 check_load_aware_deadman
 check_single_store
+check_cargo_storage_fixed_disk
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

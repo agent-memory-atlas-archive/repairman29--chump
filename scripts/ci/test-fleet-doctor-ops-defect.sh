@@ -137,4 +137,111 @@ else
     pass "no second VOA file written on dedup"
 fi
 
-echo "=== all ops-defect self-diagnosis tests passed ==="
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests 6-8 (RESILIENT-1670 / RESILIENT-1657 item a'): cargo + sccache storage
+# must sit on a fixed disk, never a removable or USB-transport block device
+# (check_cargo_storage_fixed_disk). A node self-provisioned onto a USB flash
+# stick is an operational defect of exactly the class this file diagnoses —
+# closetjunky's ~/.cargo + 25G build target lived on a 32G USB stick and
+# writeback stalls wedged the whole box three times in five days.
+#
+# Seam: lsblk + readlink are stubbed via PATH (the real check function runs
+# unchanged); CARGO_HOME / CARGO_TARGET_DIR / SCCACHE_DIR are the genuine cargo
+# env vars, set to sandbox paths. No CHUMP_* safety-input override exists.
+# ─────────────────────────────────────────────────────────────────────────────
+STUB="$TMPDIR_BASE/stub-bin"
+mkdir -p "$STUB"
+
+# Stub lsblk: ignore args, emit a fixed `-Pno NAME,PKNAME,TRAN,RM,MOUNTPOINT`
+# table from a per-scenario file.
+cat > "$STUB/lsblk" <<EOF
+#!/usr/bin/env bash
+cat "$STUB/lsblk.table"
+EOF
+# Stub readlink: map its last arg through a TSV (real<TAB>fake); identity on miss.
+cat > "$STUB/readlink" <<EOF
+#!/usr/bin/env bash
+target="\${@: -1}"
+if [[ -f "$STUB/readlink.map" ]]; then
+    while IFS=\$'\t' read -r real fake; do
+        [[ "\$target" == "\$real" ]] && { printf '%s\n' "\$fake"; exit 0; }
+    done < "$STUB/readlink.map"
+fi
+printf '%s\n' "\$target"
+EOF
+chmod +x "$STUB/lsblk" "$STUB/readlink"
+
+# CARGO_TARGET_DIR is not part of these scenarios; keep it out of the audited
+# set so the check only inspects CARGO_HOME + SCCACHE_DIR below.
+unset CARGO_TARGET_DIR
+
+# ── Test 6: CARGO_HOME resolves onto a USB stick → fail, names the var + flags ──
+CJ_CARGO="$TMPDIR_BASE/cj-cargo"
+mkdir -p "$CJ_CARGO"
+cat > "$STUB/lsblk.table" <<'EOF'
+NAME="sda" PKNAME="" TRAN="" RM="0" MOUNTPOINT=""
+NAME="sda1" PKNAME="sda" TRAN="" RM="0" MOUNTPOINT="/"
+NAME="sde" PKNAME="" TRAN="usb" RM="1" MOUNTPOINT=""
+NAME="sde1" PKNAME="sde" TRAN="" RM="1" MOUNTPOINT="/mnt/cjdata1"
+EOF
+printf '%s\t%s\n' "$CJ_CARGO" "/mnt/cjdata1/cargo" > "$STUB/readlink.map"
+
+PATH="$STUB:$PATH" \
+    CARGO_HOME="$CJ_CARGO" \
+    SCCACHE_DIR="$TMPDIR_BASE/does-not-exist-sccache" \
+    check_cargo_storage_fixed_disk
+if [[ "$(last_status)" == "fail" ]] \
+    && [[ "$(last_detail)" == *"CARGO_HOME"* ]] \
+    && [[ "$(last_detail)" == *"/mnt/cjdata1/cargo"* ]] \
+    && [[ "$(last_detail)" == *"TRAN=usb"* ]]; then
+    pass "CARGO_HOME on a USB stick → fail, detail names var + resolved path + TRAN=usb"
+else
+    fail "expected USB fail naming CARGO_HOME, got status=$(last_status) detail=$(last_detail)"
+fi
+
+# ── Test 7: all paths on a fixed (sata) disk or absent → pass ──────────────────
+FIXED_CARGO="$TMPDIR_BASE/fixed-cargo"
+mkdir -p "$FIXED_CARGO"
+cat > "$STUB/lsblk.table" <<'EOF'
+NAME="sda" PKNAME="" TRAN="" RM="0" MOUNTPOINT=""
+NAME="sda1" PKNAME="sda" TRAN="" RM="0" MOUNTPOINT="/"
+NAME="sdb" PKNAME="" TRAN="sata" RM="0" MOUNTPOINT=""
+NAME="sdb1" PKNAME="sdb" TRAN="" RM="0" MOUNTPOINT="/data"
+EOF
+printf '%s\t%s\n' "$FIXED_CARGO" "/data/cargo" > "$STUB/readlink.map"
+
+PATH="$STUB:$PATH" \
+    CARGO_HOME="$FIXED_CARGO" \
+    SCCACHE_DIR="$TMPDIR_BASE/does-not-exist-sccache" \
+    check_cargo_storage_fixed_disk
+if [[ "$(last_status)" == "pass" ]]; then
+    pass "cargo on a fixed sata disk + sccache absent → pass"
+else
+    fail "expected pass for fixed-disk cargo, got status=$(last_status) detail=$(last_detail)"
+fi
+
+# ── Test 8: a removable-flagged (RM=1) disk with no USB transport → fail ───────
+# Proves the RM=1 arm independently of TRAN=usb (an eSATA/removable bay).
+RM_CARGO="$TMPDIR_BASE/rm-cargo"
+mkdir -p "$RM_CARGO"
+cat > "$STUB/lsblk.table" <<'EOF'
+NAME="sda" PKNAME="" TRAN="" RM="0" MOUNTPOINT=""
+NAME="sda1" PKNAME="sda" TRAN="" RM="0" MOUNTPOINT="/"
+NAME="sdf" PKNAME="" TRAN="sata" RM="1" MOUNTPOINT=""
+NAME="sdf1" PKNAME="sdf" TRAN="" RM="1" MOUNTPOINT="/mnt/removable"
+EOF
+printf '%s\t%s\n' "$RM_CARGO" "/mnt/removable/cargo" > "$STUB/readlink.map"
+
+PATH="$STUB:$PATH" \
+    CARGO_HOME="$RM_CARGO" \
+    SCCACHE_DIR="$TMPDIR_BASE/does-not-exist-sccache" \
+    check_cargo_storage_fixed_disk
+if [[ "$(last_status)" == "fail" ]] \
+    && [[ "$(last_detail)" == *"CARGO_HOME"* ]] \
+    && [[ "$(last_detail)" == *"RM=1"* ]]; then
+    pass "CARGO_HOME on a removable (RM=1) disk → fail, detail names RM=1"
+else
+    fail "expected RM=1 fail, got status=$(last_status) detail=$(last_detail)"
+fi
+
+echo "=== all ops-defect self-diagnosis + cargo-storage tests passed ==="
