@@ -109,6 +109,24 @@ run_hook() {
     "$HOOK" origin "$TMP/origin.git" </dev/null 2>&1
 }
 
+# Helper: invoke the hook with an explicit pre-push stdin ref list. Mirrors
+# run_hook's env so the full-gate path behaves identically; the only change is
+# that real refs are fed on stdin (needed to exercise the RESILIENT-1668
+# refs/stash-only fast path, which decides from the refspec alone).
+run_hook_stdin() {
+    local _stdin="$1"
+    PATH="$TMP/bin:$PATH" \
+    CHUMP_FMT_CHECK=0 \
+    CHUMP_GAP_CHECK=0 \
+    CHUMP_AUTOMERGE_OVERRIDE=1 \
+    CHUMP_FORCE_LEASE_CHECK=0 \
+    CHUMP_REBASE_DETECT=0 \
+    CHUMP_TEST_GATE_FAKE_RC="${CHUMP_TEST_GATE_FAKE_RC:-0}" \
+    "$HOOK" origin "$TMP/origin.git" <<<"$_stdin" 2>&1
+}
+
+ZERO_SHA="0000000000000000000000000000000000000000"
+
 # ── Test 1: no .rs change → skip ────────────────────────────────────────────
 echo "--- Test 1: docs-only change → guard skips (no cargo test invocation) ---"
 echo "x" > README.md
@@ -222,6 +240,102 @@ if [[ "$RC" -ne 0 ]] && echo "$OUT" | grep -qE "(running cargo test|running carg
     ok "direct push still runs the full nextest suite"
 else
     fail "direct push should still run the full suite (rc=$RC, out=$OUT)"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════
+# RESILIENT-1668: refs/stash-only fast path
+# ══════════════════════════════════════════════════════════════════════════
+# A push whose every updated ref is under refs/stash/ skips fmt/clippy/test but
+# still runs the origin-protecting scans. Decided from the refspec alone — no
+# env var can enable it for a branch push.
+
+# ── Test 8: stash-only push skips the test gate + emits prepush_stash_only ──
+echo "--- Test 8: refs/stash-only push skips fmt/clippy/test, emits prepush_stash_only ---"
+echo "// test-pre-push-test-gate.sh stash-only skip change $(date +%s)" >> src/lib.rs
+git add src/lib.rs
+git commit -qm "rs change pushed to a stash ref"
+STASH_HEAD="$(git rev-parse HEAD)"
+rm -f .chump-locks/ambient.jsonl
+# FAKE_RC=101 would BLOCK if the test gate ran — the fast path must not reach it.
+OUT=$(CHUMP_TEST_GATE_FAKE_RC=101 run_hook_stdin "refs/heads/wip ${STASH_HEAD} refs/stash/RESILIENT-1668-wip ${ZERO_SHA}")
+RC=$?
+if [[ "$RC" -eq 0 ]] && ! echo "$OUT" | grep -qE "running cargo (test|nextest)"; then
+    ok "stash-only push skipped the build-bearing gates (rc=0, no cargo test)"
+else
+    fail "stash-only push should skip the gates (rc=$RC, out=$OUT)"
+fi
+if grep -q '"kind":"prepush_stash_only"' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "ambient event prepush_stash_only emitted"
+else
+    fail "ambient event prepush_stash_only missing"
+fi
+
+# ── Test 9: stash-only push containing a secret is REFUSED (AC3) ────────────
+# A mutant that skips the secret scan (removes the exit 1) makes this fail.
+echo "--- Test 9: stash-only push containing a secret is refused ---"
+# Assemble the fake key at runtime so no credential-shaped literal is committed
+# into this test file (the repo's own pre-commit credential guard would block it).
+SECRET="ghp_$(printf 'a%.0s' {1..36})"
+printf 'token = %s\n' "$SECRET" > leaked.txt
+git add leaked.txt
+git commit -qm "wip with a secret"
+SECRET_HEAD="$(git rev-parse HEAD)"
+rm -f .chump-locks/ambient.jsonl
+OUT=$(run_hook_stdin "refs/heads/wip ${SECRET_HEAD} refs/stash/RESILIENT-1668-wip ${ZERO_SHA}")
+RC=$?
+if [[ "$RC" -ne 0 ]] && echo "$OUT" | grep -q "secret scan"; then
+    ok "stash-only push with a secret is refused by the secret scan"
+else
+    fail "stash-only push with a secret should be refused (rc=$RC, out=$OUT)"
+fi
+# Clean up the leaked fixture so later ranges don't re-trip the scan.
+git rm -q leaked.txt
+git commit -qm "drop secret fixture"
+
+# ── Test 10: mixed push (stash ref + branch ref) runs the FULL gate (AC2) ───
+# A mutant that fast-paths mixed pushes makes this fail (the gate would be
+# skipped, so FAKE_RC=101 would not block).
+echo "--- Test 10: mixed stash+branch push runs every gate (no fast path) ---"
+echo "// test-pre-push-test-gate.sh mixed-push change $(date +%s)" >> src/lib.rs
+git add src/lib.rs
+git commit -qm "rs change for mixed push"
+MIXED_HEAD="$(git rev-parse HEAD)"
+rm -f .chump-locks/ambient.jsonl
+OUT=$(CHUMP_TEST_GATE_FAKE_RC=101 run_hook_stdin \
+    "refs/heads/wip ${MIXED_HEAD} refs/stash/RESILIENT-1668-wip ${ZERO_SHA}
+refs/heads/wip ${MIXED_HEAD} refs/heads/wip ${ZERO_SHA}")
+RC=$?
+if [[ "$RC" -ne 0 ]] && echo "$OUT" | grep -qE "running cargo (test|nextest)"; then
+    ok "mixed push ran the full test gate (did not fast-path)"
+else
+    fail "mixed push should run every gate (rc=$RC, out=$OUT)"
+fi
+if ! grep -q '"kind":"prepush_stash_only"' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "mixed push did not emit prepush_stash_only"
+else
+    fail "mixed push should NOT emit prepush_stash_only"
+fi
+
+# ── Test 11: no env var can enable the fast path for a branch push (AC4) ────
+echo "--- Test 11: branch push cannot be fast-pathed by any env var ---"
+rm -f .chump-locks/ambient.jsonl
+# Set invented knobs that a future bypass might use — the code reads none of
+# them, so a branch push must still run the full gate and refuse FAKE_RC=101.
+OUT=$(CHUMP_TEST_GATE_FAKE_RC=101 \
+      CHUMP_PREPUSH_STASH_ONLY=1 \
+      CHUMP_STASH_FAST_PATH=1 \
+      CHUMP_PREPUSH_STASH=1 \
+      run_hook_stdin "refs/heads/wip ${MIXED_HEAD} refs/heads/wip ${ZERO_SHA}")
+RC=$?
+if [[ "$RC" -ne 0 ]] && echo "$OUT" | grep -qE "running cargo (test|nextest)"; then
+    ok "branch push ran the full gate despite stash-flavored env vars"
+else
+    fail "env vars must not enable the fast path for a branch push (rc=$RC, out=$OUT)"
+fi
+if ! grep -q '"kind":"prepush_stash_only"' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "branch push did not emit prepush_stash_only"
+else
+    fail "branch push should NOT emit prepush_stash_only"
 fi
 
 # ── Summary ─────────────────────────────────────────────────────────────────

@@ -6452,6 +6452,26 @@ events:
       uses a much larger budget (default 600s) because a full test run
       legitimately takes minutes.
 
+  # ── RESILIENT-1668 (RESILIENT-1656 slice): refs/stash-only fast path ──────
+  - kind: prepush_stash_only
+    effect_metric: resilient
+    emitter: scripts/git-hooks/pre-push refs/stash-only fast path (RESILIENT-1668)
+    trigger: a push whose every updated ref is under refs/stash/ (decided from
+      the hook's stdin ref list alone) — the fmt/clippy/test and branch/claim
+      guards are skipped, and only the origin-protecting scans (secret,
+      report-only publish-guard, large-file) run
+    consumers: [fleet-brief, curator]
+    fields_required: [ts, kind, refs, scans]
+    docs: |
+      refs is a comma-joined list of the refs/stash/* remote refs in the
+      push; scans lists the origin-protecting scans that still ran. The fast
+      path is decided SOLELY from the pushed refspec — no env var can enable
+      it for a branch push (RESILIENT-1656 AC5). A secret or an over-100-MiB
+      blob in the stash content still refuses the push; the publish-guard is
+      report-only. Emitted from git-hooks/, which is outside the event-registry
+      coverage scanner's PROD_PATHS, so it is also listed in
+      scripts/ci/event-registry-reserved.txt.
+
   # ── INFRA-1372: pre-push HEAD-drift detection ─────────────────────────────
   - kind: prepush_head_drift
     effect_metric: resilient

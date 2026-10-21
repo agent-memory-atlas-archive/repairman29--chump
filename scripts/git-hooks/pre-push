@@ -338,6 +338,130 @@ _silent_alarm_check_and_emit() {
 trap _silent_alarm_check_and_emit EXIT
 
 # -----------------------------------------------------------------------
+# RESILIENT-1668 (RESILIENT-1656 slice): refs/stash-only fast path.
+#
+# A push whose every updated ref is under refs/stash/ never lands on a
+# branch and never triggers CI, so running the full fmt/clippy/test gate on
+# it is pure waste — and it false-reds on unfinished WIP, which is the whole
+# point of a stash (the stash-before-kill rule pushes budget-killed WIP to
+# refs/stash/<gap>-wip). Such a push still reaches origin, so the scans that
+# protect origin — the secret scan, the report-only publish-guard, and the
+# large-file check — MUST still run. Only the fmt/clippy/test and the
+# branch/claim guards are skipped.
+#
+# The fast path is decided SOLELY from the pushed refspec (the hook's stdin
+# ref list): every non-deletion line's <remote_ref> (field 3) must be under
+# refs/stash/. There is deliberately NO env var that can enable it — a
+# branch push can never be fast-pathed, whatever the environment
+# (RESILIENT-1656 AC5). A mixed push (a stash ref plus a branch ref) falls
+# through to the full gates below. This is not a bypass: stash refs never
+# land and CI never runs on them, so skipping the build-bearing gates loses
+# no safety — the origin-protecting scans are exactly what is kept.
+# -----------------------------------------------------------------------
+_pp_stash_saw_ref=0
+_pp_stash_saw_nonstash=0
+_pp_stash_refs=""
+_pp_stash_shas=""
+while read -r _pp_lref _pp_lsha _pp_rref _pp_rsha; do
+    [[ -z "$_pp_rref" ]] && continue
+    _pp_stash_saw_ref=1
+    if [[ "$_pp_rref" == refs/stash/* ]]; then
+        _pp_stash_refs+="${_pp_stash_refs:+,}$_pp_rref"
+        # Collect the local sha being pushed; an all-zero local sha is a
+        # deletion (nothing to scan), so skip it.
+        if [[ -n "$_pp_lsha" ]] && [[ ! "$_pp_lsha" =~ ^0+$ ]]; then
+            _pp_stash_shas+="${_pp_stash_shas:+ }$_pp_lsha"
+        fi
+    else
+        _pp_stash_saw_nonstash=1
+    fi
+done <<<"$_HOOK_STDIN"
+
+if [[ "$_pp_stash_saw_ref" -eq 1 ]] && [[ "$_pp_stash_saw_nonstash" -eq 0 ]]; then
+    # Mark the main loop as entered so the INFRA-1988 silent-noop alarm does
+    # not false-fire on this (legitimately) short-circuited push.
+    _HOOK_LOOP_ENTERED=1
+    echo "[pre-push] RESILIENT-1668: refs/stash-only push (${_pp_stash_refs}) — skipping fmt/clippy/test; running origin-protecting scans only." >&2
+
+    _pp_so_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    _pp_so_amb="${CHUMP_AMBIENT_LOG:-$_pp_so_root/.chump-locks/ambient.jsonl}"
+    mkdir -p "$(dirname "$_pp_so_amb")" 2>/dev/null || true
+    # scanner-anchor: "kind":"prepush_stash_only"
+    printf '{"ts":"%s","kind":"prepush_stash_only","refs":"%s","scans":["secret","publish_guard","large_file"]}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_pp_stash_refs" \
+        >> "$_pp_so_amb" 2>/dev/null || true
+
+    # Base for the content scan: origin/main when we have it, else the empty
+    # tree object (a brand-new stash ref with an all-zero remote sha has no
+    # other base). Every blob/line reachable from the pushed sha but not the
+    # base is "new to origin" and therefore in scope.
+    _pp_so_base="$(git rev-parse --verify --quiet origin/main 2>/dev/null || true)"
+    if [[ -z "$_pp_so_base" ]]; then
+        _pp_so_base="$(git hash-object -t tree /dev/null 2>/dev/null || echo 4b825dc642cb6eb9a060e54bf8d69288fbee4904)"
+    fi
+
+    # ── secret scan (BLOCKS) — same credential-family patterns as the
+    #    pre-commit credential-pattern guard (INFRA-018). A stash ref still
+    #    reaches origin, so a key committed into WIP would be published;
+    #    refuse it. The matched value is NEVER echoed (INFRA-7880): naming
+    #    the key family is enough and printing it would publish it twice.
+    _pp_so_patterns='(sk-ant-[A-Za-z0-9_-]{30,})|(sk-[A-Za-z0-9]{32,})|(tgp_v1_[A-Za-z0-9_-]{30,})|(AIzaSy[A-Za-z0-9_-]{30,})|(ghp_[A-Za-z0-9]{30,})|(github_pat_[A-Za-z0-9_]{30,})'
+    _pp_so_added=""
+    for _pp_so_sha in $_pp_stash_shas; do
+        _pp_so_added+="$(git diff --unified=0 "$_pp_so_base" "$_pp_so_sha" 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+' || true)"$'\n'
+    done
+    _pp_so_hit="$(printf '%s\n' "$_pp_so_added" | grep -oE "$_pp_so_patterns" | head -3 || true)"
+    if [[ -n "$_pp_so_hit" ]]; then
+        echo "" >&2
+        echo "🚫 [pre-push] RESILIENT-1668 secret scan: the refs/stash push contains what looks like a secret." >&2
+        printf '%s\n' "$_pp_so_hit" | sed -E 's/^(sk-ant-|sk-|tgp_v1_|AIzaSy|ghp_|github_pat_).*/\1/' | sort -u \
+            | sed 's/^/   key family: /; s/$/... (value withheld)/' >&2
+        echo "   A stash ref still reaches origin — rotate the key and rebuild the WIP without it." >&2
+        echo "" >&2
+        exit 1
+    fi
+
+    # ── publish-guard scan (REPORT-ONLY, never blocks) — logs one
+    #    publish_guard_report event with class counts over the push range.
+    if [[ -f "$REPO_ROOT/scripts/publish-guard/report_only.py" ]] && command -v python3 &>/dev/null; then
+        for _pp_so_sha in $_pp_stash_shas; do
+            python3 "$REPO_ROOT/scripts/publish-guard/report_only.py" range "$_pp_so_base" "$_pp_so_sha" >&2 2>&1 || true
+        done
+    fi
+
+    # ── large-file check (BLOCKS) — a blob over GitHub's hard 100 MiB push
+    #    limit can never land and should never be pushed, even to a stash
+    #    ref. The limit is a fixed safety floor, intentionally NOT an
+    #    env-tunable input.
+    _pp_so_max_bytes=104857600  # 100 MiB
+    _pp_so_big=""
+    for _pp_so_sha in $_pp_stash_shas; do
+        while IFS=$'\t' read -r _pp_so_meta _pp_so_path; do
+            [[ -z "$_pp_so_meta" ]] && continue
+            _pp_so_blob="$(awk '{print $4}' <<<"$_pp_so_meta")"
+            _pp_so_status="$(awk '{print $5}' <<<"$_pp_so_meta")"
+            [[ "$_pp_so_status" == D* ]] && continue
+            [[ "$_pp_so_blob" =~ ^0+$ ]] && continue
+            _pp_so_sz="$(git cat-file -s "$_pp_so_blob" 2>/dev/null || echo 0)"
+            if [[ "$_pp_so_sz" -gt "$_pp_so_max_bytes" ]]; then
+                _pp_so_big+="${_pp_so_path} (${_pp_so_sz} bytes)"$'\n'
+            fi
+        done < <(git diff --raw "$_pp_so_base" "$_pp_so_sha" 2>/dev/null)
+    done
+    if [[ -n "$_pp_so_big" ]]; then
+        echo "" >&2
+        echo "🚫 [pre-push] RESILIENT-1668 large-file check: a blob over 100 MiB is in the stash push:" >&2
+        printf '%s' "$_pp_so_big" | sed 's/^/   /' >&2
+        echo "   GitHub refuses blobs this large; strip it before pushing the WIP." >&2
+        echo "" >&2
+        exit 1
+    fi
+
+    echo "[pre-push] RESILIENT-1668: origin-protecting scans passed; allowing refs/stash push." >&2
+    exit 0
+fi
+
+# -----------------------------------------------------------------------
 # Guard 0-verify-claim-branch (INFRA-1649, re-do of INFRA-1598)
 #
 # Fast-fail mirror of Guard 5 (below) using the `chump verify-claim-branch`
