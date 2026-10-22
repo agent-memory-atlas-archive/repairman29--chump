@@ -1829,6 +1829,9 @@ jobs:
       - name: test-bot-merge-rest-direct (CREDIBLE-1511)
         run: bash scripts/ci/test-bot-merge-rest-direct.sh
 
+      - name: test-bot-merge-landing-queue (RESILIENT-1643)
+        run: bash scripts/ci/test-bot-merge-landing-queue.sh
+
       - name: test-bot-merge-portability (CREDIBLE-1511)
         run: bash scripts/ci/test-bot-merge-portability.sh
 

@@ -2802,6 +2802,11 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
         steps.push(step(
+            "bot-merge-landing-queue-resilient-1643",
+            &["bash", "scripts/ci/test-bot-merge-landing-queue.sh"],
+            GateKind::Scripts,
+        ));
+        steps.push(step(
             "bot-merge-portability-credible-1511",
             &["bash", "scripts/ci/test-bot-merge-portability.sh"],
             GateKind::Scripts,

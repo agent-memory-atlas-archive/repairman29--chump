@@ -12871,6 +12871,16 @@ events:
     fields_required: [ts, kind, auth_ok, kicked]
     fields_optional: [note]
 
+  - kind: bot_merge_queue_enqueue
+    effect_metric: waste_prevented
+    emitter: scripts/coord/bot-merge.sh §1 fetch/rebase block (RESILIENT-1643)
+    trigger: CHUMP_LANDING_PROVIDER=github and a merge-queue ruleset is active
+      on main — bot-merge switches to enqueue-only (skips the §1 and
+      RESILIENT-325 pre-push local rebases so it does not race the queue's own
+      rebase+retest) and arms merge-when-ready once. PHASE-R R3 slice b.
+    consumers: [fleet-brief, audit-log, queue-tender]
+    fields_required: [ts, kind, branch, gap_id, note]
+
   - kind: bot_merge_enqueue_failed
     effect_metric: waste_prevented
     emitter: scripts/coord/bot-merge.sh Mode A enqueue block (CREDIBLE-154)

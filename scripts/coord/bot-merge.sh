@@ -3018,6 +3018,29 @@ stage_done
 
 info "Fetched $REMOTE/$BASE_BRANCH."
 
+# ── RESILIENT-1643 (PHASE-R R3 slice b): landing-provider = GitHub merge queue ─
+# When CHUMP_LANDING_PROVIDER=github AND a merge-queue ruleset is active on main,
+# the queue owns rebasing and ordering: the ship path must only ENQUEUE and wait
+# for the R1 receipt. A local rebase/force-push here races the queue's own
+# rebase+retest and can eject the entry (double rebase on a 4-core runner). So in
+# queue mode we SKIP both the §1 rebase and the RESILIENT-325 pre-push rebase; the
+# arm step still enqueues via `gh pr merge --auto` (merge when ready) exactly once
+# (auto-merge-armer.sh, INFRA-1377), and bot-merge never calls update-branch or
+# gh pr reopen. With no queue (default), behaviour is unchanged. Fail-safe: any
+# detection error → "false" (rebase as before).
+source "$(dirname "${BASH_SOURCE[0]}")/lib/landing-provider.sh" 2>/dev/null || true
+_BM_LANDING_QUEUE="false"
+if declare -F landing_queue_mode >/dev/null 2>&1; then
+    _BM_LANDING_QUEUE="$(landing_queue_mode 2>/dev/null || printf 'false')"
+fi
+if [[ "$_BM_LANDING_QUEUE" == "true" ]]; then
+    info "RESILIENT-1643: CHUMP_LANDING_PROVIDER=github + merge queue active — enqueue-only (no local rebase/force-push; queue owns rebasing)."
+    # scanner-anchor: "kind":"bot_merge_queue_enqueue"
+    printf '{"ts":"%s","kind":"bot_merge_queue_enqueue","branch":"%s","gap_id":"%s","note":"RESILIENT-1643: merge-queue landing provider — skipping local rebase; arm merge-when-ready once"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${BRANCH:-unknown}" "${GAP_IDS[*]:-}" \
+        >> "${LOCK_DIR:-${REPO_ROOT:-.}/.chump-locks}/ambient.jsonl" 2>/dev/null || true
+fi
+
 BEHIND=$(git rev-list --count "HEAD..${REMOTE}/${BASE_BRANCH}" 2>/dev/null || echo 0)
 
 # Hard abort if branch is extremely stale — rebase at 50+ commits is risky and
@@ -3030,7 +3053,11 @@ if [[ "$BEHIND" -gt 50 ]]; then
     exit 3
 fi
 
-if [[ "$BEHIND" -gt 0 ]]; then
+if [[ "$BEHIND" -gt 0 && "$_BM_LANDING_QUEUE" == "true" ]]; then
+    # RESILIENT-1643: queue owns rebasing — enqueue the branch as-is.
+    info "RESILIENT-1643: $BEHIND commit(s) behind $REMOTE/$BASE_BRANCH — skipping local rebase (merge queue rebases + retests on dequeue)."
+    _grade_rebase_clean="null"
+elif [[ "$BEHIND" -gt 0 ]]; then
     stage_start "rebase on $REMOTE/$BASE_BRANCH ($BEHIND commit(s) behind)"
     _rebase_args=("${REMOTE}/${BASE_BRANCH}")
     if [[ "$NO_MERGE_DRIVER" == "1" ]]; then
@@ -3804,6 +3831,10 @@ if [[ $DRY_RUN -eq 0 ]]; then
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$BRANCH" "$BEHIND_NOW" "$STALE_REBASE_THRESHOLD" \
             >> "$_amb_path" 2>/dev/null || true
         _bm_fail "stale-branch" 3 "branch $BEHIND_NOW commits behind > threshold ${STALE_REBASE_THRESHOLD}"
+    elif [[ "$BEHIND_NOW" -gt 0 && "${_BM_LANDING_QUEUE:-false}" == "true" ]]; then
+        # RESILIENT-1643: queue owns rebasing — do not rebase/force-push before
+        # enqueue; the merge queue rebases + retests on dequeue.
+        info "RESILIENT-1643: $BEHIND_NOW commit(s) behind $REMOTE/$BASE_BRANCH — skipping pre-push rebase (merge-queue landing provider)."
     elif [[ "$BEHIND_NOW" -gt 0 ]]; then
         info "RESILIENT-325: $BEHIND_NOW commit(s) behind $REMOTE/$BASE_BRANCH — rebasing onto fresh base immediately before push"
         _pp_rebase_args=("${REMOTE}/${BASE_BRANCH}")
