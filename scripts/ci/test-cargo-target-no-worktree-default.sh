@@ -106,17 +106,24 @@ ann="$(cd "$WT" && env -i HOME="$FAKE_HOME" PATH="$PATH" bash -c '
   REPO_ROOT="$1"; eval "$(cat "$2")"; eval "$(cat "$2")"' x "$WT" "$TMP/hook-block.sh" 2>&1 >/dev/null | grep -c '^\[cargo-target\]')"
 [[ "$ann" == "1" ]] && ok "announces the chosen dir exactly once" || bad "expected 1 announce line, got $ann"
 
-# ── Part 3: pre-push cargo-test gate keys its target UNDER the shared resolver,
-#    never a <worktree>/.cargo-test-target build tree (RESILIENT-1669 / RESILIENT-1642
+# ── Part 3: pre-push cargo-test gate resolves ONE per-node test target shared
+#    by every worktree (INFRA-8620), under the shared resolver and never a
+#    <worktree>/.cargo-test-target build tree (RESILIENT-1669 / RESILIENT-1642
 #    AC2/AC3). Mirrors Part 2: extract the real resolution block from the pre-push
-#    hook, eval it with REPO_ROOT_T pointed at a fake .claude/worktrees/* worktree,
-#    and assert the resolved target lives OUTSIDE the worktree (under the shared
-#    resolver) and that no .cargo-test-target dir is created inside the worktree.
-#    Mutant guard: reverting the block to "$REPO_ROOT_T/.cargo-test-target" resolves
-#    inside the worktree and fails the "resolves under the shared resolver" check.
+#    hook, eval it with REPO_ROOT_T pointed at two DIFFERENT fake
+#    .claude/worktrees/* worktrees, and assert (a) the resolved target lives
+#    OUTSIDE the worktree under the shared resolver, (b) both worktrees resolve to
+#    the IDENTICAL target dir (one per-node target, no per-worktree suffix), and
+#    (c) no .cargo-test-target dir is created inside either worktree.
+#    Mutant guards: reverting the block to "$REPO_ROOT_T/.cargo-test-target"
+#    resolves inside the worktree and fails (a); re-adding a per-worktree suffix
+#    like /$(basename "$REPO_ROOT_T") makes the two worktrees resolve to DIFFERENT
+#    dirs and fails (b).
 WT3="$TMP/.claude/worktrees/wt3"
-mkdir -p "$WT3/scripts/ci/lib"
+WT3B="$TMP/.claude/worktrees/wt3-other"
+mkdir -p "$WT3/scripts/ci/lib" "$WT3B/scripts/ci/lib"
 cp "$RESOLVER" "$WT3/scripts/ci/lib/"
+cp "$RESOLVER" "$WT3B/scripts/ci/lib/"
 awk 'index($0,"RESILIENT-1669:BEGIN-TEST-TARGET"){f=1;next} index($0,"RESILIENT-1669:END-TEST-TARGET"){f=0} f{print}' \
     scripts/git-hooks/pre-push >"$TMP/test-target-block.sh"
 if [[ -s "$TMP/test-target-block.sh" ]]; then
@@ -125,10 +132,14 @@ else
   bad "cannot extract pre-push cargo-test-target block (RESILIENT-1669 markers missing)"
 fi
 
-got_tt="$(cd "$WT3" && env -i HOME="$FAKE_HOME" PATH="$PATH" bash -c '
-    set -euo pipefail
-    REPO_ROOT_T="$1"; eval "$(cat "$2")"; printf "%s\n" "$_WT_TEST_TARGET"' \
-    x "$WT3" "$TMP/test-target-block.sh" 2>/dev/null)"
+resolve_tt() {  # $1 = worktree root
+  (cd "$1" && env -i HOME="$FAKE_HOME" PATH="$PATH" bash -c '
+      set -euo pipefail
+      REPO_ROOT_T="$1"; eval "$(cat "$2")"; printf "%s\n" "$_WT_TEST_TARGET"' \
+      x "$1" "$TMP/test-target-block.sh" 2>/dev/null)
+}
+got_tt="$(resolve_tt "$WT3")"
+got_tt_b="$(resolve_tt "$WT3B")"
 case "$got_tt" in
   "$WT3"/*)
     bad "pre-push cargo-test target resolves INSIDE the worktree ($got_tt) — must be a subdir under the shared resolver" ;;
@@ -137,10 +148,17 @@ case "$got_tt" in
   *)
     bad "pre-push cargo-test target resolved to unexpected '$got_tt' (expected a subdir of $FAKE_HOME/.cargo/chump-shared-target)" ;;
 esac
-if [[ ! -e "$WT3/.cargo-test-target" ]]; then
+# INFRA-8620: one per-node target shared by every worktree — two distinct
+# worktree paths MUST resolve to the identical test target dir.
+if [[ -n "$got_tt" && "$got_tt" == "$got_tt_b" ]]; then
+  ok "two different worktrees resolve to the SAME per-node pre-push test target ($got_tt)"
+else
+  bad "pre-push cargo-test target differs by worktree ($WT3 -> '$got_tt' vs $WT3B -> '$got_tt_b') — must be one shared per-node target with no per-worktree suffix"
+fi
+if [[ ! -e "$WT3/.cargo-test-target" && ! -e "$WT3B/.cargo-test-target" ]]; then
   ok "pre-push block creates no .cargo-test-target build tree under .claude/worktrees/*"
 else
-  bad ".cargo-test-target build tree created under .claude/worktrees/* ($WT3/.cargo-test-target)"
+  bad ".cargo-test-target build tree created under .claude/worktrees/* ($WT3/.cargo-test-target or $WT3B/.cargo-test-target)"
 fi
 
 if [[ "$FAILS" -gt 0 ]]; then echo "test-cargo-target-no-worktree-default: $FAILS failure(s)" >&2; exit 1; fi

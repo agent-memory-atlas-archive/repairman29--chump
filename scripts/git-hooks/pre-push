@@ -1256,21 +1256,35 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
             # <worktree>/.cargo-test-target grew a private ~6.5 GB build tree per
             # push beside the shared cache (cuphead receipt: 27 GB across four
             # worktrees). Resolve the shared target via the SAME resolver as
-            # CARGO_TARGET_DIR (scripts/ci/lib/resolve-cargo-target-dir.sh) and
-            # key a per-worktree subdir UNDER it, so a node keeps ONE cache root
-            # and fingerprints stay isolated. Guard: the block is fenced by the
-            # RESILIENT-1669 markers below and exercised by the Part 3 fixture in
+            # CARGO_TARGET_DIR (scripts/ci/lib/resolve-cargo-target-dir.sh).
+            #
+            # INFRA-8620: use ONE pre-push test target per node, shared by every
+            # worktree — $(chump_cargo_target_dir)/cargo-test-target with NO
+            # per-worktree suffix. RESILIENT-1669 had keyed a per-worktree subdir
+            # UNDER the shared root, which still gave each fresh worktree a cold
+            # target: the FIRST push from a new worktree recompiled the whole
+            # workspace inside the INFRA-1744 600s cap (no sccache on cuphead), so
+            # an already-green suite was refused. INFRA-1138's per-worktree
+            # fingerprint isolation is superseded on cuphead (Chief ruling
+            # 2026-10-21): cargo admission = 1 (chump admit cargo, node.env
+            # CHUMP_MAX_CONCURRENT_CARGO_JOBS=1) serializes every build on the
+            # node so two worktrees never compile into the shared target at once,
+            # and cargo's own fingerprinting already rebuilds whatever a different
+            # source tree changed — so a shared target stays warm across worktrees
+            # instead of cold per worktree. The INFRA-1744 cap and the full test
+            # gate below are unchanged; sccache stays optional. Guard: the block is
+            # fenced by the RESILIENT-1669 markers below and exercised by Part 3 of
             # scripts/ci/test-cargo-target-no-worktree-default.sh.
             # RESILIENT-1669:BEGIN-TEST-TARGET
             if [[ -f "$REPO_ROOT_T/scripts/ci/lib/resolve-cargo-target-dir.sh" ]]; then
                 # shellcheck source=../ci/lib/resolve-cargo-target-dir.sh
                 # shellcheck disable=SC1091
                 source "$REPO_ROOT_T/scripts/ci/lib/resolve-cargo-target-dir.sh"
-                _WT_TEST_TARGET="$(chump_cargo_target_dir)/cargo-test-target/$(basename "$REPO_ROOT_T")"
+                _WT_TEST_TARGET="$(chump_cargo_target_dir)/cargo-test-target"
             else
                 # Old checkout without the resolver: still never a worktree-local
                 # build tree — fall back to the inherited/shared default directly.
-                _WT_TEST_TARGET="${CARGO_TARGET_DIR:-${HOME:-/tmp}/.cargo/chump-shared-target}/cargo-test-target/$(basename "$REPO_ROOT_T")"
+                _WT_TEST_TARGET="${CARGO_TARGET_DIR:-${HOME:-/tmp}/.cargo/chump-shared-target}/cargo-test-target"
             fi
             # RESILIENT-1669:END-TEST-TARGET
             # INFRA-1316: bash 3.2 + `set -u` aborts on `"${arr[@]}"` when
