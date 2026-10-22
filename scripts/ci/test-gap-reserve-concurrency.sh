@@ -44,11 +44,22 @@ if ! [[ "$N" =~ ^[1-9][0-9]*$ ]]; then
     exit 2
 fi
 
+# RESILIENT-1652: route this isolated fixture repo through the canonical
+# sandbox primitive + healthy-node fixture so `chump gap reserve` sees a
+# GREEN farmer readiness gate on a fresh CI runner (no ~/.chump/oauth-token.json)
+# without loosening the gate or adding a skip env var.
+# shellcheck source=../coord/lib/test-sandbox.sh
+# shellcheck disable=SC1091
+source "$ROOT/scripts/coord/lib/test-sandbox.sh"
+# shellcheck source=lib/sandbox-healthy-node.sh
+# shellcheck disable=SC1091
+source "$ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
+chump_test_sandbox_setup "$SANDBOX"
+export HOME="$SANDBOX"
+write_sandbox_healthy_node "$SANDBOX"
+
 export PATH="$SANDBOX/bin:$PATH"
-export CHUMP_HOME="$SANDBOX"
-export CHUMP_REPO="$SANDBOX"
 export CHUMP_WORKTREE_ROOT="$SANDBOX"
-export CHUMP_LOCK_DIR="$SANDBOX/.chump-locks"
 export CHUMP_ALLOW_MAIN_WORKTREE=1
 export CHUMP_GAP_RESERVE_SKIP_PR=1
 export CHUMP_RESERVE_SCAN_OPEN_PRS=0

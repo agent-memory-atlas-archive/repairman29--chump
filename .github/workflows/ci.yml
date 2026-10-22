@@ -785,6 +785,15 @@ jobs:
       - name: Node admission ceiling gate (RESILIENT-1604)
         run: bash scripts/ci/test-node-admission-ceiling.sh
 
+      # RESILIENT-1686: fleet-doctor canonical-checkout-dirty RED check. chump
+      # gap ship no longer runs `cargo hakari generate` in the canonical
+      # checkout; fleet-doctor loudly reports a dirty canonical checkout
+      # (scanning Cargo.lock / workspace-hack/Cargo.toml) and emits
+      # kind=canonical_checkout_dirty. Mutant kill: dropping Cargo.lock from the
+      # scan turns the test red. Hermetic, <5s; mirrored in chump preflight.
+      - name: Fleet-doctor canonical-checkout-dirty gate (RESILIENT-1686)
+        run: bash scripts/ci/test-fleet-doctor-canonical-dirty.sh
+
       # INFRA-1808: bootstrap-auto-install smoke — the hourly launchd job
       # (install-bootstrap-auto-launchd.sh) that self-runs
       # chump-fleet-bootstrap.sh --install must generate a valid plist and

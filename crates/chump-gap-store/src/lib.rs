@@ -3092,8 +3092,8 @@ impl GapStore {
     /// state.db and the YAML mirror in agreement (INFRA-156).
     pub fn ship(&self, gap_id: &str, session_id: &str, closed_pr: Option<i64>) -> Result<()> {
         // PHASE-R R1 (CREDIBLE-1491): a second ship of an already-terminal gap
-        // is a true no-op. Return before the fetch / auto-pull / cargo build /
-        // hakari steps below, so a re-ship touches nothing: no status write,
+        // is a true no-op. Return before the fetch / auto-pull / cargo build
+        // steps below, so a re-ship touches nothing: no status write,
         // no ambient event, no rebuild. RESILIENT-1562 shipped 87 times in 2h;
         // each of those calls must now cost one SELECT.
         if self.already_terminal(gap_id)?.is_some() {
@@ -3330,20 +3330,20 @@ impl GapStore {
             bail!(msg);
         }
 
-        // RESILIENT-469: run `cargo hakari generate` to keep the workspace-hack
-        // dedup crate in sync before the gap flips to status=done. Best-effort
-        // and non-fatal (missing `cargo-hakari` binary or a hakari-less
-        // checkout must never block a ship) — only attempted against a real
-        // Cargo workspace, mirroring the RESILIENT-492 build-step guard above.
-        if self.repo_root.join("Cargo.toml").exists() {
-            eprintln!("Running cargo hakari generate");
-            let _ = std::process::Command::new("cargo")
-                .args(["hakari", "generate"])
-                .current_dir(&self.repo_root)
-                .stderr(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .status();
-        }
+        // RESILIENT-1686: the old RESILIENT-469 `cargo hakari generate` call
+        // was REMOVED from the ship path. On the canonical cuphead checkout
+        // (~/chump) that command ran `cargo` with whatever toolchain happened
+        // to be on PATH and re-resolved the workspace, rewriting Cargo.lock
+        // (-156/+18) and workspace-hack/Cargo.toml in the main checkout on
+        // every ship. That residue then made the *next* ship refuse through
+        // the INFRA-2423 auto-fetch-on-dirty guard above — a ship that broke
+        // the next ship, leaving organ landings' gaps stranded open and
+        // requiring a hand `git checkout --` of the residue. workspace-hack
+        // drift is owned by CI (the hakari-verify gate in ci.yml), not by the
+        // ship path, so a status=done flip must never mutate the working tree.
+        // AC6 (resilient1686_ship_leaves_working_tree_byte_identical) asserts
+        // ship() leaves the tree git-clean and kills any mutant that restores
+        // this call.
 
         // CREDIBLE-1495 R1: Construct and validate LandingReceipt before status transition.
         // CREDIBLE-1550 AC3: stamp the proof-of-merge SHA onto the receipt.
@@ -3359,7 +3359,7 @@ impl GapStore {
         // cleanup, EFFECT-verification, ship_landed event, and publication kick
         // now live in the single receipt-gated done-writer. `ship()` keeps only
         // its PR-specific gates above (proof-of-merge, running-and-effective,
-        // cargo build/hakari) — everything a real PR-backed closure needs that
+        // cargo build) — everything a real PR-backed closure needs that
         // a no-actor reconcile does not. A `changed == 0` outcome here is the
         // idempotent "already terminal" short-circuit (CREDIBLE-1495 R3), which
         // ship() surfaces as the same Ok(()) it always has.
@@ -3627,7 +3627,7 @@ impl GapStore {
 
     /// CREDIBLE-1508: auto-close a decomposed umbrella whose children are all
     /// `done`, through the single receipt-gated done-writer — but skipping
-    /// `ship()`'s PR-specific gates (proof-of-merge / cargo build / hakari),
+    /// `ship()`'s PR-specific gates (proof-of-merge / cargo build),
     /// since there is no PR for the PARENT itself: each child's own `ship()`
     /// already proved ITS work landed, and the `ChildrenDoneReceipt` records
     /// which children stood behind this close. Returns whether the parent
@@ -9746,6 +9746,147 @@ mod tests {
         }
     }
 
+    // RESILIENT-1686: ship() must NOT mutate the canonical checkout. The old
+    // RESILIENT-469 `cargo hakari generate` call re-resolved the workspace in
+    // `self.repo_root` on every ship, rewriting Cargo.lock (-156/+18) and
+    // workspace-hack/Cargo.toml; that residue then made the NEXT ship refuse
+    // through the INFRA-2423 auto-fetch-on-dirty guard (a ship that broke the
+    // next ship). This fixture is a git checkout that LOOKS like a cargo
+    // workspace, ships a gap whose merge commit is on main, and asserts the
+    // working tree is byte-identical afterwards.
+    //
+    // The kill is proven by a FAKE `cargo` prepended to PATH that mutates
+    // Cargo.lock + workspace-hack/Cargo.toml on `hakari generate`: with the
+    // generate call DROPPED, ship() never spawns cargo, so the fixture stays
+    // byte-identical; a mutant that RESTORES the call would invoke the fake,
+    // dirty the tree, and fail the assertions below. (A real `cargo` without
+    // the `hakari` subcommand installed is a silent no-op, so a real cargo on
+    // PATH would NOT kill the mutant — hence the deterministic fake.)
+    #[test]
+    #[serial_test::serial(resilient1686_path_env)]
+    fn resilient1686_ship_leaves_working_tree_byte_identical() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (store, dir) = test_store();
+        let root = dir.path();
+
+        // Hermetic git helper (this module can't reach proof_of_merge_tests::
+        // hermetic_git): no ambient global/system config, no leaked GIT_* env.
+        let git = |args: &[&str]| -> std::process::Output {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_INDEX_FILE")
+                .output()
+                .expect("git should spawn")
+        };
+
+        // Real git repo on `main` so fetch / proof-of-merge run as in prod.
+        if !git(&["init", "--initial-branch=main", "--quiet"])
+            .status
+            .success()
+        {
+            return; // older git without --initial-branch
+        }
+        git(&["config", "user.email", "test@test.local"]);
+        git(&["config", "user.name", "test"]);
+
+        // Make the checkout look like a cargo workspace so ship()'s
+        // `Cargo.toml exists` guard would have fired the old hakari call.
+        std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+        std::fs::write(
+            root.join("Cargo.lock"),
+            "# lockfile sentinel\nversion = 4\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("workspace-hack")).unwrap();
+        std::fs::write(
+            root.join("workspace-hack").join("Cargo.toml"),
+            "[package]\nname = \"workspace-hack\"\n",
+        )
+        .unwrap();
+        // Keep chump's own scratch dirs out of `git status` so a clean tree is
+        // genuinely clean (the gap store lives at .chump/, leases at
+        // .chump-locks/, YAML mirror under docs/, build log at build.log).
+        std::fs::write(
+            root.join(".gitignore"),
+            "/.chump/\n/.chump-locks/\n/docs/\n/target/\n/fakebin/\n/build.log\n",
+        )
+        .unwrap();
+
+        // Reserve a gap, commit a merge whose subject carries the gap ID +
+        // (#PR) so verify_proof_of_merge passes against local main.
+        let id = store
+            .reserve("RESILIENT", "byte-identical ship fixture", "P1", "xs")
+            .unwrap();
+        git(&["add", "-A"]);
+        let commit = git(&["commit", "-m", &format!("{id}: workspace fixture (#4242)")]);
+        assert!(
+            commit.status.success(),
+            "commit: {}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+        store
+            .claim(&id, "sess-1686", "/worktrees/test", 3600)
+            .unwrap();
+
+        let porcelain = || -> String {
+            String::from_utf8_lossy(&git(&["status", "--porcelain", "--untracked-files=no"]).stdout)
+                .to_string()
+        };
+        assert_eq!(porcelain(), "", "fixture must start git-clean");
+        let lock_before = std::fs::read(root.join("Cargo.lock")).unwrap();
+        let hack_before = std::fs::read(root.join("workspace-hack").join("Cargo.toml")).unwrap();
+
+        // Fake `cargo` that MUTATES the lock + workspace-hack on `hakari
+        // generate` (what the real toolchain did on cuphead). cwd is
+        // self.repo_root, so the relative writes land in the fixture.
+        let bin = root.join("fakebin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let fake = bin.join("cargo");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nif [ \"$1\" = hakari ]; then\n  echo mutated >> Cargo.lock\n  \
+             echo mutated >> workspace-hack/Cargo.toml\nfi\nexit 0\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let old_path = std::env::var("PATH").unwrap_or_default();
+        unsafe {
+            std::env::set_var("PATH", format!("{}:{}", bin.display(), old_path));
+        }
+
+        let ship_res = store.ship(&id, "sess-1686", Some(4242));
+
+        // Restore PATH immediately so a concurrent test never inherits the fake.
+        unsafe {
+            std::env::set_var("PATH", &old_path);
+        }
+        ship_res.unwrap();
+
+        // AC6: the ship left the working tree byte-identical.
+        assert_eq!(
+            porcelain(),
+            "",
+            "ship() must leave the canonical checkout git-clean (git status --porcelain empty)"
+        );
+        assert_eq!(
+            std::fs::read(root.join("Cargo.lock")).unwrap(),
+            lock_before,
+            "Cargo.lock must be byte-identical after ship()"
+        );
+        assert_eq!(
+            std::fs::read(root.join("workspace-hack").join("Cargo.toml")).unwrap(),
+            hack_before,
+            "workspace-hack/Cargo.toml must be byte-identical after ship()"
+        );
+    }
+
     // EFFECTIVE-834 (EFFECTIVE-364 slice): resolve_publication reads the
     // shipped gap's artifact_type, looks up publish_targets.json, and only
     // reserves a follow-up "publish work" gap when a target is registered
@@ -11696,6 +11837,12 @@ meta:
     /// and whose commit is sitting in git history. reserve() must skip it
     /// and hand out `<PREFIX>-002` instead.
     #[test]
+    // RESILIENT-1686: this test and its siblings mutate the process-global
+    // CHUMP_RESERVE_GIT_HISTORY_CHECK / CHUMP_RESERVE_FETCH_ORIGIN env vars;
+    // under full-suite parallelism one test's "0"/remove raced another's
+    // expected "1" and flaked reserve_avoids_cross_node_collision. Shared
+    // serial key keeps every reserve-history env mutator off the same thread.
+    #[serial_test::serial(reserve_history_env)]
     fn reserve_skips_id_already_referenced_in_git_history() {
         let dir = TempDir::new().unwrap();
         let git = |args: &[&str]| {
@@ -11731,6 +11878,7 @@ meta:
     /// Sanity check on the other side: when the candidate ID does NOT appear
     /// anywhere in git history, reserve() proceeds normally without skipping.
     #[test]
+    #[serial_test::serial(reserve_history_env)] // RESILIENT-1686: see sibling note above
     fn reserve_does_not_skip_id_absent_from_git_history() {
         let dir = TempDir::new().unwrap();
         let git = |args: &[&str]| {
@@ -11764,6 +11912,7 @@ meta:
     /// occupied ID and return a genuinely-unused one — and the returned ID
     /// must exist as a fresh `open` row so `gap set` works and it is pickable.
     #[test]
+    #[serial_test::serial(reserve_history_env)] // RESILIENT-1686: see sibling note above
     fn reserve_never_returns_id_already_in_store_after_counter_reset() {
         // No git history dependence for this test — exercise the pure
         // store-level guard so we prove it stands on its own.
@@ -11838,6 +11987,7 @@ meta:
     /// git-history check must close that gap: node B's reserve() fetches
     /// origin first and skips the already-taken ID.
     #[test]
+    #[serial_test::serial(reserve_history_env)] // RESILIENT-1686: see sibling note above
     fn reserve_avoids_cross_node_collision_via_origin_fetch() {
         let git = |dir: &Path, args: &[&str]| {
             let out = std::process::Command::new("git")

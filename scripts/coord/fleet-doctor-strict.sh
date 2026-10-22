@@ -1525,6 +1525,55 @@ check_checkout_parked_off_main() {
         "checkout on '$branch' for ${age}s (threshold ${stale_s}s) — not yet stale" ""
 }
 
+#  19. canonical-checkout-dirty — RESILIENT-1686: `chump gap ship` used to run
+#      `cargo hakari generate` in REPO_ROOT, rewriting Cargo.lock (-156/+18)
+#      and workspace-hack/Cargo.toml on every ship. That residue then made the
+#      NEXT ship refuse through the INFRA-2423 auto-fetch-on-dirty guard — a
+#      ship that broke the next ship, stranding organ landings' gaps open and
+#      needing a hand `git checkout --` of the residue. The generate call is
+#      gone (crates/chump-gap-store/src/lib.rs, AC5), but a dirty canonical
+#      checkout from ANY source must still be surfaced loudly rather than
+#      silently blocking the next ship. RED when REPO_ROOT has uncommitted
+#      changes to MODIFIED TRACKED files — explicitly including Cargo.lock and
+#      workspace-hack/Cargo.toml (the residue class) — naming the offenders.
+#      A mutant that drops Cargo.lock from the scan is killed by
+#      scripts/ci/test-fleet-doctor-canonical-dirty.sh.
+check_canonical_checkout_dirty() {
+    if [[ ! -d "$REPO_ROOT/.git" ]]; then
+        register_check "canonical-checkout-dirty" "skip" "no .git under REPO_ROOT" ""
+        return
+    fi
+    # Tracked, modified files only (-uno: untracked state under .chump/, target/
+    # etc. is expected and is not the residue class). Cargo.lock and
+    # workspace-hack/Cargo.toml fall out of this porcelain naturally — the check
+    # must NOT filter them out.
+    local dirty
+    dirty="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no 2>/dev/null)"
+    if [[ -z "$dirty" ]]; then
+        register_check "canonical-checkout-dirty" "pass" \
+            "canonical checkout is clean (no modified tracked files)" ""
+        return
+    fi
+    local paths
+    paths="$(printf '%s\n' "$dirty" | awk '{print $NF}' | tr '\n' ' ')"
+    local lock_hit=0
+    if printf '%s\n' "$dirty" | awk '{print $NF}' \
+        | grep -qxE 'Cargo\.lock|workspace-hack/Cargo\.toml'; then
+        lock_hit=1
+    fi
+    local amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+    mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+    printf '{"ts":"%s","kind":"canonical_checkout_dirty","lock_residue":%d,"paths":"%s","source":"fleet-doctor-strict.sh"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$lock_hit" "$(printf '%s' "$paths" | tr '"' "'")" \
+        >> "$amb" 2>/dev/null || true
+    local detail="canonical checkout ($REPO_ROOT) has uncommitted changes to tracked file(s): ${paths}"
+    if [[ "$lock_hit" -eq 1 ]]; then
+        detail="${detail}— Cargo.lock/workspace-hack residue is exactly the RESILIENT-1686 class that makes the next chump gap ship refuse (INFRA-2423 auto-fetch-on-dirty)"
+    fi
+    register_check "canonical-checkout-dirty" "fail" "$detail" \
+        "cd $REPO_ROOT && git checkout -- Cargo.lock workspace-hack/Cargo.toml (or git stash), then retry; if the residue keeps reappearing, something is still building cargo in the main checkout"
+}
+
 #  18. single-branch-refspec — INFRA-8210: the cuphead hub's gap-store checkout
 #      was cloned with a single-branch fetch refspec
 #      (+refs/heads/main:refs/remotes/origin/main), so `git fetch origin` only
@@ -1937,6 +1986,7 @@ check_auth_probe
 check_self_healer_heartbeat
 check_tracked_config_drift
 check_checkout_parked_off_main
+check_canonical_checkout_dirty
 check_fetch_refspec_single_branch
 check_second_scope
 check_admission_ceiling

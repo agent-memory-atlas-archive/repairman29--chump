@@ -2341,6 +2341,18 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-node-admission-ceiling.sh"],
             GateKind::Scripts,
         ));
+        // RESILIENT-1686: fleet-doctor canonical-checkout-dirty RED check. The
+        // chump gap ship path no longer runs `cargo hakari generate` in the
+        // canonical checkout; the fleet-doctor check loudly reports a dirty
+        // canonical checkout (explicitly scanning Cargo.lock /
+        // workspace-hack/Cargo.toml) and emits kind=canonical_checkout_dirty.
+        // Mutant kill: dropping Cargo.lock from the scan turns the test red.
+        // Hermetic (throwaway git repo + stubbed scan root); fast (<5s).
+        steps.push(step(
+            "fleet-doctor-canonical-dirty",
+            &["bash", "scripts/ci/test-fleet-doctor-canonical-dirty.sh"],
+            GateKind::Scripts,
+        ));
 
         // INFRA-1808: bootstrap-auto-install smoke. install-bootstrap-auto-
         // launchd.sh (the hourly self-install job for chump-fleet-bootstrap.sh)

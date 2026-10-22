@@ -1,0 +1,15 @@
+  - kind: canonical_checkout_dirty
+    effect_metric: resilient
+    emitter: scripts/coord/fleet-doctor-strict.sh (RESILIENT-1686)
+    trigger: >-
+      Emitted when check_canonical_checkout_dirty finds the canonical gap-store
+      checkout (REPO_ROOT) has uncommitted changes to MODIFIED TRACKED files —
+      explicitly including Cargo.lock and workspace-hack/Cargo.toml, the residue
+      class that `chump gap ship`'s old `cargo hakari generate` call used to
+      leave behind and that then made the NEXT ship refuse through the
+      INFRA-2423 auto-fetch-on-dirty guard. lock_residue=1 marks the lockfile
+      residue class specifically.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, source, lock_residue, paths]
+    expected_volume: "0 on a healthy node; >0 only while the checkout is dirty"
+    status: stable
