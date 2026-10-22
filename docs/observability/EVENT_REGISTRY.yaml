@@ -14318,7 +14318,7 @@ events:
     trigger: node-wide admission ceiling hit — a `claude -p` or cargo/rustc spawn was deferred because the live count was >= CHUMP_MAX_CONCURRENT_CLAUDE / CHUMP_MAX_CONCURRENT_CARGO_JOBS (outcome=deferred on entry, outcome=timeout when the bounded wait fails open)
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, resource, active, ceiling, waited_s, outcome]
-  # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──
+  # ── RESILIENT-1634: architect / ATC tick organ (Phase R) ──
   - kind: organ_install_scope_skipped
     effect_metric: self
     emitter: scripts/setup/chump-node-install.sh place_role_unit_files (INFRA-8194)
@@ -14735,3 +14735,18 @@ events:
     status: stable
 
   # ── INFRA-2156 (META-125/C5): chump consensus ask ───────────────────────────
+  - kind: architect_tick
+    status: active
+    effect_metric: resilient
+    emitter: scripts/dispatch/architect-tick.sh (RESILIENT-1634)
+    emitter_paths: [scripts/dispatch/architect-tick.sh]
+    trigger: the architect / Air-Traffic-Control standing loop ran one bounded tick
+      on the node (outcome=ran, carrying the gap rollup done/total and trunk state),
+      or refused to start (outcome=skipped) because an admission guard fired — another
+      claude already running (the wait_quiet rule), free disk below the 20G floor after
+      the reaper, the local single-architect flock held (or flock missing), or another
+      host's cross-host architect lease fresh on origin (refs/architect-lease/, or the
+      lease unreadable / unwritable, fail closed).
+    consumers: [ambient, fleet-brief]
+    fields_required: [ts, kind, outcome, rollup_done, rollup_total]
+  # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──

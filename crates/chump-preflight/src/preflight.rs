@@ -190,6 +190,11 @@ const CLI_OBSERVABILITY_MISC_SCRIPTS: &[(&str, &str)] = &[
         "api-cost-leaderboard",
         "scripts/ci/test-api-cost-leaderboard.sh",
     ),
+    // RESILIENT-1634: architect / ATC tick organ gate — admission guards
+    // (one-claude/disk-floor/single-architect-lock), the no-merge/no-push/
+    // no-bypass tool allowlist (AC4), tick-report writes (AC2), and the
+    // architect_tick emit (AC5). Pure local (stub claude, no network).
+    ("architect-tick", "scripts/ci/test-architect-tick.sh"),
     (
         "cascade-rebase-observability",
         "scripts/ci/test-cascade-rebase-observability.sh",

@@ -51,6 +51,10 @@ pub const SUBSTRATE_MARKERS: &[&str] = &[
     "state-audit",
     "queue-health-monitor",
     "trunk-sentinel",
+    // RESILIENT-1634: the architect / ATC tick reads, reruns CI and files
+    // findings; it never claims a gap, merges or pushes. Hygiene-class, so a
+    // paused node keeps it running and pause never counts it as work.
+    "architect-tick",
 ];
 
 /// The last path component of a unit name or launchd label, with a trailing
@@ -330,6 +334,37 @@ mod tests {
         // non-chump units are never work organs
         assert!(!is_work_organ("ssh.service"));
         assert!(!is_work_organ("cron.timer"));
+    }
+
+    #[test]
+    fn architect_tick_is_hygiene_class_not_a_work_organ() {
+        // RESILIENT-1634: the user-scope architect tick (service + timer, bare
+        // name or full unit path) must never count as a work organ, so the
+        // fleet pause never stops it and a PAUSED report is never blocked by it.
+        assert!(SUBSTRATE_MARKERS.contains(&"architect-tick"));
+        for name in [
+            "chump-architect-tick.service",
+            "chump-architect-tick.timer",
+            "chump-architect-tick",
+            "/tmp/units/chump-architect-tick.timer",
+        ] {
+            assert!(is_chump_unit(name), "{name} is a chump unit");
+            assert!(!is_work_organ(name), "{name} must be hygiene-class");
+        }
+        // An active architect tick does not make a scope report work active.
+        let scan = ScopeScan {
+            scope: RunScope::User,
+            root: None,
+            units: vec![Unit {
+                name: "chump-architect-tick.service".into(),
+                active: true,
+                enabled: true,
+            }],
+        };
+        assert!(scan.active_work_organs().is_empty());
+        // The marker is not so broad that it demotes a real work organ.
+        assert!(is_work_organ("chump-node1-worker.service"));
+        assert!(is_work_organ("chump-architect-dispatch.service"));
     }
 
     #[test]

@@ -133,6 +133,10 @@ NODE_LOCAL_ORGAN_BASES=(
   chump-cargo-target-reaper
   chump-active-target-reaper
   chump-stale-process-watchdog
+  # RESILIENT-1634: the architect / ATC tick is a user-scope timer the operator
+  # renders and enables by hand (never via the manifest). It is hygiene-class:
+  # a role-scoped reconcile must never reap it as out-of-role drift.
+  chump-architect-tick
 )
 organ_is_node_local() {
   local base="${1%.service}"; base="${base%.timer}"

@@ -3680,3 +3680,10 @@ CHUMP_WORKER_HEARTBEAT_FILE
 CHUMP_WORKER_SINGLE_TICK
 # Override the chumpd binary the worker.sh shim execs (default: resolve from target/ or PATH)
 CHUMPD_BIN
+
+# ── RESILIENT-1634: architect / ATC tick organ (scripts/dispatch/architect-tick.sh) ──
+# Only two env reads remain (STANDING RULE 2026-10-20 / AC6): the kill switch and
+# the exact-name-validated model. Every safety input (timeout, disk floor,
+# budget, state dir, claude binary, handoff source) is pinned in code.
+CHUMP_ARCHITECT_TICK_ENABLED
+CHUMP_ARCHITECT_TICK_MODEL

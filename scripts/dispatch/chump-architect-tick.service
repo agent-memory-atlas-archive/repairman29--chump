@@ -1,0 +1,38 @@
+# RESILIENT-1634 (PHASE-R) — the architect / Air-Traffic-Control standing loop
+# as an ORGAN on cuphead instead of hand-work in a Mac desktop session. Fires
+# ONE bounded `claude -p --model opus` architect tick (board + trunk + nodes +
+# rollup; unstick by rebase/rerun only; file findings; never admin-merge, never
+# push to main, never hand-implement) with zero desktop session open. Paired
+# with chump-architect-tick.timer (every 30 min).
+#
+# SCOPE: user-scope (`systemctl --user`). Rendered through crates/chump-provision
+# (__HOME__ / __REPO_ROOT__ placeholders, no host literal, no User=, no %h) so
+# one unit text installs on any node's user manager.
+#
+# HYGIENE-CLASS, in code: this organ is the fleet's traffic-cop. It is
+# deliberately NOT gated by the fleet-paused sentinel (it reads + unsticks +
+# files; it never claims a gap), so the fleet pause does NOT stop it. The unit
+# name matches the `architect-tick` entry in SUBSTRATE_MARKERS
+# (crates/chump-provision/src/scopes.rs), so `is_work_organ` is false for it and
+# `chump node pause` never counts it as a work organ; and it is listed in
+# NODE_LOCAL_ORGAN_BASES (scripts/ops/organ-reconcile.sh), so a role-scoped
+# reconcile never reaps it as out-of-role drift.
+#
+# SHIPPED DISABLED: no organ manifest line enables it. Rendering and enabling
+# it is the operator's step (see chump-architect-tick.timer's header).
+[Unit]
+Description=Chump architect tick — one bounded claude -p --model opus ATC cycle (board/trunk/nodes/rollup, unstick-only) (RESILIENT-1634)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Hard ceiling on one tick: the agent run is capped at 1500 s inside the script
+# (git fetch 120 s, reaper 600 s, lease 60 s each, all under timeout(1)), so a
+# hung step can never pin the oneshot and block the next timer fire.
+TimeoutStartSec=1800
+# Source providers.env for ANTHROPIC/CLAUDE credentials (export format, so
+# source it in a shell rather than systemd EnvironmentFile which can't parse
+# `export KEY=val`). HOME is set so the user-scope manager resolves ~/.chump.
+Environment=HOME=__HOME__
+ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/dispatch/architect-tick.sh'

@@ -67,3 +67,11 @@ scripts/coord/auto-merge-arm-watcher.sh  # INFRA-2289: gh api graphql for PR-wit
 scripts/ci/test-cross-pr-contract.sh  # INFRA-2406: gh pr list --json number,files for in-flight contract scan; cache layer has no files-per-PR enumeration API
 scripts/coord/last-mile-rescuer.sh         # INFRA-2629: rescuer needs `gh pr list --head` + `gh pr create` as the core action of last-mile fallback when bot-merge.sh is itself unavailable; chump_gh migration follow-up filed as INFRA-NEW-LAST-MILE-CHUMP-GH-MIGRATION
 scripts/coord/merge-sla-scorecard.sh   # migration gap: INFRA-3591 (board SLA scorecard needs live uncached PR ages; cache-first wrapper unsuitable for timing)
+
+# RESILIENT-1634: cross-host single-architect lease. Reads/writes the git refs
+# REST API (git/refs, git/matching-refs, git/refs/.../DELETE) under a custom
+# architect-lease/<host>/<epoch> ref namespace — NOT PR state. The cache wrapper
+# (cache_lookup_pr/cache_lookup_checks) only indexes PRs + check-runs and exposes
+# no git-refs API, so raw gh is the only path. Same class as required-check-monitor.sh
+# (branch-protection API) and chump-post-integration-prune.sh (gh api -X DELETE mutations).
+scripts/dispatch/architect-lease.sh    # RESILIENT-1634: git-refs REST API for custom lease ref namespace; not covered by cache wrapper

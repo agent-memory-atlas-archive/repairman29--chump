@@ -1,0 +1,30 @@
+# Pairs with chump-architect-tick.service. Fires the architect / ATC tick every
+# 30 minutes so the fleet's traffic-cop keeps looping with no desktop session
+# open (RESILIENT-1634). SHIPPED DISABLED: no organ manifest line enables it.
+# Enabling it is the operator's step, on the node, from its checkout:
+#   cd ~/.chumpnode/repo
+#   chump node render-unit scripts/dispatch/chump-architect-tick.service \
+#     --host linux-systemd-user --repo-root "$PWD" \
+#     --out ~/.config/systemd/user/chump-architect-tick.service
+#   chump node render-unit scripts/dispatch/chump-architect-tick.timer \
+#     --host linux-systemd-user --repo-root "$PWD" \
+#     --out ~/.config/systemd/user/chump-architect-tick.timer
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now chump-architect-tick.timer
+#   systemctl --user list-timers chump-architect-tick.timer   # listing receipt
+[Unit]
+Description=Run the Chump architect / ATC tick every 30 minutes headless (RESILIENT-1634)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+# RESILIENT-1455: OnUnitInactiveSec pairs with OnUnitActiveSec so this
+# Type=oneshot timer self-perpetuates. A oneshot goes inactive after each run,
+# leaving OnUnitActiveSec with no live "active" anchor -> NextElapse goes n/a
+# and the timer fires once, never again. OnUnitInactiveSec re-arms from the
+# inactive edge (the anchor a oneshot has). Mirrors chump-board-cycle.timer.
+OnUnitInactiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
