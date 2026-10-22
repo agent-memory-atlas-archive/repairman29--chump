@@ -1480,6 +1480,9 @@ jobs:
       - name: node pause invariant (RESILIENT-1614)
         run: bash scripts/ci/test-resilient-1614-node-pause-invariant.sh
 
+      - name: node-refresh units render canonical checkout (INFRA-8597)
+        run: bash scripts/ci/test-infra-8597-node-refresh-canonical-checkout.sh
+
       - name: subagent pre-exit check armed/unarmed (CREDIBLE-1518)
         run: bash scripts/ci/test-subagent-pre-exit-check.sh
 

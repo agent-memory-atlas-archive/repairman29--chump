@@ -2940,6 +2940,17 @@ pub fn run(argv: &[String]) -> i32 {
             ],
             GateKind::Scripts,
         ));
+        // INFRA-8597 (PHASE-R R5): install-node-refresh-systemd.sh bakes the
+        // node's canonical checkout into ExecStart, never a disposable
+        // .claude/worktrees/* path. Pure shell fixture — stubs systemctl, no build.
+        steps.push(step(
+            "node-refresh-canonical-checkout",
+            &[
+                "bash",
+                "scripts/ci/test-infra-8597-node-refresh-canonical-checkout.sh",
+            ],
+            GateKind::Scripts,
+        ));
         // CREDIBLE-1518: subagent pre-exit check reads autoMergeRequest, not
         // the REST-only merge_method field; stubbed gh, armed + unarmed fixtures.
         steps.push(step(

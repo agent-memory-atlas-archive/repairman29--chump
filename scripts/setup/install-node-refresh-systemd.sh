@@ -42,41 +42,88 @@ USER="${USER:-$(id -un 2>/dev/null || echo root)}"
 CADENCE_MIN="${CADENCE_MIN:-30}"
 UNIT_DIR="$HOME/.config/systemd/user"
 
-# RESILIENT-1685: resolve a tracked script to a STABLE checkout path, never a
-# reaped-prone dispatch worktree (…/.claude/worktrees/…) or /tmp. The cuphead
-# trap (2026-10-21): this installer was invoked from a dispatch worktree, the
-# `$(dirname "$0")/..` fallback baked that worktree path into ExecStart, the
-# worktree was later reaped, and chump-node-refresh.service exited 127 every
-# tick on a missing script — the node binary never refreshed and the review
-# organ ran stale code for days. So: try the canonical durable checkouts first
-# (…/.chumpnode/repo, ~/chump), SKIP any candidate that resolves under a
-# worktree or /tmp, and fail LOUDLY if the only copy on disk lives under one —
-# a loud install failure beats a silent exit-127 timer.
-_resolve_stable_script() {
-    local candidate resolved
-    for candidate in "$@"; do
-        [[ -n "$candidate" && -f "$candidate" ]] || continue
-        resolved="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
-        case "$resolved" in
-            */.claude/worktrees/*|/tmp|/tmp/*) continue ;;
-        esac
-        printf '%s\n' "$resolved"
-        return 0
+# --- canonical node checkout (INFRA-8597, PHASE-R R5) ------------------------
+# The script paths baked into ExecStart MUST live in the node's canonical,
+# durable checkout — never in a disposable `.claude/worktrees/*` linked worktree.
+# When this installer was invoked from inside a claimed worktree, the old
+# `$(dirname "$0")/..` candidate baked that worktree's path into
+# chump-node-refresh.service; the worktree was later reaped, leaving
+# ExecStart=.../.claude/worktrees/infra-8571/scripts/ops/node-refresh-chump.sh
+# → exit 127 every cycle (cuphead, since ~2026-10-17). Resolve the canonical
+# checkout explicitly: CHUMP_NODE_REPO, else the MAIN worktree of this git repo
+# (git-common-dir's parent — a linked worktree's common dir points at the main
+# repo's .git), else the well-known node checkouts. Anything under
+# `.claude/worktrees/` is rejected so a doomed path can never be rendered.
+is_worktree_path() { case "$1" in */.claude/worktrees/*) return 0;; *) return 1;; esac; }
+
+resolve_canonical_checkout() {
+    local cand
+    # 1. explicit operator/unit override. A linked worktree's `.git` is a FILE,
+    #    not a dir, so accept either. Worktree rejection is DELEGATED to
+    #    assert_canonical_path below (where it is load-bearing + testable, so the
+    #    INFRA-8597 M6 mutant dies): candidate 1 returns the CHUMP_NODE_REPO path
+    #    verbatim and the assert FATALs on a `.claude/worktrees/` path — never a
+    #    silent fall-through to candidate 2/3.
+    if [[ -n "${CHUMP_NODE_REPO:-}" ]] && { [[ -d "${CHUMP_NODE_REPO}/.git" ]] || [[ -f "${CHUMP_NODE_REPO}/.git" ]]; }; then
+        cand="$(cd "$CHUMP_NODE_REPO" && pwd)"
+        printf '%s\n' "$cand"; return 0
+    fi
+    # 2. the MAIN worktree of whatever repo this installer runs from. From a
+    #    linked worktree, git-common-dir resolves to <main>/.git, whose parent
+    #    is the canonical checkout — so we hop out of the worktree automatically.
+    local gcd here; here="$(cd "$(dirname "$0")" && pwd)"
+    if gcd="$(git -C "$here" rev-parse --git-common-dir 2>/dev/null)"; then
+        [[ "$gcd" != /* ]] && gcd="$here/$gcd"
+        cand="$(cd "$(dirname "$gcd")" 2>/dev/null && pwd || true)"
+        if [[ -n "$cand" ]] && ! is_worktree_path "$cand" && [[ -f "$cand/scripts/ops/node-refresh-chump.sh" ]]; then
+            printf '%s\n' "$cand"; return 0
+        fi
+    fi
+    # 3. well-known node checkouts (canonical, never a worktree).
+    for cand in "$HOME/chump" "$HOME/chump-host" "$HOME/Projects/Chump"; do
+        if [[ -f "$cand/scripts/ops/node-refresh-chump.sh" ]] && ! is_worktree_path "$cand"; then
+            printf '%s\n' "$cand"; return 0
+        fi
     done
     return 1
 }
 
-SCRIPT_SRC="$(_resolve_stable_script \
-    "${CHUMP_NODE_REPO:-}/scripts/ops/node-refresh-chump.sh" \
-    "$HOME/.chumpnode/repo/scripts/ops/node-refresh-chump.sh" \
-    "$HOME/chump/scripts/ops/node-refresh-chump.sh" \
-    "$HOME/chump-host/scripts/ops/node-refresh-chump.sh" \
-    "$HOME/Projects/Chump/scripts/ops/node-refresh-chump.sh" \
-    "$(dirname "$0")/../ops/node-refresh-chump.sh")" || SCRIPT_SRC=""
-if [[ -z "$SCRIPT_SRC" ]]; then
-    echo "FATAL: cannot locate node-refresh-chump.sh under a stable checkout (CHUMP_NODE_REPO, ~/.chumpnode/repo, or ~/chump); refusing to install the refresh timer from a dispatch worktree (.claude/worktrees/…) or /tmp — that is the exit-127-every-tick trap (RESILIENT-1685). Set CHUMP_NODE_REPO to a durable checkout and re-run." >&2
+# Assert a resolved ExecStart path is durable before it is baked into a unit.
+assert_canonical_path() {
+    local p="$1" label="$2"
+    if is_worktree_path "$p"; then
+        echo "FATAL: refusing to render $label from a disposable worktree path: $p (INFRA-8597)" >&2
+        exit 1
+    fi
+    if [[ ! -f "$p" ]]; then
+        echo "FATAL: $label resolves to a non-existent path: $p (INFRA-8597)" >&2
+        exit 1
+    fi
+}
+
+# INFRA-8597 (blocking #1): a SET CHUMP_NODE_REPO must resolve to a durable
+# checkout — NEVER a silent fall-through that then writes the caller's raw value
+# into `Environment=`. A missing / no-.git value is FATAL here at top level (not
+# inside the `$(resolve_canonical_checkout)` command substitution, whose `exit`
+# only kills the subshell). A `.claude/worktrees/` value is rejected (also FATAL
+# exit 1) by assert_canonical_path below, where the worktree guard is
+# load-bearing and testable.
+if [[ -n "${CHUMP_NODE_REPO:-}" ]]; then
+    if [[ ! -d "${CHUMP_NODE_REPO}/.git" && ! -f "${CHUMP_NODE_REPO}/.git" ]]; then
+        echo "FATAL: CHUMP_NODE_REPO=${CHUMP_NODE_REPO} is not a git checkout (missing or no .git); refusing (INFRA-8597)" >&2
+        exit 1
+    fi
+fi
+
+CANON_REPO="$(resolve_canonical_checkout || true)"
+if [[ -z "$CANON_REPO" ]]; then
+    echo "FATAL: cannot locate the canonical node checkout (set CHUMP_NODE_REPO)" >&2
     exit 1
 fi
+echo "canonical checkout: $CANON_REPO"
+
+SCRIPT_SRC="$CANON_REPO/scripts/ops/node-refresh-chump.sh"
+assert_canonical_path "$SCRIPT_SRC" "chump-node-refresh.service ExecStart"
 chmod +x "$SCRIPT_SRC" 2>/dev/null || true
 echo "refresh script: $SCRIPT_SRC"
 
@@ -118,16 +165,15 @@ mkdir -p "$UNIT_DIR"
     # a truly wedged run (network hang, deadlocked cargo) instead of running
     # forever.
     echo "TimeoutStartSec=2700"
-    [[ -n "${CHUMP_NODE_REPO:-}" ]] && echo "Environment=CHUMP_NODE_REPO=${CHUMP_NODE_REPO}"
+    # INFRA-8597 (blocking #1): write the RESOLVED canonical repo (CANON_REPO),
+    # never the caller's raw CHUMP_NODE_REPO. A worktree/stale value here is the
+    # exact failure install-helsinki-atc.sh recorded on 2026-08-11.
+    echo "Environment=CHUMP_NODE_REPO=${CANON_REPO}"
     [[ -n "${CHUMP_NODE_BIN:-}" ]]  && echo "Environment=CHUMP_NODE_BIN=${CHUMP_NODE_BIN}"
-    # RESILIENT-1041 (fix a): a systemd --user timer starts with NO login
-    # session and therefore no `gh auth login` state — the node-refresh script
-    # can only see a real GH_TOKEN if this unit exports one. Bake in whatever
-    # GH_TOKEN the *installing* environment has (operator's shell / bootstrap
-    # secret), so the timer's `gh` calls are authenticated from the first run
-    # instead of silently degrading to the raw-HEAD-fallback / cold-build
-    # halt-class paths every single cycle.
-    [[ -n "${GH_TOKEN:-}" ]] && echo "Environment=GH_TOKEN=${GH_TOKEN}"
+    # INFRA-8597 (blocking #3, RESILIENT-1649 renderer half): do NOT bake any
+    # secret into the unit. node-refresh-chump.sh reads GH_TOKEN from
+    # ~/.chump/providers.env at runtime, so the timer's `gh` calls stay
+    # authenticated without a plaintext GH_TOKEN= line in a world-readable unit.
     echo "ExecStart=/usr/bin/env bash ${SCRIPT_SRC}"
     echo "Nice=10"
 } > "$UNIT_DIR/chump-node-refresh.service"
@@ -151,14 +197,13 @@ mkdir -p "$UNIT_DIR"
 # every 5 min — much tighter than the refresh cadence — so a stalled or
 # timed-out refresh surfaces fast instead of silently leaving the node on a
 # stale binary (AC #2).
-# RESILIENT-1685: same stable-checkout guard as SCRIPT_SRC — SCRIPT_SRC is now
-# guaranteed off-worktree, so its dirname-relative candidate is safe too.
-WATCHDOG_SRC="$(_resolve_stable_script \
-    "$(dirname "$SCRIPT_SRC")/../coord/node-deploy-lag-watchdog.sh" \
-    "${CHUMP_NODE_REPO:-}/scripts/coord/node-deploy-lag-watchdog.sh" \
-    "$(dirname "$0")/../coord/node-deploy-lag-watchdog.sh")" || WATCHDOG_SRC=""
+WATCHDOG_SRC=""
+if [[ -f "$CANON_REPO/scripts/coord/node-deploy-lag-watchdog.sh" ]]; then
+    WATCHDOG_SRC="$CANON_REPO/scripts/coord/node-deploy-lag-watchdog.sh"
+fi
 
 if [[ -n "$WATCHDOG_SRC" ]]; then
+    assert_canonical_path "$WATCHDOG_SRC" "chump-node-deploy-lag-watchdog.service ExecStart"
     chmod +x "$WATCHDOG_SRC" 2>/dev/null || true
     echo "watchdog script: $WATCHDOG_SRC"
     {
@@ -168,7 +213,8 @@ if [[ -n "$WATCHDOG_SRC" ]]; then
         echo ""
         echo "[Service]"
         echo "Type=oneshot"
-        [[ -n "${CHUMP_NODE_REPO:-}" ]] && echo "Environment=CHUMP_REPO_ROOT=${CHUMP_NODE_REPO}"
+        # INFRA-8597 (blocking #1): resolved canonical repo, never the caller's raw value.
+        echo "Environment=CHUMP_REPO_ROOT=${CANON_REPO}"
         [[ -n "${CHUMP_NODE_BIN:-}" ]]  && echo "Environment=CHUMP_NODE_BIN=${CHUMP_NODE_BIN}"
         echo "ExecStart=/usr/bin/env bash ${WATCHDOG_SRC}"
         echo "Nice=10"
@@ -200,11 +246,10 @@ fi
 # WITHOUT the destructive `reset --hard` node-main-sync.sh uses — preserving
 # node-local tracked customizations (the muscle-node organ-manifest.txt stopgap)
 # and untracked hand-deployed files, and refusing to touch a diverged checkout.
-# RESILIENT-1685: stable-checkout guard (see _resolve_stable_script).
-SCRIPTHOST_SRC="$(_resolve_stable_script \
-    "$(dirname "$SCRIPT_SRC")/node-script-host-refresh.sh" \
-    "${CHUMP_NODE_REPO:-}/scripts/ops/node-script-host-refresh.sh" \
-    "$(dirname "$0")/../ops/node-script-host-refresh.sh")" || SCRIPTHOST_SRC=""
+SCRIPTHOST_SRC=""
+if [[ -f "$CANON_REPO/scripts/ops/node-script-host-refresh.sh" ]]; then
+    SCRIPTHOST_SRC="$CANON_REPO/scripts/ops/node-script-host-refresh.sh"
+fi
 
 # Resolve the SCRIPT-HOST checkout the worker actually runs from (NOT the binary
 # mirror). Precedence: explicit override → first of the canonical worker
@@ -217,6 +262,7 @@ if [[ -z "${CHUMP_SCRIPT_HOST_REPO:-}" ]]; then
 fi
 
 if [[ -n "$SCRIPTHOST_SRC" ]]; then
+    assert_canonical_path "$SCRIPTHOST_SRC" "chump-script-host-refresh.service ExecStart"
     chmod +x "$SCRIPTHOST_SRC" 2>/dev/null || true
     echo "script-host refresh script: $SCRIPTHOST_SRC"
     echo "script-host checkout:       $CHUMP_SCRIPT_HOST_REPO"
@@ -231,7 +277,12 @@ if [[ -n "$SCRIPTHOST_SRC" ]]; then
         # a generous bound so a slow fetch on a 2-core node never wedges forever.
         echo "TimeoutStartSec=300"
         echo "Environment=CHUMP_SCRIPT_HOST_REPO=${CHUMP_SCRIPT_HOST_REPO}"
-        [[ -n "${GH_TOKEN:-}" ]] && echo "Environment=GH_TOKEN=${GH_TOKEN}"
+        # INFRA-8597 (blocking #3): no secret baked into the unit. Unlike the
+        # binary-refresh service, node-script-host-refresh.sh does NOT read
+        # GH_TOKEN / ~/.chump/providers.env — it runs a plain `git fetch origin
+        # main`, which authenticates via the ~/chump checkout's own `origin`
+        # remote credentials (an SSH key, or the git credential helper / a token
+        # embedded in the remote URL), not an env token baked into the unit.
         echo "ExecStart=/usr/bin/env bash ${SCRIPTHOST_SRC}"
         echo "Nice=10"
     } > "$UNIT_DIR/chump-script-host-refresh.service"
