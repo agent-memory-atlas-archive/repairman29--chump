@@ -118,12 +118,47 @@ launchd_exit_status() {
         | awk -v l="$1" '$3 == l {print $2; found=1} END {if (!found) print "absent"}'
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${REPO_ROOT:-${CHUMP_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}}"
+# INFRA-8583: read the ONE shared pause detector (_nc_paused -> chump node is-paused /
+# node.env CHUMP_NODE_MODE=paused / state_dir/.chump/fleet-paused / repo .chump/fleet-paused).
+# When paused on purpose, report PAUSED (state=paused_expected) instead of alerting reaper_silent.
+if [[ -f "$SCRIPT_DIR/node-converge.sh" ]]; then
+    eval "$(sed -n '/^_nc_paused()/,/^}/p' "$SCRIPT_DIR/node-converge.sh" 2>/dev/null)" 2>/dev/null || true
+fi
+_watchdog_node_paused() {
+    local sd="${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}"
+    if declare -f _nc_paused >/dev/null 2>&1; then
+        CHUMP_STATE_DIR="$sd" REPO_ROOT="$REPO_ROOT" _nc_paused && return 0
+    fi
+    [[ -f "$REPO_ROOT/.chump/fleet-paused" ]] && return 0
+    [[ -f "$sd/.chump/fleet-paused" ]] && return 0
+    local ne="$sd/node.env"
+    if [[ -f "$ne" ]]; then
+        grep -Eq "^(export )?CHUMP_NODE_MODE=paused([[:space:]]|$)" "$ne" && return 0
+    fi
+    [[ "${CHUMP_NODE_MODE:-}" == "paused" ]] && return 0
+    return 1
+}
+
 reaper_setup watchdog
 reaper_check_disk_headroom  # INFRA-453: exit 0 + ALERT if <5% free
 
 ALERTS=0
 OK=0
 NOW=$(date +%s)
+
+if _watchdog_node_paused; then
+    for name in "${TARGETS[@]}"; do
+        OK=$((OK + 1))
+        [[ $QUIET -eq 0 ]] && printf "  PAUSED (state=paused_expected): %s skipped on paused node\n" "$name"
+    done
+    if [[ $QUIET -eq 0 ]]; then
+        printf "=== watchdog done (PAUSED): %d expected-paused, %d ALERT(s) ===\n" "$OK" "$ALERTS"
+    fi
+    reaper_finish ok "{\"checked\":${#TARGETS[@]},\"ok\":$OK,\"alerts\":0,\"state\":\"paused_expected\"}"
+    exit 0
+fi
 
 for name in "${TARGETS[@]}"; do
     # INFRA-683: pr-watch and distill are non-reaper processes that write heartbeats

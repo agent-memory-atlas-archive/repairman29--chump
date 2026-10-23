@@ -57,6 +57,9 @@ pub struct WorkerConfig {
     /// Per-tick wall-clock budget. 0 = no timeout.
     pub budget_secs: u64,
     pub pause_file: PathBuf,
+    /// Node state dir (`CHUMP_STATE_DIR`, else `$HOME/.chump`) consulted via the
+    /// shared `node_pause::is_paused` detector (INFRA-8583).
+    pub state_dir: PathBuf,
     pub heartbeat_file: PathBuf,
     pub ambient: PathBuf,
     pub agent_id: String,
@@ -99,6 +102,9 @@ impl WorkerConfig {
             pause_file: std::env::var("CHUMP_WORKER_PAUSE_FILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| repo.join(".chump/fleet-paused")),
+            state_dir: std::env::var("CHUMP_STATE_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home.join(".chump")),
             heartbeat_file: std::env::var("CHUMP_WORKER_HEARTBEAT_FILE")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| {
@@ -141,6 +147,11 @@ impl WorkerConfig {
                         cfg.pause_file = PathBuf::from(v);
                     }
                 }
+                "--state-dir" => {
+                    if let Some(v) = take() {
+                        cfg.state_dir = PathBuf::from(v);
+                    }
+                }
                 "--heartbeat-file" => {
                     if let Some(v) = take() {
                         cfg.heartbeat_file = PathBuf::from(v);
@@ -161,6 +172,16 @@ impl WorkerConfig {
             i += 1;
         }
         cfg
+    }
+
+    /// True when either the farmer kill switch (`self.pause_file`, default
+    /// `<repo>/.chump/fleet-paused`) exists OR the shared node-mode detector
+    /// (`crate::node_pause::is_paused(&self.state_dir)`) reports the node paused
+    /// (`CHUMP_NODE_MODE=paused` in `<state_dir>/node.env`, legacy
+    /// `control-plane` + `CHUMP_NODE_WORK_ENABLED=0`, or
+    /// `<state_dir>/.chump/fleet-paused`) — INFRA-8583 AC1/AC2.
+    pub fn is_paused(&self) -> bool {
+        self.pause_file.exists() || crate::node_pause::is_paused(&self.state_dir)
     }
 }
 
@@ -250,7 +271,10 @@ fn install_signal_handlers() {
 pub fn run(args: &[String]) -> i32 {
     install_signal_handlers();
     let cfg = WorkerConfig::from_args(args);
+    run_with_config(cfg)
+}
 
+pub fn run_with_config(cfg: WorkerConfig) -> i32 {
     // scanner-anchor: "kind":"chumpd_worker_loop_started"
     emit(
         &cfg,
@@ -266,9 +290,10 @@ pub fn run(args: &[String]) -> i32 {
     let mut ticks: u64 = 0;
     let mut paused_emitted = false;
     while WORKER_SHUTDOWN.load(Ordering::SeqCst) == 0 {
-        // Fleet-paused sentinel: skip the tick body (no new work) but stay
-        // visibly alive via the heartbeat, mirroring worker.sh FLEET-054.
-        if cfg.pause_file.exists() {
+        // Fleet-paused sentinel OR shared node-mode pause detector (INFRA-8583):
+        // skip the tick body (no new work) but stay visibly alive via the
+        // heartbeat, mirroring worker.sh FLEET-054.
+        if cfg.is_paused() {
             write_heartbeat(&cfg.heartbeat_file, "paused");
             if !paused_emitted {
                 // scanner-anchor: "kind":"chumpd_worker_paused"
@@ -282,6 +307,10 @@ pub fn run(args: &[String]) -> i32 {
                     ),
                 );
                 paused_emitted = true;
+            }
+            ticks += 1;
+            if cfg.max_ticks != 0 && ticks >= cfg.max_ticks {
+                break;
             }
             sleep_cadence(&cfg);
             continue;
@@ -379,6 +408,67 @@ mod tests {
         assert!(body.ends_with(" tick\n"), "body={body:?}");
         let epoch: u64 = body.split_whitespace().next().unwrap().parse().unwrap();
         assert!(epoch > 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worker_loop_idles_when_node_env_paused_without_fleet_paused_file() {
+        let dir = std::env::temp_dir().join(format!("chumpd-wl-infra8583-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let state_dir = dir.join("state");
+        let repo_dir = dir.join("repo");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::create_dir_all(&repo_dir).unwrap();
+
+        // AC1: node.env says CHUMP_NODE_MODE=paused and NO fleet-paused file exists.
+        fs::write(state_dir.join("node.env"), "CHUMP_NODE_MODE=paused\n").unwrap();
+        let pause_file = repo_dir.join(".chump/fleet-paused");
+        assert!(
+            !pause_file.exists(),
+            "no fleet-paused file may exist in this fixture"
+        );
+        assert!(
+            !crate::node_pause::node_sentinel_path(&state_dir).exists(),
+            "no state_dir/.chump/fleet-paused sentinel may exist in this fixture"
+        );
+
+        let marker = dir.join("tick_ran");
+        let hb = dir.join("worker.hb");
+        let amb = dir.join("ambient.jsonl");
+        let cfg = WorkerConfig {
+            repo: repo_dir,
+            tick_cmd: format!("touch {}", marker.display()),
+            cadence_secs: 0,
+            budget_secs: 5,
+            pause_file,
+            state_dir,
+            heartbeat_file: hb.clone(),
+            ambient: amb.clone(),
+            agent_id: "test-0".to_string(),
+            max_ticks: 1,
+        };
+        assert!(
+            cfg.is_paused(),
+            "shared detector must report paused from node.env alone"
+        );
+
+        let rc = run_with_config(cfg);
+        assert_eq!(rc, 0);
+        assert!(
+            !marker.exists(),
+            "worker loop must idle (never run tick_cmd) when node.env is paused"
+        );
+        let hb_body = fs::read_to_string(&hb).unwrap();
+        assert!(
+            hb_body.ends_with(" paused\n"),
+            "heartbeat must record paused state, got: {hb_body:?}"
+        );
+        let amb_body = fs::read_to_string(&amb).unwrap();
+        assert!(
+            amb_body.contains("\"kind\":\"chumpd_worker_paused\""),
+            "ambient must record chumpd_worker_paused, got: {amb_body:?}"
+        );
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

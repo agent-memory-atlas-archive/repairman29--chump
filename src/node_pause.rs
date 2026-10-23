@@ -182,8 +182,10 @@ mod tests {
 
     #[test]
     fn pause_signal_reads_node_env_and_sentinel() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = dir.path();
+        let state_buf =
+            std::env::temp_dir().join(format!("chump-node-pause-test-1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state_buf);
+        let state = state_buf.as_path();
         std::fs::create_dir_all(state.join(".chump")).unwrap();
 
         // Nothing paused yet.
@@ -204,6 +206,7 @@ mod tests {
         // both present → NodeEnv attribution.
         std::fs::write(node_env_path(state), "CHUMP_NODE_MODE=paused\n").unwrap();
         assert_eq!(pause_signal(state), Some(PauseSignal::NodeEnv));
+        let _ = std::fs::remove_dir_all(&state_buf);
     }
 
     #[test]
@@ -213,8 +216,10 @@ mod tests {
         // ONE function the pause verb writes through — is seen by the predicate,
         // which reads through the SAME function. A doubled
         // `.chump/.chump/fleet-paused` is NOT where the reader looks.
-        let dir = tempfile::tempdir().unwrap();
-        let state = dir.path();
+        let state_buf =
+            std::env::temp_dir().join(format!("chump-node-pause-test-2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&state_buf);
+        let state = state_buf.as_path();
         std::fs::create_dir_all(node_sentinel_path(state).parent().unwrap()).unwrap();
         std::fs::write(node_env_path(state), "CHUMP_NODE_MODE=work-ready\n").unwrap();
         // Write where the predicate reads → the predicate sees it.
@@ -226,5 +231,6 @@ mod tests {
         std::fs::create_dir_all(doubled.parent().unwrap()).unwrap();
         std::fs::write(&doubled, "REASON=slo_breach\n").unwrap();
         assert_eq!(pause_signal(state), None);
+        let _ = std::fs::remove_dir_all(&state_buf);
     }
 }

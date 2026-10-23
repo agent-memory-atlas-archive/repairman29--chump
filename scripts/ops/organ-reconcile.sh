@@ -539,7 +539,33 @@ if [[ "$MODE" == "--check" ]]; then
   exit "$fail"
 fi
 
+
+# INFRA-8583: read the ONE shared pause detector (_nc_paused -> chump node is-paused /
+# node.env CHUMP_NODE_MODE=paused / state_dir/.chump/fleet-paused / repo .chump/fleet-paused).
+if [[ -f "$SCRIPT_DIR/node-converge.sh" ]]; then
+    eval "$(sed -n '/^_nc_paused()/,/^}/p' "$SCRIPT_DIR/node-converge.sh" 2>/dev/null)" 2>/dev/null || true
+fi
+_organ_node_paused() {
+    local sd="${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}"
+    if declare -f _nc_paused >/dev/null 2>&1; then
+        CHUMP_STATE_DIR="$sd" REPO_ROOT="$REPO_ROOT" _nc_paused && return 0
+    fi
+    [[ -f "$REPO_ROOT/.chump/fleet-paused" ]] && return 0
+    [[ -f "$sd/.chump/fleet-paused" ]] && return 0
+    local ne="$sd/node.env"
+    if [[ -f "$ne" ]]; then
+        grep -Eq "^(export )?CHUMP_NODE_MODE=paused([[:space:]]|$)" "$ne" && return 0
+    fi
+    [[ "${CHUMP_NODE_MODE:-}" == "paused" ]] && return 0
+    return 1
+}
+
 # ── --apply mode ─────────────────────────────────────────────────────────────
+if _organ_node_paused; then
+  echo "[organ-reconcile] EXPECTED (state=paused_expected): node is paused — skipping reconcile apply (no start/enable/restart)"
+  emit organ_reconcile_skipped "\"reason\":\"node_paused\",\"state\":\"paused_expected\""
+  exit 0
+fi
 # CHUMP_ORGAN_RECONCILE_ALLOW_NONROOT is a test-only hook (mirrors the stub
 # pattern organ-watchdog.sh uses for its own tests) so scripts/ci/test-organ-reconcile.sh
 # can exercise the applicability/backoff logic against a stubbed systemctl

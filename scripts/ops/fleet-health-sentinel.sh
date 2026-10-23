@@ -156,6 +156,26 @@ SUDO="${CHUMP_SENTINEL_SUDO-sudo -n}"
 # source (built-in default OR env override), so a lingering host drop-in cannot
 # re-introduce them. Back-compat: role brain / all / EMPTY = coordination home →
 # lists unchanged (CJ and any pre-role node keep coordinating).
+# INFRA-8583: read the ONE shared pause detector (_nc_paused -> chump node is-paused /
+# node.env CHUMP_NODE_MODE=paused / state_dir/.chump/fleet-paused / repo .chump/fleet-paused).
+# Source node-converge.sh (which has a source-guard so only _nc_paused is defined).
+if [[ -f "$SCRIPT_DIR/node-converge.sh" ]]; then
+    eval "$(sed -n '/^_nc_paused()/,/^}/p' "$SCRIPT_DIR/node-converge.sh" 2>/dev/null)" 2>/dev/null || true
+fi
+_sentinel_node_paused() {
+    if declare -f _nc_paused >/dev/null 2>&1; then
+        CHUMP_STATE_DIR="$STATE_DIR" REPO_ROOT="$REPO_ROOT" _nc_paused && return 0
+    fi
+    [[ -f "$REPO_ROOT/.chump/fleet-paused" ]] && return 0
+    [[ -f "$STATE_DIR/.chump/fleet-paused" ]] && return 0
+    local ne="$STATE_DIR/node.env"
+    if [[ -f "$ne" ]]; then
+        grep -Eq "^(export )?CHUMP_NODE_MODE=paused([[:space:]]|$)" "$ne" && return 0
+    fi
+    [[ "${CHUMP_NODE_MODE:-}" == "paused" ]] && return 0
+    return 1
+}
+
 _SENTINEL_NODE_ENV="${CHUMP_STATE_DIR:-$HOME/.chump}/node.env"
 # INFRA-8588: node.env is bare KEY=VALUE — source under `set -a` so the keys export.
 # shellcheck disable=SC1090
@@ -314,11 +334,20 @@ heal_system_organ() {
 SNAP_FAILED=0; SNAP_HEALED=0; SNAP_UNHEALED=0; SNAP_HEALERS_DOWN=0; SNAP_HEALERS_FIXED=0; SNAP_RACE_ACTIVE=0
 scan_and_heal_local() {
     SNAP_FAILED=0; SNAP_HEALED=0; SNAP_UNHEALED=0; SNAP_HEALERS_DOWN=0; SNAP_HEALERS_FIXED=0; SNAP_RACE_ACTIVE=0
+    local node_paused=0
+    if _sentinel_node_paused; then
+        node_paused=1
+        log "NODE PAUSED (state=paused_expected): dead or stopped organs are EXPECTED and will NOT be healed"
+    fi
 
     # 1. failed chump units -----------------------------------------------------
     local u still
     while IFS= read -r u; do
         [[ -z "$u" ]] && continue
+        if [[ $node_paused -eq 1 ]]; then
+            log "EXPECTED (state=paused_expected): unit $u failed on paused node — never healed"
+            continue
+        fi
         SNAP_FAILED=$((SNAP_FAILED+1))
         log "FAILED unit: $u"
         if [[ $DRY -eq 1 ]]; then continue; fi
@@ -348,6 +377,10 @@ scan_and_heal_local() {
     for h in $REQUIRED_HEALERS; do
         if unit_exists "$h"; then
             if unit_active "$h"; then continue; fi
+            if [[ $node_paused -eq 1 ]]; then
+                log "EXPECTED (state=paused_expected): healer $h inactive on paused node — never healed"
+                continue
+            fi
             SNAP_HEALERS_DOWN=$((SNAP_HEALERS_DOWN+1))
             log "HEALER inactive: $h"
             if [[ $DRY -eq 1 ]]; then continue; fi
@@ -360,6 +393,10 @@ scan_and_heal_local() {
                      "fleet_health_healer_down"
             fi
         else
+            if [[ $node_paused -eq 1 ]]; then
+                log "EXPECTED (state=paused_expected): healer $h absent on paused node — never healed"
+                continue
+            fi
             SNAP_HEALERS_DOWN=$((SNAP_HEALERS_DOWN+1))
             log "HEALER ABSENT: $h"
             [[ $DRY -eq 1 ]] && continue
@@ -372,6 +409,10 @@ scan_and_heal_local() {
     for h in $WATCHED_HEALERS; do
         unit_exists "$h" || continue
         unit_active "$h" && continue
+        if [[ $node_paused -eq 1 ]]; then
+            log "EXPECTED (state=paused_expected): watched healer $h inactive on paused node — never healed"
+            continue
+        fi
         SNAP_HEALERS_DOWN=$((SNAP_HEALERS_DOWN+1))
         log "watched healer inactive: $h"
         [[ $DRY -eq 1 ]] && continue
@@ -396,11 +437,16 @@ scan_and_heal_local() {
 # page. This is the watch set that keeps organ-reconcile — and the self-drive
 # organs — from decaying unnoticed the way they did on 2026-09-08.
 scan_and_heal_system_organs() {
-    local u state
+    local u state node_paused=0
+    _sentinel_node_paused && node_paused=1
     for u in $SYSTEM_ORGANS; do
         sys_unit_exists "$u" || continue
         if sys_unit_active "$u" && ! timer_dead "$u"; then continue; fi   # healthy
         if timer_dead "$u"; then state="dead(active,no-next-fire)"; else state="inactive"; fi
+        if [[ $node_paused -eq 1 ]]; then
+            log "EXPECTED (state=paused_expected): SYSTEM organ $u is $state on paused node — never healed"
+            continue
+        fi
         SNAP_HEALERS_DOWN=$((SNAP_HEALERS_DOWN+1))
         log "SYSTEM organ needs heal: $u [$state]"
         [[ $DRY -eq 1 ]] && continue
@@ -503,9 +549,11 @@ snapshot_json() {
 do_local_pass() {
     scan_and_heal_local
     write_heartbeat
-    emit "fleet_health_sentinel_tick" mode=local failed="$SNAP_FAILED" \
+    local tick_state="active"
+    _sentinel_node_paused && tick_state="paused_expected"
+    emit "fleet_health_sentinel_tick" mode=local state="$tick_state" failed="$SNAP_FAILED" \
         healed="$SNAP_HEALED" unhealed="$SNAP_UNHEALED" healers_down="$SNAP_HEALERS_DOWN" race_active="$SNAP_RACE_ACTIVE"
-    log "local pass: failed=$SNAP_FAILED healed=$SNAP_HEALED unhealed=$SNAP_UNHEALED healers_down=$SNAP_HEALERS_DOWN healers_fixed=$SNAP_HEALERS_FIXED race_active=$SNAP_RACE_ACTIVE"
+    log "local pass: state=$tick_state failed=$SNAP_FAILED healed=$SNAP_HEALED unhealed=$SNAP_UNHEALED healers_down=$SNAP_HEALERS_DOWN healers_fixed=$SNAP_HEALERS_FIXED race_active=$SNAP_RACE_ACTIVE"
 }
 
 # ── FLEET: cross-node grade (the sentinel-is-watched-too closure) ────────────

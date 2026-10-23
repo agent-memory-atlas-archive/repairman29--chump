@@ -19,6 +19,8 @@
 //! socket (CLI reads via chumpd) is the next slice; see MISSION-051 AC.
 
 mod file_sandbox;
+#[path = "../../../src/node_pause.rs"]
+pub mod node_pause;
 mod worker_loop;
 
 use serde::{Deserialize, Serialize};
@@ -154,6 +156,16 @@ impl Config {
             home,
             log_dir,
         }
+    }
+
+    fn state_dir(&self) -> PathBuf {
+        std::env::var("CHUMP_STATE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| self.home.join(".chump"))
+    }
+
+    fn is_paused(&self) -> bool {
+        self.repo.join(".chump/fleet-paused").exists() || node_pause::is_paused(&self.state_dir())
     }
 
     fn mode(&self) -> String {
@@ -529,7 +541,11 @@ async fn main() {
 
     while SHUTDOWN_SIGNAL.load(Ordering::SeqCst) == 0 {
         let mode = cfg.mode();
-        let desired = if mode == "off" { 0 } else { cfg.desired_size() };
+        let desired = if mode == "off" || cfg.is_paused() {
+            0
+        } else {
+            cfg.desired_size()
+        };
 
         // MISSION-073 AC2 / MISSION-069: disk-floor gate. Re-measured every
         // tick so a host that fills up mid-run stops handing out new worker

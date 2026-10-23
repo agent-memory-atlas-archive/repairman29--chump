@@ -266,6 +266,33 @@ calendar_spec_to_interval_secs() {  # spec-string -> secs on stdout
     fi
 }
 
+
+# INFRA-8583: read the ONE shared pause detector (_nc_paused -> chump node is-paused /
+# node.env CHUMP_NODE_MODE=paused / state_dir/.chump/fleet-paused / repo .chump/fleet-paused).
+if [[ -f "$SCRIPT_DIR/node-converge.sh" ]]; then
+    eval "$(sed -n '/^_nc_paused()/,/^}/p' "$SCRIPT_DIR/node-converge.sh" 2>/dev/null)" 2>/dev/null || true
+fi
+_organ_node_paused() {
+    local sd="${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}"
+    if declare -f _nc_paused >/dev/null 2>&1; then
+        CHUMP_STATE_DIR="$sd" REPO_ROOT="$REPO_ROOT" _nc_paused && return 0
+    fi
+    [[ -f "$REPO_ROOT/.chump/fleet-paused" ]] && return 0
+    [[ -f "$sd/.chump/fleet-paused" ]] && return 0
+    local ne="$sd/node.env"
+    if [[ -f "$ne" ]]; then
+        grep -Eq "^(export )?CHUMP_NODE_MODE=paused([[:space:]]|$)" "$ne" && return 0
+    fi
+    [[ "${CHUMP_NODE_MODE:-}" == "paused" ]] && return 0
+    return 1
+}
+
+if _organ_node_paused; then
+    echo "[organ-watchdog] EXPECTED (state=paused_expected): node is paused — skipping all heal/restart/deploy actions"
+    emit organ_watchdog_tick "\"state\":\"paused_expected\",\"healed\":0,\"checked\":0,\"dry_run\":$DRY_RUN"
+    exit 0
+fi
+
 if ! command -v "$SYSTEMCTL_RAW" >/dev/null 2>&1; then
     echo "[organ-watchdog] systemctl unavailable ($SYSTEMCTL_RAW not found) — no-op (expected off the helsinki node)"
     exit 1

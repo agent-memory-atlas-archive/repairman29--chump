@@ -38,9 +38,11 @@ case "\$cmd" in
      if [[ "\$prop" == NextElapseUSecRealtime ]]; then cat "\$S/\$u.rt" 2>/dev/null || echo ""; fi
      if [[ "\$prop" == NextElapseUSecMonotonic ]]; then cat "\$S/\$u.mono" 2>/dev/null || echo ""; fi ;;
   start)
+     echo "start \$*" >> "\$S/sys.calls"
      svc="\$1"; t="\${svc%.service}.timer"           # starting the oneshot re-arms its timer
      echo active > "\$S/\$t.active"; echo "" > "\$S/\$t.rt"; echo "1w 2h 3min" > "\$S/\$t.mono" ;;
   enable) # "enable --now <unit>"
+     echo "enable \$*" >> "\$S/sys.calls"
      for a in "\$@"; do case "\$a" in --now) : ;; -*) : ;; *) echo active > "\$S/\$a.active";; esac; done ;;
   restart|reset-failed|daemon-reload|list-units) : ;;
   *) : ;;
@@ -150,6 +152,38 @@ ck "muscle: coordination board-cycle NOT healed (stripped by role)" \
    '! grep -q "chump-board-cycle.timer" "$WORK/ambient.jsonl"'
 ck "muscle: dead board-cycle left dead (not re-armed)" \
    '[[ "$(cat "$STATE/chump-board-cycle.timer.mono")" == infinity ]]'
+rm -f "$WORK/chump-state/node.env"
+
+echo
+# ── Scenario 6 (INFRA-8583 AC3): paused node.env + stopped chump-organ-reconcile.timer ──
+# Receipt: closetjunky 2026-10-19 01:59-02:15Z, sentinel restarted organ-reconcile
+# every ~5 min on a paused node and cj-worker came back. With CHUMP_NODE_MODE=paused
+# in node.env (and no fleet-paused file required), a stopped or dead
+# chump-organ-reconcile.timer must be reported as EXPECTED (state=paused_expected)
+# and NEVER healed (no systemctl start / enable / restart).
+echo "[6] paused node.env + stopped/dead chump-organ-reconcile.timer -> EXPECTED (state=paused_expected), no start"
+: > "$WORK/ambient.jsonl"; SINK="$WORK/sink6"; : > "$SINK"; : > "$STATE/sys.calls"
+mkdir -p "$WORK/chump-state"
+printf 'CHUMP_NODE_MODE=paused
+' > "$WORK/chump-state/node.env"
+rm -f "$WORK/chump-state/.chump/fleet-paused"
+set_unit chump-organ-reconcile.timer 1 inactive "" ""          # stopped
+set_unit chump-board-cycle.timer     1 active "" infinity      # dead
+set_unit chump-armed-pr-rebaser.timer 1 inactive "" ""
+set_unit chump-pr-auto-rebase.timer   1 inactive "" ""
+SENTINEL_ERR="$WORK/sentinel6.err"
+CHUMP_SYSTEMCTL="$FAKEUSER" CHUMP_SENTINEL_SYSTEMCTL_SYS="$FAKESYS" CHUMP_SENTINEL_SUDO="" CHUMP_SENTINEL_REQUIRED_HEALERS=" " CHUMP_SENTINEL_WATCHED_HEALERS=" " CHUMP_SENTINEL_SYSTEM_ORGANS="chump-organ-reconcile.timer chump-board-cycle.timer" CHUMP_SENTINEL_RACE_ORGANS="chump-armed-pr-rebaser.timer chump-pr-auto-rebase.timer" CHUMP_STATE_DIR="$WORK/chump-state" CHUMP_AMBIENT_LOG="$WORK/ambient.jsonl" CHUMP_SENTINEL_PAGE_SINK="$SINK"     bash "$SENTINEL" --local >"$WORK/sentinel6.out" 2>"$SENTINEL_ERR"
+ck "paused node: sentinel reports EXPECTED (state=paused_expected) for stopped chump-organ-reconcile.timer"    'grep -q "EXPECTED (state=paused_expected).*chump-organ-reconcile.timer" "$SENTINEL_ERR"'
+ck "paused node: ambient tick records state=paused_expected"    'grep -q "\"kind\":\"fleet_health_sentinel_tick\".*\"state\":\"paused_expected\"" "$WORK/ambient.jsonl"'
+ck "paused node: no start/enable issued to systemctl"    '[[ ! -s "$STATE/sys.calls" ]]'
+ck "paused node: stopped chump-organ-reconcile.timer remains inactive"    '[[ "$(cat "$STATE/chump-organ-reconcile.timer.active")" == inactive ]]'
+ck "paused node: no fleet_health_self_healed or fleet_health_healer_down emitted"    '! grep -qE "fleet_health_self_healed|fleet_health_healer_down" "$WORK/ambient.jsonl" && [[ ! -s "$SINK" ]]'
+
+# Also verify reaper-heartbeat-watchdog reports PAUSED (state=paused_expected) instead of reaper_silent
+WD_OUT="$WORK/wd6.out"
+: > "$WORK/ambient.jsonl"
+CHUMP_STATE_DIR="$WORK/chump-state" REAPER_LOCK_DIR="$WORK" CHUMP_DISK_CRITICAL_PCT=0     bash "$REPO_ROOT/scripts/ops/reaper-heartbeat-watchdog.sh" pr >"$WD_OUT" 2>&1
+ck "paused node: reaper-heartbeat-watchdog reports PAUSED (state=paused_expected) and emits no reaper_silent"    'grep -q "PAUSED (state=paused_expected): pr" "$WD_OUT" && ! grep -q "reaper_silent" "$WORK/ambient.jsonl"'
 rm -f "$WORK/chump-state/node.env"
 
 if [[ $fails -eq 0 ]]; then echo "PASS: all system-organ + race sentinel assertions"; exit 0
