@@ -86,6 +86,121 @@ P0_FULL="$(echo "$RES_FULL" | jq -r '.[0].p_success')"
 [[ "$P0_FULL" == "0.55" ]] && _ok "100% pane coverage -> p_success == table default (0.55), no spurious discount" \
   || { echo "$RES_FULL"; _fail "expected p_success 0.55, got $P0_FULL"; }
 
+# ── 6. INFRA-8592: current-head-only check evaluation + stale cache row ignored + head SHA named ──
+TMP_NBA="$(mktemp -d "${TMPDIR:-/tmp}/nba-infra8592.XXXXXX")"
+trap 'rm -rf "$TMP_NBA"' EXIT
+: > "$TMP_NBA/failed-units.txt"
+echo "[]" > "$TMP_NBA/gaps.json"
+
+# AC1: red on old head (e882a794a), 3 pending on current head (a472c09d1), mergeStateStatus=UNSTABLE -> wait_ci
+cat > "$TMP_NBA/prs-ac1.json" <<'EOF'
+[
+  {
+    "number": 5589,
+    "title": "INFRA: example repair push",
+    "mergeStateStatus": "UNSTABLE",
+    "createdAt": "2026-10-18T14:00:00Z",
+    "updatedAt": "2026-10-18T15:38:00Z",
+    "headCommittedAt": "2026-10-18T15:38:00Z",
+    "isDraft": false,
+    "headRefOid": "a472c09d1",
+    "statusCheckRollup": [
+      {"name": "unit-test", "status": "COMPLETED", "conclusion": "FAILURE", "headSha": "e882a794a", "completedAt": "2026-10-18T15:20:00Z"},
+      {"name": "unit-test", "status": "IN_PROGRESS", "conclusion": null, "headSha": "a472c09d1", "startedAt": "2026-10-18T15:38:10Z"},
+      {"name": "clippy", "status": "QUEUED", "conclusion": null, "headSha": "a472c09d1", "startedAt": "2026-10-18T15:38:11Z"},
+      {"name": "verified", "status": "PENDING", "conclusion": null, "headSha": "a472c09d1", "startedAt": "2026-10-18T15:38:12Z"}
+    ]
+  }
+]
+EOF
+
+CHUMP_NBA_OUT="$TMP_NBA/out-ac1.json" \
+CHUMP_NBA_PR_FIXTURE="$TMP_NBA/prs-ac1.json" \
+CHUMP_NBA_FAILED_UNITS_FIXTURE="$TMP_NBA/failed-units.txt" \
+CHUMP_NBA_GAPS_FIXTURE="$TMP_NBA/gaps.json" \
+CHUMP_FACULTY_OUT="$TMP_NBA/no-faculty.json" \
+CHUMP_JOURNEY_ODDS="$TMP_NBA/no-journey.json" \
+CHUMP_CACHE_DB="$TMP_NBA/no-cache.db" \
+  bash "$NBA" --no-emit >/dev/null 2>&1
+
+AC1_ACT="$(jq -r '.recommendations[0].action // empty' "$TMP_NBA/out-ac1.json")"
+AC1_HEAD="$(jq -r '.recommendations[0].head_sha // empty' "$TMP_NBA/out-ac1.json")"
+AC1_WHY="$(jq -r '.recommendations[0].why // empty' "$TMP_NBA/out-ac1.json")"
+[[ "$AC1_ACT" == "wait_ci" ]] && _ok "INFRA-8592 AC1: red on old head + pending on current head -> wait_ci (not fix_own_red)" \
+  || _fail "INFRA-8592 AC1: expected wait_ci, got $AC1_ACT ($(cat "$TMP_NBA/out-ac1.json"))"
+[[ "$AC1_HEAD" == "a472c09d1" && "$AC1_WHY" == *"a472c09d1"* ]] \
+  && _ok "INFRA-8592 AC3: recommendation names evaluated head SHA (a472c09d1)" \
+  || _fail "INFRA-8592 AC3: expected head_sha=a472c09d1 in recommendation, got head_sha=$AC1_HEAD why=$AC1_WHY"
+
+# AC2: stale cache rows (old head e882a794a AND row with timestamp older than headCommittedAt) are ignored
+sqlite3 "$TMP_NBA/cache.db" <<'SQL'
+CREATE TABLE pr_state (
+    number INTEGER PRIMARY KEY,
+    head_ref TEXT, head_sha TEXT, base_ref TEXT, base_sha TEXT,
+    mergeable_state TEXT, auto_merge_enabled INTEGER NOT NULL DEFAULT 0,
+    draft INTEGER NOT NULL DEFAULT 0, merged_at TEXT, title TEXT, user_login TEXT,
+    updated_at_api TEXT NOT NULL, fetched_at_local TEXT NOT NULL,
+    raw_payload_json TEXT, merge_state_status TEXT
+);
+CREATE TABLE check_runs (
+    head_sha TEXT NOT NULL, name TEXT NOT NULL, status TEXT, conclusion TEXT,
+    started_at TEXT, completed_at TEXT, fetched_at_local TEXT NOT NULL,
+    PRIMARY KEY (head_sha, name)
+);
+INSERT INTO pr_state (number, head_sha, updated_at_api, fetched_at_local, raw_payload_json)
+VALUES (5589, 'e882a794a', '2026-10-18T15:25:00Z', '2026-10-18T15:25:00Z',
+        '{"statusCheckRollup":[{"name":"unit-test","status":"COMPLETED","conclusion":"FAILURE"}]}');
+INSERT INTO check_runs VALUES ('e882a794a', 'unit-test', 'COMPLETED', 'FAILURE', '2026-10-18T15:18:00Z', '2026-10-18T15:20:00Z', '2026-10-18T15:20:00Z');
+INSERT INTO check_runs VALUES ('a472c09d1', 'stale-row', 'COMPLETED', 'FAILURE', '2026-10-18T15:30:00Z', '2026-10-18T15:31:00Z', '2026-10-18T15:31:00Z');
+SQL
+
+CHUMP_NBA_OUT="$TMP_NBA/out-ac2.json" \
+CHUMP_NBA_PR_FIXTURE="$TMP_NBA/prs-ac1.json" \
+CHUMP_NBA_FAILED_UNITS_FIXTURE="$TMP_NBA/failed-units.txt" \
+CHUMP_NBA_GAPS_FIXTURE="$TMP_NBA/gaps.json" \
+CHUMP_FACULTY_OUT="$TMP_NBA/no-faculty.json" \
+CHUMP_JOURNEY_ODDS="$TMP_NBA/no-journey.json" \
+CHUMP_CACHE_DB="$TMP_NBA/cache.db" \
+  bash "$NBA" --no-emit >/dev/null 2>&1
+
+AC2_ACT="$(jq -r '.recommendations[0].action // empty' "$TMP_NBA/out-ac2.json")"
+[[ "$AC2_ACT" == "wait_ci" ]] && _ok "INFRA-8592 AC2: stale cache rows (old head + timestamp older than head) ignored -> wait_ci" \
+  || _fail "INFRA-8592 AC2: expected wait_ci with stale cache, got $AC2_ACT ($(cat "$TMP_NBA/out-ac2.json"))"
+
+# Control: genuine failure on the current head still produces fix_own_red
+cat > "$TMP_NBA/prs-red.json" <<'EOF'
+[
+  {
+    "number": 5590,
+    "title": "INFRA: genuinely broken on current head",
+    "mergeStateStatus": "BLOCKED",
+    "createdAt": "2026-10-18T14:00:00Z",
+    "updatedAt": "2026-10-18T15:38:00Z",
+    "headCommittedAt": "2026-10-18T15:38:00Z",
+    "isDraft": false,
+    "headRefOid": "deadbeef1",
+    "statusCheckRollup": [
+      {"name": " bespoke-unit-test", "status": "COMPLETED", "conclusion": "FAILURE", "headSha": "deadbeef1", "completedAt": "2026-10-18T15:40:00Z"}
+    ]
+  }
+]
+EOF
+
+CHUMP_NBA_OUT="$TMP_NBA/out-red.json" \
+CHUMP_NBA_PR_FIXTURE="$TMP_NBA/prs-red.json" \
+CHUMP_NBA_FAILED_UNITS_FIXTURE="$TMP_NBA/failed-units.txt" \
+CHUMP_NBA_GAPS_FIXTURE="$TMP_NBA/gaps.json" \
+CHUMP_FACULTY_OUT="$TMP_NBA/no-faculty.json" \
+CHUMP_JOURNEY_ODDS="$TMP_NBA/no-journey.json" \
+CHUMP_CACHE_DB="$TMP_NBA/no-cache.db" \
+  bash "$NBA" --no-emit >/dev/null 2>&1
+
+RED_ACT="$(jq -r '.recommendations[0].action // empty' "$TMP_NBA/out-red.json")"
+RED_HEAD="$(jq -r '.recommendations[0].head_sha // empty' "$TMP_NBA/out-red.json")"
+[[ "$RED_ACT" == "fix_own_red" && "$RED_HEAD" == "deadbeef1" ]] \
+  && _ok "INFRA-8592 control: real FAILURE on current head still scores fix_own_red with head_sha=deadbeef1" \
+  || _fail "INFRA-8592 control: expected fix_own_red/deadbeef1, got $RED_ACT/$RED_HEAD"
+
 echo ""
 if [[ "$FAIL" -eq 0 ]]; then
   echo "PASS: test-next-best-action-pane-coverage ($PASS checks)"

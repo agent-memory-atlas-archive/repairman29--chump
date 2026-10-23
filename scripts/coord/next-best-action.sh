@@ -124,9 +124,155 @@ read -r -d '' ACTION_TABLE <<'JQ'
 }
 JQ
 
-# ── 1. PRs → priced candidates via pr-book-model.jq ─────────────────────────
-PR_RAW="$(gh pr list --state open --limit 40 \
-  --json number,title,mergeStateStatus,createdAt,isDraft,statusCheckRollup,headRefOid 2>/dev/null || echo '[]')"
+# ── 1. PRs → priced candidates via pr-book-model.jq (INFRA-8592) ────────────
+# Evaluate checks for the PR's current headRefOid ONLY (cache row keyed by head
+# SHA, gh fallback; stale cache rows older than the head are ignored).
+CACHE_DB="${CHUMP_CACHE_DB:-$REPO/.chump/github_cache.db}"
+if [[ -n "${CHUMP_NBA_PR_FIXTURE:-}" && -f "${CHUMP_NBA_PR_FIXTURE}" ]]; then
+  PR_RAW="$(cat "$CHUMP_NBA_PR_FIXTURE")"
+else
+  PR_RAW="$(gh pr list --state open --limit 40 \
+    --json number,title,mergeStateStatus,createdAt,updatedAt,isDraft,statusCheckRollup,headRefOid 2>/dev/null || echo '[]')"
+fi
+PR_RAW="$(CHUMP_NBA_CACHE_DB="$CACHE_DB" python3 -c '
+import json, os, sqlite3, sys
+
+try:
+    prs = json.loads(sys.stdin.read() or "[]")
+    if not isinstance(prs, list):
+        prs = []
+except Exception:
+    prs = []
+
+db_path = os.environ.get("CHUMP_NBA_CACHE_DB", "")
+conn = None
+if db_path and os.path.isfile(db_path):
+    try:
+        conn = sqlite3.connect(db_path)
+    except Exception:
+        conn = None
+
+def check_head(c):
+    if not isinstance(c, dict):
+        return ""
+    h = c.get("headSha") or c.get("head_sha") or ""
+    if not h and isinstance(c.get("commit"), dict):
+        h = c["commit"].get("oid") or ""
+    return str(h).strip().lower()
+
+def check_ts(c):
+    if not isinstance(c, dict):
+        return ""
+    return str(c.get("startedAt") or c.get("completedAt") or c.get("createdAt") or c.get("fetched_at_local") or "").strip()
+
+out = []
+for pr in prs:
+    if not isinstance(pr, dict):
+        continue
+    num = pr.get("number")
+    head = str(pr.get("headRefOid") or "").strip()
+    head_l = head.lower()
+    head_ts = str(pr.get("headCommittedAt") or pr.get("pushedAt") or pr.get("updatedAt") or "").strip()
+
+    # Filter gh fallback rollup to current headRefOid only (and drop rows older than headCommittedAt/pushedAt if set).
+    explicit_head_ts = str(pr.get("headCommittedAt") or pr.get("pushedAt") or "").strip()
+    gh_checks = []
+    for c in (pr.get("statusCheckRollup") or []):
+        if not isinstance(c, dict):
+            continue
+        ch = check_head(c)
+        if ch and head_l and ch != head_l:
+            continue
+        cts = check_ts(c)
+        if explicit_head_ts and cts and cts < explicit_head_ts:
+            continue
+        c_copy = dict(c)
+        if head and not check_head(c_copy):
+            c_copy["headSha"] = head
+        gh_checks.append(c_copy)
+
+    # Check sqlite cache keyed by current headRefOid; ignore any stale row older than the head.
+    cache_checks = []
+    if conn is not None and head_l:
+        try:
+            cur = conn.cursor()
+            # 1) check_runs keyed by head_sha == current headRefOid
+            cur.execute(
+                "SELECT name, status, conclusion, started_at, completed_at, fetched_at_local, head_sha "
+                "FROM check_runs WHERE LOWER(head_sha) = ?",
+                (head_l,),
+            )
+            for name, status, concl, started_at, completed_at, fetched_at, r_sha in cur.fetchall():
+                row_ts = (fetched_at or completed_at or started_at or "").strip()
+                if head_ts and row_ts and row_ts < head_ts:
+                    continue  # stale cache row older than head
+                cache_checks.append({
+                    "name": name,
+                    "status": status or None,
+                    "conclusion": concl or None,
+                    "startedAt": started_at or None,
+                    "completedAt": completed_at or None,
+                    "headSha": r_sha or head,
+                })
+        except Exception:
+            pass
+        if not cache_checks and num is not None:
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT head_sha, fetched_at_local, updated_at_api, raw_payload_json "
+                    "FROM pr_state WHERE number = ?",
+                    (num,),
+                )
+                row = cur.fetchone()
+                if row:
+                    p_sha = (row[0] or "")
+                    p_fetched = (row[1] or "")
+                    p_updated = (row[2] or "")
+                    p_raw = (row[3] or "")
+                    p_ts = p_fetched or p_updated or ""
+                    # Ignore stale pr_state rows whose head_sha != current head or whose timestamp < head_ts
+                    if p_sha.strip().lower() == head_l and not (head_ts and p_ts and p_ts < head_ts) and p_raw:
+                        payload = json.loads(p_raw)
+                        for c in (payload.get("statusCheckRollup") or []):
+                            if not isinstance(c, dict):
+                                continue
+                            ch = check_head(c)
+                            if ch and ch != head_l:
+                                continue
+                            c_copy = dict(c)
+                            c_copy["headSha"] = head
+                            cache_checks.append(c_copy)
+            except Exception:
+                pass
+
+    # Cache row keyed by current head SHA wins when present; otherwise gh fallback for current head.
+    if cache_checks and not gh_checks:
+        pr["statusCheckRollup"] = cache_checks
+    elif cache_checks and gh_checks:
+        by_name = {}
+        for c in gh_checks:
+            by_name[str(c.get("name") or c.get("context") or len(by_name))] = c
+        for c in cache_checks:
+            k = str(c.get("name") or c.get("context") or len(by_name))
+            prev = by_name.get(k)
+            if prev is None:
+                by_name[k] = c
+            else:
+                pts = check_ts(prev)
+                cts = check_ts(c)
+                if cts and pts and cts >= pts:
+                    by_name[k] = c
+        pr["statusCheckRollup"] = list(by_name.values())
+    else:
+        pr["statusCheckRollup"] = gh_checks
+    out.append(pr)
+
+if conn is not None:
+    conn.close()
+print(json.dumps(out))
+' <<<"$PR_RAW" 2>/dev/null || printf '%s' "$PR_RAW")"
+
 PR_CAND="$(printf '%s' "$PR_RAW" | jq -c "$(cat "$MODEL_JQ")"'
   [ .[] | {
       source:"pr",
@@ -141,7 +287,8 @@ PR_CAND="$(printf '%s' "$PR_RAW" | jq -c "$(cat "$MODEL_JQ")"'
         elif ($a=="merge-candidate") then "merge_pr"
         else "fix_own_red" end),
       target:("#\(.number)"),
-      label:(.title[0:60]),
+      head_sha:(.headRefOid // null),
+      label:(if (.headRefOid // "") != "" then "\(.title[0:48]) [head:\(.headRefOid)]" else (.title[0:60]) end),
       p_success:(price),
       raw_action:action,
       merge_state:.mergeStateStatus
@@ -149,9 +296,13 @@ PR_CAND="$(printf '%s' "$PR_RAW" | jq -c "$(cat "$MODEL_JQ")"'
 [[ -z "$PR_CAND" ]] && PR_CAND='[]'
 
 # ── 2. Failed organs → heal candidates ──────────────────────────────────────
-FAILED_UNITS="$( { systemctl list-units 'chump-*' --state=failed --no-legend 2>/dev/null;
-                   systemctl --user list-units 'chump-*' --state=failed --no-legend 2>/dev/null; } \
-                 | awk '{print $1}' | sed 's/^●//' | grep -v '^$' | sort -u )"
+if [[ -n "${CHUMP_NBA_FAILED_UNITS_FIXTURE:-}" && -f "${CHUMP_NBA_FAILED_UNITS_FIXTURE}" ]]; then
+  FAILED_UNITS="$(cat "$CHUMP_NBA_FAILED_UNITS_FIXTURE")"
+else
+  FAILED_UNITS="$( { systemctl list-units 'chump-*' --state=failed --no-legend 2>/dev/null;
+                     systemctl --user list-units 'chump-*' --state=failed --no-legend 2>/dev/null; } \
+                   | awk '{print $1}' | sed 's/^●//' | grep -v '^$' | sort -u )"
+fi
 ORGAN_CAND="$(printf '%s\n' "$FAILED_UNITS" | jq -R -s -c '
   [ split("\n")[] | select(length>0) | {
       source:"organ", action:"heal_organ", target:.,
@@ -171,7 +322,11 @@ else FAC_CAND='[]'; fi
 # ── 4. Open P0/P1 gaps → dispatch-worker candidates ─────────────────────────
 # Robust read: the first `chump` call in a cold shell can print a warning line
 # before the JSON array, so strip everything before the first top-level `[`.
-GAP_JSON="$(chump gap list --json 2>/dev/null | sed -n '/^\[/,$p')"
+if [[ -n "${CHUMP_NBA_GAPS_FIXTURE:-}" && -f "${CHUMP_NBA_GAPS_FIXTURE}" ]]; then
+  GAP_JSON="$(cat "$CHUMP_NBA_GAPS_FIXTURE")"
+else
+  GAP_JSON="$(chump gap list --json 2>/dev/null | sed -n '/^\[/,$p')"
+fi
 printf '%s' "$GAP_JSON" | jq -e 'type=="array"' >/dev/null 2>&1 || GAP_JSON='[]'
 P0_OPEN="$(printf '%s' "$GAP_JSON" | jq '[ .[] | select(.status=="open" and .priority=="P0") ] | length' 2>/dev/null || echo 0)"
 P1_OPEN="$(printf '%s' "$GAP_JSON" | jq '[ .[] | select(.status=="open" and .priority=="P1") ] | length' 2>/dev/null || echo 0)"
@@ -218,7 +373,7 @@ RANKED="$(jq -n -c \
       | ( if $c.action=="raise_faculty"
           then ($t.value * (1 - (($c.position // 0.5))))
           else $t.value end ) as $val
-      | {
+      | ({
           action:$c.action,
           target:$c.target,
           value:(($val*10|round)/10),
@@ -226,8 +381,8 @@ RANKED="$(jq -n -c \
           expected_value:(($val*$p0*10|round)/10),
           why:$c.label,
           who_should_do_it:$t.who,
-          need_to_know:$t.need
-        }
+          need_to_know:(if ($c.head_sha // "") != "" then "\($t.need) (head \($c.head_sha))" else $t.need end)
+        } + (if ($c.head_sha // "") != "" then {head_sha:$c.head_sha, headRefOid:$c.head_sha} else {} end))
     )
   | sort_by(-.expected_value)' 2>/dev/null || echo '[]')"
 [[ -z "$RANKED" ]] && RANKED='[]'
