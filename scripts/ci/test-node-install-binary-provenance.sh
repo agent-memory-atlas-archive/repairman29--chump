@@ -94,6 +94,36 @@ else
   pass "skip built-from-HEAD case (not in a git checkout)"
 fi
 
+# ---- 3. ensure_chumpd_binary (INFRA-8582 AC1) ----
+CHUMPD_BIN="$CHUMP_NODE_DIR/bin/chumpd"
+rm -f "$CHUMPD_BIN"
+dry_out="$(DRY=1 ensure_chumpd_binary)"
+if printf '%s\n' "$dry_out" | grep -qF "DRY: install chumpd alongside chump -> $CHUMPD_BIN"; then
+  pass "ensure_chumpd_binary --dry-run renders install -> $CHUMPD_BIN"
+else
+  fail "ensure_chumpd_binary --dry-run did not render expected line (got '$dry_out')"
+fi
+
+FAKE_TARGET="$TMP/shared-target"
+mkdir -p "$FAKE_TARGET/release"
+cat > "$FAKE_TARGET/release/chumpd" <<'EOF'
+#!/usr/bin/env bash
+echo "chumpd 0.2.0"
+EOF
+chmod +x "$FAKE_TARGET/release/chumpd"
+DRY=0 CARGO_TARGET_DIR="$FAKE_TARGET" ensure_chumpd_binary >/dev/null
+if [ -x "$CHUMPD_BIN" ]; then
+  pass "ensure_chumpd_binary installs executable chumpd alongside chump ($CHUMPD_BIN)"
+else
+  fail "ensure_chumpd_binary did not install executable chumpd at $CHUMPD_BIN"
+fi
+
+if grep -qE 'CHUMP_AUX_MERGE_BINS=.*chumpd' "$REPO_ROOT/scripts/setup/refresh-runner-binary.sh"; then
+  pass "refresh-runner-binary.sh includes chumpd in CHUMP_AUX_MERGE_BINS"
+else
+  fail "refresh-runner-binary.sh missing chumpd in CHUMP_AUX_MERGE_BINS"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "PASS: binary provenance gate holds ($0)"; exit 0
 else echo "FAIL: $fails assertion(s) failed"; exit 1; fi

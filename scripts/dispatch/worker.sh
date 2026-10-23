@@ -87,9 +87,22 @@ REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 if [[ "$_WORKER_SINGLE_TICK" != "1" ]]; then
     _chumpd_bin="${CHUMPD_BIN:-}"
     if [[ -z "$_chumpd_bin" ]]; then
+        _shared_target=""
+        if [[ -f "$REPO_ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh" ]]; then
+            # shellcheck disable=SC1091
+            source "$REPO_ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh" 2>/dev/null || true
+            _shared_target="$(chump_cargo_target_dir 2>/dev/null || true)"
+        fi
+        _chump_sibling_dir="$(dirname "$(command -v chump 2>/dev/null || echo /nonexistent)")"
         for _cand in \
+            "${_shared_target:+$_shared_target/debug/chumpd}" \
+            "${_shared_target:+$_shared_target/release/chumpd}" \
             "$REPO_ROOT/target/debug/chumpd" \
             "$REPO_ROOT/target/release/chumpd" \
+            "${CHUMP_NODE_DIR:-$HOME/.chumpnode}/bin/chumpd" \
+            "$_chump_sibling_dir/chumpd" \
+            "$HOME/.local/bin/chumpd" \
+            "$HOME/.cargo/bin/chumpd" \
             "$(command -v chumpd 2>/dev/null || true)"; do
             if [[ -n "$_cand" && -x "$_cand" ]]; then
                 _chumpd_bin="$_cand"
@@ -97,10 +110,18 @@ if [[ "$_WORKER_SINGLE_TICK" != "1" ]]; then
             fi
         done
     fi
+    _worker_ambient="${CHUMP_AMBIENT_FILE:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+    mkdir -p "$(dirname "$_worker_ambient")" 2>/dev/null || true
+    _worker_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     if [[ -n "$_chumpd_bin" && -x "$_chumpd_bin" ]]; then
+        # scanner-anchor: "kind":"worker_loop_backend"
+        printf '{"ts":"%s","kind":"worker_loop_backend","agent":"%s","backend":"rust","bin":"%s"}\n' \
+            "$_worker_ts" "$AGENT_ID" "$_chumpd_bin" >> "$_worker_ambient" 2>/dev/null || true
         exec "$_chumpd_bin" worker
     fi
-    echo "[worker.sh] chumpd binary not found; running legacy inline loop (INFRA-8575 shim fallback)" >&2
+    printf '{"ts":"%s","kind":"worker_loop_backend","agent":"%s","backend":"legacy","bin":"none"}\n' \
+        "$_worker_ts" "$AGENT_ID" >> "$_worker_ambient" 2>/dev/null || true
+    echo "[worker.sh] chumpd binary truly absent (checked shared target, node bin dir, PATH); running legacy inline loop (INFRA-8575/8582 shim fallback)" >&2
 fi
 # ── end INFRA-8575 shim ──────────────────────────────────────────────────────
 

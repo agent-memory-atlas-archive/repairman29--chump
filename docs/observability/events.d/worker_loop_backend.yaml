@@ -1,0 +1,12 @@
+  - kind: worker_loop_backend
+    effect_metric: resilient
+    emitter: scripts/dispatch/worker.sh (PHASE-R R6, INFRA-8582)
+    trigger: >-
+      Emitted once at worker.sh loop-control shim startup before exec-ing into
+      chumpd worker (backend=rust, bin=<path>) or falling through to the legacy
+      inline bash loop when chumpd is truly absent across shared target, node
+      bin dir, and PATH (backend=legacy, bin=none).
+    consumers: [fleet-brief, audit-log]
+    fields_required: [ts, kind, agent, backend, bin]
+    expected_volume: "1 per worker startup"
+    status: stable

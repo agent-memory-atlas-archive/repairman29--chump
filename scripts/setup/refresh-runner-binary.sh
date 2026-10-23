@@ -366,7 +366,7 @@ mv -f "$TARGET_BIN.new" "$TARGET_BIN"
 # PRs jammed. Build + install the merge-critical aux binaries alongside chump.
 # Best-effort: a missing/broken aux warns + emits, but never fails the chump
 # deploy (chump is the critical path and is already installed above).
-CHUMP_AUX_MERGE_BINS="${CHUMP_AUX_MERGE_BINS:-chump-integrator}"
+CHUMP_AUX_MERGE_BINS="${CHUMP_AUX_MERGE_BINS:-chump-integrator chumpd}"
 INSTALL_DIR="$(dirname "$TARGET_BIN")"
 for _aux in $CHUMP_AUX_MERGE_BINS; do
     if PATH="$(dirname "$CARGO"):$PATH" CARGO_TARGET_DIR="$SHARED_TARGET" \

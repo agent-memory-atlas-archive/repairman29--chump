@@ -104,6 +104,7 @@ REPO_URL="${CHUMP_NODE_REPO_URL:-https://github.com/repairman29/chump.git}"
 LOG_DIR="$NODE_DIR/logs"
 ORGAN_DIR="$NODE_DIR/organs"
 BIN="$NODE_DIR/bin/chump"
+CHUMPD_BIN="$NODE_DIR/bin/chumpd"
 ok(){ printf '  \033[32m✓\033[0m %s\n' "$*"; }
 no(){ printf '  \033[31m✗\033[0m %s\n' "$*"; }
 info(){ printf '\033[36m[%s]\033[0m %s\n' "$1" "$2"; }
@@ -1006,6 +1007,54 @@ fetch_release_binary() {
   return 0
 }
 
+# INFRA-8582 (Phase R R6): install chumpd alongside chump in $NODE_DIR/bin so
+# scripts/dispatch/worker.sh's Rust loop-control shim resolves chumpd on nodes
+# that have no $REPO_ROOT/target/ directory (ZERO-WASTE-134).
+ensure_chumpd_binary() {
+  local chumpd_dest="${CHUMPD_BIN:-$NODE_DIR/bin/chumpd}"
+  if [ "$DRY" = 1 ]; then
+    echo "  DRY: install chumpd alongside chump -> $chumpd_dest"
+    return 0
+  fi
+  if [ -x "$chumpd_dest" ]; then
+    ok "chumpd binary present alongside chump: $chumpd_dest"
+    return 0
+  fi
+  local _tdir=""
+  if [ -f "$NODE_DIR/repo/scripts/ci/lib/resolve-cargo-target-dir.sh" ]; then
+    # shellcheck disable=SC1090
+    . "$NODE_DIR/repo/scripts/ci/lib/resolve-cargo-target-dir.sh" 2>/dev/null || true
+    _tdir="$(chump_cargo_target_dir 2>/dev/null || true)"
+  elif [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    _tdir="$CARGO_TARGET_DIR"
+  fi
+  local _cand
+  for _cand in \
+    "${_tdir:+$_tdir/release/chumpd}" \
+    "${_tdir:+$_tdir/debug/chumpd}" \
+    "$NODE_DIR/repo/target/release/chumpd" \
+    "$NODE_DIR/repo/target/debug/chumpd"; do
+    if [ -n "$_cand" ] && [ -x "$_cand" ]; then
+      run "mkdir -p '$(dirname "$chumpd_dest")'"
+      install -m 755 "$_cand" "$chumpd_dest" 2>/dev/null || { cp -f "$_cand" "$chumpd_dest"; chmod +x "$chumpd_dest"; }
+      ok "chumpd installed alongside chump: $chumpd_dest"
+      return 0
+    fi
+  done
+  if [ -d "$NODE_DIR/repo/.git" ] && command -v cargo >/dev/null 2>&1; then
+    local _build_target="${_tdir:-$NODE_DIR/repo/target}"
+    if CARGO_TARGET_DIR="$_build_target" cargo build --release -p chumpd --manifest-path "$NODE_DIR/repo/Cargo.toml" >/dev/null 2>&1 \
+       && [ -x "$_build_target/release/chumpd" ]; then
+      run "mkdir -p '$(dirname "$chumpd_dest")'"
+      install -m 755 "$_build_target/release/chumpd" "$chumpd_dest" 2>/dev/null || { cp -f "$_build_target/release/chumpd" "$chumpd_dest"; chmod +x "$chumpd_dest"; }
+      ok "chumpd built + installed alongside chump: $chumpd_dest"
+      return 0
+    fi
+  fi
+  info BINARY "chumpd not yet built at $chumpd_dest (refresh-runner-binary.sh builds it in CHUMP_AUX_MERGE_BINS)"
+  return 0
+}
+
 ensure_binary() {
   # (A) An already-present $BIN is accepted ONLY with valid provenance
   # (release-verified OR built-from-repo-HEAD). A stray/foreign/stale/inherited
@@ -1015,6 +1064,7 @@ ensure_binary() {
   if [ -x "$BIN" ]; then
     if binary_provenance_ok "$BIN"; then
       ok "binary present + provenance verified: $BIN"
+      ensure_chumpd_binary
       return 0
     fi
     no "existing $BIN has no valid provenance (foreign/stale) — discarding, will fetch/build a verified one"
@@ -1023,15 +1073,22 @@ ensure_binary() {
   # (B) Fast path: HEAD-exact pre-built CI artifact (download + verify), then
   # the opt-in stale-release tarball. Never a silent stale install by default.
   if fetch_ci_artifact_binary; then
+    ensure_chumpd_binary
     return 0
   fi
   if fetch_release_binary; then
+    ensure_chumpd_binary
     return 0
   fi
   # (C) Fallback: build from the cloned repo HEAD, then gate on provenance.
   build_binary_from_repo || return 1
+  if [ "$DRY" = 1 ]; then
+    ensure_chumpd_binary
+    return 0
+  fi
   if binary_provenance_ok "$BIN"; then
     ok "binary built from repo HEAD + provenance verified: $BIN"
+    ensure_chumpd_binary
     return 0
   fi
   no "built binary failed provenance gate ($BIN) — refusing to report INSTALLED"

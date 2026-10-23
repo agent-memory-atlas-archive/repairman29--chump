@@ -93,6 +93,43 @@ else
     fail "heartbeat not written while paused"
 fi
 
+# ── Part 3 (INFRA-8582 AC2): worker.sh shim resolves chumpd on a node with no target/ ──
+mkdir -p "$FIX/repo/scripts/ci/lib" "$FIX/node/bin" "$FIX/empty-target" "$FIX/home"
+cp "$REPO_ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh" "$FIX/repo/scripts/ci/lib/resolve-cargo-target-dir.sh"
+rm -rf "$FIX/repo/target"
+cat > "$FIX/node/bin/chumpd" <<'EOF'
+#!/usr/bin/env bash
+echo "stub-chumpd-ran:$*"
+exit 0
+EOF
+chmod +x "$FIX/node/bin/chumpd"
+: > "$AMBIENT"
+SHIM_OUT="$(REPO_ROOT="$FIX/repo" AGENT_ID=9 CHUMP_NODE_DIR="$FIX/node"     CARGO_TARGET_DIR="$FIX/empty-target" HOME="$FIX/home"     CHUMP_AMBIENT_FILE="$AMBIENT" PATH="/usr/bin:/bin"     bash "$REPO_ROOT/scripts/dispatch/worker.sh" 2>&1)"
+if printf '%s\n' "$SHIM_OUT" | grep -q "stub-chumpd-ran:worker"; then
+    ok "worker.sh shim resolved chumpd from node bin dir with no target/ directory"
+else
+    fail "worker.sh shim did not exec node bin chumpd (out: $SHIM_OUT)"
+fi
+if grep -q '"kind":"worker_loop_backend"' "$AMBIENT" && grep -q '"backend":"rust"' "$AMBIENT"; then
+    ok "worker.sh shim emitted kind=worker_loop_backend backend=rust"
+else
+    fail "worker.sh shim did not emit worker_loop_backend backend=rust"
+fi
+
+# ── Part 4 (INFRA-8582 AC3): legacy fallback only when chumpd is truly absent ──
+: > "$AMBIENT"
+FALLBACK_OUT="$(REPO_ROOT="$FIX/repo" AGENT_ID=9 CHUMPD_BIN="$FIX/no-such-chumpd"     CHUMP_AMBIENT_FILE="$AMBIENT"     timeout 2 bash "$REPO_ROOT/scripts/dispatch/worker.sh" --dry-run 2>&1 || true)"
+if printf '%s\n' "$FALLBACK_OUT" | grep -q "chumpd binary truly absent"; then
+    ok "worker.sh shim reports when chumpd is truly absent"
+else
+    fail "worker.sh shim did not report chumpd truly absent (out: $FALLBACK_OUT)"
+fi
+if grep -q '"kind":"worker_loop_backend"' "$AMBIENT" && grep -q '"backend":"legacy"' "$AMBIENT"; then
+    ok "worker.sh shim emitted kind=worker_loop_backend backend=legacy on fallback"
+else
+    fail "worker.sh shim did not emit worker_loop_backend backend=legacy"
+fi
+
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]
