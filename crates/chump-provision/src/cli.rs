@@ -20,6 +20,9 @@ Usage:
       the mac launchd user domain. Exits 3 on a two-scope node. --install-guard
       refuses (exit 3, kind=node_second_scope_refused) if the OTHER scope
       already has an install.
+  chump node ensure-nextest [--dry-run] [--json]
+      Idempotently ensure cargo-nextest is installed on linux-systemd and
+      mac-launchd hosts (INFRA-8572).
 
 Host variants: mac-launchd, linux-systemd-user, linux-systemd-system, termux
 Override detection with CHUMP_PROVISION_HOST=<variant>.";
@@ -32,6 +35,8 @@ pub fn run_cli(args: &[String]) -> i32 {
         Some("render-unit") => run_render(&args[1..], &Probe::from_env()),
         // RESILIENT-1615: two-scope enumeration + installer second-scope guard.
         Some("scopes") => crate::scopes_live::run_scopes(&args[1..], &Probe::from_env()),
+        // INFRA-8572: idempotent cargo-nextest provisioning on linux-systemd / mac-launchd.
+        Some("ensure-nextest") => run_ensure_nextest(&args[1..], &Probe::from_env()),
         Some("-h") | Some("--help") | Some("help") => {
             println!("{USAGE}");
             0
@@ -289,4 +294,134 @@ pub fn run_render(args: &[String], probe: &Probe) -> i32 {
         None => print!("{rendered}"),
     }
     0
+}
+
+/// `chump node ensure-nextest` (INFRA-8572).
+pub fn run_ensure_nextest(args: &[String], probe: &Probe) -> i32 {
+    let mut dry_run = false;
+    let mut json = false;
+    for a in args {
+        match a.as_str() {
+            "--dry-run" => dry_run = true,
+            "--json" => json = true,
+            "-h" | "--help" => {
+                println!("{USAGE}");
+                return 0;
+            }
+            other => {
+                eprintln!("chump node ensure-nextest: unknown argument {other:?}\n{USAGE}");
+                return 2;
+            }
+        }
+    }
+    let host = match detect(probe) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("chump node ensure-nextest: {e}");
+            return 1;
+        }
+    };
+    let hp = match paths(host, probe) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("chump node ensure-nextest: detected {host}, but {e}");
+            return 1;
+        }
+    };
+    let on_path_bin = std::env::var_os("PATH").and_then(|p| {
+        std::env::split_paths(&p)
+            .map(|d| d.join("cargo-nextest"))
+            .find(|c| c.is_file())
+    });
+    let arch = std::env::consts::ARCH;
+    let plan = crate::plan_cargo_nextest(host, &hp, arch, on_path_bin);
+    match &plan {
+        crate::NextestProvisionPlan::NotApplicable { host } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "not_applicable", "host": host.as_str()})
+                );
+            } else {
+                println!("cargo-nextest: not applicable on {host}");
+            }
+            0
+        }
+        crate::NextestProvisionPlan::AlreadyInstalled { bin } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"status": "already_installed", "bin": bin.to_string_lossy()})
+                );
+            } else {
+                println!("cargo-nextest: already installed at {}", bin.display());
+            }
+            0
+        }
+        crate::NextestProvisionPlan::Install {
+            bin,
+            archive_url,
+            cargo_fallback,
+        } => {
+            if dry_run {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "status": "would_install",
+                            "bin": bin.to_string_lossy(),
+                            "archive_url": archive_url,
+                            "cargo_fallback": cargo_fallback,
+                        })
+                    );
+                } else {
+                    println!(
+                        "cargo-nextest: would install to {} (archive={:?}, fallback={})",
+                        bin.display(),
+                        archive_url,
+                        cargo_fallback.join(" ")
+                    );
+                }
+                return 0;
+            }
+            if let Some(parent) = bin.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    eprintln!(
+                        "chump node ensure-nextest: cannot create {}: {e}",
+                        parent.display()
+                    );
+                    return 1;
+                }
+                if let Some(url) = archive_url {
+                    let cmd = format!(
+                        "curl -fsSL '{url}' | tar -xzf - -C '{}' cargo-nextest",
+                        parent.display()
+                    );
+                    if std::process::Command::new("sh")
+                        .args(["-c", &cmd])
+                        .status()
+                        .is_ok_and(|s| s.success())
+                        && bin.is_file()
+                    {
+                        println!(
+                            "cargo-nextest: installed prebuilt binary to {}",
+                            bin.display()
+                        );
+                        return 0;
+                    }
+                }
+            }
+            if std::process::Command::new(cargo_fallback[0])
+                .args(&cargo_fallback[1..])
+                .status()
+                .is_ok_and(|s| s.success())
+            {
+                println!("cargo-nextest: installed via {}", cargo_fallback.join(" "));
+                0
+            } else {
+                eprintln!("chump node ensure-nextest: failed to install cargo-nextest");
+                1
+            }
+        }
+    }
 }

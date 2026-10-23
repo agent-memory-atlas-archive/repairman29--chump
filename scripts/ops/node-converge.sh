@@ -116,6 +116,46 @@ if [[ -z "${CHUMP_NODE_ROLE:-}" ]]; then
     [[ -z "${CHUMP_NODE_ROLE:-}" ]] && unset CHUMP_NODE_ROLE
 fi
 NODE_ROLE="${CHUMP_NODE_ROLE:-muscle}"
+# INFRA-8572: idempotently ensure cargo-nextest is installed on linux-systemd
+# and mac-launchd hosts (prebuilt archive or `cargo install cargo-nextest --locked`).
+_ensure_cargo_nextest() {
+    [[ -n "${PREFIX:-}" && "${PREFIX}" == *com.termux* ]] && return 0
+    local os_s
+    os_s="$(uname -s 2>/dev/null || echo unknown)"
+    case "$os_s" in
+        Linux|Darwin) ;;
+        *) return 0 ;;
+    esac
+    local cargo_bin="${CARGO_HOME:-${HOME:-/root}/.cargo}/bin"
+    if command -v cargo-nextest >/dev/null 2>&1 || [[ -x "$cargo_bin/cargo-nextest" ]]; then
+        return 0
+    fi
+    mkdir -p "$cargo_bin" 2>/dev/null || true
+    local url="" arch_s
+    arch_s="$(uname -m 2>/dev/null || echo unknown)"
+    if [[ "$os_s" == "Darwin" ]]; then
+        url="https://get.nexte.st/latest/mac"
+    elif [[ "$arch_s" == "aarch64" || "$arch_s" == "arm64" ]]; then
+        url="https://get.nexte.st/latest/linux-arm"
+    elif [[ "$arch_s" == "x86_64" || "$arch_s" == "amd64" ]]; then
+        url="https://get.nexte.st/latest/linux"
+    fi
+    if [[ -n "$url" ]] && command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
+        if curl -fsSL "$url" | tar -xzf - -C "$cargo_bin" cargo-nextest >>"$LOG" 2>&1 && [[ -x "$cargo_bin/cargo-nextest" ]]; then
+            log "OK: installed prebuilt cargo-nextest to $cargo_bin/cargo-nextest"
+            return 0
+        fi
+    fi
+    if command -v cargo >/dev/null 2>&1; then
+        if cargo install cargo-nextest --locked >>"$LOG" 2>&1; then
+            log "OK: installed cargo-nextest via cargo install --locked"
+            return 0
+        fi
+    fi
+    log "WARN: failed to provision cargo-nextest (non-fatal)"
+    return 0
+}
+
 _reconcile_role_organs() {
     local installer="$REPO_ROOT/scripts/setup/chump-node-install.sh"
     if [[ ! -f "$installer" ]]; then
@@ -135,6 +175,7 @@ _reconcile_role_organs() {
         log "WARN: chump-node-install.sh --reconcile-organs-only exited non-zero (non-fatal, role=$NODE_ROLE)"
         emit node_organs_reconcile_failed "\"role\":\"$NODE_ROLE\""
     fi
+    _ensure_cargo_nextest
 }
 
 emit() {
@@ -409,6 +450,7 @@ if [[ "$HEAD_SHA" == "$TARGET_SHA" && "$BEHIND" -eq 0 && "$TARGET_SHA" != "unkno
     # RESILIENT-1453: even when the tree did not move THIS tick, a worker started
     # before an earlier converge (or a restart via another path) may still be
     # executing older worker.sh — reconcile it against its stamp.
+    [[ -f "$REPO_ROOT/scripts/setup/chump-node-install.sh" ]] && _ensure_cargo_nextest
     _maybe_restart_stale_workers ""
     # Prune old logs (keep last 24) even on the fast path.
     ls -t "$LOG_DIR"/converge-*.log 2>/dev/null | tail -n +25 | xargs -r rm -f 2>/dev/null || true

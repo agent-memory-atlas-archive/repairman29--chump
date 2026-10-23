@@ -1547,7 +1547,9 @@ mod tests {
     // went dead and silent — proven by backdating a curator_heartbeat event
     // 12 days (the real RESILIENT-246 incident duration), not asserted.
     #[test]
+    #[serial_test::serial]
     fn test_l5_slo1_catches_12_day_dead_curator() {
+        std::env::remove_var("CHUMP_SLO_PARKED_ROLES");
         let tmp = tempdir();
         let stale_ts = iso_days_ago(12);
         let lines = [format!(
@@ -1571,6 +1573,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_l5_slo1_passes_when_heartbeat_fresh() {
         let tmp = tempdir();
         let fresh_ts = now_iso();
@@ -1594,6 +1597,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_l5_slo1_parked_role_does_not_breach() {
         let tmp = tempdir();
         let stale_ts = iso_days_ago(12);

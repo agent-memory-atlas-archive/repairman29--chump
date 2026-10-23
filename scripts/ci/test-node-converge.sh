@@ -137,4 +137,51 @@ CHUMP_NODE_CONVERGE_FAR_BEHIND_N=0 CHUMP_NODE_CONVERGE_FAR_BEHIND_MIN=0 run_conv
 grep -q '"kind":"node_converge_far_behind"' "$AMBIENT" || fail "missing node_converge_far_behind alarm: $(cat "$AMBIENT")"
 ok "far-behind node raises node_converge_far_behind alarm"
 
+# ── Test 7: _ensure_cargo_nextest idempotently provisions cargo-nextest (INFRA-8572) ──
+NEXTEST_HOME="$TMP/nextest-home"
+NEXTEST_CARGO="$NEXTEST_HOME/.cargo"
+NEXTEST_STUB="$TMP/nextest-stub"
+mkdir -p "$NEXTEST_HOME" "$NEXTEST_STUB"
+cat > "$NEXTEST_STUB/cargo" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "install" && "\$2" == "cargo-nextest" ]]; then
+    mkdir -p "$NEXTEST_CARGO/bin"
+    printf '#!/usr/bin/env bash\necho stub-nextest\n' > "$NEXTEST_CARGO/bin/cargo-nextest"
+    chmod +x "$NEXTEST_CARGO/bin/cargo-nextest"
+    echo "cargo-install-invoked" >> "$TMP/nextest-install.log"
+    exit 0
+fi
+exit 1
+EOF
+cat > "$NEXTEST_STUB/curl" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$NEXTEST_STUB/cargo" "$NEXTEST_STUB/curl"
+
+# Strip any existing cargo-nextest from PATH so the missing-then-idempotent cycle is exercised.
+_CLEAN_PATH=""
+IFS=: read -ra _PDIRS <<< "$PATH"
+for _d in "${_PDIRS[@]}"; do
+    [[ -x "$_d/cargo-nextest" ]] && continue
+    _CLEAN_PATH="${_CLEAN_PATH:+$_CLEAN_PATH:}$_d"
+done
+
+(
+    export HOME="$NEXTEST_HOME"
+    export CARGO_HOME="$NEXTEST_CARGO"
+    export PATH="$NEXTEST_STUB:$_CLEAN_PATH"
+    export CHUMP_NODE_REPO="$CHECKOUT"
+    export CHUMP_NODE_CONVERGE_LOGDIR="$TMP/logs"
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _ensure_cargo_nextest
+    [[ -x "$NEXTEST_CARGO/bin/cargo-nextest" ]] || exit 11
+    # Second invocation must be idempotent (must not invoke cargo install a second time).
+    _ensure_cargo_nextest
+) || fail "_ensure_cargo_nextest failed to provision cargo-nextest (rc=$?)"
+[[ "$(wc -l < "$TMP/nextest-install.log" | tr -d ' ')" == "1" ]] \
+    || fail "_ensure_cargo_nextest was not idempotent (log: $(cat "$TMP/nextest-install.log" 2>/dev/null))"
+ok "_ensure_cargo_nextest provisions cargo-nextest when absent and is idempotent when present (INFRA-8572)"
+
 printf '\033[0;32mALL PASS\033[0m scripts/ci/test-node-converge.sh\n'

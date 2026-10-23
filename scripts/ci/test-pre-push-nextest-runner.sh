@@ -167,10 +167,10 @@ for _d in "${_PATH_DIRS[@]}"; do
 done
 OUT=$(HOOK_PATH="$TMP/bin:$_CLEAN_PATH" run_hook)
 RC=$?
-if [[ "$RC" -eq 0 ]] && grep -qE '^cargo test .*--bin chump' "$INVOKE_LOG"; then
-    ok "hook's actual argv fell back to cargo test when nextest is absent"
+if [[ "$RC" -eq 0 ]] && grep -qE '^cargo test .*--bin chump.* -- --test-threads=1' "$INVOKE_LOG"; then
+    ok "hook's actual argv fell back to cargo test -- --test-threads=1 when nextest is absent (INFRA-8572)"
 else
-    fail "hook should fall back to cargo test (rc=$RC, invoke_log=$(cat "$INVOKE_LOG"), out=$OUT)"
+    fail "hook should fall back to cargo test -- --test-threads=1 (rc=$RC, invoke_log=$(cat "$INVOKE_LOG"), out=$OUT)"
 fi
 if echo "$OUT" | grep -q "WARN CREDIBLE-278: cargo-nextest not found on PATH"; then
     ok "hook loudly announced the fallback (never silent)"

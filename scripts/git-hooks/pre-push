@@ -1179,6 +1179,7 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
             # cargo-nextest, which gives every test its own process. Match CI
             # here: prefer nextest, and fail LOUD (never silent) when absent.
             _TEST_RUNNER_CMD=()
+            _TEST_RUNNER_HAS_DD=0
             if command -v cargo-nextest &>/dev/null; then
                 # INFRA-8042: --profile prepush (.config/nextest.toml) kills any
                 # single test still running after 4 min, so one hang fails the
@@ -1186,10 +1187,11 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                 echo "[pre-push] CREDIBLE-278: running cargo nextest run --profile prepush --bin chump --tests (full suite; process-isolated, matches CI; per-test timeout)..." >&2
                 _TEST_RUNNER_CMD=(cargo nextest run --profile prepush --bin chump --tests --no-fail-fast)
             else
-                echo "[pre-push] WARN CREDIBLE-278: cargo-nextest not found on PATH — falling back to 'cargo test'." >&2
-                echo "[pre-push] WARN CREDIBLE-278: cargo test THREADS tests in one process and can false-red on env races that nextest (CI's runner) does not hit." >&2
+                echo "[pre-push] WARN CREDIBLE-278: cargo-nextest not found on PATH — falling back to 'cargo test -- --test-threads=1' (INFRA-8572)." >&2
+                echo "[pre-push] WARN CREDIBLE-278: cargo test runs in one process; --test-threads=1 serializes tests so process-global env does not race when nextest is absent." >&2
                 echo "[pre-push] WARN CREDIBLE-278: install for a gate that matches CI: cargo install cargo-nextest --locked" >&2
-                _TEST_RUNNER_CMD=(cargo test --bin chump --tests --no-fail-fast --quiet)
+                _TEST_RUNNER_CMD=(cargo test --bin chump --tests --no-fail-fast --quiet -- --test-threads=1)
+                _TEST_RUNNER_HAS_DD=1
             fi
             echo "[pre-push] (one-time per tree-hash; cached at $CACHE_MARKER on green)" >&2
             echo "[pre-push] Bypass: CHUMP_TEST_GATE=0 git push  (with Test-Gate-Bypass: trailer)" >&2
@@ -1225,7 +1227,7 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                         echo "[pre-push] WARN: KNOWN_FLAKES entry '${_tname}' has no tracking_gap — add one (INFRA-764)" >&2
                     fi
                     echo "[pre-push] SKIP (known flake): ${_tname}" >&2
-                    if [[ "${#_SKIP_ARGS[@]}" -eq 0 ]]; then
+                    if [[ "${#_SKIP_ARGS[@]}" -eq 0 && "${_TEST_RUNNER_HAS_DD:-0}" -eq 0 ]]; then
                         _SKIP_ARGS+=("--")
                     fi
                     _SKIP_ARGS+=("--skip" "${_tname}")

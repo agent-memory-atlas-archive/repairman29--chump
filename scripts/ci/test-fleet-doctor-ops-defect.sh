@@ -244,4 +244,29 @@ else
     fail "expected RM=1 fail, got status=$(last_status) detail=$(last_detail)"
 fi
 
+# ── Tests 9-10 (INFRA-8572): check_cargo_nextest fails when absent, passes when present ──
+_NO_NEXTEST_PATH=""
+IFS=: read -ra _PDIRS <<< "$PATH"
+for _d in "${_PDIRS[@]}"; do
+    [[ -x "$_d/cargo-nextest" ]] && continue
+    _NO_NEXTEST_PATH="${_NO_NEXTEST_PATH:+$_NO_NEXTEST_PATH:}$_d"
+done
+EMPTY_CARGO="$TMPDIR_BASE/empty-cargo"
+mkdir -p "$EMPTY_CARGO/bin"
+PATH="$_NO_NEXTEST_PATH" CARGO_HOME="$EMPTY_CARGO" HOME="$TMPDIR_BASE/empty-home" check_cargo_nextest
+if [[ "$(last_status)" == "fail" ]] && [[ "$(last_detail)" == *"cargo-nextest absent"* ]]; then
+    pass "check_cargo_nextest fails RED when cargo-nextest is absent from PATH and CARGO_HOME/bin (INFRA-8572)"
+else
+    fail "expected check_cargo_nextest fail when absent, got status=$(last_status) detail=$(last_detail)"
+fi
+
+printf '#!/usr/bin/env bash\nexit 0\n' > "$EMPTY_CARGO/bin/cargo-nextest"
+chmod +x "$EMPTY_CARGO/bin/cargo-nextest"
+PATH="$_NO_NEXTEST_PATH" CARGO_HOME="$EMPTY_CARGO" HOME="$TMPDIR_BASE/empty-home" check_cargo_nextest
+if [[ "$(last_status)" == "pass" ]] && [[ "$(last_detail)" == *"cargo-nextest installed"* ]]; then
+    pass "check_cargo_nextest passes when cargo-nextest is present in CARGO_HOME/bin (INFRA-8572)"
+else
+    fail "expected check_cargo_nextest pass when present, got status=$(last_status) detail=$(last_detail)"
+fi
+
 echo "=== all ops-defect self-diagnosis + cargo-storage tests passed ==="

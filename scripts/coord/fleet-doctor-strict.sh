@@ -82,6 +82,10 @@
 #                        target lived on a USB flash stick and writeback stalls
 #                        wedged the whole node. Each path on a fixed disk, or
 #                        absent, passes.
+#   22. cargo-nextest   — INFRA-8572: RED when `cargo-nextest` is absent from
+#                        PATH and `${CARGO_HOME:-$HOME/.cargo}/bin/cargo-nextest`
+#                        on a Linux/macOS host (prevents silent fallback to
+#                        in-process threaded `cargo test`).
 #
 # Thresholds (override via env)
 #   LEASE_STALE_HOURS         default 2    — leases older than N hours are flagged
@@ -1960,6 +1964,32 @@ check_cargo_storage_fixed_disk() {
     fi
 }
 
+# ── Check 22 (INFRA-8572): cargo-nextest must be installed on the node ───────
+# Without cargo-nextest, pre-push falls back to cargo test (single process),
+# risking env-var races across tests. Every linux-systemd / mac-launchd node
+# must have cargo-nextest on PATH or at ${CARGO_HOME:-$HOME/.cargo}/bin/cargo-nextest.
+check_cargo_nextest() {
+    if [[ -n "${PREFIX:-}" && "${PREFIX}" == *com.termux* ]]; then
+        register_check "cargo-nextest" "skip" "Termux host does not run the local Rust pre-push test gate" ""
+        return
+    fi
+    local cargo_home="${CARGO_HOME:-${HOME:-/root}/.cargo}"
+    local candidate="$cargo_home/bin/cargo-nextest"
+    local resolved=""
+    if command -v cargo-nextest >/dev/null 2>&1; then
+        resolved="$(command -v cargo-nextest)"
+    elif [[ -x "$candidate" ]]; then
+        resolved="$candidate"
+    fi
+    if [[ -n "$resolved" ]]; then
+        register_check "cargo-nextest" "pass" "cargo-nextest installed ($resolved)" ""
+    else
+        register_check "cargo-nextest" "fail" \
+            "cargo-nextest absent from PATH and $candidate (INFRA-8572)" \
+            "run 'chump node ensure-nextest' or 'cargo install cargo-nextest --locked'"
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -1994,6 +2024,7 @@ check_node_env_no_export
 check_load_aware_deadman
 check_single_store
 check_cargo_storage_fixed_disk
+check_cargo_nextest
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

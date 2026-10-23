@@ -21,14 +21,18 @@ struct TestFixture {
 
 impl TestFixture {
     fn new() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        let seq = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let temp_dir = std::env::temp_dir().join(format!(
-            "sentinel-test-{}-{}",
+            "sentinel-test-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis())
-                .unwrap_or(0)
+                .unwrap_or(0),
+            seq
         ));
 
         if temp_dir.exists() {

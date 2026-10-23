@@ -466,6 +466,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_build_report_empty() {
         let dir = tempfile::tempdir().unwrap();
         let report = build_report(dir.path(), 5.0);
@@ -474,7 +475,11 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_over_budget_flag() {
+        std::env::remove_var("CHUMP_COST_INPUT_PER_MTK");
+        std::env::remove_var("CHUMP_COST_OUTPUT_PER_MTK");
+        std::env::remove_var("CHUMP_COST_CACHE_READ_PER_MTK");
         use std::io::Write;
         let dir = tempfile::tempdir().unwrap();
         let locks = dir.path().join(".chump-locks");

@@ -170,8 +170,10 @@ pub fn approval_timeout_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[tokio::test]
+    #[serial]
     async fn resolve_sends_allow_to_receiver() {
         let (id, mut rx) = request_approval();
         assert_eq!(resolve_approval(&id, true), ResolveOutcome::Hit);
@@ -180,6 +182,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn resolve_sends_deny_to_receiver() {
         let (id, mut rx) = request_approval();
         assert_eq!(resolve_approval(&id, false), ResolveOutcome::Hit);
@@ -188,6 +191,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn resolve_unknown_id_is_orphan_no_panic() {
         assert_eq!(
             resolve_approval("00000000-0000-0000-0000-000000000099", true),
@@ -196,8 +200,9 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn same_tool_and_args_joins_existing_request() {
-        let args = serde_json::json!({"cmd": "ls"});
+        let args = serde_json::json!({"cmd": "ls-same-tool"});
         let (id1, _rx1, joined1) = request_approval_for("run_cli", &args);
         assert!(!joined1);
         let (id2, _rx2, joined2) = request_approval_for("run_cli", &args);
@@ -206,20 +211,26 @@ mod tests {
             id1, id2,
             "joined attempt must reuse the original request_id"
         );
+        abandon(&id1);
     }
 
     #[tokio::test]
+    #[serial]
     async fn different_args_do_not_join() {
-        let (id1, _rx1, _) = request_approval_for("run_cli", &serde_json::json!({"cmd": "ls"}));
+        let (id1, _rx1, _) =
+            request_approval_for("run_cli", &serde_json::json!({"cmd": "ls-diff"}));
         let (id2, _rx2, joined2) =
-            request_approval_for("run_cli", &serde_json::json!({"cmd": "pwd"}));
+            request_approval_for("run_cli", &serde_json::json!({"cmd": "pwd-diff"}));
         assert!(!joined2);
         assert_ne!(id1, id2);
+        abandon(&id1);
+        abandon(&id2);
     }
 
     #[tokio::test]
+    #[serial]
     async fn joined_receiver_observes_resolution_from_original_request() {
-        let args = serde_json::json!({"cmd": "ls"});
+        let args = serde_json::json!({"cmd": "ls-joined-rx"});
         let (id1, _rx1, _) = request_approval_for("run_cli", &args);
         let (_id2, mut rx2, joined2) = request_approval_for("run_cli", &args);
         assert!(joined2);
@@ -229,15 +240,18 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn key_normalization_ignores_field_order() {
         let (id1, _rx1, _) = request_approval_for("run_cli", &serde_json::json!({"a": 1, "b": 2}));
         let (id2, _rx2, joined2) =
             request_approval_for("run_cli", &serde_json::json!({"b": 2, "a": 1}));
         assert!(joined2);
         assert_eq!(id1, id2);
+        abandon(&id1);
     }
 
     #[tokio::test]
+    #[serial]
     async fn abandon_removes_pending_state() {
         let (id, _rx, _) = request_approval_for("run_cli", &serde_json::json!({}));
         assert!(is_pending(&id));

@@ -833,3 +833,99 @@ fn cli_host_and_render_exit_codes() {
     assert_eq!(cli::run_render(&[], &p), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn cargo_nextest_provisioning_plan_and_idempotency() {
+    let dir = std::env::temp_dir().join(format!("chump-provision-nextest-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let home = dir.join("u");
+    std::fs::create_dir_all(&home).unwrap();
+
+    let mut p_linux = linux(1000, "u", &home.to_string_lossy());
+    p_linux.passwd = Some(format!(
+        "u:x:1000:1000::{}:
+",
+        home.display()
+    ));
+    let hp_linux = paths(Host::LinuxSystemdUser, &p_linux).unwrap();
+
+    // Missing -> Install plan with arch-specific tarball URL + cargo install --locked fallback.
+    let plan_x86 = plan_cargo_nextest(Host::LinuxSystemdUser, &hp_linux, "x86_64", None);
+    assert_eq!(
+        plan_x86,
+        NextestProvisionPlan::Install {
+            bin: home.join(".cargo/bin/cargo-nextest"),
+            archive_url: Some("https://get.nexte.st/latest/linux"),
+            cargo_fallback: ["cargo", "install", "cargo-nextest", "--locked"],
+        }
+    );
+    let plan_arm = plan_cargo_nextest(Host::LinuxSystemdSystem, &hp_linux, "aarch64", None);
+    assert_eq!(
+        plan_arm,
+        NextestProvisionPlan::Install {
+            bin: home.join(".cargo/bin/cargo-nextest"),
+            archive_url: Some("https://get.nexte.st/latest/linux-arm"),
+            cargo_fallback: ["cargo", "install", "cargo-nextest", "--locked"],
+        }
+    );
+
+    let p_mac = Probe {
+        os: "Darwin".into(),
+        has_launchctl: true,
+        euid: Some(501),
+        user: Some("u".into()),
+        home: Some(home.to_string_lossy().into()),
+        ..Probe::default()
+    };
+    let hp_mac = paths(Host::MacLaunchd, &p_mac).unwrap();
+    let plan_mac = plan_cargo_nextest(Host::MacLaunchd, &hp_mac, "aarch64", None);
+    assert_eq!(
+        plan_mac,
+        NextestProvisionPlan::Install {
+            bin: home.join(".cargo/bin/cargo-nextest"),
+            archive_url: Some("https://get.nexte.st/latest/mac"),
+            cargo_fallback: ["cargo", "install", "cargo-nextest", "--locked"],
+        }
+    );
+
+    // Termux -> NotApplicable.
+    let p_termux = Probe {
+        os: "Linux".into(),
+        prefix: Some("/data/data/com.termux/files/usr".into()),
+        euid: Some(10200),
+        user: Some("u0_a200".into()),
+        home: Some("/data/data/com.termux/files/home".into()),
+        ..Probe::default()
+    };
+    let hp_termux = paths(Host::Termux, &p_termux).unwrap();
+    assert_eq!(
+        plan_cargo_nextest(Host::Termux, &hp_termux, "aarch64", None),
+        NextestProvisionPlan::NotApplicable { host: Host::Termux }
+    );
+    assert_eq!(cli::run_ensure_nextest(&["--json".into()], &p_termux), 0);
+
+    // Already on PATH -> AlreadyInstalled (idempotent).
+    let existing = PathBuf::from("/usr/local/bin/cargo-nextest");
+    assert_eq!(
+        plan_cargo_nextest(
+            Host::LinuxSystemdUser,
+            &hp_linux,
+            "x86_64",
+            Some(existing.clone())
+        ),
+        NextestProvisionPlan::AlreadyInstalled { bin: existing }
+    );
+
+    // Present in <home>/.cargo/bin/cargo-nextest -> AlreadyInstalled (idempotent).
+    let bin_path = home.join(".cargo/bin/cargo-nextest");
+    std::fs::create_dir_all(bin_path.parent().unwrap()).unwrap();
+    std::fs::write(&bin_path, "#!/bin/sh\nexit 0\n").unwrap();
+    assert_eq!(
+        plan_cargo_nextest(Host::LinuxSystemdUser, &hp_linux, "x86_64", None),
+        NextestProvisionPlan::AlreadyInstalled { bin: bin_path }
+    );
+    assert_eq!(cli::run_ensure_nextest(&["--dry-run".into()], &p_linux), 0);
+    assert_eq!(cli::run_ensure_nextest(&["--bogus".into()], &p_linux), 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

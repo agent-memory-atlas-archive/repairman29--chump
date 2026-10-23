@@ -176,6 +176,15 @@ impl Host {
                 | (Host::Termux, UnitKind::Runit)
         )
     }
+
+    /// Does this host run the local Rust pre-push test gate and therefore require
+    /// `cargo-nextest` in `<home>/.cargo/bin` (INFRA-8572)?
+    pub fn requires_cargo_nextest(self) -> bool {
+        matches!(
+            self,
+            Host::MacLaunchd | Host::LinuxSystemdUser | Host::LinuxSystemdSystem
+        )
+    }
 }
 
 impl fmt::Display for Host {
@@ -796,6 +805,59 @@ pub fn render(
         }
     }
     Ok(out)
+}
+
+/// Prebuilt nextest release URL for `(host, arch)` (INFRA-8572).
+pub fn cargo_nextest_archive_url(host: Host, arch: &str) -> Option<&'static str> {
+    match host {
+        Host::MacLaunchd => Some("https://get.nexte.st/latest/mac"),
+        Host::LinuxSystemdUser | Host::LinuxSystemdSystem => match arch {
+            "aarch64" | "arm64" => Some("https://get.nexte.st/latest/linux-arm"),
+            "x86_64" | "amd64" => Some("https://get.nexte.st/latest/linux"),
+            _ => None,
+        },
+        Host::Termux => None,
+    }
+}
+
+/// How `chump-provision` converges `cargo-nextest` on a host (INFRA-8572).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NextestProvisionPlan {
+    /// Host does not run the local Rust test gate (e.g. Termux).
+    NotApplicable { host: Host },
+    /// `cargo-nextest` is already installed at `bin`.
+    AlreadyInstalled { bin: PathBuf },
+    /// Install `cargo-nextest` into `bin` (prebuilt archive URL if available,
+    /// falling back to `cargo install cargo-nextest --locked`).
+    Install {
+        bin: PathBuf,
+        archive_url: Option<&'static str>,
+        cargo_fallback: [&'static str; 4],
+    },
+}
+
+/// Compute the idempotent `cargo-nextest` provisioning plan for `host` (INFRA-8572).
+pub fn plan_cargo_nextest(
+    host: Host,
+    paths: &HostPaths,
+    arch: &str,
+    already_installed_at: Option<PathBuf>,
+) -> NextestProvisionPlan {
+    if !host.requires_cargo_nextest() {
+        return NextestProvisionPlan::NotApplicable { host };
+    }
+    if let Some(bin) = already_installed_at {
+        return NextestProvisionPlan::AlreadyInstalled { bin };
+    }
+    let bin = paths.bin_dir.join("cargo-nextest");
+    if bin.is_file() {
+        return NextestProvisionPlan::AlreadyInstalled { bin };
+    }
+    NextestProvisionPlan::Install {
+        bin,
+        archive_url: cargo_nextest_archive_url(host, arch),
+        cargo_fallback: ["cargo", "install", "cargo-nextest", "--locked"],
+    }
 }
 
 #[cfg(test)]
