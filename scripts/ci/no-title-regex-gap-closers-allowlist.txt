@@ -13,12 +13,14 @@
 #
 # One repo-relative path per line, then a reason. Mirrors the raw-gh-allowlist
 # idiom (scripts/ci/raw-gh-allowlist.txt).
-
-# KNOWN PRE-EXISTING — convert the CLOSE path to the gap_prs FK under CREDIBLE-1551.
-# stale-pr-reaper.sh INFRA-674 "ghost-status" block parses gap IDs from merged
-# PR title+body and runs `chump gap ship`; it also legitimately parses titles
-# for respawn/retire dispatch. Tracked: CREDIBLE-1551.
-scripts/ops/stale-pr-reaper.sh
-# chump-pr-triage.sh `--apply ship-gap` derives the gap from the PR title then
-# ships it; the rest of the tool is advisory triage. Tracked: CREDIBLE-1551.
-scripts/coord/chump-pr-triage.sh
+#
+# CREDIBLE-1551 (Phase R R2, AC2) emptied this file to TRUE ZERO. The two
+# KNOWN PRE-EXISTING closers that used to live here —
+#   - scripts/ops/stale-pr-reaper.sh   (INFRA-674 "ghost-status" block)
+#   - scripts/coord/chump-pr-triage.sh (`--apply ship-gap`)
+# — now resolve the gap they close from the typed gap_prs FK via
+# `chump gap gaps-for-pr`, never from a PR title. They still parse titles for
+# respawn/retire dispatch and the advisory triage table, but those usages sit
+# far from any close, so the proximity-based TIER-2 heuristic no longer flags
+# them without an allowlist entry. Keep this file empty of paths: a new entry
+# means a new title-regex closer slipped in — convert it to the FK instead.

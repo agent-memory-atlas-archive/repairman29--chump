@@ -52,9 +52,17 @@ chmod +x "$TMPDIR_TEST/bin/gh"
 # ---------- stub: chump -------------------------------------------------------
 cat > "$TMPDIR_TEST/bin/chump" <<STUB
 #!/usr/bin/env bash
-# chump shim: gap show returns status for known gaps; gap ship records the call
+# chump shim: gaps-for-pr resolves the gap from the typed gap_prs FK
+# (CREDIBLE-1551 — the reaper no longer parses the gap from the PR title);
+# gap show returns status for known gaps; gap ship records the call.
 TMPDIR_TEST="$TMPDIR_TEST"
 case "\$*" in
+  *"gap gaps-for-pr 9901"*)
+    echo "INFRA-664"
+    ;;
+  *"gap gaps-for-pr 9902"*)
+    echo "INFRA-665"
+    ;;
   *"gap show INFRA-664"*)
     echo "- id: INFRA-664"
     echo "  status: open"

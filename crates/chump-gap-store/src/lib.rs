@@ -3322,6 +3322,28 @@ impl GapStore {
             );
         }
 
+        // CREDIBLE-1550 AC2 (completed in CREDIBLE-1551): the typed gap_prs FK
+        // is the ONLY proof a PR-backed close may trust. If this ship names a
+        // closed_pr, a gap_prs row must link THAT PR to THIS gap — the link is
+        // written at PR-open by every PR-opening path (bot-merge.sh main +
+        // recovery, the manual SUBAGENT_DISPATCH.md path), so a legitimate ship
+        // always has it. Refusing here is what retires the title-regex closers:
+        // a closer that derived the gap from a merged PR's title can no longer
+        // close the wrong gap, because the ship fails unless the link exists.
+        // Only enforced when a closed_pr is present — a genuinely PR-less ship
+        // (closed_pr: None) carries no PR to link and is unaffected.
+        if let Some(pr) = closed_pr {
+            if self.get_pr_link(gap_id, pr)?.is_none() {
+                bail!(
+                    "CREDIBLE-1550 AC2: refusing to flip {gap_id} to status=done from \
+                     PR #{pr} — no gap_prs row links PR #{pr} to {gap_id}. The gap→PR link \
+                     is written at PR-open time (`chump gap link-pr`, called by bot-merge.sh \
+                     right after `gh pr create`). If PR #{pr} genuinely implemented {gap_id}, \
+                     run `chump gap link-pr {gap_id} {pr} --sha <merge-sha>` first, then retry."
+                );
+            }
+        }
+
         // RESILIENT-1110: merged is a proxy, not the definition. Kill it at
         // the root — refuse status=done if the merge deploys an organ unit
         // that the target node's own verifier (RESILIENT-1108) currently
@@ -3371,6 +3393,13 @@ impl GapStore {
             DoneExtras::ShipCeremony,
             "ship",
         )?;
+        // CREDIBLE-1551 (Phase R R2, AC2): the PR this gap closed from has now
+        // landed, so flip its gap_prs row open → merged. Best-effort: the
+        // status=done write above already succeeded, so a bookkeeping failure
+        // here must never turn a landed ship into an error.
+        if let Some(pr) = closed_pr {
+            let _ = self.mark_pr_merged(gap_id, pr);
+        }
         Ok(())
     }
 
@@ -7183,6 +7212,38 @@ impl GapStore {
             .optional()
             .map_err(Into::into)
     }
+
+    /// CREDIBLE-1551 (Phase R R2, AC2): reverse lookup — the gap(s) a typed
+    /// gap_prs row links to this PR number, most-recently-opened first. This is
+    /// the FK-backed replacement for parsing gap IDs out of a merged PR's
+    /// title/body (what the two legacy title-regex closers did —
+    /// stale-pr-reaper's INFRA-674 ghost block and chump-pr-triage's
+    /// `--apply ship-gap`). A caller resolves the gap from the link, never the
+    /// title, so the close routes through the same proof `chump gap ship` now
+    /// enforces.
+    pub fn gaps_for_pr(&self, pr_number: i64) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT gap_id FROM gap_prs WHERE pr_number=?1 ORDER BY opened_at DESC")?;
+        let rows = stmt
+            .query_map(params![pr_number], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// CREDIBLE-1551 (Phase R R2, AC2): flip a gap_prs row's state to `merged`
+    /// once the PR it links has actually landed. Idempotent and best-effort: a
+    /// missing row is a no-op (the ship-time FK gate already proved the row
+    /// exists for a PR-backed close), so a caller may fire this without a
+    /// pre-check. The `open` → `merged` transition lets reconcilers and the
+    /// closer-conversion paths tell a still-open PR link from a landed one.
+    pub fn mark_pr_merged(&self, gap_id: &str, pr_number: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE gap_prs SET state='merged' WHERE gap_id=?1 AND pr_number=?2",
+            params![gap_id, pr_number],
+        )?;
+        Ok(())
+    }
 }
 
 // ────────── repos table (MISSION-033) ──────────
@@ -7611,6 +7672,9 @@ mod phase_r_r1_tests {
             .reserve("RESILIENT", "r1 idempotent", "P2", "s")
             .unwrap();
 
+        // CREDIBLE-1551 AC2: ship --closed-pr now requires the gap_prs FK that
+        // every PR-opening path writes at PR-open. Link it before the ship.
+        store.link_pr(&id, 4242, "landed").unwrap();
         store.ship(&id, "sess-a", Some(4242)).unwrap();
         let first = row(&store, &id);
         assert_eq!(first.0, "done");
@@ -7640,6 +7704,8 @@ mod phase_r_r1_tests {
         let id = store
             .reserve("RESILIENT", "r1 replay 1562", "P2", "s")
             .unwrap();
+        // CREDIBLE-1551 AC2: link the landed PR before the replay ships.
+        store.link_pr(&id, 4242, "landed").unwrap();
         for i in 0..87 {
             store
                 .ship(&id, &format!("worker-{i}"), Some(4242))
@@ -8979,6 +9045,49 @@ mod tests {
         assert_eq!(count, 0, "an absent link writes no gap_pr_unlinked line");
     }
 
+    // ── CREDIBLE-1551 (Phase R R2, AC2): reverse lookup + merged transition ──
+
+    #[test]
+    fn gaps_for_pr_returns_every_gap_linked_to_a_pr() {
+        let (store, _dir) = test_store();
+        store.link_pr("CREDIBLE-1551", 5600, "aaa").unwrap();
+        store.link_pr("CREDIBLE-1552", 5600, "bbb").unwrap();
+        store.link_pr("INFRA-9999", 6001, "ccc").unwrap();
+
+        let mut gaps = store.gaps_for_pr(5600).unwrap();
+        gaps.sort();
+        assert_eq!(gaps, vec!["CREDIBLE-1551", "CREDIBLE-1552"]);
+        assert!(
+            store.gaps_for_pr(424242).unwrap().is_empty(),
+            "a PR with no link resolves to no gap (closers close nothing)"
+        );
+    }
+
+    #[test]
+    fn mark_pr_merged_flips_state_and_is_a_noop_when_absent() {
+        let (store, _dir) = test_store();
+        store.link_pr("CREDIBLE-1551", 5600, "aaa").unwrap();
+        assert_eq!(
+            store
+                .get_pr_link("CREDIBLE-1551", 5600)
+                .unwrap()
+                .unwrap()
+                .state,
+            "open"
+        );
+        store.mark_pr_merged("CREDIBLE-1551", 5600).unwrap();
+        assert_eq!(
+            store
+                .get_pr_link("CREDIBLE-1551", 5600)
+                .unwrap()
+                .unwrap()
+                .state,
+            "merged"
+        );
+        // Best-effort: a missing row is a no-op, never an error.
+        store.mark_pr_merged("CREDIBLE-1551", 999999).unwrap();
+    }
+
     // ── EFFECTIVE-679: idea-drop intake tests ──────────────────────────
 
     #[test]
@@ -9834,6 +9943,7 @@ mod tests {
         store
             .claim(&id, "sess-1686", "/worktrees/test", 3600)
             .unwrap();
+        store.link_pr(&id, 4242, "landed").unwrap();
 
         let porcelain = || -> String {
             String::from_utf8_lossy(&git(&["status", "--porcelain", "--untracked-files=no"]).stdout)
@@ -9973,6 +10083,8 @@ mod tests {
                 params![id],
             )
             .unwrap();
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id, 4242, "landed").unwrap();
         store.ship(&id, "sess", Some(4242)).unwrap();
         match store.preflight(&id).unwrap() {
             PreflightResult::Done => {}
@@ -9992,6 +10104,8 @@ mod tests {
             .reserve("ZERO-WASTE", "ship-yaml-sync test", "P1", "s")
             .unwrap();
         let gaps_dir = _dir.path().join("docs").join("gaps");
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id, 4242, "landed").unwrap();
         store.ship(&id, "s", Some(4242)).unwrap();
         let wrote = store.dump_per_file_single(&id, &gaps_dir).unwrap();
         assert!(wrote, "dump_per_file_single should write the yaml on ship");
@@ -11002,6 +11116,8 @@ meta:
 
         // After mutating the gap (set status to done), single-dump
         // must re-write.
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id1, 999, "landed").unwrap();
         store.ship(&id1, "test-session", Some(999)).unwrap();
         let wrote3 = store.dump_per_file_single(&id1, &out_dir).unwrap();
         assert!(wrote3, "post-ship single-dump must rewrite");
@@ -11141,6 +11257,8 @@ meta:
         store.claim(&id, "s", "/wt", 3600).unwrap();
         // The `chump gap ship --closed-pr N` path: ship() takes the option
         // directly so callers don't have to do a follow-up set_fields call.
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id, 631, "landed").unwrap();
         store.ship(&id, "s", Some(631)).unwrap();
         let row = store.get(&id).unwrap().expect("row");
         assert_eq!(row.status, "done");
@@ -11219,6 +11337,8 @@ meta:
         let (store, dir) = test_store();
         let id = store.reserve("INFRA", "import test", "P1", "s").unwrap();
         store.claim(&id, "s", "/wt", 3600).unwrap();
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id, 598, "landed").unwrap();
         store.ship(&id, "s", Some(598)).unwrap();
         let yaml = store.dump_yaml().unwrap();
         // Persist YAML and re-import into a fresh store rooted at the same dir.
@@ -11420,6 +11540,8 @@ meta:
         // Case 1: DB done + YAML open → DB stays done (no reverse).
         let id1 = store.reserve("INFRA", "shipped gap", "P1", "s").unwrap();
         store.claim(&id1, "s", "/wt", 3600).unwrap();
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id1, 500, "landed").unwrap();
         store.ship(&id1, "s", Some(500)).unwrap();
         let row = store.get(&id1).unwrap().expect("row");
         assert_eq!(row.status, "done");
@@ -11470,6 +11592,8 @@ meta:
         let (store, dir) = test_store();
         let id = store.reserve("INFRA", "shipped gap", "P1", "s").unwrap();
         store.claim(&id, "s", "/wt", 3600).unwrap();
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id, 999, "landed").unwrap();
         store.ship(&id, "s", Some(999)).unwrap();
         let row = store.get(&id).unwrap().expect("row");
         assert_eq!(row.closed_pr, Some(999));
@@ -12833,6 +12957,8 @@ meta:
     fn ship_with_closed_pr_stamps_pr_number() {
         let (store, _dir) = test_store();
         let id = store.reserve("INFRA", "with-pr", "P2", "s").unwrap();
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id, 1234, "landed").unwrap();
         store.ship(&id, "session-x", Some(1234)).unwrap();
         let gap = store.get(&id).unwrap().unwrap();
         assert_eq!(gap.closed_pr, Some(1234));
@@ -13714,6 +13840,8 @@ mod waiting_operator_tests {
     fn cannot_suspend_a_done_gap() {
         let (store, _dir) = test_store();
         let id = store.reserve("EFFECTIVE", "done test", "P1", "s").unwrap();
+        // CREDIBLE-1551 AC2: link the PR before ship (FK gate).
+        store.link_pr(&id, 1, "landed").unwrap();
         store.ship(&id, "session-x", Some(1)).unwrap();
         let err = store
             .suspend_waiting(&id, "input_required", "q?", None)

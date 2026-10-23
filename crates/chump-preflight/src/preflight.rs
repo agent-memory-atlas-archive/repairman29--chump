@@ -2780,6 +2780,15 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-no-title-regex-gap-closers.sh"],
             GateKind::Scripts,
         ));
+        // CREDIBLE-1551 (Phase R R2, AC4): meta-test proving the gate above has a
+        // strong-enough TIER-2 proximity window — drives it against verbatim-M2
+        // and a regex-17-lines-above-ship fixture; FAILS if the window is set to
+        // 0 or 15. Mirrors the ci.yml step so local + CI stay in sync (INFRA-1867).
+        steps.push(step(
+            "no-title-regex-gate-fixtures",
+            &["bash", "scripts/ci/test-no-title-regex-gate-fixtures.sh"],
+            GateKind::Scripts,
+        ));
         // CREDIBLE-1550 (AC1/AC5): gap-doctor-reconcile closes a gap only via a
         // typed gap_prs row linking a merged PR — never a title.
         steps.push(step(
@@ -2793,6 +2802,28 @@ pub fn run(argv: &[String]) -> i32 {
         steps.push(step(
             "unresolved-deps-resolution",
             &["bash", "scripts/ci/test-unresolved-deps-resolution.sh"],
+            GateKind::Scripts,
+        ));
+        // CREDIBLE-1551 (Phase R R2, AC2): `chump gap ship --closed-pr N` is
+        // refused unless a gap_prs row links PR #N to the gap; the landed ship
+        // flips the row open -> merged; the no-title-closer allowlist is true
+        // zero. Drives the debug binary; builds it when absent.
+        steps.push(step(
+            "credible-1551-ship-fk-gate",
+            &["bash", "scripts/ci/test-credible-1551-ship-fk-gate.sh"],
+            GateKind::Scripts,
+        ));
+        // CREDIBLE-1551 (Phase R R2, AC2): behavioural proof that the two
+        // converted closers (stale-pr-reaper.sh ghost-status, chump-pr-triage.sh
+        // --apply ship-gap) close only from the gap_prs FK — a merged PR whose
+        // title names an open gap but has no link must NOT ship it. Hermetic
+        // (stubbed chump/gh/git). Mirrors the ci.yml step (INFRA-1867).
+        steps.push(step(
+            "credible-1551-converted-closers-behaviour",
+            &[
+                "bash",
+                "scripts/ci/test-credible-1551-converted-closers-behaviour.sh",
+            ],
             GateKind::Scripts,
         ));
         // RESILIENT-1613 / INFRA-8221: every shell armer, the rebaser, the direct

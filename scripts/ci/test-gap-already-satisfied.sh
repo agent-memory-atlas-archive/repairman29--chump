@@ -6,15 +6,18 @@
 # already on main (the class the live-only INFRA-3808 worker close misses and
 # --check-closure-drift is blind to).
 #
-#   1. HIGH confidence (cycle log shows already-shipped + covering PR that is
-#      MERGED) → gap closed already_satisfied in state.db, closed_pr set,
-#      kind=gap_already_satisfied_closed emitted.
+#   CREDIBLE-1551 (Phase R R2, AC2): the auto-close is RETIRED. The covering PR
+#   belongs to a DIFFERENT gap and is not gap_prs-linked here, so the ship
+#   FK-gate refuses it; this pass now only FLAGS. Asserted here:
+#   1. HIGH confidence (cycle log shows already-shipped + covering PR MERGED) →
+#      gap left OPEN, kind=gap_already_satisfied_flagged emitted with
+#      reason=fk_close_not_applicable. NO gap_already_satisfied_closed event.
 #   2. LOW confidence (covering PR NOT merged) → gap left OPEN, only
-#      kind=gap_already_satisfied_flagged emitted.
+#      kind=gap_already_satisfied_flagged (reason=pr_not_merged) emitted.
 #   3. Gaps with no cycle log, or a log with no signal, are left untouched.
 #   4. Reads the gap store DIRECTLY from CHUMP_STATE_DB (NOT `chump gap list`).
 #   5. dry-run writes nothing (no db mutation, no ambient line).
-#   6. Exits 0 even when it closes a gap (self-healing oneshot stays green).
+#   6. Exits 0 (self-healing oneshot stays green); closes nothing, ever.
 #
 # Uses a fake `gh` on PATH so the test needs no network/auth.
 
@@ -108,36 +111,47 @@ set +e; out="$(run --dry-run 2>&1)"; rc=$?; set -e
 grep -q "COVERED-1" <<<"$out" || fail "dry-run didn't mention COVERED-1: $out"
 ok "dry-run reports but writes nothing"
 
-# ── Test 2: apply — close the covered gap, flag the unmerged one ─────────────
+# ── Test 2: apply — RETIRED auto-close; the covered gap is FLAGGED, not closed ─
 seed_db; rm -f "$AMB"
 set +e; out="$(run "" 2>&1)"; rc=$?; set -e
 [[ "$rc" -eq 0 ]] || fail "apply rc=$rc (want 0 — self-healing stays green): $out"
-[[ "$(status_of COVERED-1)" == "already_satisfied" ]] \
-    || fail "COVERED-1 not closed already_satisfied (got '$(status_of COVERED-1)'): $out"
-[[ "$(closedpr_of COVERED-1)" == "9999" ]] \
-    || fail "COVERED-1 closed_pr not 9999 (got '$(closedpr_of COVERED-1)')"
+# CREDIBLE-1551: COVERED-1's covering PR #9999 is not gap_prs-linked to it, so
+# the FK-gate would refuse the close — the pass FLAGS it and LEAVES IT OPEN.
+[[ "$(status_of COVERED-1)" == "open" ]] \
+    || fail "COVERED-1 must stay OPEN (auto-close retired), got '$(status_of COVERED-1)': $out"
+[[ -z "$(closedpr_of COVERED-1)" ]] \
+    || fail "COVERED-1 must NOT get a closed_pr (got '$(closedpr_of COVERED-1)')"
 [[ "$(status_of UNMERGED-1)" == "open" ]] \
     || fail "UNMERGED-1 should stay open (PR not merged), got '$(status_of UNMERGED-1)'"
 [[ "$(status_of NOLOG-1)" == "open" ]] || fail "NOLOG-1 should be untouched"
 [[ "$(status_of NOSIGNAL-1)" == "open" ]] || fail "NOSIGNAL-1 should be untouched"
 [[ "$(status_of HASPR-1)" == "open" ]] || fail "HASPR-1 (has closed_pr) out of scope, untouched"
-ok "apply closes merged-covered gap, leaves everything else open"
+ok "apply closes NOTHING (auto-close retired); covered + unmerged gaps left open"
 
-# ── Test 3: the two ambient events, correct kinds + fields ──────────────────
-grep -q '"kind":"gap_already_satisfied_closed"' "$AMB" || fail "no closed event: $(cat "$AMB")"
-grep -q '"gap_id":"COVERED-1"' "$AMB" || fail "closed event missing gap_id"
-grep -q '"pr_number":9999' "$AMB" || fail "closed event missing pr_number 9999"
+# ── Test 3: both gaps FLAGGED (no close event at all) ────────────────────────
+# The HIGH-confidence covered gap is flagged with the RETIREMENT reason; the
+# unmerged gap keeps its pr_not_merged reason. A gap_already_satisfied_closed
+# event must NEVER appear now — that pins the retirement (kills a relapse that
+# re-enables the --closed-pr auto-close).
+grep -q '"kind":"gap_already_satisfied_closed"' "$AMB" \
+    && fail "gap_already_satisfied_closed emitted — auto-close relapse: $(cat "$AMB")"
 grep -q '"kind":"gap_already_satisfied_flagged"' "$AMB" || fail "no flagged event: $(cat "$AMB")"
-grep -q '"gap_id":"UNMERGED-1"' "$AMB" || fail "flagged event missing gap_id"
-grep -q '"reason":"pr_not_merged"' "$AMB" || fail "flagged event missing reason"
-ok "emits gap_already_satisfied_closed + gap_already_satisfied_flagged with required fields"
+# COVERED-1's event line carries BOTH its gap_id and the retirement reason.
+# (Read the line into a var first — a `grep | grep -q` tail would SIGPIPE the
+# producer under `set -o pipefail` and false-fail.)
+cov_line="$(grep '"gap_id":"COVERED-1"' "$AMB" || true)"
+grep -q '"reason":"fk_close_not_applicable"' <<<"$cov_line" \
+    || fail "COVERED-1 not flagged with reason=fk_close_not_applicable: $(cat "$AMB")"
+grep -q '"gap_id":"UNMERGED-1"' "$AMB" || fail "flagged event missing UNMERGED-1 gap_id"
+grep -q '"reason":"pr_not_merged"' "$AMB" || fail "UNMERGED-1 flag missing reason=pr_not_merged"
+ok "both gaps flagged (COVERED-1 fk_close_not_applicable, UNMERGED-1 pr_not_merged); no close event"
 
-# ── Test 4: idempotent — a second apply closes nothing new, still exit 0 ─────
+# ── Test 4: idempotent — a second apply closes nothing, still exit 0 ─────────
 rm -f "$AMB"
 set +e; out="$(run "" 2>&1)"; rc=$?; set -e
 [[ "$rc" -eq 0 ]] || fail "second apply rc=$rc (want 0)"
 grep -q "closed 0 already_satisfied" <<<"$out" || fail "second apply should close 0: $out"
-ok "idempotent: re-run closes nothing new (COVERED-1 already closed)"
+ok "idempotent: re-run closes nothing (auto-close retired — always 0 closed)"
 
 # ── Test 5: both new kinds registered in EVENT_REGISTRY.yaml ─────────────────
 for k in gap_already_satisfied_closed gap_already_satisfied_flagged; do

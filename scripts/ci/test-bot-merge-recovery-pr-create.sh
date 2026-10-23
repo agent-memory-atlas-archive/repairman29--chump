@@ -110,6 +110,19 @@ BASE_BRANCH="main"
 _gap_lbl="INFRA-8209"
 _bm_recover_amb="$TMP/ambient_${mode}.jsonl"
 
+# CREDIBLE-1551 (Phase R R2, AC2): the recovery block calls _bm_link_pr to write
+# the typed gap→PR link (so a wedge-then-recovery close is not refused by the
+# gap_prs FK gate). _bm_link_pr lives above the extracted block in the real
+# bot-merge.sh, so it is NOT part of \$BLOCK — stub it here with the same
+# contract (reads the gap list, takes the PR number as \$1) and record each call
+# so T2/T3/T4 can assert the recovery path linked the gap to the resolved PR.
+GAP_IDS=("INFRA-8209")
+BM_LINK_PR_LOG="$TMP/link_pr_${mode}.log"
+_bm_link_pr() {
+    local pr="\${1:-}"
+    echo "_bm_link_pr gaps=\${GAP_IDS[*]:-} pr=\$pr" >> "\$BM_LINK_PR_LOG"
+}
+
 $BLOCK
 
 echo "REACHED_END pr=\${_recover_pr_num:-none}"
@@ -140,6 +153,11 @@ grep -q "rate limit exceeded" "$TMP/ambient_fail.jsonl" 2>/dev/null \
 [[ ! -f "$TMP/err_trap_fail.flag" ]] \
     && ok "T1: ERR trap did NOT fire (failure reached the RESILIENT-217 handler)" \
     || fail "T1: ERR trap fired before the RESILIENT-217 handler"
+# CREDIBLE-1551: the failure path exits 1 BEFORE reaching _bm_link_pr, so no
+# gap→PR link is written when the PR never came into being.
+[[ ! -f "$TMP/link_pr_fail.log" ]] \
+    && ok "T1: _bm_link_pr NOT called when PR creation failed (nothing to link)" \
+    || fail "T1: _bm_link_pr called despite a failed PR create ($(cat "$TMP/link_pr_fail.log" 2>/dev/null))"
 
 echo
 echo "--- Test 2: gh pr create succeeds -> number parsed from the printed URL ---"
@@ -154,6 +172,10 @@ done
 case "$CREATE_CALL" in *--json*) fail "T2: --json passed to gh pr create" ;; *) ok "T2: no --json passed" ;; esac
 [[ ! -s "$TMP/ambient_succeed.jsonl" ]] && ok "T2: no failure event on success" || fail "T2: failure event on success"
 [[ ! -f "$TMP/err_trap_succeed.flag" ]] && ok "T2: ERR trap did not fire" || fail "T2: ERR trap fired"
+# CREDIBLE-1551: recovery path wrote the typed gap→PR link for the gap+resolved PR.
+grep -q "gaps=INFRA-8209 pr=9001" "$TMP/link_pr_succeed.log" 2>/dev/null \
+    && ok "T2: _bm_link_pr called with the gap (INFRA-8209) and the created PR #9001" \
+    || fail "T2: recovery path did not link INFRA-8209 → PR #9001 ($(cat "$TMP/link_pr_succeed.log" 2>/dev/null))"
 
 echo
 echo "--- Test 3: PR already exists -> gh pr create not invoked ---"
@@ -162,6 +184,9 @@ run_mode existing
 grep -q '^gh pr create' "$TMP/gh_calls_existing.log" \
     && fail "T3: gh pr create invoked despite an existing PR" || ok "T3: gh pr create skipped"
 printf '%s\n' "$OUT" | grep -q "REACHED_END pr=4242" && ok "T3: existing PR 4242 used" || fail "T3: existing PR not used"
+grep -q "gaps=INFRA-8209 pr=4242" "$TMP/link_pr_existing.log" 2>/dev/null \
+    && ok "T3: _bm_link_pr called with the gap (INFRA-8209) and the existing PR #4242" \
+    || fail "T3: recovery path did not link INFRA-8209 → PR #4242 ($(cat "$TMP/link_pr_existing.log" 2>/dev/null))"
 
 echo
 echo "--- Test 4: gh prints no URL -> number resolved via gh pr list --head ---"
@@ -171,6 +196,9 @@ printf '%s\n' "$OUT" | grep -q "REACHED_END pr=7777" \
     && ok "T4: PR number 7777 resolved via gh pr list --head" || fail "T4: fallback lookup failed ($OUT)"
 grep -c '^gh pr list' "$TMP/gh_calls_nourl.log" | grep -q '^2$' \
     && ok "T4: gh pr list consulted before and after create" || fail "T4: unexpected gh pr list call count"
+grep -q "gaps=INFRA-8209 pr=7777" "$TMP/link_pr_nourl.log" 2>/dev/null \
+    && ok "T4: _bm_link_pr called with the gap (INFRA-8209) and the fallback-resolved PR #7777" \
+    || fail "T4: recovery path did not link INFRA-8209 → PR #7777 ($(cat "$TMP/link_pr_nourl.log" 2>/dev/null))"
 
 echo
 echo "=== Results: $PASS passed, $FAIL failed ==="

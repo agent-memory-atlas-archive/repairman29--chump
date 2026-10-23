@@ -192,8 +192,13 @@ remediation_cmd() {
 
 # ── --apply mode ──────────────────────────────────────────────────────────────
 if [[ -n "$APPLY_PR" && -n "$APPLY_ACTION" ]]; then
-    gap_id="$(gh pr view "$APPLY_PR" --repo repairman29/chump --json title --jq '.title' 2>/dev/null \
-        | { read -r t; extract_gap_id "$t"; })"
+    # CREDIBLE-1551 (Phase R R2, AC2): resolve the gap this PR closes from the
+    # typed gap_prs FK (chump gap gaps-for-pr), NEVER from the PR title. The
+    # `ship-gap` action runs `chump gap ship <gap>`, and ship refuses a close
+    # whose gap_prs row is absent — so deriving the gap from the title here
+    # could only ever point `ship` at a gap it would then reject. The title
+    # regex (extract_gap_id) stays for the advisory display table below.
+    gap_id="$(chump gap gaps-for-pr "$APPLY_PR" 2>/dev/null | head -1)"
     cmd="$(remediation_cmd "$APPLY_PR" "$APPLY_ACTION" "$gap_id")"
     if [[ "$cmd" == "(no mechanical action"* ]]; then
         echo "[pr-triage] No mechanical action available for PR #$APPLY_PR action=$APPLY_ACTION." >&2

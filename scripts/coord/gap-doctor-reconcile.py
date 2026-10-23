@@ -210,6 +210,25 @@ def reconcile_one(gid: str, yaml_data: dict, db_row: dict, dry_run: bool) -> lis
     return actions
 
 
+def _gaps_for_pr(pr_number) -> set:
+    """CREDIBLE-1551 (Phase R R2, AC2): the gap IDs a typed gap_prs row links to
+    `pr_number`, via the FK reverse index (`chump gap gaps-for-pr`). Returns an
+    empty set on any failure (chump absent, no table, no links) — callers treat
+    "unknown" as "no link" and decline to close, which is the fail-closed side.
+    This is how a closer confirms the (gap, PR) pair the ship FK-gate requires
+    EXISTS before attempting a close the gate would otherwise refuse."""
+    try:
+        r = subprocess.run(
+            ["chump", "gap", "gaps-for-pr", str(int(pr_number))],
+            capture_output=True, text=True,
+        )
+    except (FileNotFoundError, ValueError):
+        return set()
+    if r.returncode != 0:
+        return set()
+    return {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+
+
 def check_closure_drift(db: dict, ambient_path: Path, dry_run: bool) -> int:
     """META-059: surface gaps where status=open BUT closed_pr is set and that
     PR is state=merged. Emits kind=gap_closure_drift to ambient.jsonl for each.
@@ -276,10 +295,22 @@ def check_closure_drift(db: dict, ambient_path: Path, dry_run: bool) -> int:
             # This is the safety net for the fragile bot-merge auto-close step
             # (CREDIBLE-295), which silently skips and leaves OPEN-BUT-LANDED ghosts.
             # Best-effort: a failure just re-tries next cycle (idempotent).
-            # Write the canonical store directly (state.db) — a bookkeeping close of
-            # an already-merged PR must not go through the ship-workflow CLI (which
-            # guards on current-main). This reconciler IS the state.db owner. The
-            # sibling field-reconcile pass keeps the YAML mirror in sync.
+            # CREDIBLE-1551 (Phase R R2, AC2): `chump gap ship --closed-pr` now
+            # REFUSES a close unless a gap_prs row links THIS PR to THIS gap. A
+            # drift row's closed_pr is operator/legacy-supplied and may point at a
+            # PR that was never FK-linked to the gap — attempting the ship would
+            # just trip the gate. Look the link up first via the typed reverse
+            # index (`chump gap gaps-for-pr`): close only when the (gap, PR) pair
+            # exists; otherwise leave the gap open. The gap_closure_drift event
+            # above still surfaces the drift so an operator can add the missing
+            # link (`chump gap link-pr`) and the next cycle closes it.
+            if gid not in _gaps_for_pr(pr_num):
+                print(
+                    f"  SKIP {gid}: PR #{pr_num} merged but no gap_prs row links it "
+                    f"to {gid} — not closing (CREDIBLE-1551 FK gate). Add the link: "
+                    f"chump gap link-pr {gid} {pr_num} --sha <merge-sha>"
+                )
+                continue
             try:
                 subprocess.run(
                     ["chump", "gap", "ship", gid, "--closed-pr", str(pr_num)],
@@ -485,18 +516,21 @@ def check_already_satisfied(state_db: Path, ambient_path: Path, dry_run: bool) -
     """INFRA-3826 backstop. Close open gaps whose work is ALREADY on main but
     that were never linked to the covering PR (closed_pr NULL).
 
-    HIGH confidence → auto-close already_satisfied:
-      the gap's latest worker cycle log fires the 3-factor already-satisfied
-      signal (already-done + no-op + covering PR), AND that PR is verified MERGED
-      on GitHub. Mirrors worker.sh's live INFRA-3808 close (status +
-      closed_pr + evidence receipt). Emits kind=gap_already_satisfied_closed.
+    CREDIBLE-1551 (Phase R R2, AC2): the auto-close is RETIRED. The covering PR
+    belongs to a DIFFERENT gap (the one actually worked) and was never gap_prs-
+    linked to this looping/covered gap, so `chump gap ship --closed-pr <cov_pr>`
+    now (correctly) refuses it. This pass therefore only ever FLAGS:
 
-    LOW confidence → FLAG only, never close (a wrong auto-close discards real
-    work): the detector fired but the PR is not merged / unresolvable, or gh is
-    unavailable so we cannot verify. Emits kind=gap_already_satisfied_flagged
-    with a reason. Leaves the gap open for a human/operator to adjudicate.
+    HIGH confidence (covering PR verified MERGED) → FLAG, reason
+      fk_close_not_applicable: the work is on main under another gap's PR, but
+      no gap_prs row links it here. An operator confirms + closes deliberately.
+      Emits kind=gap_already_satisfied_flagged.
 
-    Returns (closed_count, flagged_count).
+    LOW confidence (PR not merged / unresolvable / gh unavailable) → FLAG,
+      reason pr_not_merged|gh_unavailable. Emits kind=gap_already_satisfied_flagged.
+
+    Either way the gap is LEFT OPEN. Returns (closed_count, flagged_count) where
+    closed_count is now always 0 (kept for the stable call signature).
     """
     gaps = open_gaps_without_closed_pr(state_db)
     if not gaps:
@@ -539,34 +573,35 @@ def check_already_satisfied(state_db: Path, ambient_path: Path, dry_run: bool) -
             reason = "pr_not_merged"
 
         if merged:
+            # CREDIBLE-1551 (Phase R R2, AC2) — RETIRED auto-close. The covering
+            # PR #{cov_pr} implemented a DIFFERENT gap (the one actually worked);
+            # it was never gap_prs-linked to THIS looping/covered gap. Closing via
+            # `chump gap ship {gid} --closed-pr {cov_pr}` was always semantically
+            # wrong (it would stamp another gap's PR as this gap's closer) AND is
+            # now impossible: the ship FK-gate refuses a (gid, cov_pr) pair that
+            # has no gap_prs row. So this HIGH-confidence case no longer
+            # auto-closes — it FLAGS for human review (reason
+            # fk_close_not_applicable), same as the unverifiable case below but
+            # with a distinct reason. An operator who confirms the coverage closes
+            # it deliberately (a non-PR status flip, or by linking a PR that truly
+            # implemented {gid}). This trades the zero-waste auto-close for
+            # correctness; INFRA-3826's re-pick suppression now needs the operator
+            # or a proper FK link.
             print(
-                f"  SATISFIED {gid}: cycle log {log.name} reports work already "
-                f"shipped in PR #{cov_pr} (merged {merged_at[:10]})"
+                f"  FLAG {gid}: cycle log {log.name} reports work already shipped "
+                f"in PR #{cov_pr} (merged {merged_at[:10]}), but #{cov_pr} is not "
+                f"gap_prs-linked to {gid} — NOT closing (CREDIBLE-1551 FK gate); "
+                f"flagging for human review"
             )
+            flagged += 1
             if not dry_run:
-                evidence = (
-                    f"already-satisfied backstop (INFRA-3826): worker cycle log "
-                    f"{log.name} reports the work already shipped in PR #{cov_pr} "
-                    f"(merged {merged_at[:10]}); worktree had no diff to ship. "
-                    f"Auto-closed by gap-doctor-reconcile --check-already-satisfied."
-                )
-                try:
-                    subprocess.run(
-                        ["chump", "gap", "ship", gid, "--closed-pr", str(int(cov_pr))],
-                        check=True, capture_output=True, text=True
-                    )
-                    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                    _emit(ambient_path, {
-                        "ts": ts, "kind": "gap_already_satisfied_closed",
-                        "gap_id": gid, "pr_number": int(cov_pr),
-                        "merged_at": merged_at, "source": "gap-doctor-reconcile",
-                    })
-                    closed += 1
-                    print(f"  CLOSED {gid} already_satisfied (covered by PR #{cov_pr})")
-                except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                    print(f"  WARN could not close {gid}: {e}", file=sys.stderr)
-            else:
-                closed += 1
+                ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                _emit(ambient_path, {
+                    "ts": ts, "kind": "gap_already_satisfied_flagged",
+                    "gap_id": gid, "pr_number": int(cov_pr),
+                    "reason": "fk_close_not_applicable", "cycle_log": log.name,
+                    "merged_at": merged_at, "source": "gap-doctor-reconcile",
+                })
         else:
             # Signal fired but we can't stand behind an auto-close. FLAG it.
             print(
@@ -868,10 +903,19 @@ def check_merged_pr_head_branch(state_db: Path, ambient_path: Path, dry_run: boo
 
 
 # CREDIBLE-1552 (Phase R R2, AC1/AC5): gap IDs look like INFRA-123 / CREDIBLE-9.
-# Used ONLY by the report-only pass below to name the open gap a merged PR
-# titles — never to CLOSE anything (closes route exclusively through the
-# gap_prs FK). gap-doctor-reconcile.py is allowlisted in
-# scripts/ci/no-title-regex-gap-closers-allowlist.txt for exactly this reason.
+# Used ONLY by the report-only pass below (check_unlinked_merged_prs) to NAME
+# the open gap a merged PR titles — never to CLOSE anything. Every close path in
+# this file routes through the typed gap_prs FK: the merged-pr-links drain reads
+# gap_prs directly (gap_pr_links), closure-drift now confirms the (gap, PR) pair
+# via `chump gap gaps-for-pr` before shipping, and already-satisfied no longer
+# closes at all (CREDIBLE-1551).
+#
+# This file is NOT in scripts/ci/no-title-regex-gap-closers-allowlist.txt — that
+# allowlist is TRUE ZERO (CREDIBLE-1551). It passes the no-title-closer gate on
+# its own merits: its only title source, recent_merged_prs()'s multi-line
+# `gh pr list --json number,title` call, does not match the gate's single-line
+# `pr (list|view) … --json … title` source pattern, and even if it did, no
+# gap-ID regex here sits within the gate's proximity window of a close action.
 _GAP_ID_RE = re.compile(r"\b[A-Z][A-Z0-9]*-[0-9]+\b")
 
 
@@ -980,9 +1024,10 @@ def main():
     )
     ap.add_argument(
         "--check-already-satisfied", action="store_true",
-        help="INFRA-3826: scan open gaps with NO closed_pr; close "
-             "already_satisfied when a worker cycle log shows the work already "
-             "shipped in a merged PR, else FLAG low-confidence matches",
+        help="INFRA-3826: scan open gaps with NO closed_pr whose cycle log shows "
+             "the work already shipped. CREDIBLE-1551: auto-close RETIRED (the "
+             "covering PR belongs to another gap and is not gap_prs-linked here, "
+             "so the ship FK-gate refuses it) — this now only FLAGS for review",
     )
     ap.add_argument(
         "--check-merged-pr-links", "--check-merged-pr-titles",

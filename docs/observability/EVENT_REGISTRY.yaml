@@ -5263,6 +5263,12 @@ events:
 
   # ── INFRA-3826: already-satisfied backstop (closed_pr NULL class) ──────────
   - kind: gap_already_satisfied_closed
+    deprecated: true
+    deprecated_reason: >-
+      CREDIBLE-1551 retired --check-already-satisfied auto-close (the covering
+      PR belongs to another gap and is never gap_prs-linked to the covered gap,
+      so the close is refused by the ship FK gate; HIGH-confidence now emits
+      gap_already_satisfied_flagged with reason=fk_close_not_applicable).
     effect_metric: self
     emitter: scripts/coord/gap-doctor-reconcile.py --check-already-satisfied (INFRA-3826)
     trigger: open gap with NO closed_pr whose latest worker cycle log fires the

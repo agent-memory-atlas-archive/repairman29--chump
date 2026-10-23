@@ -384,6 +384,18 @@ fn gap_ship_reserved_gap_marks_done() {
     let dir = tempfile::tempdir().unwrap();
     setup_isolated_repo(dir.path());
     let id = reserve_gap(dir.path(), "INFRA", "test-ship-happy");
+    // CREDIBLE-1551 AC2: ship --closed-pr requires the gap_prs FK written at
+    // PR-open (`chump gap link-pr`). Link before shipping, as every PR-opening
+    // path does right after `gh pr create`.
+    let link = run(
+        dir.path(),
+        &["gap", "link-pr", &id, "9999", "--sha", "deadbeef"],
+    );
+    assert!(
+        link.status.success(),
+        "gap link-pr failed: {}",
+        stderr(&link)
+    );
     let out = run(dir.path(), &["gap", "ship", &id, "--closed-pr", "9999"]);
     assert!(
         out.status.success(),
@@ -417,6 +429,16 @@ fn gap_ship_updates_state_db_and_yaml_atomically() {
     setup_isolated_repo(dir.path());
     let id = reserve_gap(dir.path(), "INFRA", "test-ship-yaml-atomic");
 
+    // CREDIBLE-1551 AC2: link the PR before shipping (the gap_prs FK gate).
+    let link = run(
+        dir.path(),
+        &["gap", "link-pr", &id, "4242", "--sha", "deadbeef"],
+    );
+    assert!(
+        link.status.success(),
+        "gap link-pr failed: {}",
+        stderr(&link)
+    );
     // Ship the gap with a known closed_pr.
     let out = run(dir.path(), &["gap", "ship", &id, "--closed-pr", "4242"]);
     assert!(

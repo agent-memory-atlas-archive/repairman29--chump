@@ -268,7 +268,10 @@ gh pr create --base main --title "<title>" --body "<body>"
 #    bot-merge.sh does this automatically at PR-open (scripts/coord/bot-merge.sh
 #    _bm_link_pr:562, invoked at :4198); on this manual path YOU must do it, or
 #    the FK closer (gap-doctor-reconcile --check-merged-pr-links) will never
-#    close the gap — it trusts the gap_prs row, NEVER the PR title. Idempotent.
+#    close the gap — it trusts the gap_prs row, NEVER the PR title. Also,
+#    `chump gap ship` (step 5) REFUSES to close a PR-backed gap without this
+#    gap_prs row (CREDIBLE-1551 AC2), so the manual path must write it too or
+#    the close is rejected. Idempotent.
 chump gap link-pr <GAP-ID> <PR-number> --sha "$(git rev-parse HEAD)"
 
 # 4. Arm auto-merge
@@ -523,6 +526,10 @@ scripts/coord/bot-merge.sh --gap <GAP-ID> --auto-merge
 If no PR exists yet for the branch:
 ```bash
 gh pr create --head chump/<gap-id>-claim --base main --title "<title>"
+# Write the typed gap→PR link so the reconciler / `chump gap ship` can close
+# the gap from the gap_prs FK (CREDIBLE-1550 AC1; the ship-time gate is
+# CREDIBLE-1551 AC2). Without it the close is refused.
+chump gap link-pr <GAP-ID> <N> --sha "$(git rev-parse HEAD)"
 gh pr merge <N> --auto --squash
 ```
 

@@ -29,6 +29,19 @@ ALLOWLIST="$REPO_ROOT/scripts/ci/no-title-regex-gap-closers-allowlist.txt"
 ADVISORY=0
 [[ "${1:-}" == "--advisory" ]] && ADVISORY=1
 
+# TIER-2 proximity window: a title→gap-ID extraction this many non-comment
+# lines (or fewer) from a gap close is treated as a title→close dataflow.
+# Tight enough that display/respawn title parsing far from any close is exempt,
+# but WIDE enough to catch the real closer shapes: main's original
+# chump-pr-triage `--apply` block puts the `gh pr view --json title | extract_gap_id`
+# source 16-17 lines from the `chump gap ship` it feeds, so a 15-line window (the
+# CREDIBLE-1551 R2 initial value) silently MISSED it (and any regex 17+ lines
+# above a ship). The meta-test scripts/ci/test-no-title-regex-gate-fixtures.sh
+# PROVES this value: it drives the gate against verbatim-M2 and 17-line fixtures
+# and FAILS if the window is set to 0 or 15. Raise only with a fixture that
+# proves the new value is still tight enough.
+PROX_WINDOW=20
+
 SCAN_DIRS=(
   "$REPO_ROOT/scripts/coord"
   "$REPO_ROOT/scripts/dispatch"
@@ -79,19 +92,79 @@ for dir in "${SCAN_DIRS[@]}"; do
       continue
     fi
 
-    # ── TIER 2: gap-ID derived from a PR title / commit subject + a close ────
-    # (a) title/subject source of a gap ID
+    # ── TIER 2: title→gap-ID extraction in PROXIMITY to a gap close ─────────
+    # A title-regex CLOSER sources a gap ID from a PR title / commit subject and
+    # feeds it to a close. A file that merely parses a PR title for DISPLAY /
+    # RESPAWN / dispatch FAR from any close (stale-pr-reaper's respawn+retire
+    # loops, chump-pr-triage's advisory remediation table) is not a closer and
+    # must not trip the gate. CREDIBLE-1551 converted both legacy closers' close
+    # paths to the gap_prs FK (`chump gap gaps-for-pr`) — that reverse lookup is
+    # what proves a close is FK-resolved, not title-derived.
+    #
+    # Detection has three parts, in order:
+    #   (a) src  — does the file source a gap ID from a PR title/commit subject
+    #              at all? If not, it cannot be a title closer → skip.
+    #   (FK)     — STRUCTURAL ALLOWLIST (CREDIBLE-1551, replaces the path
+    #              allowlist so it can stay at TRUE ZERO): a file that resolves
+    #              the gap it closes through the typed gap_prs FK
+    #              (`chump gap gaps-for-pr`) is route-correct by construction —
+    #              its close trusts the FK, and the title parse it still does is
+    #              for display/respawn. Exempt it. (The ship-gate FK refusal in
+    #              `chump gap ship` is the real backstop; this gate is
+    #              defense-in-depth, so a file that both calls gaps-for-pr AND
+    #              smuggles a title close is a tolerated blind spot here, caught
+    #              at ship.)
+    #   (b/c)    — PROXIMITY: a title→gap-ID source (b) within $PROX_WINDOW
+    #              non-comment lines of a close action (c). b is the gap-ID
+    #              regex LITERAL (the direct `grep -oE '[A-Z]+-[0-9]+'` case,
+    #              incl. MG2: a regex 17 lines above a ship) OR the title-FETCH
+    #              line itself (`--json title`, `--jq '.title'`, `--format/
+    #              --pretty %s`) — main's original chump-pr-triage closer put
+    #              `gh pr view --json title --jq .title` ~16 lines from the
+    #              `chump gap ship` string it feeds (M2), which the initial
+    #              15-line window silently missed.
+    #              (b deliberately does NOT match a bare `extract_gap_id`/
+    #              `_extract_gap_ids` token: that also appears in docstrings and
+    #              function definitions — e.g. github-webhook-receiver.py — and
+    #              naming it there is not a title→close dataflow. The title-fetch
+    #              line + regex literal are enough to anchor M2 and MG2.)
+    #
+    # (a) title/subject source of a gap ID (whole-file — cheap)
     src=0
     if printf '%s\n' "$body" | grep -qE "(--format|--pretty)[= ]['\"]?[^'\"]*%s|format:%s"; then src=1; fi
     if printf '%s\n' "$body" | grep -qE "pr (list|view)[^|]*--json[^|]*title"; then src=1; fi
     [[ $src -eq 1 ]] || continue
-    # (b) a gap-ID regex literal (what pulls the ID out of that title/subject)
-    printf '%s\n' "$body" | grep -qE '\[A-Z\]\+-\[0-9\]\+|\[A-Z\]\[A-Z0-9\]\*-|\^\(\[A-Z\]' || continue
-    # (c) a gap close action
-    printf '%s\n' "$body" | grep -qE 'gap ship|gap["'\'' ]+,?["'\'' ]*ship|status: ?done' || continue
+
+    # (FK) structural allowlist: close routes through the gap_prs reverse lookup.
+    if printf '%s\n' "$body" | grep -qE 'gap[[:space:]"'\'',]+gaps-for-pr|gaps-for-pr'; then
+      continue
+    fi
+
+    # Comment-blanked view that PRESERVES line numbers (so proximity is measured
+    # on real code, and a doc-comment naming a token is never a hit — same intent
+    # as noncomment() above).
+    blanked="$(sed -E 's/^[[:space:]]*#.*$//' "$f" 2>/dev/null || true)"
+    # (b) line numbers of title→gap-ID sources: regex LITERALS that pull an ID
+    #     out of a title, PLUS the title-FETCH line that hands a title to one.
+    b_lines="$(printf '%s\n' "$blanked" \
+      | grep -nE '\[A-Z\]\+-\[0-9\]\+|\[A-Z\]\[A-Z0-9\]\*-|\^\(\[A-Z\]|(--json[^|]*title)|(--jq[^|]*\.title)|((--format|--pretty)[= ][^|]*%s)' \
+      | cut -d: -f1 || true)"
+    [[ -n "$b_lines" ]] || continue
+    # (c) line numbers of gap close actions
+    c_lines="$(printf '%s\n' "$blanked" | grep -nE 'gap ship|gap["'\'' ]+,?["'\'' ]*ship|status: ?done' | cut -d: -f1 || true)"
+    [[ -n "$c_lines" ]] || continue
+    # Proximity: any (title-source line, close line) pair within $PROX_WINDOW lines?
+    near=0
+    for bl in $b_lines; do
+      for cl in $c_lines; do
+        d=$(( bl > cl ? bl - cl : cl - bl ))
+        if [[ $d -le $PROX_WINDOW ]]; then near=1; break 2; fi
+      done
+    done
+    [[ $near -eq 1 ]] || continue
 
     if is_allowed "$rel"; then continue; fi
-    report "$rel derives a gap ID from a PR title/commit subject AND closes a gap — route the close through the gap_prs FK (CREDIBLE-1550), or allowlist with a reason if it ships by lease/branch gap-ID"
+    report "$rel extracts a gap ID from a PR title/commit subject AND closes a gap within $PROX_WINDOW lines without resolving it via the gap_prs FK — route the close through 'chump gap gaps-for-pr' (CREDIBLE-1550/1551: the typed link is the only close proof, never a title), or allowlist with a reason if it ships by lease/branch gap-ID"
   done < <(find "$dir" -type f \( -name '*.sh' -o -name '*.py' \) -print0)
 done
 

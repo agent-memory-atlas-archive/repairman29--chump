@@ -14,6 +14,7 @@ scripts/dev/chump-binary-unwedge.sh  # Heal INFRA-275 binary wedge (idempotent)
 ```bash
 CHUMP_GAP_CHECK=0 git push -u origin <your-branch> --force-with-lease
 gh pr create --base main --title "..." --body "..."
+chump gap link-pr <GAP-ID> <PR-number> --sha "$(git rev-parse HEAD)"  # CREDIBLE-1550 AC1: ship refuses without this link (CREDIBLE-1551 AC2)
 gh pr merge <PR-number> --auto --squash
 chump gap ship <GAP-ID> --closed-pr <PR-number> --update-yaml
 ```

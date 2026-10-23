@@ -12973,6 +12973,17 @@ async fn main() -> Result<()> {
                 // rationale. Uses repo_root's local `main` (the canonical replica),
                 // distinct from the CHUMP_GAP_SHIP_STALE_THRESHOLD gate above which
                 // checks the current worktree's HEAD.
+                //
+                // CREDIBLE-1551 (Phase R R2, AC2) KNOWN LIMITATION — DO NOT fix here
+                // (RESILIENT-1650 owns it): when this routes to the fleet-server, the
+                // `ship` op is forwarded, but `chump gap link-pr` has no server-routing
+                // path — it only ever writes the LOCAL state.db. So on a stale client
+                // whose ships are forwarded, the gap_prs row the ship FK-gate requires
+                // lives on the client while the ship executes on the server, and a
+                // correctly-linked close would be refused server-side. The ship-gate
+                // itself is correct; the split is a link-pr routing gap tracked by
+                // RESILIENT-1650. Documented in the CREDIBLE-1551 PR body + here so the
+                // next reader does not "fix" the ship-gate thinking it is the bug.
                 if let Ok(server_base) = std::env::var(gap_route::GAP_SERVER_ENV) {
                     let server_base = server_base.trim().to_string();
                     if !server_base.is_empty() {
@@ -13055,7 +13066,14 @@ async fn main() -> Result<()> {
                             .filter(|b| !b.is_empty() && b != "HEAD" && b != "main")
                             .and_then(|b| chump_gap_store::merged_pr_for_branch(&repo_root, &b));
                         if let Some(n) = found {
-                            eprintln!("[gap ship] closed_pr resolved from the PR that merged this branch: #{n}");
+                            // CREDIBLE-1551 (Phase R R2, AC2): a closed_pr the CLI
+                            // auto-resolves is held to the SAME gap_prs FK gate as an
+                            // explicit --closed-pr — `store.ship` refuses unless a
+                            // gap_prs row links #{n} to this gap. Say so here so the
+                            // refusal that follows is not mysterious ("I never passed
+                            // --closed-pr"): the merge was auto-detected, and it still
+                            // needs the typed link.
+                            eprintln!("[gap ship] closed_pr auto-resolved from the PR that merged this branch: #{n} (CREDIBLE-1551: this close requires a gap_prs link #{n} -> {gap_id}; if refused, run `chump gap link-pr {gap_id} {n} --sha <merge-sha>` then retry)");
                         }
                         found
                     }
@@ -13292,6 +13310,13 @@ async fn main() -> Result<()> {
                         std::process::exit(1);
                     }
                 }
+                // CREDIBLE-1551: return so the handled subcommand does not fall
+                // through to main's "unknown subcommand 'gap'" catch-all (which
+                // would exit 2). Pre-existing latent bug — link-pr was only ever
+                // called best-effort (`>/dev/null 2>&1`) by bot-merge, so the
+                // spurious exit 2 was never observed; the manual link-pr paths
+                // added for AC2 call it under `set -e`, so the return matters.
+                return Ok(());
             }
             // CREDIBLE-1552 (Phase R R2): remove ONE gap_prs row through the
             // store (single-writer). Undoes a mislinked gap→PR edge — e.g. a
@@ -13341,6 +13366,59 @@ async fn main() -> Result<()> {
                         std::process::exit(1);
                     }
                 }
+            }
+            // CREDIBLE-1551 (Phase R R2, AC2): reverse of link-pr — print the
+            // gap IDs that a typed gap_prs row links to a PR number, newest
+            // first, one per line. This is the FK-backed replacement for parsing
+            // gap IDs out of a merged PR's title/body: the two legacy title-regex
+            // closers (stale-pr-reaper's INFRA-674 ghost block and
+            // chump-pr-triage's `--apply ship-gap`) now resolve the gap to close
+            // from here instead of a title regex, so the no-title-closer
+            // allowlist empties to true zero.
+            "gaps-for-pr" => {
+                if args
+                    .iter()
+                    .skip(3)
+                    .any(|a| matches!(a.as_str(), "--help" | "-h"))
+                {
+                    println!(
+                        "Usage: chump gap gaps-for-pr <PR-NUMBER>\n\n\
+                         Print the gap IDs linked to PR-NUMBER in the gap_prs table\n\
+                         (newest first, one per line). The typed FK replacement for\n\
+                         parsing gap IDs out of a PR title/body when closing a gap."
+                    );
+                    return Ok(());
+                }
+                let pr_number: i64 = args
+                    .get(3)
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .filter(|n| *n > 0)
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                            "chump gap gaps-for-pr: PR-NUMBER must be a positive integer (got {:?})",
+                            args.get(3)
+                        );
+                        std::process::exit(2);
+                    });
+                match store.gaps_for_pr(pr_number) {
+                    Ok(gaps) => {
+                        if json_out {
+                            println!("{}", serde_json::to_string(&gaps)?);
+                        } else {
+                            for g in gaps {
+                                println!("{g}");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("chump gap gaps-for-pr: {e:#}");
+                        std::process::exit(1);
+                    }
+                }
+                // CREDIBLE-1551: return so this subcommand does not fall through
+                // to main's "unknown subcommand 'gap'" catch-all (exit 2) — same
+                // latent bug fixed for link-pr just above.
+                return Ok(());
             }
             // EFFECTIVE-038: A2A L2 task-suspension. `suspend` moves a gap
             // into status=waiting_operator carrying a structured question

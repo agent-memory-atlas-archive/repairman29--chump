@@ -2210,6 +2210,13 @@ if [[ "${CHUMP_BOT_MERGE_RECOVERY_MODE:-0}" == "1" ]]; then
         exit 1
     fi
 
+    # CREDIBLE-1551 (Phase R R2, AC2): the recovery path opens/re-resolves a PR
+    # too, so it must write the typed gap→PR link exactly like the main path
+    # (line "_bm_link_pr" below). Without this a wedge-then-recovery close would
+    # be refused by the gap_prs FK gate in `chump gap ship`. Best-effort,
+    # idempotent via link_pr's UPSERT.
+    _bm_link_pr "$_recover_pr_num"
+
     if [[ -n "$_recover_pr_num" && "${AUTO_MERGE:-0}" == "1" ]]; then
         # CREDIBLE-1576: same refusal on the recovery arm path — the PR is
         # already created above, so it survives; only the arm is refused.

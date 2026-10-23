@@ -1816,6 +1816,14 @@ jobs:
         # closer; pre-existing ones are tracked in the allowlist. Hermetic grep.
         run: bash scripts/ci/test-no-title-regex-gap-closers.sh
 
+      - name: no-title-closer gate proximity-window proof (CREDIBLE-1551 AC4)
+        # Meta-test for the gate above: drives it against verbatim-M2 (main's
+        # chump-pr-triage closer shape) and a regex-17-lines-above-ship fixture,
+        # proving the TIER-2 PROX_WINDOW catches both and passes FK-resolved +
+        # display-only negatives. FAILS if the window is narrowed back to 0 or 15
+        # (the 16/17-line closers would go undetected). Hermetic, no build.
+        run: bash scripts/ci/test-no-title-regex-gate-fixtures.sh
+
       - name: gap-doctor-reconcile closes via gap_prs FK only (CREDIBLE-1550 AC1/AC5)
         # The reconciler closes a gap ONLY via a typed gap_prs row linking a
         # merged PR — never a title. Fixture proves an umbrella named by a PR
@@ -1831,6 +1839,22 @@ jobs:
         # gaps shut and starve workers on ghosts. (Part 2 — title-scan window —
         # was dropped with the title closer itself.)
         run: bash scripts/ci/test-unresolved-deps-resolution.sh
+
+      - name: gap ship refuses without a gap_prs FK (CREDIBLE-1551 / 1550 AC2)
+        # Completes the umbrella: `chump gap ship --closed-pr N` is refused
+        # unless a gap_prs row links PR #N to the gap (proof-of-merge alone is
+        # not enough). On the landed ship the row flips open -> merged. Also
+        # asserts the no-title-closer allowlist is TRUE ZERO (both legacy
+        # title-regex closers converted to `chump gap gaps-for-pr`). Hermetic.
+        run: CHUMP_BIN="${CARGO_TARGET_DIR:-$(pwd)/target}/debug/chump" bash scripts/ci/test-credible-1551-ship-fk-gate.sh
+
+      - name: converted closers close via gap_prs FK only (CREDIBLE-1551 AC2)
+        # Behavioural proof that stale-pr-reaper.sh and chump-pr-triage.sh
+        # --apply ship-gap close a gap only from the typed gap_prs FK: a merged
+        # PR whose TITLE names an open gap but carries NO gap_prs link must NOT
+        # ship it; a FK-linked PR must. Diverges the gh-stub title from the
+        # gaps-for-pr result so restoring a title regex flips it red. Hermetic.
+        run: bash scripts/ci/test-credible-1551-converted-closers-behaviour.sh
 
       - name: CSS token-discipline smoke (INFRA-1590)
         run: bash scripts/ci/test-css-token-discipline.sh

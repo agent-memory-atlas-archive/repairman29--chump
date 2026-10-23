@@ -306,10 +306,17 @@ Run \`scripts/coord/gap-preflight.sh ${DONE_LIST// / }\` to confirm, then pick a
 
 done <<< "$PRS"
 
-# INFRA-674: ghost-status reaper — for each MERGED PR in the last 24h,
-# parse gap IDs from title+body; if state.db shows the gap still open,
-# run `chump gap ship` to close it. This catches the "shipped but never
-# closed" phantom that blocks the picker for hours (e.g. INFRA-664 via #1264).
+# INFRA-674: ghost-status reaper — for each MERGED PR in the last 24h, resolve
+# the gap(s) it closes from the typed gap_prs FK (CREDIBLE-1550 AC1, written at
+# PR-open); if state.db shows the gap still open, run `chump gap ship` to close
+# it. This catches the "shipped but never closed" phantom that blocks the picker
+# for hours (e.g. INFRA-664 via #1264).
+#
+# CREDIBLE-1551 (Phase R R2, AC2): the gap to close is resolved from
+# `chump gap gaps-for-pr` — NEVER parsed from the merged PR's title or body. A
+# title match was never proof the PR implemented the gap (it falsely closed the
+# R3 umbrella CREDIBLE-1492 from a docs-only receipt PR). `chump gap ship`
+# enforces the same gap_prs link, so a merged PR with no row closes nothing.
 GHOST_CLOSED=0
 GHOST_CLOSED_PAIRS=""
 if command -v chump >/dev/null 2>&1; then
@@ -323,17 +330,17 @@ if command -v chump >/dev/null 2>&1; then
 
     MERGED_PRS=$(gh pr list --state merged \
         --search "merged:>=${SINCE_DATE}" \
-        --json number,title,body \
-        --jq '.[] | "\(.number)\t\(.title)\t\(.body // "")"' 2>/dev/null || true)
+        --json number \
+        --jq '.[] | "\(.number)"' 2>/dev/null || true)
 
     if [[ -z "$MERGED_PRS" ]]; then
         info "No merged PRs in last 24h — nothing to scan."
     else
-        while IFS=$'\t' read -r M_NUM M_TITLE M_BODY; do
+        while IFS=$'\t' read -r M_NUM; do
             [[ -z "$M_NUM" ]] && continue
 
-            M_GAP_IDS=$(printf '%s\n%s\n' "$M_TITLE" "$M_BODY" \
-                | grep -oE '\b[A-Z]+-[0-9]+\b' | sort -u || true)
+            # Resolve the gap(s) to close from the typed gap_prs FK, not a title.
+            M_GAP_IDS=$(chump gap gaps-for-pr "$M_NUM" 2>/dev/null | sort -u || true)
             [[ -z "$M_GAP_IDS" ]] && continue
 
             for GID in $M_GAP_IDS; do

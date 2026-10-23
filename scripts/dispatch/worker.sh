@@ -1794,6 +1794,7 @@ ${_hard_rules_inject}
 - If bot-merge.sh hangs/dies: fall back to manual ship —
     git push -u origin <branch>
     gh pr create --base main --title \"...\" --body \"...\"
+    chump gap link-pr ${GAP_ID} <PR#> --sha \"\$(git rev-parse HEAD)\"  # CREDIBLE-1551 AC2: ship refuses without this gap_prs link
     chump gap ship ${GAP_ID} --closed-pr <PR#> --update-yaml
     git push (commit the close)
     gh pr merge <PR#> --auto --squash

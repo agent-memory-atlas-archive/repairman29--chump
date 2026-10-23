@@ -136,5 +136,66 @@ grep -q "kind: gap_closure_drift" "$REPO_ROOT/docs/observability/EVENT_REGISTRY.
     || fail "gap_closure_drift not registered in EVENT_REGISTRY.yaml"
 ok "EVENT_REGISTRY.yaml registers gap_closure_drift"
 
+# ── Test 5 (CREDIBLE-1551 AC2): closure-drift closes only when the gap_prs FK ─
+# links the PR to the gap. A drifted gap whose merged PR IS gap_prs-linked gets
+# shipped; one whose merged PR is NOT linked is SKIPped (the ship FK-gate would
+# refuse it anyway) — the drift is still surfaced for an operator to add a link.
+# Fake chump answers `gaps-for-pr` and records every `gap ship` so we can see
+# which drift actually closed.
+cat >"$TMP/fakebin/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "repo" && "$2" == "view" ]]; then echo "test/repo"; exit 0; fi
+if [[ "$1" == "api" ]]; then
+    case "$2" in
+        */pulls/9999) echo "closed 2026-05-13T19:00:00Z"; exit 0 ;;  # merged, LINKED gap
+        */pulls/9996) echo "closed 2026-05-14T19:00:00Z"; exit 0 ;;  # merged, UNLINKED gap
+        *) echo "fake-gh: unhandled $2" >&2; exit 1 ;;
+    esac
+fi
+exit 0
+EOF
+chmod +x "$TMP/fakebin/gh"
+SHIPS="$TMP/ships.log"; : >"$SHIPS"
+cat >"$TMP/fakebin/chump" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "gap" && "\$2" == "list" && "\$3" == "--json" ]]; then
+  cat <<JSON
+[
+  {"id":"DRIFT-LINKED","status":"open","closed_pr":9999,"title":"linked drift"},
+  {"id":"DRIFT-UNLINKED","status":"open","closed_pr":9996,"title":"unlinked drift"}
+]
+JSON
+  exit 0
+fi
+if [[ "\$1" == "gap" && "\$2" == "gaps-for-pr" ]]; then
+  case "\$3" in
+    9999) echo "DRIFT-LINKED" ;;   # the (gap, PR) pair exists
+    *) : ;;                         # 9996 → no gap_prs row (empty)
+  esac
+  exit 0
+fi
+if [[ "\$1" == "gap" && "\$2" == "ship" ]]; then
+  echo "\$3 \$5" >> "$SHIPS"        # gid  --closed-pr-value
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "$TMP/fakebin/chump"
+rm -f "$AMB"
+set +e
+out="$(run_drift "" 2>&1)"
+rc=$?
+set -e
+grep -qx "DRIFT-LINKED 9999" "$SHIPS" \
+    || fail "closure-drift did not ship the FK-linked DRIFT-LINKED (ships: $(cat "$SHIPS"); out: $out)"
+grep -q '^DRIFT-UNLINKED ' "$SHIPS" \
+    && fail "closure-drift SHIPPED the unlinked DRIFT-UNLINKED — FK gate not consulted (ships: $(cat "$SHIPS"))"
+grep -q "SKIP DRIFT-UNLINKED" <<<"$out" \
+    || fail "closure-drift did not print a SKIP for the unlinked gap: $out"
+# The drift is still SURFACED for both (detection precedes the link check).
+grep -q '"gap_id":"DRIFT-UNLINKED"' "$AMB" \
+    || fail "closure-drift did not emit gap_closure_drift for the unlinked gap: $(cat "$AMB")"
+ok "closure-drift closes only the FK-linked drift; skips (but still surfaces) the unlinked one"
+
 echo
-echo "All META-059 gap-closure-reconcile tests passed."
+echo "All META-059 / CREDIBLE-1551 gap-closure-reconcile tests passed."

@@ -111,6 +111,13 @@ else
 fi
 
 # ── AC3 + AC4 ───────────────────────────────────────────────────────────────
+# CREDIBLE-1551 (Phase R R2, AC2): ship now also requires a gap_prs row linking
+# the closed PR to the gap (the FK written at PR-open). Write it for the landed
+# PR #4242 before the ship — exactly as bot-merge.sh does right after
+# `gh pr create`. G_UNLANDED above is refused by the proof-of-merge gate first,
+# so it deliberately gets no link.
+chump gap link-pr "$G_SHIP" 4242 --sha "$(git -C "$R" rev-parse HEAD)" >/dev/null 2>&1 \
+    || die "link-pr fixture setup failed for $G_SHIP"
 out="$(chump gap ship "$G_SHIP" --closed-pr 4242 --update-yaml 2>&1)"; rc=$?
 [[ $rc -eq 0 && "$(status_of "$G_SHIP")" == "done" ]] || die "first ship failed: rc=$rc out=${out:0:300}"
 ok "first ship lands the transition"
