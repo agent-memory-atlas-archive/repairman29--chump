@@ -654,15 +654,90 @@ fn run_inner(args: &[String]) -> Result<i32> {
 
 // ── Stage implementations ─────────────────────────────────────────────────
 
-/// EFFECTIVE-353: load a filed gap from the canonical chump gap store
-/// (`.chump/state.db` under the current repo root). Best-effort — returns None
-/// when the store can't be opened or the ID isn't present, so callers fail-soft
-/// to a placeholder synthesis. Runs before any clone/cwd change, so the repo
-/// root still resolves to the chump repo whose store holds the gap.
+/// EFFECTIVE-353 + INFRA-8091: load a filed gap from the canonical chump gap store.
+/// Resolves `CHUMP_STATE_DB` first, then `.chump/state.db` under the current repo
+/// root, then the main checkout root if running inside a linked git worktree, then
+/// `~/chump/.chump/state.db` and `~/.chump/state.db`.
 fn load_stored_gap(gap_id: &str) -> Option<chump_gap_store::GapRow> {
     let repo_root = crate::repo_path::repo_root();
-    let store = chump_gap_store::GapStore::open(&repo_root).ok()?;
-    store.get(gap_id).ok().flatten()
+    if let Ok(store) = chump_gap_store::GapStore::open(&repo_root) {
+        if let Ok(Some(row)) = store.get(gap_id) {
+            return Some(row);
+        }
+    }
+    if let Ok(out) = Command::new("git")
+        .args([
+            "-C",
+            &repo_root.to_string_lossy(),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ])
+        .output()
+    {
+        if out.status.success() {
+            let common = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if let Some(main_root) = Path::new(&common).parent() {
+                if let Ok(store) = chump_gap_store::GapStore::open(main_root) {
+                    if let Ok(Some(row)) = store.get(gap_id) {
+                        return Some(row);
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let home_path = Path::new(&home);
+        for cand_root in [home_path.join("chump"), home_path.to_path_buf()] {
+            if cand_root.join(".chump/state.db").exists() {
+                if let Ok(store) = chump_gap_store::GapStore::open(&cand_root) {
+                    if let Ok(Some(row)) = store.get(gap_id) {
+                        return Some(row);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// INFRA-8091: true when `gap_id` looks like a canonical `<PREFIX>-<DIGITS>` gap ID
+/// (e.g. `PRODUCT-281`, `INFRA-8091`, `ZERO-WASTE-010`).
+fn is_canonical_gap_id(gap_id: &str) -> bool {
+    let Some((prefix, num)) = gap_id.rsplit_once('-') else {
+        return false;
+    };
+    !prefix.is_empty()
+        && !num.is_empty()
+        && num.chars().all(|c| c.is_ascii_digit())
+        && prefix
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-')
+        && prefix
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_uppercase())
+            .unwrap_or(false)
+}
+
+/// INFRA-8091: extract `external_repo:<owner/name>` tag from a stored gap's
+/// `notes` or `source_doc` if present.
+fn extract_external_repo_tag(row: &chump_gap_store::GapRow) -> Option<String> {
+    for field in [&row.notes, &row.source_doc] {
+        for tok in field.split(|c: char| {
+            c.is_whitespace() || matches!(c, ',' | ';' | ')' | '(' | '[' | ']' | '"' | '\'')
+        }) {
+            if let Some(slug) = tok.strip_prefix("external_repo:") {
+                let s = slug.trim_matches('/');
+                if let Some((owner, name)) = s.split_once('/') {
+                    if !owner.is_empty() && !name.is_empty() && !name.contains('/') {
+                        return Some(format!("{owner}/{name}"));
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// EFFECTIVE-353: map a stored `GapRow` into the `ProposedGap` the implement
@@ -737,7 +812,27 @@ fn pick_gap(opts: &Opts, clone_dir: &Path) -> Result<Vec<ProposedGap>> {
         // SOME-ID` working). Operator chose the work — single candidate, no
         // dedup-advance either way.
         if let Some(row) = load_stored_gap(gap_id) {
+            if let Some(tagged_repo) = extract_external_repo_tag(&row) {
+                if !tagged_repo.eq_ignore_ascii_case(&opts.owner_repo) {
+                    bail!(
+                        "external_repo:repo_mismatch — gap {} is tagged external_repo:{} \
+                         but `chump improve` was invoked for {} (INFRA-8091)",
+                        gap_id,
+                        tagged_repo,
+                        opts.owner_repo
+                    );
+                }
+            }
             return Ok(vec![proposed_gap_from_stored(&row)]);
+        }
+        let strict_gap =
+            opts.apply || std::env::var("CHUMP_IMPROVE_REQUIRE_STORED_GAP").as_deref() == Ok("1");
+        if strict_gap && is_canonical_gap_id(gap_id) {
+            bail!(
+                "external_repo:gap_not_found_in_canonical_store — gap {gap_id} could not be \
+                 resolved from canonical state.db; refusing to spawn agent on a placeholder \
+                 prompt (INFRA-8091)"
+            );
         }
         return Ok(vec![ProposedGap {
             title: gap_id.clone(),
@@ -2815,6 +2910,89 @@ fn fix_retries() -> usize {
         .max(1)
 }
 
+/// INFRA-8091: wall-clock timeout in seconds for a remediation backend run.
+/// Configurable via `CHUMP_IMPROVE_FIX_TIMEOUT_SECS` (default 600s; set <=60 in
+/// fast-fail tests or tight remediation loops).
+fn fix_timeout_secs() -> u64 {
+    std::env::var("CHUMP_IMPROVE_FIX_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(600)
+        .max(1)
+}
+
+/// INFRA-8091: spawn `cmd` with piped stdout/stderr and enforce `timeout_secs`
+/// wall-clock deadline so a wedged backend or git network operation fails fast
+/// instead of hanging the improve cycle for 23 minutes.
+fn run_cmd_bounded(
+    cmd: &mut Command,
+    timeout_secs: u64,
+    label: &str,
+) -> Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().with_context(|| format!("spawn {label}"))?;
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+    let out_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut r) = stdout_pipe.take() {
+            let _ = r.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let err_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut r) = stderr_pipe.take() {
+            let _ = r.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        match child.try_wait().with_context(|| format!("wait {label}"))? {
+            Some(status) => {
+                let stdout = out_handle.join().unwrap_or_default();
+                let stderr = err_handle.join().unwrap_or_default();
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let stderr = err_handle.join().unwrap_or_default();
+                    let stdout = out_handle.join().unwrap_or_default();
+                    let detail = String::from_utf8_lossy(&stderr)
+                        .lines()
+                        .chain(String::from_utf8_lossy(&stdout).lines())
+                        .map(str::trim)
+                        .filter(|l| !l.is_empty())
+                        .take(3)
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    bail!(
+                        "external_repo:remediation_backend_timeout: {label} timed out after {timeout_secs}s{}",
+                        if detail.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" — {detail}")
+                        }
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 /// The `gh` binary — injectable for tests via `CHUMP_IMPROVE_GH_BIN`.
 fn improve_gh_bin() -> String {
     std::env::var("CHUMP_IMPROVE_GH_BIN").unwrap_or_else(|_| "gh".to_string())
@@ -3095,18 +3273,34 @@ fn fix_pr_dispatch(
         c
     };
 
-    let out = cmd
-        .output()
-        .with_context(|| format!("spawn improve fix backend `{backend}`"))?;
+    let out = run_cmd_bounded(
+        &mut cmd,
+        fix_timeout_secs(),
+        &format!("improve fix backend `{backend}`"),
+    )?;
     let _ = std::fs::remove_file(&prompt_file);
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let detail = stderr
+            .lines()
+            .chain(stdout.lines())
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .take(5)
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let detail = if detail.is_empty() {
+            "(no output on stderr or stdout)".to_string()
+        } else {
+            detail
+        };
         bail!(
-            "improve fix backend `{}` exited {} — {}",
+            "external_repo:remediation_backend_failed: improve fix backend `{}` exited {} — {}",
             backend,
             out.status.code().unwrap_or(-1),
-            stderr.trim().lines().next().unwrap_or("(no output)")
+            detail
         );
     }
 
@@ -3850,13 +4044,23 @@ fn ensure_clone_exists(clone_dir: &Path, owner_repo: &str) -> Result<()> {
     let url = format!("https://github.com/{owner_repo}.git");
     let cd = clone_dir.to_string_lossy().to_string();
     println!("[improve] first-touch clone {owner_repo} → {cd}");
-    let ok = Command::new("git")
+    let git_timeout = std::env::var("CHUMP_IMPROVE_GIT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(60)
+        .max(1);
+    let mut clone_cmd = Command::new("git");
+    clone_cmd
         .args(["clone", "--quiet", &url, &cd])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !ok {
-        bail!("git clone {url} → {cd} failed");
+        .env("GIT_TERMINAL_PROMPT", "0");
+    let out = run_cmd_bounded(&mut clone_cmd, git_timeout, &format!("git clone {url}"))
+        .with_context(|| format!("external_repo:clone_failed — git clone {url} → {cd} failed"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        bail!(
+            "external_repo:clone_failed — git clone {url} → {cd} failed: {}",
+            stderr.trim()
+        );
     }
     Ok(())
 }
@@ -6626,5 +6830,77 @@ Some prose from the agent.
         assert!(!is_real_edit_status_line(""));
         assert!(!is_real_edit_status_line("M"));
         assert!(!is_real_edit_status_line(" M   "));
+    }
+
+    #[test]
+    fn infra8091_pick_gap_fails_fast_when_canonical_gap_missing_in_apply_mode() {
+        let tmp = TempDir::new().unwrap();
+        let clone_dir = tmp.path().join("clone");
+        fs::create_dir_all(&clone_dir).unwrap();
+
+        let opts = Opts {
+            owner_repo: "repairman29/olive".to_string(),
+            gap_id: Some("PRODUCT-999999".to_string()),
+            apply: true,
+            clone_dir: Some(clone_dir.clone()),
+            ..Default::default()
+        };
+
+        let err = pick_gap(&opts, &clone_dir)
+            .expect_err("missing canonical gap ID in --apply mode must fail fast");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("external_repo:gap_not_found_in_canonical_store"),
+            "expected named fast-fail reason, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn infra8091_extract_external_repo_tag_and_mismatch_fast_fail() {
+        let row = stored_gap(serde_json::json!({
+            "id": "PRODUCT-281",
+            "domain": "PRODUCT",
+            "title": "[olive] Test external repo tag",
+            "description": "desc",
+            "priority": "P2",
+            "effort": "s",
+            "status": "open",
+            "acceptance_criteria": "[\"AC1\"]",
+            "depends_on": "[]",
+            "notes": "external_repo:repairman29/olive",
+            "source_doc": "",
+            "created_at": 0,
+            "closed_at": null
+        }));
+        assert_eq!(
+            extract_external_repo_tag(&row).as_deref(),
+            Some("repairman29/olive")
+        );
+        assert!(is_canonical_gap_id("PRODUCT-281"));
+        assert!(is_canonical_gap_id("ZERO-WASTE-010"));
+        assert!(!is_canonical_gap_id("NONEXISTENT-EFFECTIVE-353-SENTINEL"));
+    }
+
+    #[test]
+    fn infra8091_run_cmd_bounded_surfaces_output_and_times_out() {
+        let mut ok_cmd = Command::new("sh");
+        ok_cmd.args([
+            "-c",
+            "echo 'stdout detail'; echo 'stderr detail' >&2; exit 1",
+        ]);
+        let out = run_cmd_bounded(&mut ok_cmd, 5, "test-fail").unwrap();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("stdout detail"));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("stderr detail"));
+
+        let mut slow_cmd = Command::new("sh");
+        slow_cmd.args(["-c", "echo 'before hang' >&2; exec sleep 10"]);
+        let err = run_cmd_bounded(&mut slow_cmd, 1, "test-timeout")
+            .expect_err("command exceeding timeout must fail fast");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("external_repo:remediation_backend_timeout"),
+            "expected timeout reason, got: {msg}"
+        );
     }
 }

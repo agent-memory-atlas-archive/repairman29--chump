@@ -287,6 +287,64 @@ pub fn landed(repo_root: &Path, gap_id: &str, pr: i64) -> Result<Option<MergeSha
     landed_with(provider, &source, pr)
 }
 
+/// [`LandingSource`] for an external repository (`owner/name`, CREDIBLE-1579).
+///
+/// Queries `gh api repos/{repo_slug}/pulls/{pr}` and NEVER resolves `pr`
+/// against `chump`'s own git history. Fails closed on `gh` execution errors.
+pub struct ExternalGithubLandingSource<'a> {
+    pub repo_slug: &'a str,
+}
+
+impl<'a> ExternalGithubLandingSource<'a> {
+    pub fn new(repo_slug: &'a str) -> Self {
+        Self { repo_slug }
+    }
+}
+
+impl LandingSource for ExternalGithubLandingSource<'_> {
+    fn check_landed(&self, pr: i64) -> Result<Option<MergeSha>, LandingError> {
+        let slug = self.repo_slug.trim();
+        if slug.is_empty() || !slug.contains('/') {
+            return Err(LandingError::ProviderError {
+                pr,
+                message: format!("invalid external repo slug {slug:?} (expected 'owner/name')"),
+            });
+        }
+        let endpoint = format!("repos/{slug}/pulls/{pr}");
+        let gh_bin = std::env::var("CHUMP_GH_BIN").unwrap_or_else(|_| "gh".to_string());
+        let out = Command::new(&gh_bin)
+            .args(["api", &endpoint])
+            .output()
+            .map_err(|e| LandingError::ProviderError {
+                pr,
+                message: format!("failed to invoke {gh_bin} api {endpoint}: {e}"),
+            })?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(LandingError::ProviderError {
+                pr,
+                message: format!(
+                    "{gh_bin} api {endpoint} exited {}: {}",
+                    out.status.code().unwrap_or(-1),
+                    stderr.trim()
+                ),
+            });
+        }
+        let body = String::from_utf8_lossy(&out.stdout);
+        parse_github_pull_json(pr, &body)
+    }
+}
+
+/// CREDIBLE-1579: verify whether PR `pr` has landed in external repository
+/// `repo_slug` (`owner/name`), returning `Ok(Some(MergeSha))` when merged,
+/// `Ok(None)` when open or closed-unmerged, or `Err(LandingError)` when the
+/// lookup fails. Never resolves `pr` against `chump`'s own git history.
+pub fn landed_in_external_repo(repo_slug: &str, pr: i64) -> Result<Option<MergeSha>, LandingError> {
+    let provider = LandingProvider::from_env()?;
+    let source = ExternalGithubLandingSource::new(repo_slug);
+    landed_with(provider, &source, pr)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

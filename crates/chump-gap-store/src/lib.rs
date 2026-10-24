@@ -3123,6 +3123,65 @@ impl GapStore {
     /// status:done flip in YAML, so passing it here keeps the canonical
     /// state.db and the YAML mirror in agreement (INFRA-156).
     pub fn ship(&self, gap_id: &str, session_id: &str, closed_pr: Option<i64>) -> Result<()> {
+        self.ship_with_external_repo(gap_id, session_id, closed_pr, None)
+    }
+
+    /// CREDIBLE-1579: extract the `external_repo:<owner>/<name>` tag (if any)
+    /// from the gap's `skills_required`, `notes`, or `source_doc` fields.
+    pub fn gap_external_repo(&self, gap_id: &str) -> Result<Option<String>> {
+        let fields: Option<(String, String, String)> = self
+            .conn
+            .query_row(
+                "SELECT skills_required, notes, source_doc FROM gaps WHERE id=?1",
+                params![gap_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((skills, notes, source_doc)) = fields else {
+            return Ok(None);
+        };
+        for text in [&skills, &notes, &source_doc] {
+            for token in text.split(|c: char| {
+                c == ','
+                    || c.is_whitespace()
+                    || c == ';'
+                    || c == '|'
+                    || c == '('
+                    || c == ')'
+                    || c == '['
+                    || c == ']'
+                    || c == '"'
+                    || c == '\''
+            }) {
+                let trimmed = token.trim().trim_end_matches('.');
+                if let Some(slug) = trimmed.strip_prefix("external_repo:") {
+                    let slug = slug.trim();
+                    if !slug.is_empty() && slug.contains('/') {
+                        return Ok(Some(slug.to_string()));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// CREDIBLE-1579: ship a gap with optional `--external-repo owner/name`.
+    ///
+    /// - When the gap is tagged `external_repo:X`, a ship without `--external-repo`
+    ///   (or with a mismatched repo) is refused so `--closed-pr N` never resolves
+    ///   against `chump`'s own history.
+    /// - When `--external-repo` is supplied on a gap NOT tagged with that repo,
+    ///   the ship is refused.
+    /// - When both match, verifies PR `N` is merged in `X` via
+    ///   [`chump_ship::landing::landed_in_external_repo`] and records the external
+    ///   merge SHA + repo on the [`chump_ship::LandingReceipt`].
+    pub fn ship_with_external_repo(
+        &self,
+        gap_id: &str,
+        session_id: &str,
+        closed_pr: Option<i64>,
+        external_repo: Option<&str>,
+    ) -> Result<()> {
         // PHASE-R R1 (CREDIBLE-1491): a second ship of an already-terminal gap
         // is a true no-op. Return before the fetch / auto-pull / cargo build
         // steps below, so a re-ship touches nothing: no status write,
@@ -3130,6 +3189,65 @@ impl GapStore {
         // each of those calls must now cost one SELECT.
         if self.already_terminal(gap_id)?.is_some() {
             return Ok(());
+        }
+
+        let tagged_repo = self.gap_external_repo(gap_id)?;
+        let supplied_repo = external_repo.map(str::trim).filter(|s| !s.is_empty());
+
+        match (&tagged_repo, supplied_repo) {
+            (Some(tagged), None) => {
+                bail!(
+                    "CREDIBLE-1579: refusing to flip {gap_id} to status=done without --external-repo {tagged}: \
+                     gap is tagged external_repo:{tagged}, so --closed-pr must never resolve against chump's own history. \
+                     Pass --external-repo {tagged} --closed-pr <N>."
+                );
+            }
+            (Some(tagged), Some(supplied)) if !supplied.eq_ignore_ascii_case(tagged) => {
+                bail!(
+                    "CREDIBLE-1579: refusing to flip {gap_id} to status=done with --external-repo {supplied}: \
+                     gap is tagged external_repo:{tagged} (wrong repo)."
+                );
+            }
+            (None, Some(supplied)) => {
+                bail!(
+                    "CREDIBLE-1579: refusing to flip {gap_id} to status=done with --external-repo {supplied}: \
+                     gap is not tagged with external_repo:{supplied}."
+                );
+            }
+            (Some(_), Some(ext_repo)) => {
+                let Some(pr) = closed_pr.filter(|&n| n > 0) else {
+                    bail!(
+                        "CREDIBLE-1579: refusing to flip {gap_id} to status=done: --external-repo {ext_repo} requires --closed-pr <N>"
+                    );
+                };
+                let merge_sha = match chump_ship::landing::landed_in_external_repo(ext_repo, pr) {
+                    Ok(Some(sha)) => sha.0,
+                    Ok(None) => bail!(
+                        "CREDIBLE-1579: refusing to flip {gap_id} to status=done: PR #{pr} is not merged in external repo {ext_repo}"
+                    ),
+                    Err(e) => bail!(
+                        "CREDIBLE-1579: refusing to flip {gap_id} to status=done: failed to verify PR #{pr} in external repo {ext_repo}: {e}"
+                    ),
+                };
+                let receipt = chump_ship::LandingReceipt::new(gap_id.to_string(), Some(pr))
+                    .with_merge_sha(Some(merge_sha))
+                    .with_external_repo(Some(ext_repo.to_string()));
+                receipt
+                    .validate()
+                    .map_err(|e| anyhow::anyhow!("CREDIBLE-1495: invalid landing receipt: {e}"))?;
+                let receipt_json = serde_json::to_string(&receipt)
+                    .context("CREDIBLE-1495: failed to serialize landing receipt")?;
+                self.finalize_status_done(
+                    gap_id,
+                    Some(pr),
+                    receipt_json,
+                    LeaseCleanup::ForSession(session_id.to_string()),
+                    DoneExtras::ShipCeremony,
+                    "ship",
+                )?;
+                return Ok(());
+            }
+            (None, None) => {}
         }
         // INFRA-1392 PROOF-OF-MERGE: refuse to flip status=done unless we
         // can verify the work actually landed. Pattern observed
@@ -3285,6 +3403,14 @@ impl GapStore {
     /// best-effort `git fetch origin main`, so a closer running seconds after
     /// the merge is not refused by a stale remote-tracking ref.
     pub fn landing_receipt_resolves(&self, gap_id: &str, closed_pr: i64) -> bool {
+        // CREDIBLE-1579: for an external_repo-tagged gap, NEVER resolve closed_pr
+        // against chump's own git history.
+        if let Ok(Some(ext_repo)) = self.gap_external_repo(gap_id) {
+            return matches!(
+                chump_ship::landing::landed_in_external_repo(&ext_repo, closed_pr),
+                Ok(Some(_))
+            );
+        }
         if matches!(
             chump_ship::landing::landed(&self.repo_root, gap_id, closed_pr),
             Ok(Some(_))
@@ -14928,6 +15054,164 @@ mod reconcile_terminal_tests {
                 .import_from_yaml_path_with_similarity(&missing, dir.path(), None)
                 .is_err(),
             "nonexistent --yaml path must return Err"
+        );
+    }
+
+    /// CREDIBLE-1579: `ship_with_external_repo` verifies external-repo PR merge via
+    /// `CHUMP_GH_BIN` without consulting chump's own git history, refuses external_repo
+    /// gaps without `--external-repo`, and refuses `--external-repo` on untagged gaps.
+    #[test]
+    fn credible1579_external_repo_ship_verifies_merged_pr_and_rejects_mismatches() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = GapStore::open(dir.path()).unwrap();
+
+        // Insert an external-repo gap (tagged external_repo:repairman29/olive) and an internal gap
+        store
+            .conn
+            .execute(
+                "INSERT INTO gaps (id, domain, title, status, priority, effort, notes)
+                 VALUES ('PRODUCT-251', 'PRODUCT', '[olive] External feature', 'open', 'P2', 's', 'external_repo:repairman29/olive')",
+                [],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO gaps (id, domain, title, status, priority, effort, notes)
+                 VALUES ('INFRA-9999', 'INFRA', 'Internal chump gap', 'open', 'P2', 's', '')",
+                [],
+            )
+            .unwrap();
+
+        // 1. Calling `ship` without `--external-repo` on an `external_repo:` gap is refused
+        let err_no_flag = store
+            .ship("PRODUCT-251", "test-session", Some(72))
+            .expect_err("external_repo gap without --external-repo must be refused");
+        assert!(
+            err_no_flag.to_string().contains("--external-repo"),
+            "unexpected error: {err_no_flag}"
+        );
+
+        // 2. Calling `ship_with_external_repo` on an untagged gap is refused
+        let err_untagged = store
+            .ship_with_external_repo(
+                "INFRA-9999",
+                "test-session",
+                Some(72),
+                Some("repairman29/olive"),
+            )
+            .expect_err("--external-repo on untagged gap must be refused");
+        assert!(
+            err_untagged
+                .to_string()
+                .contains("not tagged with external_repo:"),
+            "unexpected error: {err_untagged}"
+        );
+
+        // 3. Calling `ship_with_external_repo` with wrong repo slug is refused
+        let err_wrong_slug = store
+            .ship_with_external_repo(
+                "PRODUCT-251",
+                "test-session",
+                Some(72),
+                Some("repairman29/other"),
+            )
+            .expect_err("mismatched --external-repo must be refused");
+        assert!(
+            err_wrong_slug.to_string().contains("(wrong repo)"),
+            "unexpected error: {err_wrong_slug}"
+        );
+
+        // Write a stub `gh` binary that responds for PR 72 (merged), PR 73 (open), PR 74 (closed-unmerged)
+        let gh_stub = dir.path().join("fake-gh");
+        let script = r#"#!/usr/bin/env bash
+case "$*" in
+  *"repos/repairman29/olive/pulls/72"*)
+    echo '{"merged":true,"state":"closed","merge_commit_sha":"deadbeef72"}'
+    exit 0
+    ;;
+  *"repos/repairman29/olive/pulls/73"*)
+    echo '{"merged":false,"state":"open","merge_commit_sha":null}'
+    exit 0
+    ;;
+  *"repos/repairman29/olive/pulls/74"*)
+    echo '{"merged":false,"state":"closed","merge_commit_sha":null}'
+    exit 0
+    ;;
+  *)
+    echo "not found" >&2
+    exit 1
+    ;;
+esac
+"#;
+        std::fs::write(&gh_stub, script).unwrap();
+        let mut perms = std::fs::metadata(&gh_stub).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&gh_stub, perms).unwrap();
+
+        let prev_gh = std::env::var("CHUMP_GH_BIN").ok();
+        std::env::set_var("CHUMP_GH_BIN", &gh_stub);
+
+        // 4. Open PR (73) and closed-unmerged PR (74) are rejected
+        assert!(
+            store
+                .ship_with_external_repo(
+                    "PRODUCT-251",
+                    "test-session",
+                    Some(73),
+                    Some("repairman29/olive"),
+                )
+                .is_err(),
+            "open PR #73 must be rejected"
+        );
+        assert!(
+            store
+                .ship_with_external_repo(
+                    "PRODUCT-251",
+                    "test-session",
+                    Some(74),
+                    Some("repairman29/olive"),
+                )
+                .is_err(),
+            "closed-unmerged PR #74 must be rejected"
+        );
+
+        // 5. Merged PR (72) succeeds without any git repo in dir.path()
+        store
+            .ship_with_external_repo(
+                "PRODUCT-251",
+                "test-session",
+                Some(72),
+                Some("repairman29/olive"),
+            )
+            .expect("merged external PR #72 must ship PRODUCT-251");
+
+        let resolves = store.landing_receipt_resolves("PRODUCT-251", 72);
+
+        match prev_gh {
+            Some(v) => std::env::set_var("CHUMP_GH_BIN", v),
+            None => std::env::remove_var("CHUMP_GH_BIN"),
+        }
+
+        let shipped = store.get("PRODUCT-251").unwrap().unwrap();
+        assert_eq!(shipped.status, "done");
+        let receipt_json: String = store
+            .conn
+            .query_row(
+                "SELECT landing_receipt_json FROM gaps WHERE id = 'PRODUCT-251'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            receipt_json.contains("repairman29/olive") && receipt_json.contains("deadbeef72"),
+            "landing_receipt_json must record external repo and merge sha: {receipt_json}"
+        );
+        assert!(
+            resolves,
+            "landing_receipt_resolves must verify external repo receipt via CHUMP_GH_BIN"
         );
     }
 }

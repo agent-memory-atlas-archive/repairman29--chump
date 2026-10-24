@@ -156,6 +156,23 @@ _ensure_cargo_nextest() {
     return 0
 }
 
+# INFRA-8091: check and report the 34-tool roster from src/tool_routing.rs on
+# every converge tick; if CHUMP_AUTO_PROVISION_TOOLS=1 and any tool is missing,
+# run scripts/setup/bootstrap-toolkit.sh (apt + cargo-binstall on Linux).
+_check_toolkit_roster() {
+    [[ -n "${PREFIX:-}" && "${PREFIX}" == *com.termux* ]] && return 0
+    local toolkit="$REPO_ROOT/scripts/setup/bootstrap-toolkit.sh"
+    [[ -f "$toolkit" ]] || return 0
+    local out rc=0
+    out="$(PATH="${CARGO_HOME:-${HOME:-/root}/.cargo}/bin:${HOME:-/root}/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH" bash "$toolkit" --check 2>&1)" || rc=$?
+    log "INFRA-8091: $out"
+    if [[ "$rc" -ne 0 && "${CHUMP_AUTO_PROVISION_TOOLS:-0}" == "1" ]]; then
+        log "INFRA-8091: CHUMP_AUTO_PROVISION_TOOLS=1 — provisioning missing toolkit binaries via $toolkit"
+        PATH="${CARGO_HOME:-${HOME:-/root}/.cargo}/bin:${HOME:-/root}/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH" bash "$toolkit" >>"$LOG" 2>&1 || true
+    fi
+    return 0
+}
+
 # INFRA-8589 (Phase R R5): re-render installed systemd units from their tracked
 # repo templates, replacing any unit that carries a foreign host literal
 # (/home/<other-user>, /Users/<name>, /root/, /opt/homebrew, or User= in user
@@ -256,6 +273,7 @@ _reconcile_role_organs() {
         fi
     fi
     _ensure_cargo_nextest
+    _check_toolkit_roster
     _rerender_installed_units
 }
 
@@ -533,6 +551,7 @@ if [[ "$HEAD_SHA" == "$TARGET_SHA" && "$BEHIND" -eq 0 && "$TARGET_SHA" != "unkno
     # executing older worker.sh — reconcile it against its stamp.
     if [[ -f "$REPO_ROOT/scripts/setup/chump-node-install.sh" ]]; then
         _ensure_cargo_nextest
+        _check_toolkit_roster
         _rerender_installed_units
     fi
     _maybe_restart_stale_workers ""

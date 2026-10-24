@@ -63,6 +63,11 @@ pub struct LandingReceipt {
     /// later audit does not have to re-run the git-log lookup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_sha: Option<String>,
+    /// CREDIBLE-1579: when this gap landed in an external repository
+    /// (`external_repo:<owner>/<name>`), records the `owner/name` repository
+    /// where `closed_pr` and `merge_sha` were verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_repo: Option<String>,
     /// UTC timestamp of receipt creation.
     pub created_at: DateTime<Utc>,
 }
@@ -74,6 +79,7 @@ impl LandingReceipt {
             gap_id: gap_id.into(),
             closed_pr,
             merge_sha: None,
+            external_repo: None,
             created_at: Utc::now(),
         }
     }
@@ -83,6 +89,13 @@ impl LandingReceipt {
     /// (ship's `proof_of_merge_sha`) chain it on.
     pub fn with_merge_sha(mut self, merge_sha: Option<String>) -> Self {
         self.merge_sha = merge_sha;
+        self
+    }
+
+    /// CREDIBLE-1579: attach the external repository slug (`owner/name`) where
+    /// the PR merge was verified.
+    pub fn with_external_repo(mut self, external_repo: Option<String>) -> Self {
+        self.external_repo = external_repo;
         self
     }
 

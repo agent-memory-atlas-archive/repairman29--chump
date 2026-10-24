@@ -12837,21 +12837,23 @@ async fn main() -> Result<()> {
                     .any(|a| matches!(a.as_str(), "--help" | "-h"))
                 {
                     println!(
-                        "Usage: chump gap ship <GAP-ID> [--update-yaml] [--closed-pr N] [--session ID]\n\n\
+                        "Usage: chump gap ship <GAP-ID> [--update-yaml] [--closed-pr N] [--external-repo owner/name] [--session ID]\n\n\
                          Mark a gap as done. Updates state.db (canonical), optionally mirrors to YAML.\n\n\
                          Options:\n  \
-                           --update-yaml      Mirror status flip to docs/gaps/<ID>.yaml (destructive bulk-YAML; INFRA-825 staleness guard applies)\n  \
-                           --closed-pr N      Stamp PR number on the row (required by INFRA-107 closed_pr integrity guard for YAML mirror)\n  \
-                           --session ID       Session ID to record on the ship event (default derived)\n  \
-                           --why              Print explanation alongside the flip\n  \
-                           -h, --help         Show this help"
+                           --update-yaml               Mirror status flip to docs/gaps/<ID>.yaml (destructive bulk-YAML; INFRA-825 staleness guard applies)\n  \
+                           --closed-pr N               Stamp PR number on the row (required by INFRA-107 closed_pr integrity guard for YAML mirror)\n  \
+                           --external-repo owner/name  Verify PR N merged in owner/name (required for external_repo:X gaps, CREDIBLE-1579)\n  \
+                           --session ID                Session ID to record on the ship event (default derived)\n  \
+                           --why                       Print explanation alongside the flip\n  \
+                           -h, --help                  Show this help"
                     );
                     return Ok(());
                 }
                 let gap_id = args.get(3).cloned().unwrap_or_else(|| {
-                    eprintln!("Usage: chump gap ship <GAP-ID> [--update-yaml] [--closed-pr N]");
+                    eprintln!("Usage: chump gap ship <GAP-ID> [--update-yaml] [--closed-pr N] [--external-repo owner/name]");
                     std::process::exit(2);
                 });
+                let external_repo = flag("--external-repo");
                 let session_id = flag("--session")
                     .or_else(|| crate::ambient_stream::env_session_id())
                     .unwrap_or_else(|| format!("chump-anon-{}", unix_ts()));
@@ -13061,7 +13063,9 @@ async fn main() -> Result<()> {
                 // pointing at an unrelated PR). Advisory — never blocks the ship.
                 let closed_pr = match closed_pr {
                     Some(n) => {
-                        if chump_gap_store::pr_references_gap(&repo_root, &gap_id, n) == Some(false)
+                        if external_repo.is_none()
+                            && chump_gap_store::pr_references_gap(&repo_root, &gap_id, n)
+                                == Some(false)
                         {
                             eprintln!(
                                 "[gap ship] WARNING: PR #{n} does not reference {gap_id} in its title/branch — closed_pr may point at an unrelated PR (run scripts/ops/closed-pr-integrity-check.py)"
@@ -13069,6 +13073,7 @@ async fn main() -> Result<()> {
                         }
                         Some(n)
                     }
+                    None if external_repo.is_some() => None,
                     None => {
                         let branch = std::process::Command::new("git")
                             .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -13093,7 +13098,12 @@ async fn main() -> Result<()> {
                         found
                     }
                 };
-                match store.ship(&gap_id, &session_id, closed_pr) {
+                match store.ship_with_external_repo(
+                    &gap_id,
+                    &session_id,
+                    closed_pr,
+                    external_repo.as_deref(),
+                ) {
                     Ok(()) => {
                         println!("shipped {}", gap_id);
                         if why {
