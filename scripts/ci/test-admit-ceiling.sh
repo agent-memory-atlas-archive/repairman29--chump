@@ -117,5 +117,41 @@ grep -q 'kind: admission_deferred' "$REG" \
     || fail "admission_deferred not registered in EVENT_REGISTRY.yaml"
 ok "EVENT_REGISTRY registers admission_deferred"
 
+# ---------------------------------------------------------------------------
+# 6. RESILIENT-1679: lease visible in `chump admit status` + `release` +
+#    5 concurrent callers against C=2 never exceed 2 active leases.
+# ---------------------------------------------------------------------------
+"$CHUMP" admit release claude >/dev/null 2>&1 || true
+"$CHUMP" admit release cargo >/dev/null 2>&1 || true
+
+CHUMP_MAX_CONCURRENT_CLAUDE=2 CHUMP_ADMISSION_TEST_CLAUDE_COUNT=0 \
+    "$CHUMP" admit claude --owner-pid "$$" >/dev/null 2>&1
+"$CHUMP" admit status --json >"$TMP/status.json" 2>/dev/null
+grep -q '"leased":1' "$TMP/status.json" || fail "admit status --json should report leased:1, got: $(cat "$TMP/status.json")"
+grep -q "\"pid\":$$" "$TMP/status.json" || fail "admit status --json should list owner pid $$, got: $(cat "$TMP/status.json")"
+ok "RESILIENT-1679: active lease visible in chump admit status --json"
+
+"$CHUMP" admit release claude --owner-pid "$$" >/dev/null 2>&1
+"$CHUMP" admit status --json >"$TMP/status-after.json" 2>/dev/null
+grep -q '"leased":0' "$TMP/status-after.json" || fail "admit release should clear lease, got: $(cat "$TMP/status-after.json")"
+ok "RESILIENT-1679: chump admit release clears lease"
+
+# Spawn 5 concurrent callers holding a slot for 400ms against ceiling C=2.
+PIDS=()
+for idx in 1 2 3 4 5; do
+    CHUMP_MAX_CONCURRENT_CLAUDE=2 CHUMP_ADMISSION_TEST_CLAUDE_COUNT=0 \
+        "$CHUMP" admit claude --wait-s 3 --hold-ms 400 >/dev/null 2>&1 &
+    PIDS+=("$!")
+done
+sleep 0.15
+"$CHUMP" admit status --json >"$TMP/status-concurrent.json" 2>/dev/null
+grep -q '"leased":2' "$TMP/status-concurrent.json" \
+    || fail "5 concurrent callers against C=2 must cap active leases at 2, got: $(cat "$TMP/status-concurrent.json")"
+for p in "${PIDS[@]}"; do
+    wait "$p" || fail "concurrent caller $p failed to acquire slot within --wait-s 3"
+done
+ok "RESILIENT-1679: 5 concurrent callers against C=2 capped at 2 active leases and all 5 completed"
+
 echo
 ok "all admission-ceiling checks passed"
+
