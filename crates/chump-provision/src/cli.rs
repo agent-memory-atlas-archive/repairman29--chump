@@ -23,6 +23,10 @@ Usage:
   chump node ensure-nextest [--dry-run] [--json]
       Idempotently ensure cargo-nextest is installed on linux-systemd and
       mac-launchd hosts (INFRA-8572).
+  chump node rerender-units [--unit-dir <dir>] [--repo-root <dir>] [--host <variant>]
+                            [--user <name>] [--home <dir>] [--dry-run] [--json]
+      Re-render installed units in unit-dir from their repo templates, replacing
+      any carrying foreign host literals or template drift (INFRA-8589).
 
 Host variants: mac-launchd, linux-systemd-user, linux-systemd-system, termux
 Override detection with CHUMP_PROVISION_HOST=<variant>.";
@@ -37,6 +41,7 @@ pub fn run_cli(args: &[String]) -> i32 {
         Some("scopes") => crate::scopes_live::run_scopes(&args[1..], &Probe::from_env()),
         // INFRA-8572: idempotent cargo-nextest provisioning on linux-systemd / mac-launchd.
         Some("ensure-nextest") => run_ensure_nextest(&args[1..], &Probe::from_env()),
+        Some("rerender-units") => run_rerender_units(&args[1..], &Probe::from_env()),
         Some("-h") | Some("--help") | Some("help") => {
             println!("{USAGE}");
             0
@@ -422,6 +427,155 @@ pub fn run_ensure_nextest(args: &[String], probe: &Probe) -> i32 {
                 eprintln!("chump node ensure-nextest: failed to install cargo-nextest");
                 1
             }
+        }
+    }
+}
+
+/// `chump node rerender-units` (INFRA-8589).
+pub fn run_rerender_units(args: &[String], probe: &Probe) -> i32 {
+    let mut unit_dir: Option<PathBuf> = None;
+    let mut repo_root: Option<PathBuf> = None;
+    let mut host_arg: Option<String> = None;
+    let mut user: Option<String> = None;
+    let mut home: Option<PathBuf> = None;
+    let mut dry_run = false;
+    let mut json = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--unit-dir" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("chump node rerender-units: --unit-dir requires a value");
+                    return 2;
+                };
+                unit_dir = Some(PathBuf::from(v));
+                i += 2;
+            }
+            "--repo-root" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("chump node rerender-units: --repo-root requires a value");
+                    return 2;
+                };
+                repo_root = Some(PathBuf::from(v));
+                i += 2;
+            }
+            "--host" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("chump node rerender-units: --host requires a value");
+                    return 2;
+                };
+                host_arg = Some(v.clone());
+                i += 2;
+            }
+            "--user" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("chump node rerender-units: --user requires a value");
+                    return 2;
+                };
+                user = Some(v.clone());
+                i += 2;
+            }
+            "--home" => {
+                let Some(v) = args.get(i + 1) else {
+                    eprintln!("chump node rerender-units: --home requires a value");
+                    return 2;
+                };
+                home = Some(PathBuf::from(v));
+                i += 2;
+            }
+            "--dry-run" => {
+                dry_run = true;
+                i += 1;
+            }
+            "--json" => {
+                json = true;
+                i += 1;
+            }
+            "-h" | "--help" => {
+                println!("{USAGE}");
+                return 0;
+            }
+            other => {
+                eprintln!("chump node rerender-units: unknown argument {other:?}\n{USAGE}");
+                return 2;
+            }
+        }
+    }
+
+    let host = match host_arg {
+        Some(h) => match Host::parse(&h) {
+            Some(v) => v,
+            None => {
+                eprintln!("chump node rerender-units: unknown --host {h:?}");
+                return 2;
+            }
+        },
+        None => match detect(probe) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("chump node rerender-units: {e}");
+                return 1;
+            }
+        },
+    };
+    let mut hp = match paths(host, probe) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("chump node rerender-units: {e}");
+            return 1;
+        }
+    };
+    if let Some(u) = user {
+        hp.user = u;
+    }
+    if let Some(h) = home {
+        if host != Host::Termux {
+            hp.bin_dir = h.join(".cargo/bin");
+        }
+        hp.home = h;
+    }
+    if let Some(ud) = unit_dir {
+        hp.unit_dir = ud;
+    }
+    let repo = repo_root
+        .or_else(|| {
+            std::env::var("CHUMP_REPO_ROOT")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        })
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let ctx = RenderCtx::from_paths(&hp, &repo);
+    match crate::rerender_installed_units(&hp.unit_dir, &repo, host, &ctx, dry_run) {
+        Ok(rep) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "scanned": rep.scanned,
+                        "matched_templates": rep.matched_templates,
+                        "foreign_literal_units": rep.foreign_literal_units,
+                        "rerendered": rep.rerendered,
+                        "dry_run": dry_run,
+                    })
+                );
+            } else {
+                println!(
+                    "rerender-units: scanned={} matched={} foreign={} rerendered={} ({})",
+                    rep.scanned,
+                    rep.matched_templates,
+                    rep.foreign_literal_units.len(),
+                    rep.rerendered.len(),
+                    rep.rerendered.join(", ")
+                );
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("chump node rerender-units: {e}");
+            1
         }
     }
 }

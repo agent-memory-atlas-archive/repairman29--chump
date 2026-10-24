@@ -1990,6 +1990,62 @@ check_cargo_nextest() {
     fi
 }
 
+# ── Check 23 (INFRA-8589): installed systemd units carry no foreign host literals ──
+# Scans installed units in ${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user on a
+# Linux host for non-comment lines containing /home/<other-user>, /Users/<name>,
+# /root/ (when HOME != /root), /opt/homebrew, or User=<name> (in user scope).
+check_installed_unit_host_literals() {
+    if [[ "$(uname -s 2>/dev/null || echo unknown)" != "Linux" ]]; then
+        register_check "unit-literals" "skip" "non-Linux host; systemd user unit literal scan not applicable" ""
+        return
+    fi
+    local exp_home="${HOME:-/root}"
+    exp_home="${exp_home%/}"
+    local unit_dir="${XDG_CONFIG_HOME:-${exp_home}/.config}/systemd/user"
+    if [[ ! -d "$unit_dir" ]]; then
+        register_check "unit-literals" "pass" "no systemd user unit dir at $unit_dir" ""
+        return
+    fi
+    local bad_units=()
+    local f fname line
+    for f in "$unit_dir"/*.service "$unit_dir"/*.timer "$unit_dir"/*.socket "$unit_dir"/*.path "$unit_dir"/*.target; do
+        [[ -f "$f" && ! -L "$f" ]] || continue
+        fname="$(basename "$f")"
+        local unit_bad=0
+        while IFS= read -r line; do
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            if [[ "$line" =~ (^|[^A-Za-z0-9_])User=[A-Za-z_] ]]; then
+                unit_bad=1; break
+            fi
+            if [[ "$line" == *"/opt/homebrew"* ]] || [[ "$line" == *"/Users/"* ]]; then
+                unit_bad=1; break
+            fi
+            if [[ "$exp_home" != "/root" && "$line" == *"/root/"* ]]; then
+                unit_bad=1; break
+            fi
+            if [[ "$line" =~ /home/([a-z0-9_-]+) ]]; then
+                local Rest="$line"
+                while [[ "$Rest" =~ /home/([a-z0-9_-]+) ]]; do
+                    local cand="/home/${BASH_REMATCH[1]}"
+                    if [[ "$cand" != "$exp_home" ]]; then
+                        unit_bad=1; break
+                    fi
+                    Rest="${Rest#*"$cand"}"
+                done
+                [[ "$unit_bad" -eq 1 ]] && break
+            fi
+        done < "$f"
+        [[ "$unit_bad" -eq 1 ]] && bad_units+=("$fname")
+    done
+    if [[ ${#bad_units[@]} -eq 0 ]]; then
+        register_check "unit-literals" "pass" "installed units in $unit_dir carry no foreign host literals" ""
+    else
+        register_check "unit-literals" "fail" \
+            "installed unit(s) in $unit_dir carry foreign host literals (INFRA-8589): ${bad_units[*]}" \
+            "run 'chump node rerender-units' or 'bash scripts/ops/node-converge.sh'"
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -2025,6 +2081,7 @@ check_load_aware_deadman
 check_single_store
 check_cargo_storage_fixed_disk
 check_cargo_nextest
+check_installed_unit_host_literals
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

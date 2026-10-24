@@ -184,4 +184,51 @@ done
     || fail "_ensure_cargo_nextest was not idempotent (log: $(cat "$TMP/nextest-install.log" 2>/dev/null))"
 ok "_ensure_cargo_nextest provisions cargo-nextest when absent and is idempotent when present (INFRA-8572)"
 
+# ── Test 8: _rerender_installed_units replaces foreign host literals in installed units (INFRA-8589) ──
+RERENDER_HOME="$TMP/rerender-home"
+RERENDER_XDG="$RERENDER_HOME/.config"
+RERENDER_UNIT_DIR="$RERENDER_XDG/systemd/user"
+mkdir -p "$RERENDER_UNIT_DIR" "$CHECKOUT/scripts/dispatch" "$CHECKOUT/scripts/ops/lib"
+cp "$REPO_ROOT/scripts/ops/lib/organ-unit-install-lib.sh" "$CHECKOUT/scripts/ops/lib/organ-unit-install-lib.sh"
+
+cat > "$CHECKOUT/scripts/dispatch/chump-gap-close-decomposed.service" <<'EOF'
+[Unit]
+Description=Decomposed gap closer
+[Service]
+WorkingDirectory=__REPO_ROOT__
+Environment=HOME=__HOME__
+Environment=PATH=__BIN_DIR__:/usr/bin
+ExecStart=/bin/bash __REPO_ROOT__/scripts/coord/gap-close-decomposed.sh
+EOF
+
+FOREIGN_HOME="/home/""otherhost"
+cat > "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service" <<EOF
+[Unit]
+Description=Decomposed gap closer
+[Service]
+User=otherhost
+WorkingDirectory=${FOREIGN_HOME}/chump
+Environment=HOME=${FOREIGN_HOME}
+Environment=PATH=${FOREIGN_HOME}/bin:/opt/homebrew/bin:/usr/bin
+ExecStart=/bin/bash ${FOREIGN_HOME}/chump/scripts/coord/gap-close-decomposed.sh
+EOF
+
+(
+    export HOME="$RERENDER_HOME"
+    export XDG_CONFIG_HOME="$RERENDER_XDG"
+    export USER="ubuntu"
+    export PATH="$NEXTEST_STUB:$_CLEAN_PATH"
+    export CHUMP_NODE_REPO="$CHECKOUT"
+    export CHUMP_NODE_CONVERGE_LOGDIR="$TMP/logs"
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _rerender_installed_units
+) || fail "_rerender_installed_units failed (rc=$?)"
+
+if grep -qE "${FOREIGN_HOME}|/opt/homebrew|^User=" "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service"; then
+    fail "installed unit still carries foreign host literals after _rerender_installed_units: $(cat "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service")"
+fi
+grep -qF "WorkingDirectory=$CHECKOUT" "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service"     || fail "installed unit was not rewritten with CHECKOUT WorkingDirectory: $(cat "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service")"
+ok "_rerender_installed_units replaces foreign host literals in installed units from repo templates (INFRA-8589)"
+
 printf '\033[0;32mALL PASS\033[0m scripts/ci/test-node-converge.sh\n'

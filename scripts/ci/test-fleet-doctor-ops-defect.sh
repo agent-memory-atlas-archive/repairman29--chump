@@ -269,4 +269,33 @@ else
     fail "expected check_cargo_nextest pass when present, got status=$(last_status) detail=$(last_detail)"
 fi
 
+# ── Tests 11-12 (INFRA-8589): check_installed_unit_host_literals flags foreign host literals ──
+UNIT_HOME="/home/ubuntu"
+UNIT_XDG="$TMPDIR_BASE/xdg-units"
+FOREIGN_HOME="/home/""otherhost"
+mkdir -p "$UNIT_XDG/systemd/user"
+cat > "$UNIT_XDG/systemd/user/chump-gap-close-decomposed.service" <<EOF
+[Service]
+WorkingDirectory=${FOREIGN_HOME}/chump
+Environment=PATH=${FOREIGN_HOME}/bin:/opt/homebrew/bin
+EOF
+HOME="$UNIT_HOME" XDG_CONFIG_HOME="$UNIT_XDG" check_installed_unit_host_literals
+if [[ "$(last_status)" == "fail" ]] && [[ "$(last_detail)" == *"chump-gap-close-decomposed.service"* ]]; then
+    pass "check_installed_unit_host_literals fails RED naming unit with foreign home + /opt/homebrew (INFRA-8589)"
+else
+    fail "expected check_installed_unit_host_literals fail naming chump-gap-close-decomposed.service, got status=$(last_status) detail=$(last_detail)"
+fi
+
+cat > "$UNIT_XDG/systemd/user/chump-gap-close-decomposed.service" <<'EOF'
+[Service]
+WorkingDirectory=/home/ubuntu/chump
+Environment=PATH=/home/ubuntu/.cargo/bin:/usr/bin
+EOF
+HOME="$UNIT_HOME" XDG_CONFIG_HOME="$UNIT_XDG" check_installed_unit_host_literals
+if [[ "$(last_status)" == "pass" ]]; then
+    pass "check_installed_unit_host_literals passes when installed units only reference current HOME (INFRA-8589)"
+else
+    fail "expected check_installed_unit_host_literals pass for clean unit, got status=$(last_status) detail=$(last_detail)"
+fi
+
 echo "=== all ops-defect self-diagnosis + cargo-storage tests passed ==="

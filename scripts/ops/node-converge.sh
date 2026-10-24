@@ -156,6 +156,70 @@ _ensure_cargo_nextest() {
     return 0
 }
 
+# INFRA-8589 (Phase R R5): re-render installed systemd units from their tracked
+# repo templates, replacing any unit that carries a foreign host literal
+# (/home/<other-user>, /Users/<name>, /root/, /opt/homebrew, or User= in user
+# scope) or has drifted from its template.
+_rerender_installed_units() {
+    local unit_dir
+    if [[ "${EUID:-$(id -u)}" -eq 0 && "${HOME:-}" == "/root" ]]; then
+        unit_dir="/etc/systemd/system"
+    else
+        unit_dir="${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/systemd/user"
+    fi
+    [[ -d "$unit_dir" ]] || return 0
+
+    local chump
+    chump="$(command -v chump 2>/dev/null || true)"
+    [[ -z "$chump" && -x "$REPO_ROOT/target/release/chump" ]] && chump="$REPO_ROOT/target/release/chump"
+    [[ -z "$chump" && -x "$REPO_ROOT/target/debug/chump" ]] && chump="$REPO_ROOT/target/debug/chump"
+    if [[ -n "$chump" ]]; then
+        local out
+        if out="$("$chump" node rerender-units --unit-dir "$unit_dir" --repo-root "$REPO_ROOT" 2>>"$LOG")"; then
+            log "INFRA-8589: $out"
+            return 0
+        fi
+    fi
+
+    # Pure-shell fallback via organ_unit_host_rewrite when `chump` lacks `rerender-units`.
+    local rewrite_lib="$REPO_ROOT/scripts/ops/lib/organ-unit-install-lib.sh"
+    [[ -f "$rewrite_lib" ]] || return 0
+    # shellcheck disable=SC1090
+    source "$rewrite_lib"
+    local scope="user"
+    [[ "$unit_dir" == "/etc/systemd/system" ]] && scope="system"
+    local run_user="${USER:-$(id -un 2>/dev/null || echo ubuntu)}"
+    local run_home="${HOME:-/home/$run_user}"
+    local inst fname tmpl tmp_out rerendered=0
+    for inst in "$unit_dir"/*.service "$unit_dir"/*.timer "$unit_dir"/*.socket "$unit_dir"/*.path "$unit_dir"/*.target; do
+        [[ -f "$inst" && ! -L "$inst" ]] || continue
+        fname="$(basename "$inst")"
+        tmpl=""
+        for d in scripts/dispatch scripts/ops/systemd scripts/ops scripts/setup; do
+            if [[ -f "$REPO_ROOT/$d/$fname" ]]; then
+                tmpl="$REPO_ROOT/$d/$fname"
+                break
+            fi
+        done
+        [[ -n "$tmpl" ]] || continue
+        tmp_out="$(mktemp "${TMPDIR:-/tmp}/rerender-unit.XXXXXX")"
+        if organ_unit_host_rewrite "$tmpl" "$tmp_out" "$run_user" "$run_home" 0 "$REPO_ROOT" "$scope" >>"$LOG" 2>&1; then
+            if ! cmp -s "$tmp_out" "$inst"; then
+                mv -f "$tmp_out" "$inst"
+                rerendered=$((rerendered + 1))
+            else
+                rm -f "$tmp_out"
+            fi
+        else
+            rm -f "$tmp_out"
+        fi
+    done
+    if [[ "$rerendered" -gt 0 ]]; then
+        log "INFRA-8589: re-rendered $rerendered installed unit(s) in $unit_dir"
+    fi
+    return 0
+}
+
 _reconcile_role_organs() {
     local installer="$REPO_ROOT/scripts/setup/chump-node-install.sh"
     if [[ ! -f "$installer" ]]; then
@@ -176,6 +240,7 @@ _reconcile_role_organs() {
         emit node_organs_reconcile_failed "\"role\":\"$NODE_ROLE\""
     fi
     _ensure_cargo_nextest
+    _rerender_installed_units
 }
 
 emit() {
@@ -450,7 +515,10 @@ if [[ "$HEAD_SHA" == "$TARGET_SHA" && "$BEHIND" -eq 0 && "$TARGET_SHA" != "unkno
     # RESILIENT-1453: even when the tree did not move THIS tick, a worker started
     # before an earlier converge (or a restart via another path) may still be
     # executing older worker.sh — reconcile it against its stamp.
-    [[ -f "$REPO_ROOT/scripts/setup/chump-node-install.sh" ]] && _ensure_cargo_nextest
+    if [[ -f "$REPO_ROOT/scripts/setup/chump-node-install.sh" ]]; then
+        _ensure_cargo_nextest
+        _rerender_installed_units
+    fi
     _maybe_restart_stale_workers ""
     # Prune old logs (keep last 24) even on the fast path.
     ls -t "$LOG_DIR"/converge-*.log 2>/dev/null | tail -n +25 | xargs -r rm -f 2>/dev/null || true

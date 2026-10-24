@@ -929,3 +929,75 @@ fn cargo_nextest_provisioning_plan_and_idempotency() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn infra8589_rerender_installed_units_replaces_foreign_host_literals_and_is_idempotent() {
+    let dir = std::env::temp_dir().join(format!("chump-provision-8589-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let repo_root = dir.join("repo");
+    let dispatch_dir = repo_root.join("scripts/dispatch");
+    let unit_dir = dir.join("systemd-user");
+    let home = PathBuf::from("/home/ubuntu");
+    std::fs::create_dir_all(&dispatch_dir).unwrap();
+    std::fs::create_dir_all(&unit_dir).unwrap();
+
+    // Clean repo template using placeholders.
+    let tmpl = "[Unit]\nDescription=Decomposed gap closer\n[Service]\nWorkingDirectory=__REPO_ROOT__\nEnvironment=HOME=__HOME__\nEnvironment=PATH=__BIN_DIR__:/usr/bin\nExecStart=/bin/bash __REPO_ROOT__/scripts/coord/gap-close-decomposed.sh\n";
+    std::fs::write(
+        dispatch_dir.join("chump-gap-close-decomposed.service"),
+        tmpl,
+    )
+    .unwrap();
+
+    // Stale installed unit carrying foreign host literals (/home/<other>, /opt/homebrew, User=other).
+    let foreign_home = format!("/home/{}", "otherhost");
+    let stale = format!(
+        "[Unit]\nDescription=Decomposed gap closer\n[Service]\nUser=otherhost\nWorkingDirectory={foreign_home}/chump\nEnvironment=HOME={foreign_home}\nEnvironment=PATH={foreign_home}/bin:/opt/homebrew/bin:/usr/bin\nExecStart=/bin/bash {foreign_home}/chump/scripts/coord/gap-close-decomposed.sh\n"
+    );
+    let installed_unit = unit_dir.join("chump-gap-close-decomposed.service");
+    std::fs::write(&installed_unit, &stale).unwrap();
+
+    let findings = find_installed_unit_foreign_literals(&stale, &home, Host::LinuxSystemdUser);
+    assert!(
+        findings.iter().any(|f| f.rule == "foreign-home-literal"),
+        "expected foreign-home-literal in {findings:?}"
+    );
+    assert!(
+        findings.iter().any(|f| f.rule == "homebrew-literal"),
+        "expected homebrew-literal in {findings:?}"
+    );
+    assert!(
+        findings.iter().any(|f| f.rule == "user-literal"),
+        "expected user-literal in {findings:?}"
+    );
+
+    let ctx = ubuntu_ctx();
+
+    let rep = rerender_installed_units(&unit_dir, &repo_root, Host::LinuxSystemdUser, &ctx, false)
+        .unwrap();
+    assert_eq!(rep.scanned, 1);
+    assert_eq!(rep.matched_templates, 1);
+    assert_eq!(
+        rep.foreign_literal_units,
+        vec!["chump-gap-close-decomposed.service"]
+    );
+    assert_eq!(rep.rerendered, vec!["chump-gap-close-decomposed.service"]);
+
+    let rewritten = std::fs::read_to_string(&installed_unit).unwrap();
+    assert!(
+        find_installed_unit_foreign_literals(&rewritten, &home, Host::LinuxSystemdUser).is_empty(),
+        "rewritten unit still has foreign literals: {rewritten}"
+    );
+    assert!(rewritten.contains("WorkingDirectory=/home/ubuntu/chump"));
+    assert!(!rewritten.contains(&foreign_home));
+    assert!(!rewritten.contains("/opt/homebrew"));
+    assert!(!rewritten.contains("User="));
+
+    // Second run is idempotent.
+    let rep2 = rerender_installed_units(&unit_dir, &repo_root, Host::LinuxSystemdUser, &ctx, false)
+        .unwrap();
+    assert!(rep2.foreign_literal_units.is_empty());
+    assert!(rep2.rerendered.is_empty());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -860,5 +860,170 @@ pub fn plan_cargo_nextest(
     }
 }
 
+/// Scan an ALREADY-RENDERED installed unit for foreign/illegal host literals
+/// relative to `(expected_home, host)` (INFRA-8589).
+///
+/// Unlike [`find_host_literals`] (which checks unrendered repo templates where
+/// ANY `/home/<name>` is forbidden), an installed unit legitimately contains the
+/// host's own `expected_home` (e.g. `/home/ubuntu`). This scanner flags:
+/// - `foreign-home-literal`: `/home/<other>` where `/home/<other>` != `expected_home`
+/// - `foreign-users-literal`: `/Users/<name>` on non-MacLaunchd, or != `expected_home` on MacLaunchd
+/// - `root-literal`: `/root/` when `expected_home` != `/root`
+/// - `homebrew-literal`: `/opt/homebrew` on a Linux or Termux host
+/// - `user-literal`: `User=<name>` in a `LinuxSystemdUser` unit
+pub fn find_installed_unit_foreign_literals(
+    text: &str,
+    expected_home: &Path,
+    host: Host,
+) -> Vec<Finding> {
+    let expected = expected_home.to_string_lossy();
+    let expected = expected.trim_end_matches('/');
+    let mut out = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let n = i + 1;
+        if is_comment_line(line) {
+            continue;
+        }
+        let mut push = |rule: &'static str| {
+            out.push(Finding {
+                line: n,
+                rule,
+                text: line.trim().to_string(),
+            })
+        };
+        if host == Host::LinuxSystemdUser {
+            let user_hit = line.match_indices("User=").any(|(idx, _)| {
+                let before_ok = line[..idx]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+                let after_ok = line[idx + "User=".len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(is_ident_start);
+                before_ok && after_ok
+            });
+            if user_hit {
+                push("user-literal");
+            }
+        }
+        for (idx, _) in line.match_indices("/home/") {
+            let rest = &line[idx + "/home/".len()..];
+            let uname: String = rest
+                .chars()
+                .take_while(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == '-'
+                })
+                .collect();
+            if !uname.is_empty() {
+                let candidate = format!("/home/{uname}");
+                if candidate != expected {
+                    push("foreign-home-literal");
+                    break;
+                }
+            }
+        }
+        for (idx, _) in line.match_indices("/Users/") {
+            let rest = &line[idx + "/Users/".len()..];
+            let uname: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .collect();
+            if !uname.is_empty() {
+                let candidate = format!("/Users/{uname}");
+                if host != Host::MacLaunchd || candidate != expected {
+                    push("foreign-users-literal");
+                    break;
+                }
+            }
+        }
+        if expected != "/root" && line.contains("/root/") {
+            push("root-literal");
+        }
+        if host != Host::MacLaunchd && line.contains("/opt/homebrew") {
+            push("homebrew-literal");
+        }
+    }
+    out
+}
+
+/// Summary of `rerender_installed_units` (INFRA-8589).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RerenderReport {
+    pub scanned: usize,
+    pub matched_templates: usize,
+    pub foreign_literal_units: Vec<String>,
+    pub rerendered: Vec<String>,
+}
+
+/// Template search directories relative to `repo_root` (INFRA-8589).
+pub const TEMPLATE_REL_DIRS: [&str; 6] = [
+    "scripts/dispatch",
+    "scripts/ops/systemd",
+    "scripts/ops",
+    "scripts/setup",
+    "launchd",
+    "scripts/plists",
+];
+
+/// Re-render installed units in `unit_dir` from their matching repo templates
+/// under `repo_root`, replacing any unit that carries a foreign host literal or
+/// has drifted from its rendered template (INFRA-8589).
+pub fn rerender_installed_units(
+    unit_dir: &Path,
+    repo_root: &Path,
+    host: Host,
+    ctx: &RenderCtx,
+    dry_run: bool,
+) -> std::io::Result<RerenderReport> {
+    let mut report = RerenderReport::default();
+    if !unit_dir.is_dir() {
+        return Ok(report);
+    }
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(unit_dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_file())
+        .collect();
+    entries.sort();
+
+    for installed_path in entries {
+        let Some(fname) = installed_path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(kind) = UnitKind::from_name(fname) else {
+            continue;
+        };
+        if host.platform() != kind.as_str() {
+            continue;
+        }
+        report.scanned += 1;
+        let installed_text = std::fs::read_to_string(&installed_path)?;
+        let has_foreign =
+            !find_installed_unit_foreign_literals(&installed_text, &ctx.home, host).is_empty();
+        if has_foreign {
+            report.foreign_literal_units.push(fname.to_string());
+        }
+        let tmpl_path = TEMPLATE_REL_DIRS
+            .iter()
+            .map(|d| repo_root.join(d).join(fname))
+            .find(|p| p.is_file());
+        let Some(tmpl_path) = tmpl_path else {
+            continue;
+        };
+        report.matched_templates += 1;
+        let tmpl_text = std::fs::read_to_string(&tmpl_path)?;
+        let Ok(rendered) = render(fname, &tmpl_text, host, ctx) else {
+            continue;
+        };
+        if has_foreign || installed_text != rendered {
+            if !dry_run {
+                std::fs::write(&installed_path, &rendered)?;
+            }
+            report.rerendered.push(fname.to_string());
+        }
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests;
