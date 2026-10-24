@@ -148,35 +148,99 @@ echo "[3. Source-workflow merge_group trigger audit]"
 # job. Output `WORKFLOW\tJOB_ID\tJOB_NAME` per row, where JOB_NAME defaults
 # to JOB_ID when not explicitly set. Uses python for robustness vs. grep.
 WORKFLOW_INDEX="$(python3 - "${WORKFLOWS_DIR}" <<'PYEOF'
-import sys, os, yaml
+import sys, os, re
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
+def parse_workflow_stdlib(text):
+    """Pure-stdlib fallback when PyYAML is not installed in the runner python."""
+    fires_on_pr = False
+    has_mg = False
+    jobs = {}
+    section = None
+    cur_job = None
+    for raw in text.splitlines():
+        stripped = raw.split('#', 1)[0].rstrip()
+        if not stripped.strip():
+            continue
+        indent = len(stripped) - len(stripped.lstrip(' '))
+        line = stripped.strip()
+        if indent == 0:
+            cur_job = None
+            m_top = re.match(r'^["\']?([A-Za-z0-9_-]+)["\']?\s*:(.*)$', line)
+            if m_top:
+                key, rest = m_top.group(1), m_top.group(2).strip()
+                if key == 'on':
+                    section = 'on'
+                    if 'pull_request' in rest:
+                        fires_on_pr = True
+                    if 'merge_group' in rest:
+                        has_mg = True
+                elif key == 'jobs':
+                    section = 'jobs'
+                else:
+                    section = None
+            continue
+        if section == 'on':
+            m_ev = re.match(r'^[-\s]*([A-Za-z0-9_-]+)\s*(?::|$)', line)
+            if m_ev:
+                ev = m_ev.group(1)
+                if ev == 'pull_request':
+                    fires_on_pr = True
+                elif ev == 'merge_group':
+                    has_mg = True
+        elif section == 'jobs':
+            if indent == 2:
+                m_job = re.match(r'^([A-Za-z0-9_-]+)\s*:\s*$', line)
+                if m_job:
+                    cur_job = m_job.group(1)
+                    jobs[cur_job] = {'name': None}
+                else:
+                    cur_job = None
+            elif indent == 4 and cur_job:
+                m_name = re.match(r'^name\s*:\s*(.+)$', line)
+                if m_name:
+                    val = m_name.group(1).strip()
+                    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                        val = val[1:-1]
+                    jobs[cur_job]['name'] = val
+    return fires_on_pr, has_mg, jobs
+
 wf_dir = sys.argv[1]
 for fn in sorted(os.listdir(wf_dir)):
     if not (fn.endswith('.yml') or fn.endswith('.yaml')):
         continue
     path = os.path.join(wf_dir, fn)
     try:
-        with open(path) as f:
-            d = yaml.safe_load(f) or {}
+        with open(path, encoding='utf-8') as f:
+            text = f.read()
     except Exception:
         continue
-    # YAML 'on' may parse as True (PyYAML 1.x bool quirk on bare `on:`).
-    on_block = d.get('on') if 'on' in d else d.get(True, {})
-    # Required-check workflows fire on pull_request; schedule-only workflows
-    # cannot produce a per-PR required check no matter the job name.
-    # Skip non-PR workflows to avoid false positives (audit-weekly,
-    # cargo-audit-nightly both define `audit:` jobs but only run on cron).
-    if isinstance(on_block, dict):
-        fires_on_pr = 'pull_request' in on_block
-        has_mg = 'merge_group' in on_block
-    elif isinstance(on_block, list):
-        fires_on_pr = 'pull_request' in on_block
-        has_mg = 'merge_group' in on_block
+    if yaml is not None:
+        try:
+            d = yaml.safe_load(text) or {}
+        except Exception:
+            continue
+        # YAML 'on' may parse as True (PyYAML 1.x bool quirk on bare `on:`).
+        on_block = d.get('on') if 'on' in d else d.get(True, {})
+        if isinstance(on_block, dict):
+            fires_on_pr = 'pull_request' in on_block
+            has_mg = 'merge_group' in on_block
+        elif isinstance(on_block, list):
+            fires_on_pr = 'pull_request' in on_block
+            has_mg = 'merge_group' in on_block
+        else:
+            fires_on_pr = False
+            has_mg = False
+        jobs = d.get('jobs') or {}
     else:
-        fires_on_pr = False
-        has_mg = False
+        fires_on_pr, has_mg, jobs = parse_workflow_stdlib(text)
     if not fires_on_pr:
         continue
-    for jid, jdef in (d.get('jobs') or {}).items():
+    for jid, jdef in jobs.items():
         jname = (jdef or {}).get('name') or jid
         print(f"{fn}\t{jid}\t{jname}\t{int(has_mg)}")
 PYEOF

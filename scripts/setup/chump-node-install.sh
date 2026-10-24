@@ -1358,6 +1358,10 @@ place_role_unit_files() {
   local unit role tok in_role
   local scope_skipped=()
   for unit in "${ENABLED[@]}"; do
+    if declare -F organ_is_paused_or_retired >/dev/null 2>&1 && organ_is_paused_or_retired "$unit" "$manifest"; then
+      info ORGANS "skip $unit: paused or retired (paused-timers.txt / state=retired, RESILIENT-1644)"
+      continue
+    fi
     if ! organ_platform_matches "${ORGAN_PLATFORMS[$unit]:-}" "$install_platform"; then
       continue   # a launchd/runit-only organ: not this supervisor at all (INFRA-7764)
     fi
@@ -1649,6 +1653,10 @@ FHS"
       for entry in "${M_PAGING_OFF[@]:-}"; do [ "$entry" = "$unit" ] && { paging=1; break; }; done
       if [ "$paging" = 1 ]; then
         info ORGANS "$name skipped: organ-manifest.txt declares $unit paging_off"
+        continue
+      fi
+      if declare -F organ_is_paused_or_retired >/dev/null 2>&1 && organ_is_paused_or_retired "$unit" "$manifest"; then
+        info ORGANS "$name skipped: organ-manifest.txt declares $unit retired or paused-timers.txt lists it (RESILIENT-1644)"
         continue
       fi
       if [ "$declared" = 1 ]; then

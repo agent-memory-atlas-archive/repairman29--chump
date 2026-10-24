@@ -82,6 +82,12 @@ organ_manifest_parse() {
     _omp_have_scope=1
     _omp_scope=()
   fi
+  local _omp_have_retired=0
+  if [[ $# -ge 9 && -n "${9:-}" ]]; then
+    local -n _omp_retired="$9"
+    _omp_have_retired=1
+    _omp_retired=()
+  fi
 
   _omp_paging_off=()
   _omp_enabled=()
@@ -116,6 +122,11 @@ organ_manifest_parse() {
     done
     case "$state" in
       paging_off) _omp_paging_off+=("$unit") ;;
+      retired)
+        if [[ "$_omp_have_retired" == 1 ]]; then
+          _omp_retired+=("$unit")
+        fi
+        ;;
       enabled)
         _omp_enabled+=("$unit")
         _omp_role["$unit"]="${role:-brain}"
@@ -134,6 +145,33 @@ organ_manifest_parse() {
     esac
   done < "$manifest"
   return 0
+}
+
+# RESILIENT-1644 (PHASE-R R3 slice c): true (exit 0) when <unit> (or its
+# .timer/.service sibling or bare organ name) is declared `retired` in
+# <manifest-file> OR listed in <paused-timers-file> (default:
+# ${CHUMP_PAUSED_TIMERS_FILE:-${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/paused-timers.txt}).
+organ_is_paused_or_retired() {
+  local unit="$1"
+  local manifest="${2:-}"
+  local paused_file="${3:-${CHUMP_PAUSED_TIMERS_FILE:-${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/paused-timers.txt}}"
+  local base="${unit%.service}"; base="${base%.timer}"
+  local bare="${base#chump-}"
+
+  if [[ -n "$manifest" && -f "$manifest" ]]; then
+    if grep -Eq "^[[:space:]]*retired[[:space:]]+(${unit}|${base}\\.timer|${base}\\.service|${base})([[:space:]]|$)" "$manifest" 2>/dev/null; then
+      return 0
+    fi
+  fi
+
+  local pf
+  for pf in "$paused_file" "${HOME:-/root}/.chump/paused-timers.txt"; do
+    [[ -n "$pf" && -f "$pf" ]] || continue
+    if grep -Eq "^[[:space:]]*(${unit}|${base}\\.timer|${base}\\.service|${base}|${bare})([[:space:]#]|$)" "$pf" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # organ_current_platform -> echoes this host's supervisor: systemd|launchd|runit.

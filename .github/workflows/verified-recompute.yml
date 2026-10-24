@@ -26,10 +26,15 @@ concurrency:
 
 jobs:
   rerun-verified:
+    # RESILIENT-1644 (PHASE-R R3 slice c): with the GitHub merge queue active
+    # and verified-wait.sh polling inline on PR runs, verified-recompute no
+    # longer fires on every pull_request completion unless explicitly re-enabled
+    # via vars.CHUMP_VERIFIED_RECOMPUTE_ON_PR == '1'. Keeps merge_group and the
+    # CREDIBLE-1521 push-on-main healer active.
     if: >-
-      github.event.workflow_run.event == 'pull_request' ||
       github.event.workflow_run.event == 'merge_group' ||
-      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main') ||
+      (github.event.workflow_run.event == 'pull_request' && vars.CHUMP_VERIFIED_RECOMPUTE_ON_PR == '1')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

@@ -9,8 +9,11 @@
 name: pr-rescue (RESILIENT-006)
 
 on:
-  schedule:
-    - cron: "0 */2 * * *"
+  # RESILIENT-1644 (PHASE-R R3 slice c): cron schedule disabled now that the
+  # native GitHub merge queue is active; workflow_dispatch retained for manual
+  # rescue or one-line revert.
+  # schedule:
+  #   - cron: "0 */2 * * *"
   workflow_dispatch:
     inputs:
       pr_number:

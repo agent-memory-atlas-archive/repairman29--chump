@@ -239,6 +239,22 @@ _reconcile_role_organs() {
         log "WARN: chump-node-install.sh --reconcile-organs-only exited non-zero (non-fatal, role=$NODE_ROLE)"
         emit node_organs_reconcile_failed "\"role\":\"$NODE_ROLE\""
     fi
+    # RESILIENT-1644: ensure any organ declared `retired` in organ-manifest.txt
+    # or listed in paused-timers.txt remains disabled after converge/reconcile.
+    local manifest_lib="$REPO_ROOT/scripts/ops/lib/organ-manifest-lib.sh"
+    local manifest_file="$REPO_ROOT/scripts/ops/organ-manifest.txt"
+    if [[ -f "$manifest_lib" && -f "$manifest_file" ]]; then
+        # shellcheck disable=SC1090
+        source "$manifest_lib"
+        local _po=() _en=() _ret=() u base
+        declare -A _r _req _pl _nd _sc
+        if organ_manifest_parse "$manifest_file" _po _en _r _req _pl _nd _sc _ret 2>/dev/null; then
+            for u in "${_ret[@]}"; do
+                base="${u%.service}"; base="${base%.timer}"
+                systemctl --user disable --now "${base}.timer" "${base}.service" >>"$LOG" 2>&1 || true
+            done
+        fi
+    fi
     _ensure_cargo_nextest
     _rerender_installed_units
 }

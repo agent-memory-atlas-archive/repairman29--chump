@@ -197,5 +197,41 @@ grep -q '"gap_id":"DRIFT-UNLINKED"' "$AMB" \
     || fail "closure-drift did not emit gap_closure_drift for the unlinked gap: $(cat "$AMB")"
 ok "closure-drift closes only the FK-linked drift; skips (but still surfaces) the unlinked one"
 
+# 4. RESILIENT-1637: when `chump gap ship` exits non-zero, reconcile logs the
+#    subprocess stderr and emits `kind=gap_close_failed` with `stderr` to ambient.
+cat > "$TMP/fakebin/chump" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "gap" && "\$2" == "list" && "\$3" == "--json" ]]; then
+  cat <<JSON
+[
+  {"id":"DRIFT-LINKED","status":"open","closed_pr":9999,"title":"linked drift"}
+]
+JSON
+  exit 0
+fi
+if [[ "\$1" == "gap" && "\$2" == "gaps-for-pr" ]]; then
+  echo "DRIFT-LINKED"
+  exit 0
+fi
+if [[ "\$1" == "gap" && "\$2" == "ship" ]]; then
+  echo "refusing to ship DRIFT-LINKED: simulated ship refusal reason" >&2
+  exit 1
+fi
+exit 0
+EOF
+chmod +x "$TMP/fakebin/chump"
+rm -f "$AMB"
+set +e
+out="$(run_drift "" 2>&1)"
+rc=$?
+set -e
+grep -q "simulated ship refusal reason" <<<"$out" \
+    || fail "closure-drift did not include ship stderr in warning output: $out"
+grep -q '"kind":"gap_close_failed"' "$AMB" \
+    || fail "closure-drift did not emit kind=gap_close_failed on ship failure: $(cat "$AMB" 2>/dev/null || true)"
+grep -q '"stderr":"refusing to ship DRIFT-LINKED: simulated ship refusal reason"' "$AMB" \
+    || fail "gap_close_failed event missing stderr detail: $(cat "$AMB")"
+ok "closure-drift emits kind=gap_close_failed with stderr when chump gap ship fails (RESILIENT-1637)"
+
 echo
-echo "All META-059 / CREDIBLE-1551 gap-closure-reconcile tests passed."
+echo "All META-059 / CREDIBLE-1551 / RESILIENT-1637 gap-closure-reconcile tests passed."

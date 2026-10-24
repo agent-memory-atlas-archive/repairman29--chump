@@ -342,12 +342,13 @@ organ_registry_check() {
 # TREK-18: parsed by the shared organ_manifest_parse() helper (organ-manifest-lib.sh)
 PAGING_OFF=()
 ENABLED=()
+RETIRED=()
 declare -A ORGAN_ROLE
 declare -A ORGAN_REQUIRES
 declare -A ORGAN_PLATFORMS
 declare -A ORGAN_NODE_UNUSED
 declare -A ORGAN_RUN_SCOPE
-organ_manifest_parse "$MANIFEST" PAGING_OFF ENABLED ORGAN_ROLE ORGAN_REQUIRES ORGAN_PLATFORMS ORGAN_NODE_UNUSED ORGAN_RUN_SCOPE || exit 1
+organ_manifest_parse "$MANIFEST" PAGING_OFF ENABLED ORGAN_ROLE ORGAN_REQUIRES ORGAN_PLATFORMS ORGAN_NODE_UNUSED ORGAN_RUN_SCOPE RETIRED || exit 1
 
 # INFRA-7764 (docs/strategy/ONE_COMMAND_INSTALL.md section 1): platform
 # scoping. organ-manifest.txt is becoming the single unified roster —
@@ -389,6 +390,19 @@ for unit in "${ENABLED[@]}"; do
   fi
 done
 ENABLED=("${SCOPE_FILTERED_ENABLED[@]}")
+
+# RESILIENT-1644 (PHASE-R R3 slice c): filter out any organ listed in
+# paused-timers.txt (or whose sibling is declared `retired` in the manifest)
+# so organ-reconcile never re-enables a retired or operator-paused timer.
+PAUSED_FILTERED_ENABLED=()
+for unit in "${ENABLED[@]}"; do
+  if organ_is_paused_or_retired "$unit" "$MANIFEST"; then
+    echo "  skip $unit: paused or retired (paused-timers.txt / state=retired)"
+  else
+    PAUSED_FILTERED_ENABLED+=("$unit")
+  fi
+done
+ENABLED=("${PAUSED_FILTERED_ENABLED[@]}")
 
 # RESILIENT-746: optional per-role scoping. chump-node-install.sh's ORGANS
 # phase (--role brain|muscle|all) sets this so a freshly-installed node only

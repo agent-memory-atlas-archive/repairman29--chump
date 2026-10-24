@@ -5329,6 +5329,15 @@ events:
       visible; a later cycle retries once the fetch succeeds.
     consumers: [fleet-brief, audit-priorities]
     fields_required: [ts, kind, gap_id, pr_number, source]
+  - kind: gap_close_failed
+    effect_metric: resilient
+    emitter: scripts/coord/gap-doctor-reconcile.py --check-closure-drift / --check-merged-pr-links / --check-merged-pr-head-branch (RESILIENT-1637)
+    trigger: chump gap ship exited non-zero when attempting to close an open gap
+      whose linked PR is confirmed merged on main. Captures subprocess stderr
+      so the exact refusal reason (e.g. proof-of-merge check, FK gate, or I/O
+      failure) is visible in ambient.jsonl instead of a bare exit status.
+    consumers: [fleet-brief, audit-priorities, operator-recall]
+    fields_required: [ts, kind, gap_id, pr_number, stderr, source]
   - kind: pr_without_gap_link
     effect_metric: self
     emitter: scripts/coord/gap-doctor-reconcile.py --check-merged-pr-links (CREDIBLE-1552, report-only)

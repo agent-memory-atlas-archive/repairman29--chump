@@ -97,4 +97,63 @@ grep -Eq '^enabled[[:space:]]+chump-organ-deploy\.timer[[:space:]].*run-scope=sy
   || fail "chump-organ-deploy.timer must be tagged run-scope=system (root-only organ)"
 pass "real manifest tags the root-only chump-organ-deploy.timer run-scope=system"
 
+# ── 5. RESILIENT-1644: retired state + paused-timers.txt honoured ───────────
+M_RET="$TMP/manifest-retired.txt"
+cat > "$M_RET" <<'EOF'
+enabled  chump-active-organ.timer       role=brain
+enabled  chump-paused-by-file.timer     role=brain
+retired  chump-armed-pr-rebaser.timer   role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired  chump-rot-reaper.timer         role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+EOF
+PAUSED_FILE="$TMP/paused-timers.txt"
+cat > "$PAUSED_FILE" <<'EOF'
+# Paused by operator / PHASE-R R3
+chump-paused-by-file.timer
+armed-pr-rebaser
+pr-auto-rebase
+rot-reaper
+stale-pr-reaper
+auto-arm-sweeper
+auto-merge-armer
+EOF
+
+RET_ARR=()
+organ_manifest_parse "$M_RET" OFF EN ROLE REQ PLAT NODE SCOPE RET_ARR || fail "9-arg parse with retired state failed"
+[[ "${#EN[@]}" == 2 ]] || fail "retired units must not enter ENABLED; got ${#EN[@]} (${EN[*]})"
+[[ "${#RET_ARR[@]}" == 2 ]] || fail "9th nameref must capture 2 retired units; got ${#RET_ARR[@]} (${RET_ARR[*]})"
+organ_is_paused_or_retired "chump-armed-pr-rebaser.timer" "$M_RET" "$PAUSED_FILE" \
+  || fail "organ_is_paused_or_retired must match manifest-retired unit"
+organ_is_paused_or_retired "chump-paused-by-file.timer" "$M_RET" "$PAUSED_FILE" \
+  || fail "organ_is_paused_or_retired must match paused-timers.txt unit"
+organ_is_paused_or_retired "chump-active-organ.timer" "$M_RET" "$PAUSED_FILE" \
+  && fail "organ_is_paused_or_retired must NOT match active un-paused unit"
+
+: > "$CALLS"
+: > "$ACTIVE"
+out_ret="$(CHUMP_ORGAN_MANIFEST="$M_RET" \
+  CHUMP_PAUSED_TIMERS_FILE="$PAUSED_FILE" \
+  CHUMP_ORGAN_RECONCILE_SYSTEMCTL_BIN="$STUB" \
+  CHUMP_ORGAN_RECONCILE_ALLOW_NONROOT=1 \
+  CHUMP_ORGAN_RECONCILE_BACKOFF_DIR="$TMP/backoff" \
+  CHUMP_ORGAN_RECONCILE_VERIFY_DELAY_S=0 \
+  CHUMP_ORGAN_MANIFEST_PLATFORM=systemd \
+  NODE_AMBIENT="$TMP/ambient.jsonl" \
+  bash "$RECONCILE" --apply 2>&1)"
+grep -q "enable.*chump-armed-pr-rebaser" "$CALLS" \
+  && fail "organ-reconcile must never re-enable retired chump-armed-pr-rebaser; calls: $(cat "$CALLS")"
+grep -q "enable.*chump-rot-reaper" "$CALLS" \
+  && fail "organ-reconcile must never re-enable retired chump-rot-reaper; calls: $(cat "$CALLS")"
+grep -q "enable.*chump-paused-by-file" "$CALLS" \
+  && fail "organ-reconcile must never re-enable paused-timers.txt unit; calls: $(cat "$CALLS")"
+grep -q "enable.*chump-active-organ.timer" "$CALLS" \
+  || fail "organ-reconcile must still enable non-retired chump-active-organ.timer; out=$out_ret calls=$(cat "$CALLS")"
+
+for retired_base in armed-pr-rebaser pr-auto-rebase rot-reaper stale-pr-reaper auto-arm-sweeper auto-merge-armer; do
+  grep -Eq "^retired[[:space:]]+chump-${retired_base}\\.(timer|service).*retired: done by the GitHub merge queue \\(PHASE-R R3\\)" "$REPO_ROOT/scripts/ops/organ-manifest.txt" \
+    || fail "real organ-manifest.txt must mark chump-${retired_base} retired with PHASE-R R3 reason"
+  grep -Eq "^enabled[[:space:]]+chump-${retired_base}\\.(timer|service)" "$REPO_ROOT/scripts/ops/organ-manifest.txt" \
+    && fail "real organ-manifest.txt must not leave chump-${retired_base} enabled"
+done
+pass "RESILIENT-1644: retired state + paused-timers.txt honoured by parser, organ-reconcile, and real organ-manifest.txt"
+
 echo "ALL PASS"

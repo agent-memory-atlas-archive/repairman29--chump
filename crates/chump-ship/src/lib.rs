@@ -42,9 +42,14 @@
 
 pub mod arm_policy;
 pub mod bot_merge;
+pub mod landing;
 pub mod manual_ship;
 pub mod ship;
 
+pub use landing::{
+    landed, landed_with, GithubLandingSource, LandingError, LandingProvider, LandingSource,
+    MergeSha,
+};
 pub use ship::{
     ChildrenDoneReceipt, ImportedReceipt, LandingReceipt, PreflightGate, PreflightReport, Ship,
     ShipError, ShipIntent, ShipMode, ShipReceipt,

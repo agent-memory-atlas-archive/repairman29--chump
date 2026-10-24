@@ -161,3 +161,20 @@ The brief's shorthand chain was `sub_agent_dispatched → ship_landed`; `sub_age
 3. R3 (CREDIBLE-1492): `audit-required` is deliberately outside branch protection, which let #5485 merge red; the audit's Test 5 only scans mapping-style gap files (list-style files are skipped), so the gate is also incomplete.
 4. The node-level fixes applied live tonight (wildcard fetch refspec added and a stale per-branch refspec removed on cuphead `~/chump`, ambient `node_config_changed` 06:17Z) must be made durable by INFRA-8210 or they will be lost on the next re-clone.
 5. Open fleet PR #5331 (RESILIENT-1494, dispatch hardening) overlaps `src/dispatch.rs` with INFRA-8204/8207/8198 and will need a rebase and a re-read (shepherd's lane).
+
+## 8. PHASE-R R3 & R1 Completion Receipt (2026-10-24)
+
+- **RESILIENT-1637 (R1 dirty-checkout ship block & failure telemetry):**
+  - `chump gap ship` is fetch-only (`RESILIENT-1645`) and no longer runs `cargo hakari generate` (`RESILIENT-1686`).
+  - `scripts/ops/node-refresh-chump.sh` now restores `Cargo.lock` and `workspace-hack/Cargo.toml` in `_cleanup_build_wt` after an in-place build so node refreshes leave tracked files git-clean.
+  - `scripts/coord/gap-doctor-reconcile.py` (`check_closure_drift`, `check_merged_pr_links`, `check_merged_pr_head_branch`) now captures subprocess `stderr` and emits `kind=gap_close_failed` to `ambient.jsonl` (`docs/observability/EVENT_REGISTRY.yaml`).
+  - **24h ambient receipt (`ship_autofetch_blocked_dirty`):** Baseline on `2026-10-17`–`18` was 212 events across 39 gaps; post-`RESILIENT-1645` binary swap on `cuphead` (`2026-10-24T14:43Z`), `ship_autofetch_blocked_dirty` count is `0`.
+- **CREDIBLE-1557 (R3 slice d — landing-provider seam):**
+  - Added `crates/chump-ship/src/landing.rs` (`pub mod landing;` in `crates/chump-ship/src/lib.rs`) exposing `MergeSha`, `LandingProvider` (`CHUMP_LANDING_PROVIDER=github|local`), `LandingSource`, `landed()`, and `landed_with()`.
+  - Wired `crates/chump-gap-store/src/lib.rs` (`ship()`, `landing_receipt_resolves()`, `verify_proof_of_merge()`, `proof_of_merge_sha()`) to consult `chump_ship::landing::landed()`. Setting `CHUMP_LANDING_PROVIDER=local` fails closed with no fallback to GitHub.
+- **CREDIBLE-1556 (R3 slice a — `merge_group` coverage gate strict):**
+  - Hardened `scripts/ci/test-merge-group-coverage.sh` with a pure-stdlib workflow parser fallback when `PyYAML` is absent and flipped `.github/workflows/ci.yml` (`pr-hygiene`) to `CHUMP_MERGE_GROUP_STRICT: "1"` (blocking, `continue-on-error` removed).
+- **RESILIENT-1644 (R3 slice c — retire queue-duplicating organs):**
+  - Added `retired` state support to `scripts/ops/lib/organ-manifest-lib.sh` (`organ_manifest_parse` 9th nameref + `organ_is_paused_or_retired`), `scripts/ops/organ-reconcile.sh`, `scripts/setup/chump-node-install.sh`, and `scripts/ops/node-converge.sh`.
+  - Marked all 6 queue-duplicating organs (`chump-armed-pr-rebaser`, `chump-pr-auto-rebase`, `chump-rot-reaper`, `chump-stale-pr-reaper`, `chump-auto-arm-sweeper`, `chump-auto-merge-armer`) `retired: done by the GitHub merge queue (PHASE-R R3)` in `scripts/ops/organ-manifest.txt`, disabled them at both `system` and `user` scopes on `cuphead`, and recorded them in `/home/ubuntu/.chump/paused-timers.txt`.
+  - Disabled cron/auto triggers in `.github/workflows/queue-driver.yml` and `.github/workflows/pr-rescue.yml` (retaining `workflow_dispatch`) and gated `pull_request` recomputes in `.github/workflows/verified-recompute.yml` while keeping `merge_group` and `push`-on-`main` active.

@@ -497,16 +497,32 @@ fi
 echo "--- verified-recompute.yml shape + HTTP 502 retry + push-on-main trigger (test 16) ---"
 RECOMPUTE_YML="${RECOMPUTE_YML:-$REPO_ROOT/.github/workflows/verified-recompute.yml}"
 RECOMPUTE_IF="$(RECOMPUTE_YML="$RECOMPUTE_YML" python3 -c '
-import os, yaml
-with open(os.environ["RECOMPUTE_YML"]) as f:
-    d = yaml.safe_load(f)
-print(d["jobs"]["rerun-verified"].get("if", ""))
+import os, re
+p = os.environ["RECOMPUTE_YML"]
+try:
+    import yaml
+    with open(p) as f:
+        d = yaml.safe_load(f)
+    print(d["jobs"]["rerun-verified"].get("if", ""))
+except ImportError:
+    with open(p) as f:
+        txt = f.read()
+    m = re.search(r"if:\s*>-\n((?:      .*\n)+)", txt)
+    print(m.group(1).strip() if m else "")
 ')"
 RECOMPUTE_RUN="$(RECOMPUTE_YML="$RECOMPUTE_YML" python3 -c '
-import os, yaml
-with open(os.environ["RECOMPUTE_YML"]) as f:
-    d = yaml.safe_load(f)
-print(d["jobs"]["rerun-verified"]["steps"][0]["run"])
+import os, re, textwrap
+p = os.environ["RECOMPUTE_YML"]
+try:
+    import yaml
+    with open(p) as f:
+        d = yaml.safe_load(f)
+    print(d["jobs"]["rerun-verified"]["steps"][0]["run"])
+except ImportError:
+    with open(p) as f:
+        txt = f.read()
+    m = re.search(r"run:\s*\|\n([\s\S]+)$", txt)
+    print(textwrap.dedent(m.group(1)) if m else "")
 ')"
 
 if grep -q "pull_request" <<<"$RECOMPUTE_IF" && \

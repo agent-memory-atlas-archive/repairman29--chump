@@ -3169,6 +3169,12 @@ impl GapStore {
                 .unwrap_or(0);
         }
 
+        if let Some(pr) = closed_pr {
+            if let Err(e) = chump_ship::landing::landed(&self.repo_root, gap_id, pr) {
+                bail!("CREDIBLE-1557: {e}");
+            }
+        }
+
         if !verify_proof_of_merge(&self.repo_root, gap_id, closed_pr) {
             bail!(
                 "INFRA-1392 PROOF-OF-MERGE: refusing to flip {gap_id} to status=done — \
@@ -3279,7 +3285,11 @@ impl GapStore {
     /// best-effort `git fetch origin main`, so a closer running seconds after
     /// the merge is not refused by a stale remote-tracking ref.
     pub fn landing_receipt_resolves(&self, gap_id: &str, closed_pr: i64) -> bool {
-        if verify_proof_of_merge(&self.repo_root, gap_id, Some(closed_pr)) {
+        if matches!(
+            chump_ship::landing::landed(&self.repo_root, gap_id, closed_pr),
+            Ok(Some(_))
+        ) || verify_proof_of_merge(&self.repo_root, gap_id, Some(closed_pr))
+        {
             return true;
         }
         let _ = std::process::Command::new("git")
@@ -3288,7 +3298,10 @@ impl GapStore {
             .stderr(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .status();
-        verify_proof_of_merge(&self.repo_root, gap_id, Some(closed_pr))
+        matches!(
+            chump_ship::landing::landed(&self.repo_root, gap_id, closed_pr),
+            Ok(Some(_))
+        ) || verify_proof_of_merge(&self.repo_root, gap_id, Some(closed_pr))
     }
 
     /// PHASE-R R1 (CREDIBLE-1491): the gap's status when it is already in a
@@ -5817,6 +5830,16 @@ fn push_receipt_greps(args: &mut Vec<String>, gap_id: &str, closed_pr: Option<i6
 /// "Recent" = last 200 commits on main. Wider than necessary but cheap
 /// — git log of 200 commits is sub-100ms.
 pub fn verify_proof_of_merge(repo_root: &Path, gap_id: &str, closed_pr: Option<i64>) -> bool {
+    // CREDIBLE-1557: when a closed_pr is supplied, consult the landing-provider
+    // seam first so `CHUMP_LANDING_PROVIDER=local` fails closed with no fallback
+    // and `CHUMP_LANDING_PROVIDER=github` answers whether PR `pr` landed.
+    if let Some(pr) = closed_pr {
+        match chump_ship::landing::landed(repo_root, gap_id, pr) {
+            Err(_) => return false,
+            Ok(Some(_)) => return true,
+            Ok(None) => {}
+        }
+    }
     // Test-fixture compatibility: if there's no .git under repo_root,
     // we're either in a synthetic test or a fresh init. The guard
     // can't usefully verify proof-of-merge in that context, so we
@@ -5917,49 +5940,13 @@ pub fn proof_of_merge_sha(
     gap_id: &str,
     closed_pr: Option<i64>,
 ) -> Option<String> {
-    if !repo_root.join(".git").exists() {
-        return None;
+    if let Some(pr) = closed_pr {
+        return chump_ship::landing::landed(repo_root, gap_id, pr)
+            .ok()
+            .flatten()
+            .map(|m| m.0);
     }
-    let has_origin_main = std::process::Command::new("git")
-        .args([
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            "refs/remotes/origin/main",
-        ])
-        .current_dir(repo_root)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    let target_ref = if has_origin_main {
-        "origin/main"
-    } else {
-        "main"
-    };
-    let mut args: Vec<String> = vec![
-        "log".into(),
-        target_ref.into(),
-        "-i".into(),
-        "-F".into(),
-        "-n".into(),
-        "1".into(),
-        "--format=%H".into(),
-    ];
-    push_receipt_greps(&mut args, gap_id, closed_pr);
-    let out = std::process::Command::new("git")
-        .args(&args)
-        .current_dir(repo_root)
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if sha.is_empty() {
-        None
-    } else {
-        Some(sha)
-    }
+    chump_ship::landing::git_log_merge_sha(repo_root, gap_id, None).map(|m| m.0)
 }
 
 /// RESILIENT-1110: redefine "done" = verified running-and-effective on the
@@ -8102,6 +8089,29 @@ mod phase_r_r1_tests {
         assert!(format!("{err:#}").contains("PROOF-OF-MERGE"), "{err:#}");
         assert_eq!(row(&store, &id).0, "open");
         assert_eq!(count_kind(&ambient(dir.path()), "ship_landed", &id), 0);
+    }
+
+    #[test]
+    #[serial_test::serial(closed_pr_guard_env)]
+    fn credible1557_local_landing_provider_fails_closed_on_ship() {
+        let dir = tempdir().unwrap();
+        let store = repo_with_landed_pr(dir.path());
+        let id = store
+            .reserve("CREDIBLE", "r3 local provider fail-closed", "P2", "s")
+            .unwrap();
+        store.link_pr(&id, 4242, "landed").unwrap();
+        unsafe {
+            std::env::set_var("CHUMP_LANDING_PROVIDER", "local");
+        }
+        let res = store.ship(&id, "sess-local", Some(4242));
+        unsafe {
+            std::env::remove_var("CHUMP_LANDING_PROVIDER");
+        }
+        let err = res.expect_err("CHUMP_LANDING_PROVIDER=local must refuse to fall back to github");
+        assert!(
+            format!("{err:#}").contains("CHUMP_LANDING_PROVIDER=local is not implemented"),
+            "unexpected error: {err:#}"
+        );
     }
 
     /// AC5: `gap set --status done` needs a closed_pr that RESOLVES to a

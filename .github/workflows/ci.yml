@@ -623,15 +623,14 @@ jobs:
         # this gate fail until the canary surface is taught about it.
         run: bash scripts/ci/test-broad-canary-coverage.sh
 
-      - name: Merge-queue trigger coverage (INFRA-2095, advisory)
+      - name: Merge-queue trigger coverage (INFRA-2095 / CREDIBLE-1556, blocking)
         # Verifies every required status check on main has its source workflow
         # firing on merge_group events. Missing trigger = merge queue blocks
         # forever (textbook footgun). Sibling of INFRA-1377 merge-queue-armed
-        # gate; this one ensures the queue WILL succeed once enabled.
-        # Set CHUMP_MERGE_GROUP_STRICT=1 to make blocking.
+        # gate; CREDIBLE-1556 flipped CHUMP_MERGE_GROUP_STRICT=1 to make it blocking.
         env:
           GH_TOKEN: ${{ github.token }}
-        continue-on-error: true
+          CHUMP_MERGE_GROUP_STRICT: "1"
         run: bash scripts/ci/test-merge-group-coverage.sh
 
       # META-1040: doctrine seam-finder (Doctrine Loom stitch 1) fixture test.

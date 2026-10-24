@@ -120,6 +120,38 @@ def normalize(v) -> str:
     return str(v) if v is not None else ""
 
 
+def _ship_stderr(exc: Exception) -> str:
+    """RESILIENT-1637: extract stderr (or stdout / str(exc)) from a failed
+    `chump gap ship` subprocess so the reconcile log and `gap_close_failed`
+    ambient event record the real failure reason instead of only the exit code."""
+    if isinstance(exc, subprocess.CalledProcessError):
+        detail = (exc.stderr or exc.stdout or "").strip()
+        if detail:
+            return detail
+    return str(exc).strip()
+
+
+def _emit_close_failed(ambient_path: Path, gid: str, pr_num: int, exc: Exception) -> str:
+    """RESILIENT-1637: emit kind=gap_close_failed with stderr and return the
+    detail string for log output."""
+    from datetime import datetime, timezone
+
+    detail = _ship_stderr(exc)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ambient_path.parent.mkdir(parents=True, exist_ok=True)
+    ev = {
+        "ts": ts,
+        "kind": "gap_close_failed",
+        "gap_id": gid,
+        "pr_number": int(pr_num),
+        "stderr": detail,
+        "source": "gap-doctor-reconcile",
+    }
+    with ambient_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(ev, separators=(",", ":")) + "\n")
+    return detail
+
+
 def is_yaml_richer(yaml_v, db_v) -> bool:
     """INFRA-316: heuristic for "YAML has materially more content than DB."
 
@@ -318,7 +350,8 @@ def check_closure_drift(db: dict, ambient_path: Path, dry_run: bool) -> int:
                 )
                 print(f"  CLOSED {gid} (PR #{pr_num} merged {merged_at[:10]}) — drift resolved")
             except (subprocess.CalledProcessError, FileNotFoundError) as _e:
-                print(f"  WARN could not close {gid}: {_e}")
+                detail = _emit_close_failed(ambient_path, gid, int(pr_num), _e)
+                print(f"  WARN could not close {gid}: {_e} ({detail})", file=sys.stderr)
 
     if dry_run:
         print(f"  (dry-run — {drift} drift case(s) would emit kind=gap_closure_drift)")
@@ -776,7 +809,8 @@ def check_merged_pr_links(state_db: Path, ambient_path: Path, dry_run: bool) -> 
                 closed += 1
                 print(f"  CLOSED {gid} done (gap_prs-linked PR #{pr_num} merged {cd})")
             except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                print(f"  WARN could not close {gid}: {e}", file=sys.stderr)
+                detail = _emit_close_failed(ambient_path, gid, int(pr_num), e)
+                print(f"  WARN could not close {gid}: {e} ({detail})", file=sys.stderr)
             break  # one close per gap; newest linked merged PR wins
     if dry_run:
         print(f"  (dry-run — {closed} would close; no writes)")
@@ -891,7 +925,8 @@ def check_merged_pr_head_branch(state_db: Path, ambient_path: Path, dry_run: boo
             closed += 1
             print(f"  CLOSED {gid} done (head-branch PR #{pr_num} merged {cd})")
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"  WARN could not close {gid}: {e}", file=sys.stderr)
+            detail = _emit_close_failed(ambient_path, gid, int(pr_num), e)
+            print(f"  WARN could not close {gid}: {e} ({detail})", file=sys.stderr)
     if found == 0:
         print(f"merged-pr-head-branch: scanned {len(merged)} merged PR(s) — "
               f"no open gap matches a merged PR's head branch, clean")

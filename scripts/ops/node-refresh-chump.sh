@@ -798,7 +798,15 @@ if [[ -n "$_PIN_FULL" && "$_PIN_FULL" != "$_HEAD_FULL" ]]; then
         rm -rf "$_BUILD_WT"; _BUILD_WT=""
     fi
 fi
-_cleanup_build_wt() { [[ -n "$_BUILD_WT" ]] && { git worktree remove --force "$_BUILD_WT" >>"$LOG" 2>&1 || rm -rf "$_BUILD_WT"; }; _BUILD_WT=""; }
+_cleanup_build_wt() {
+    [[ -n "$_BUILD_WT" ]] && { git worktree remove --force "$_BUILD_WT" >>"$LOG" 2>&1 || rm -rf "$_BUILD_WT"; }
+    _BUILD_WT=""
+    # RESILIENT-1637: When BUILD_DIR == REPO_ROOT (green pin == HEAD, in-place
+    # build), cargo build can touch Cargo.lock / workspace-hack/Cargo.toml and
+    # leave the node checkout dirty. Restore tracked lockfiles so git status
+    # stays clean after a binary refresh.
+    git -C "$REPO_ROOT" checkout -- Cargo.lock workspace-hack/Cargo.toml 2>/dev/null || true
+}
 
 log "cargo build --release --bin chump (warm target $CARGO_TARGET_DIR_ABS, source $BUILD_DIR) …"
 if ! ( cd "$BUILD_DIR" && PATH="$(dirname "$CARGO"):$PATH" CARGO_TARGET_DIR="$CARGO_TARGET_DIR_ABS" "$CARGO" build --release --bin chump ) >>"$LOG" 2>&1; then

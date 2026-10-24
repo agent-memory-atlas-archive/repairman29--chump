@@ -215,14 +215,8 @@ enabled     chump-pr-approval.timer  role=brain requires=bin:gh
 # the fragile, hand-installed transient `chump-farmer-bridge` unit. Declared here
 # so organ-reconcile re-arms it if it drifts or fails.
 enabled     chump-farmer.timer  role=brain requires=bin:chump
-# chump-rot-reaper.timer: the CONFLICTING-PR drain (RESILIENT-324). Closes open
-# PRs that are genuinely CONFLICTING and older than the age gate — the ones the
-# armed-rebaser CANNOT rebase — and re-queues their gaps to be redone on fresh
-# main. Without it the back-pressure breaker's stuck-pile drains only to 4–5 and
-# the fleet stays halted in the hysteresis dead-zone with no auto-recovery (the
-# 2026-08-14 hours-long deadlock). Declared here so organ-reconcile re-arms it if
-# it drifts or fails.
-enabled     chump-rot-reaper.timer  role=brain requires=bin:gh
+# chump-rot-reaper.timer: retired: done by the GitHub merge queue (PHASE-R R3, RESILIENT-1644).
+retired     chump-rot-reaper.timer  role=brain requires=bin:gh  # retired: done by the GitHub merge queue (PHASE-R R3)
 # chump-trunk-recovery-reviver.timer: the RECOVERY counterpart to the rot-reaper's
 # RESILIENT-1188 systemic-red HOLD. On a trunk RED→GREEN recovery it reopens the
 # PRs that were reaped as victims of the just-ended trunk-red window (closed
@@ -717,4 +711,16 @@ enabled     chump-shared-target-cache-reaper.service  role=janitor requires=file
 enabled     chump-reviver.service  role=brain requires=file:~/.chump/organs/reviver.sh housekeeping=scripts/coord/post-push-integrity-watch.sh|60| run-scope=system
 enabled     chump-pr-stuck-live-scan.service  role=brain requires=file:~/.chump/organs/pr-stuck-live-scan.sh housekeeping=scripts/ops/stuck-pr-filer.sh|3600| run-scope=system
 enabled     chump-pr-stuck-cluster-detector.service  role=brain requires=file:~/.chump/organs/pr-stuck-cluster-detector.sh housekeeping=scripts/coord/pr-stuck-cluster-detector.sh|1800|--apply run-scope=system
-enabled     chump-armed-pr-rebaser.service  role=brain requires=file:~/.chump/organs/armed-pr-rebaser.sh housekeeping=scripts/coord/armed-pr-rebaser.sh|1200| run-scope=system
+# PHASE-R R3 (RESILIENT-1644): queue-duplicating organs retired at both system and
+# user scopes — retired: done by the GitHub merge queue (PHASE-R R3).
+retired     chump-armed-pr-rebaser.service  role=brain requires=file:~/.chump/organs/armed-pr-rebaser.sh housekeeping=scripts/coord/armed-pr-rebaser.sh|1200| run-scope=system  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-armed-pr-rebaser.timer    role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-pr-auto-rebase.timer      role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-pr-auto-rebase.service    role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-rot-reaper.service        role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-stale-pr-reaper.timer     role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-stale-pr-reaper.service   role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-auto-arm-sweeper.timer    role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-auto-arm-sweeper.service  role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-auto-merge-armer.timer    role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
+retired     chump-auto-merge-armer.service  role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
