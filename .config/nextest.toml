@@ -4,3 +4,16 @@
 # A test still running after 4 x 60s is killed and reported as a timeout, so
 # one hung test fails the gate by name instead of stalling the whole push.
 slow-timeout = { period = "60s", terminate-after = 4 }
+
+# RESILIENT-1621: serialize dispatch_child_lifetime so its subprocess + git
+# worktree setup does not compete with parallel nextest workers on 4-core nodes.
+[test-groups.dispatch-child-lifetime]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = 'binary(dispatch_child_lifetime)'
+test-group = 'dispatch-child-lifetime'
+
+[[profile.prepush.overrides]]
+filter = 'binary(dispatch_child_lifetime)'
+test-group = 'dispatch-child-lifetime'

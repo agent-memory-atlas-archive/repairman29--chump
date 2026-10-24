@@ -259,14 +259,11 @@ fn ac2_parent_sigkill_still_reaps_child_via_pdeathsig() {
         .spawn()
         .expect("spawn chump dispatch");
 
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while Instant::now() < deadline && !pidfile.exists() {
-        std::thread::sleep(Duration::from_millis(100));
+    if let Err(msg) = wait_for_pidfile_with_deadline(&pidfile, PIDFILE_WAIT_DEADLINE) {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("{msg}");
     }
-    assert!(
-        pidfile.exists(),
-        "fake claude never wrote its pidfile within 30s"
-    );
     let pid_str = fs::read_to_string(&pidfile).expect("read pidfile");
     let fake_claude_pid: u32 = pid_str
         .trim()
@@ -286,5 +283,60 @@ fn ac2_parent_sigkill_still_reaps_child_via_pdeathsig() {
     assert!(
         !pid_alive(fake_claude_pid),
         "fake claude pid {fake_claude_pid} survived a SIGKILL of its chump-dispatch parent"
+    );
+}
+
+/// RESILIENT-1621: 120s pidfile wait budget so `chump dispatch` (claim + worktree
+/// setup) does not flake under full-suite load on a 4-core node.
+const PIDFILE_WAIT_DEADLINE: Duration = Duration::from_secs(120);
+
+fn wait_for_pidfile_with_deadline(pidfile: &Path, budget: Duration) -> Result<Duration, String> {
+    let start = Instant::now();
+    let deadline = start + budget;
+    while Instant::now() < deadline {
+        if pidfile.exists() {
+            return Ok(start.elapsed());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if pidfile.exists() {
+        return Ok(start.elapsed());
+    }
+    let elapsed = start.elapsed();
+    let loadavg = fs::read_to_string("/proc/loadavg")
+        .unwrap_or_else(|_| "unavailable".to_string())
+        .trim()
+        .to_string();
+    Err(format!(
+        "fake claude never wrote its pidfile within {}s (elapsed={elapsed:?}, loadavg={loadavg})",
+        budget.as_secs()
+    ))
+}
+
+#[test]
+fn resilient1621_pidfile_wait_deadline_is_120s_and_reports_elapsed_on_timeout() {
+    assert_eq!(
+        PIDFILE_WAIT_DEADLINE,
+        Duration::from_secs(120),
+        "RESILIENT-1621 AC1: pidfile wait deadline must be 120s"
+    );
+    let tmp = TempDir::new().expect("tempdir");
+    let missing = tmp.path().join("never-written.pid");
+    let err = wait_for_pidfile_with_deadline(&missing, Duration::from_millis(120))
+        .expect_err("missing pidfile must return timeout error");
+    assert!(
+        err.contains("fake claude never wrote its pidfile within")
+            && err.contains("elapsed=")
+            && err.contains("loadavg="),
+        "timeout error must report elapsed time and loadavg, got: {err}"
+    );
+    let nextest_cfg =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".config/nextest.toml"))
+            .expect("read .config/nextest.toml");
+    assert!(
+        nextest_cfg.contains("[test-groups.dispatch-child-lifetime]")
+            && nextest_cfg.contains("max-threads = 1")
+            && nextest_cfg.contains("binary(dispatch_child_lifetime)"),
+        "RESILIENT-1621 AC2: .config/nextest.toml must assign dispatch_child_lifetime to a serial test-group"
     );
 }
