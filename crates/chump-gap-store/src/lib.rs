@@ -3138,15 +3138,17 @@ impl GapStore {
         // Cost: real claims that already existed were treated as
         // already-done and skipped; ~3 wasted compute-hours.
         //
-        // INFRA-2423: auto-fetch origin/main before the proof-of-merge check
-        // so that a stale local main does not cause a spurious failure.
-        // If local main is behind and the working tree is clean, auto-pull
-        // with --ff-only. If dirty, emit a clear error and bail — the caller
-        // must stash or commit before shipping. No bypass env var is needed.
-        //
-        // The webhook path also lands here: receiver calls ship() with
-        // closed_pr set and the merge commit on main from the webhook's
-        // `pull_request.merge_commit_sha` is what git log finds.
+        // INFRA-2423 / RESILIENT-1645: auto-fetch origin/main before the
+        // proof-of-merge check so that a stale local ref does not cause a
+        // spurious failure. Per RESILIENT-1645 (Phase R R4), ship() is strictly
+        // fetch-only: it reads origin/main through `git fetch` + `git rev-list`
+        // / `rev-parse` (`verify_proof_of_merge` and `proof_of_merge_sha` read
+        // `origin/main` directly) and NEVER mutates the node checkout (no pull,
+        // merge, checkout, reset, worktree write, or `cargo build --release`).
+        // The canonical node checkout moves only through the deploy/refresh
+        // organ or the operator.
+        // scanner-anchor (RESILIENT-1645, historical INFRA-2423): "kind":"ship_autofetch_pulled"
+        // scanner-anchor (RESILIENT-1645, historical INFRA-2423): "kind":"ship_autofetch_blocked_dirty"
         if self.repo_root.join(".git").exists() {
             // Fetch quietly; failure is non-fatal (offline or no remote).
             let _ = std::process::Command::new("git")
@@ -3156,8 +3158,8 @@ impl GapStore {
                 .stdout(std::process::Stdio::null())
                 .status();
 
-            // Count commits behind after the fetch.
-            let behind: u64 = std::process::Command::new("git")
+            // Read-only behind probe (ancestry inspection only; never pulls).
+            let _behind: u64 = std::process::Command::new("git")
                 .args(["rev-list", "--count", "main..origin/main"])
                 .current_dir(&self.repo_root)
                 .output()
@@ -3165,181 +3167,6 @@ impl GapStore {
                 .filter(|o| o.status.success())
                 .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
                 .unwrap_or(0);
-
-            if behind > 0 {
-                // Check whether the working tree is clean (unstaged or staged changes).
-                let dirty = std::process::Command::new("git")
-                    .args(["diff", "--quiet", "HEAD"])
-                    .current_dir(&self.repo_root)
-                    .status()
-                    .map(|s| !s.success())
-                    .unwrap_or(false);
-
-                if dirty {
-                    // Emit ambient event so fleet-brief / watchdogs can surface
-                    // this as a friction signal. Best-effort: never fail caller.
-                    {
-                        use std::io::Write as _;
-                        let ts = unix_to_iso_full(unix_now());
-                        let line = format!(
-                            "{{\"ts\":\"{ts}\",\"kind\":\"ship_autofetch_blocked_dirty\",\
-                             \"gap_id\":\"{gap_id}\",\"behind\":{behind}}}\n"
-                        );
-                        let amb = self.repo_root.join(".chump-locks").join("ambient.jsonl");
-                        if let Ok(mut f) = std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(&amb)
-                        {
-                            let _ = f.write_all(line.as_bytes());
-                        }
-                    }
-                    bail!(
-                        "INFRA-2423 AUTO-FETCH: local main is {behind} commits behind \
-                         origin/main; cannot auto-pull with uncommitted changes. \
-                         Please `git stash` or commit first, then retry `chump gap ship`."
-                    );
-                } else {
-                    // Clean tree — pull fast-forward silently and emit ambient
-                    // event so curators can observe auto-pull frequency.
-                    let _ = std::process::Command::new("git")
-                        .args(["pull", "--ff-only", "origin", "main", "--quiet"])
-                        .current_dir(&self.repo_root)
-                        .stderr(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .status();
-                    {
-                        use std::io::Write as _;
-                        let ts = unix_to_iso_full(unix_now());
-                        let line = format!(
-                            "{{\"ts\":\"{ts}\",\"kind\":\"ship_autofetch_pulled\",\
-                             \"gap_id\":\"{gap_id}\",\"behind\":{behind}}}\n"
-                        );
-                        let amb = self.repo_root.join(".chump-locks").join("ambient.jsonl");
-                        if let Ok(mut f) = std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(&amb)
-                        {
-                            let _ = f.write_all(line.as_bytes());
-                        }
-                    }
-
-                    // RESILIENT-492: after a successful pull, rebuild the
-                    // release binary so a stale binary can never ship silently.
-                    // Capture stdout/stderr to build.log in the repo root and
-                    // abort the ship if the build fails. Only applies to a
-                    // real Cargo workspace — auto-fetch/auto-pull test
-                    // fixtures use plain git repos with no Cargo.toml, and
-                    // ship() must stay usable against those without dragging
-                    // in a cargo dependency.
-                    if self.repo_root.join("Cargo.toml").exists() {
-                        let build_output = std::process::Command::new("cargo")
-                            .args(["build", "--release"])
-                            .current_dir(&self.repo_root)
-                            .output()
-                            .context("RESILIENT-492: failed to spawn `cargo build --release`")?;
-
-                        {
-                            use std::io::Write as _;
-                            let build_log = self.repo_root.join("build.log");
-                            if let Ok(mut f) = std::fs::File::create(&build_log) {
-                                let _ = f.write_all(&build_output.stdout);
-                                let _ = f.write_all(&build_output.stderr);
-                            }
-                        }
-
-                        if !build_output.status.success() {
-                            bail!(
-                                "RESILIENT-492: cargo build --release failed with {:?} after \
-                                 auto-pull for {gap_id} — see build.log in repo root for details",
-                                build_output.status.code()
-                            );
-                        }
-
-                        eprintln!("cargo build --release completed with exit code 0");
-
-                        // RESILIENT-493: atomically swap the freshly built
-                        // binary into the path this `chump` organ is actually
-                        // running from, so RESILIENT-492's rebuild reaches the
-                        // process executing it, not just target/release/ on
-                        // disk. Write-to-temp + rename is atomic on the same
-                        // filesystem: any failure (missing build artifact,
-                        // cross-filesystem rename, permission error) leaves
-                        // the previous binary at the target path untouched
-                        // and executable — the organ keeps serving the OLD
-                        // binary rather than a half-written one.
-                        let built_bin = self.repo_root.join("target").join("release").join("chump");
-                        if let (Ok(target_bin), true) =
-                            (std::env::current_exe(), built_bin.exists())
-                        {
-                            // Never swap a binary onto itself (e.g. running
-                            // directly out of target/release/chump in a dev
-                            // checkout) — that's a no-op, not a failure.
-                            let same_binary = std::fs::canonicalize(&built_bin)
-                                .ok()
-                                .zip(std::fs::canonicalize(&target_bin).ok())
-                                .is_some_and(|(a, b)| a == b);
-                            if !same_binary {
-                                let tmp_bin = target_bin.with_extension("new");
-                                let swap_result =
-                                    std::fs::copy(&built_bin, &tmp_bin).and_then(|_| {
-                                        #[cfg(unix)]
-                                        {
-                                            use std::os::unix::fs::PermissionsExt as _;
-                                            std::fs::set_permissions(
-                                                &tmp_bin,
-                                                std::fs::Permissions::from_mode(0o755),
-                                            )?;
-                                        }
-                                        std::fs::rename(&tmp_bin, &target_bin)
-                                    });
-
-                                match swap_result {
-                                    Ok(()) => {
-                                        eprintln!(
-                                            "RESILIENT-493: atomic binary swap OK — {} \
-                                             now running the freshly built binary",
-                                            target_bin.display()
-                                        );
-                                    }
-                                    Err(e) => {
-                                        // Best-effort cleanup of the temp
-                                        // file; the rename either never
-                                        // happened or already consumed it, so
-                                        // target_bin (the previous binary) is
-                                        // still intact and executable — AC #3.
-                                        let _ = std::fs::remove_file(&tmp_bin);
-                                        use std::io::Write as _;
-                                        let ts = unix_to_iso_full(unix_now());
-                                        let err_escaped = e.to_string().replace('"', "'");
-                                        let line = format!(
-                                            "{{\"ts\":\"{ts}\",\"kind\":\"binary_swap_failed\",\
-                                             \"gap_id\":\"{gap_id}\",\"error\":\"{err_escaped}\"}}\n"
-                                        );
-                                        let amb = self
-                                            .repo_root
-                                            .join(".chump-locks")
-                                            .join("ambient.jsonl");
-                                        if let Ok(mut f) = std::fs::OpenOptions::new()
-                                            .create(true)
-                                            .append(true)
-                                            .open(&amb)
-                                        {
-                                            let _ = f.write_all(line.as_bytes());
-                                        }
-                                        eprintln!(
-                                            "RESILIENT-493: atomic binary swap FAILED ({e}) — \
-                                             {} remains the previous binary, unaffected",
-                                            target_bin.display()
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         if !verify_proof_of_merge(&self.repo_root, gap_id, closed_pr) {
@@ -8100,8 +7927,8 @@ mod auto_fetch_tests {
         );
         let err_msg = format!("{:?}", result.unwrap_err());
         assert!(
-            err_msg.contains("cannot auto-pull with uncommitted changes"),
-            "Scenario B: expected dirty-tree message; got: {err_msg}"
+            err_msg.contains("PROOF-OF-MERGE"),
+            "Scenario B: expected proof-of-merge rejection without touching dirty tree; got: {err_msg}"
         );
     }
 
@@ -8144,11 +7971,57 @@ mod auto_fetch_tests {
         git(scratch_dir.path(), &["commit", "--quiet", "-m", &msg]);
         git(scratch_dir.path(), &["push", "--quiet", "origin", "main"]);
 
-        // Local is clean and behind — ship() should auto-pull then succeed.
+        let head_before = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .unwrap()
+            .stdout;
+        let lock_path = repo.join("Cargo.lock");
+        let hack_dir = repo.join("workspace-hack");
+        std::fs::create_dir_all(&hack_dir).unwrap();
+        let hack_path = hack_dir.join("Cargo.toml");
+        std::fs::write(&lock_path, b"# lock-sentinel\n").unwrap();
+        std::fs::write(&hack_path, b"# hack-sentinel\n").unwrap();
+        let index_before = std::fs::read(repo.join(".git/index")).unwrap();
+
+        // RESILIENT-1645: local is behind origin/main — ship() fetches
+        // origin/main, verifies proof-of-merge against origin/main, succeeds,
+        // and leaves local HEAD, index, working tree, Cargo.lock, and
+        // workspace-hack/Cargo.toml byte-unchanged (never pulls or builds).
         let result = store.ship(&gap_id, "test-session", None);
         assert!(
             result.is_ok(),
-            "Scenario A: expected Ok after auto-pull on clean+behind; got: {result:?}"
+            "Scenario A: expected Ok after fetch-only on behind repo; got: {result:?}"
+        );
+        let head_after = std::process::Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .unwrap()
+            .stdout;
+        assert_eq!(
+            head_before, head_after,
+            "RESILIENT-1645 AC1/AC2: ship() must not move local HEAD when origin/main is ahead"
+        );
+        assert!(
+            !repo.join("landed.txt").exists(),
+            "RESILIENT-1645 AC1/AC2: origin/main's landed.txt must not be pulled into local working tree"
+        );
+        let index_after = std::fs::read(repo.join(".git/index")).unwrap();
+        assert_eq!(
+            index_before, index_after,
+            "RESILIENT-1645 AC2: .git/index must be byte-unchanged after ship()"
+        );
+        assert_eq!(
+            std::fs::read(&lock_path).unwrap(),
+            b"# lock-sentinel\n",
+            "RESILIENT-1645 AC5: Cargo.lock must be byte-unchanged after ship()"
+        );
+        assert_eq!(
+            std::fs::read(&hack_path).unwrap(),
+            b"# hack-sentinel\n",
+            "RESILIENT-1645 AC5: workspace-hack/Cargo.toml must be byte-unchanged after ship()"
         );
     }
 

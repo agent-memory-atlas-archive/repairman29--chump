@@ -52,16 +52,24 @@ else
     fail "git fetch origin main call not found in $SRC"
 fi
 
-if grep -q '"pull".*"--ff-only"\|--ff-only' "$SRC"; then
-    ok "git pull --ff-only call found in $SRC"
+# RESILIENT-1645 AC1 & AC5: ship() is strictly fetch-only and never invokes
+# `git pull --ff-only` or `cargo build --release` in the canonical checkout.
+if grep -q 'args(\["pull", "--ff-only"' "$SRC"; then
+    fail "git pull --ff-only call still present in $SRC (must be fetch-only per RESILIENT-1645 AC1)"
 else
-    fail "git pull --ff-only call not found in $SRC"
+    ok "git pull --ff-only call absent from $SRC (RESILIENT-1645 AC1)"
 fi
 
-if grep -q "cannot auto-pull with uncommitted changes" "$SRC"; then
-    ok "dirty-tree error message found in $SRC"
+if grep -q 'args(\["build", "--release"' "$SRC"; then
+    fail "cargo build --release call still present in $SRC (must be removed per RESILIENT-1645 AC5)"
 else
-    fail "dirty-tree error message missing from $SRC"
+    ok "cargo build --release call absent from $SRC (RESILIENT-1645 AC5)"
+fi
+
+if grep -q "RESILIENT-1645" "$SRC"; then
+    ok "RESILIENT-1645 fetch-only implementation marker present in $SRC"
+else
+    fail "RESILIENT-1645 fetch-only implementation marker missing from $SRC"
 fi
 
 # ── Cargo unit tests ──────────────────────────────────────────────────────────
@@ -73,7 +81,7 @@ if ! command -v cargo >/dev/null 2>&1; then
 else
     if (cd "$REPO_ROOT" && \
         PATH="$HOME/.cargo/bin:$PATH" \
-        cargo test -p chump-gap-store auto_fetch --quiet -- --test-threads=1 2>&1 | tail -15
+        cargo test -p chump-gap-store --lib auto_fetch --quiet -- --test-threads=1 2>&1 | tail -15
     ); then
         ok "cargo test auto_fetch tests passed"
     else
@@ -103,11 +111,14 @@ else
     SHIP_REPO="$TMP/ship-repo"
     mkdir -p "$SHIP_REPO"
     git -C "$SHIP_REPO" init -q
+    git -C "$SHIP_REPO" checkout -q -b main
     git -C "$SHIP_REPO" config user.email "test@integration.local"
     git -C "$SHIP_REPO" config user.name "Integration Test"
 
     # Reserve a test gap so we have a real gap ID
-    export CHUMP_STATE_DB="$TMP/state.db"
+    mkdir -p "$SHIP_REPO/.chump"
+    export CHUMP_STATE_DB="$SHIP_REPO/.chump/state.db"
+    export CHUMP_REPO_ROOT="$SHIP_REPO"
     gap_id=$(
         FLEET_029_AMBIENT_GLANCE_SKIP=1 \
         "$CHUMP_BIN" gap reserve \
@@ -122,13 +133,15 @@ else
         # Add commit mentioning gap_id to SHIP_REPO main branch
         echo "marker" > "$SHIP_REPO/marker.txt"
         git -C "$SHIP_REPO" add marker.txt
-        git -C "$SHIP_REPO" commit -q -m "feat(${gap_id}): INFRA-2423 auto-fetch test marker"
+        git -C "$SHIP_REPO" commit -q -m "feat(${gap_id}): INFRA-2423 auto-fetch test marker (#9999)"
+        (cd "$SHIP_REPO" && CHUMP_REPO_ROOT="$SHIP_REPO" CHUMP_STATE_DB="$SHIP_REPO/.chump/state.db" "$CHUMP_BIN" gap link-pr "$gap_id" 9999 --sha "$(git -C "$SHIP_REPO" rev-parse HEAD)" >/dev/null 2>&1 || true)
         mkdir -p "$SHIP_REPO/docs/gaps"
         yaml_src="$REPO_ROOT/docs/gaps/${gap_id}.yaml"
         [[ -f "$yaml_src" ]] && cp "$yaml_src" "$SHIP_REPO/docs/gaps/${gap_id}.yaml"
 
         SHIP_OUT=$(
-            CHUMP_REPO="$SHIP_REPO" \
+            cd "$SHIP_REPO" &&
+            CHUMP_REPO="$SHIP_REPO" CHUMP_REPO_ROOT="$SHIP_REPO" \
             CHUMP_SKIP_SUPERSEDED_CLOSE=1 \
             CHUMP_SHIP_NO_AUTOSTAGE=1 \
             CHUMP_ALLOW_STALE_DESTRUCTIVE=1 \
@@ -145,7 +158,8 @@ else
         # Verify bypass var is NOT consulted: set it and scenario should still work
         # (it has no effect — the var is gone from the binary)
         BYPASS_OUT=$(
-            CHUMP_REPO="$SHIP_REPO" \
+            cd "$SHIP_REPO" &&
+            CHUMP_REPO="$SHIP_REPO" CHUMP_REPO_ROOT="$SHIP_REPO" \
             CHUMP_BYPASS_PROOF_OF_MERGE=1 \
             CHUMP_SKIP_SUPERSEDED_CLOSE=1 \
             CHUMP_SHIP_NO_AUTOSTAGE=1 \
@@ -165,6 +179,68 @@ else
 
         # Clean up test gap YAML from real repo
         [[ -f "$yaml_src" ]] && rm -f "$yaml_src" || true
+    fi
+
+    # RESILIENT-1645 AC2 & AC5: when origin/main is ahead of local HEAD, gap ship
+    # fetches origin/main, proves merge from origin/main, and leaves HEAD, index,
+    # working tree, Cargo.lock, and workspace-hack/Cargo.toml byte-unchanged.
+    gap_id2=$(
+        FLEET_029_AMBIENT_GLANCE_SKIP=1 \
+        "$CHUMP_BIN" gap reserve \
+            --domain TEST \
+            --title "TEST: RESILIENT-1645 fetch-only fixture" \
+            --priority P3 --force 2>&1 | grep '^TEST-' | tail -1
+    ) || true
+    if [[ -n "$gap_id2" ]] && grep -qa "RESILIENT-1645" "$CHUMP_BIN" 2>/dev/null; then
+        BARE_ORIGIN="$TMP/origin.git"
+        git clone --bare -q "$SHIP_REPO" "$BARE_ORIGIN"
+        git -C "$SHIP_REPO" remote add origin "$BARE_ORIGIN" 2>/dev/null || git -C "$SHIP_REPO" remote set-url origin "$BARE_ORIGIN"
+        git -C "$SHIP_REPO" push -q origin main
+
+        # Advance origin/main in a separate clone so SHIP_REPO is behind
+        ADV="$TMP/advance"
+        git clone -q "$BARE_ORIGIN" "$ADV"
+        git -C "$ADV" config user.email "test@integration.local"
+        git -C "$ADV" config user.name "Integration Test"
+        echo "ahead" > "$ADV/ahead.txt"
+        git -C "$ADV" add ahead.txt
+        git -C "$ADV" commit -q -m "feat(${gap_id2}): RESILIENT-1645 origin ahead (#9998)"
+        git -C "$ADV" push -q origin main
+
+        # Populate Cargo.lock and workspace-hack/Cargo.toml in SHIP_REPO
+        mkdir -p "$SHIP_REPO/workspace-hack"
+        printf '# lock-before\n' > "$SHIP_REPO/Cargo.lock"
+        printf '# hack-before\n' > "$SHIP_REPO/workspace-hack/Cargo.toml"
+        printf '[workspace]\nmembers = []\n' > "$SHIP_REPO/Cargo.toml"
+        head_before="$(git -C "$SHIP_REPO" rev-parse HEAD)"
+        index_sha_before="$(sha256sum "$SHIP_REPO/.git/index" | awk '{print $1}')"
+        lock_sha_before="$(sha256sum "$SHIP_REPO/Cargo.lock" | awk '{print $1}')"
+        hack_sha_before="$(sha256sum "$SHIP_REPO/workspace-hack/Cargo.toml" | awk '{print $1}')"
+
+        "$CHUMP_BIN" gap link-pr "$gap_id2" 9998 --sha "$(git -C "$ADV" rev-parse HEAD)" >/dev/null 2>&1 || true
+
+        SHIP2_OUT=$(
+            cd "$SHIP_REPO" &&
+            CHUMP_REPO="$SHIP_REPO" CHUMP_REPO_ROOT="$SHIP_REPO" \
+            CHUMP_SKIP_SUPERSEDED_CLOSE=1 \
+            CHUMP_SHIP_NO_AUTOSTAGE=1 \
+            CHUMP_ALLOW_STALE_DESTRUCTIVE=1 \
+            CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 \
+            "$CHUMP_BIN" gap ship "$gap_id2" --closed-pr 9998 2>&1
+        )
+        SHIP2_RC=$?
+        head_after="$(git -C "$SHIP_REPO" rev-parse HEAD)"
+        index_sha_after="$(sha256sum "$SHIP_REPO/.git/index" | awk '{print $1}')"
+        lock_sha_after="$(sha256sum "$SHIP_REPO/Cargo.lock" | awk '{print $1}')"
+        hack_sha_after="$(sha256sum "$SHIP_REPO/workspace-hack/Cargo.toml" | awk '{print $1}')"
+
+        if [[ $SHIP2_RC -eq 0 && "$head_before" == "$head_after" && ! -f "$SHIP_REPO/ahead.txt" && "$index_sha_before" == "$index_sha_after" && "$lock_sha_before" == "$lock_sha_after" && "$hack_sha_before" == "$hack_sha_after" ]]; then
+            ok "RESILIENT-1645 AC2/AC5: HEAD, index, working tree, Cargo.lock, and workspace-hack/Cargo.toml byte-unchanged when origin/main is ahead"
+        else
+            fail "RESILIENT-1645 AC2/AC5: rc=$SHIP2_RC head_changed=$([[ $head_before != $head_after ]] && echo 1 || echo 0) index_changed=$([[ $index_sha_before != $index_sha_after ]] && echo 1 || echo 0) out=${SHIP2_OUT:0:200}"
+        fi
+        yaml_src2="$REPO_ROOT/docs/gaps/${gap_id2}.yaml"
+        [[ -f "$yaml_src2" ]] && rm -f "$yaml_src2" || true
     fi
 fi
 
