@@ -577,6 +577,39 @@ if generate_path:
     gen_path.write_text("\n".join(lines_out) + "\n")
     info(f"Generated inventory written to {generate_path} ({len(gates)} gates, {len(missing_rows)} missing)")
 
+# CREDIBLE-1538: release-plz Test and verify job must scope tests to the 3
+# publishable crates (not `cargo test --workspace`) and must not run an
+# un-ignored `cargo audit` step (which belongs to cargo-audit-nightly.yml).
+def check_release_plz_test_scope(wf_file: pathlib.Path) -> tuple[bool, str]:
+    if not wf_file.exists():
+        if not sibling_ymls:
+            return True, "release-plz.yml absent in synthetic ci.yml-only fixture"
+        return False, "release-plz.yml missing"
+    txt = wf_file.read_text(encoding="utf-8")
+    if "cargo test --workspace" in txt:
+        return False, "release-plz.yml still runs `cargo test --workspace`"
+    if "run: cargo audit" in txt:
+        return False, "release-plz.yml still runs un-ignored `cargo audit`"
+    required = [
+        "cargo test --manifest-path chump-tool-macro/Cargo.toml",
+        "cargo test --manifest-path crates/chump-coord/Cargo.toml",
+        "cargo test --manifest-path crates/chump-perception/Cargo.toml",
+        "cargo check --manifest-path chump-tool-macro/Cargo.toml",
+        "cargo check --manifest-path crates/chump-coord/Cargo.toml",
+        "cargo check --manifest-path crates/chump-perception/Cargo.toml",
+    ]
+    for req in required:
+        if req not in txt:
+            return False, f"release-plz.yml missing `{req}`"
+    return True, "release-plz.yml scopes test+check to publishable crates"
+
+rp_ok, rp_msg = check_release_plz_test_scope(ci_yml.parent / "release-plz.yml")
+if rp_ok:
+    ok(f"CREDIBLE-1538: {rp_msg}")
+else:
+    fail(f"CREDIBLE-1538: {rp_msg}")
+    sys.exit(1)
+
 if unmirrored:
     fail(f"{len(unmirrored)} CI gate(s) lack a preflight mirror and are not allowlisted.")
     fail("Each unaccounted gate emitted kind=ci_parity_drift to ambient.jsonl.")
