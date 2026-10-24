@@ -298,6 +298,35 @@ else:
     bad('wait step run is not exactly `bash scripts/ci/verified-wait.sh --flag "value" ...`; '
         f"extra shell (chain/redirect/substitution/variable call) found in: {logical[0]!r}")
 
+# ── CREDIBLE-1572: reject continue-on-error (job + step) and require exact --lane values ──
+# 13. Neither the verified job nor any step inside it may carry continue-on-error.
+if v.get("continue-on-error") is not None:
+    bad(f"verified job carries continue-on-error: {v.get('continue-on-error')!r} — required gate must never swallow failure")
+else:
+    ok("verified job has no continue-on-error")
+
+steps_with_coe = [st for st in steps if st.get("continue-on-error") is not None]
+if steps_with_coe:
+    bad(f"{len(steps_with_coe)} step(s) in verified carry continue-on-error — wait step must never swallow failure")
+else:
+    ok("no step in verified carries continue-on-error")
+
+# 14. Every --lane "<lane>=<val>" argument must have <val> equal to the live
+#     ${{ needs.<lane>.result }} expression for that exact lane (no hard-coded
+#     --lane "test=success" or cross-wired lane result), and --lane flag count
+#     must equal len(needs_set).
+lane_pairs = re.findall(r'--lane\s+"([^="]+)=([^"]*)"', wait_run)
+bad_lane_vals = []
+for lname, lval in lane_pairs:
+    m_expr = re.fullmatch(r"\$\{\{\s*(.*?)\s*\}\}", lval.strip())
+    expected_inner = f"needs.{lname}.result"
+    if not m_expr or " ".join(m_expr.group(1).split()) != expected_inner:
+        bad_lane_vals.append(f"{lname}={lval}")
+if not bad_lane_vals and len(lane_pairs) == len(needs_set) and flag_counts.get("lane", 0) == len(needs_set):
+    ok(f"every --lane value is the exact ${{{{ needs.<lane>.result }}}} expression ({len(lane_pairs)} lanes)")
+else:
+    bad(f"--lane values invalid or count mismatch (bad={bad_lane_vals}, pairs={len(lane_pairs)}, flag_count={flag_counts.get('lane', 0)}, needs={len(needs_set)})")
+
 sys.exit(1 if fail else 0)
 PY
 rc=$?
@@ -337,6 +366,17 @@ MUTANTS = [
      ACP[:-1] + '; W=scripts/ci/verified-wait; bash "$W.sh" --lane "test=success"' + "\n"),
     # regression anchor (reviewer Mutant C, killed since repair 4).
     ("hard-coded-event-name", EV, I + '--event-name "workflow_dispatch" ' + BS + "\n"),
+    # CREDIBLE-1572 AC1: continue-on-error: true on verified job or wait step.
+    ("job-continue-on-error",
+     "  verified:\n    name: verified\n",
+     "  verified:\n    name: verified\n    continue-on-error: true\n"),
+    ("step-continue-on-error",
+     "      - name: Wait in-job for every lane then aggregate (CREDIBLE-1554 / META-134)\n",
+     "      - name: Wait in-job for every lane then aggregate (CREDIBLE-1554 / META-134)\n        continue-on-error: true\n"),
+    # CREDIBLE-1572 AC2: hard-coded --lane "test=success" instead of needs.test.result.
+    ("hard-coded-lane-value",
+     I + '--lane "test=${{ needs.test.result }}" ' + BS + "\n",
+     I + '--lane "test=success" ' + BS + "\n"),
 ]
 for i, (name, anchor, repl) in enumerate(MUTANTS):
     n = src.count(anchor)
