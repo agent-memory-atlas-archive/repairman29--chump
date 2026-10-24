@@ -134,10 +134,12 @@ while true; do
     runs_json="$(fetch_check_runs)"
     all_terminal=1
     for c in "${CHECKS[@]}"; do
-        # RESILIENT-338: a lane that failed then was retried to success must read
-        # success. started_at ordering is unreliable across reruns, so pick ANY
-        # completed run with conclusion=="success"; else fall back to the latest run.
-        entry="$(echo "$runs_json" | jq -c --arg n "$c" '[.[] | select(.name == $n)] as $runs | ([$runs[] | select(.conclusion == "success")] | last) // ($runs | sort_by(.started_at) | last) // empty')"
+        # CREDIBLE-1562 (PHASE-R R3): classify each required cross-workflow check
+        # by its LATEST check run on the SHA (ordered by completed_at, started_at,
+        # and id), NOT by any earlier successful run. An earlier success followed
+        # by a later failed re-run is a regression signal and must classify failure;
+        # an earlier failure followed by a later successful re-run classifies success.
+        entry="$(echo "$runs_json" | jq -c --arg n "$c" '[.[] | select(.name == $n)] | sort_by([(.completed_at // .started_at // ""), (.started_at // ""), (.id // 0)]) | last // empty')"
         if [[ -z "$entry" ]]; then
             # RESILIENT-1617: no check-run named exactly "$c" yet. The audit
             # aggregate posts its check-run only after its shards finish, so
@@ -157,12 +159,17 @@ while true; do
             continue
         fi
         conclusion="$(echo "$entry" | jq -r '.conclusion // ""')"
+        # CREDIBLE-1560 (PHASE-R R3): neither audit.yml nor integrations.yml
+        # (ACP protocol smoke test) emits conclusion=neutral for a legitimate
+        # conditional skip (GitHub Actions if:-skipped jobs emit conclusion=skipped).
+        # Under R3 an unstated neutral conclusion on a required cross-workflow
+        # lane is not green and maps to failure.
         case "$conclusion" in
-            success)                            RESULT["$c"]="success" ;;
-            failure|timed_out|action_required|stale) RESULT["$c"]="failure" ;;
-            cancelled)                           RESULT["$c"]="cancelled" ;;
-            skipped|neutral)                     RESULT["$c"]="skipped" ;;
-            *)                                   RESULT["$c"]="failure" ;;
+            success)                                         RESULT["$c"]="success" ;;
+            failure|timed_out|action_required|stale|neutral) RESULT["$c"]="failure" ;;
+            cancelled)                                       RESULT["$c"]="cancelled" ;;
+            skipped)                                         RESULT["$c"]="skipped" ;;
+            *)                                               RESULT["$c"]="failure" ;;
         esac
     done
 

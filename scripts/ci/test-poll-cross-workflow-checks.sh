@@ -110,23 +110,34 @@ else
     fail "later-poll resolution: got: $out"
 fi
 
-# ---- Test 6: RESILIENT-338 failure-then-success retry pair -> lane reads success ----
-# The retry (success) can report an EARLIER started_at than the failed attempt,
-# so sort_by(.started_at)|last would pick the failure. ANY completed success for
-# the SHA must win, else the sole-required `verified` aggregator blocks a
-# mergeable PR (10 armed PRs hang). Failure sorts LAST here on purpose.
+# ---- Test 6a (CREDIBLE-1562): earlier failure then later success on same SHA -> success (PASS) ----
 gh() {
     echo '[
-      {"name":"audit","status":"completed","conclusion":"success","started_at":"2026-08-20T00:00:00Z"},
-      {"name":"audit","status":"completed","conclusion":"failure","started_at":"2026-08-20T00:05:00Z"}
+      {"id":101,"name":"audit","status":"completed","conclusion":"failure","started_at":"2026-08-20T00:00:00Z","completed_at":"2026-08-20T00:01:00Z"},
+      {"id":102,"name":"audit","status":"completed","conclusion":"success","started_at":"2026-08-20T00:05:00Z","completed_at":"2026-08-20T00:06:00Z"}
     ]'
 }
 export -f gh
 out="$("$POLL" --sha deadbeef --check "audit" --timeout-s 5 --interval-s 1)"
 if echo "$out" | grep -qx "audit=success"; then
-    ok "failure-then-success retry pair reads success (ANY success wins)"
+    ok "CREDIBLE-1562: earlier failure then later success classifies success"
 else
-    fail "retry-to-success: got: $out"
+    fail "CREDIBLE-1562 earlier-failure-later-success: got: $out"
+fi
+
+# ---- Test 6b (CREDIBLE-1562): earlier success then later failure on same SHA -> failure (FAIL) ----
+gh() {
+    echo '[
+      {"id":201,"name":"audit","status":"completed","conclusion":"success","started_at":"2026-08-20T00:00:00Z","completed_at":"2026-08-20T00:01:00Z"},
+      {"id":202,"name":"audit","status":"completed","conclusion":"failure","started_at":"2026-08-20T00:05:00Z","completed_at":"2026-08-20T00:06:00Z"}
+    ]'
+}
+export -f gh
+out="$("$POLL" --sha deadbeef --check "audit" --timeout-s 5 --interval-s 1)"
+if echo "$out" | grep -qx "audit=failure"; then
+    ok "CREDIBLE-1562: earlier success then later failure classifies failure"
+else
+    fail "CREDIBLE-1562 earlier-success-later-failure: got: $out"
 fi
 
 # ---- Test 7 (RESILIENT-1617): audit aggregate check-run absent, shards in_progress ----
@@ -207,6 +218,28 @@ if [[ "$agg_rc" -eq 1 ]]; then
     ok "audit=failure aggregates to FAIL (exit 1)"
 else
     fail "expected aggregator exit 1 (FAIL) for audit=failure, got exit $agg_rc"
+fi
+
+# ---- Test 9 (CREDIBLE-1560): neutral conclusion on audit and ACP smoke maps to failure ----
+gh() {
+    echo '[
+      {"id":301,"name":"audit","status":"completed","conclusion":"neutral","started_at":"2026-10-19T00:00:00Z","completed_at":"2026-10-19T00:01:00Z"},
+      {"id":302,"name":"ACP protocol smoke test (Zed / JetBrains compatible)","status":"completed","conclusion":"neutral","started_at":"2026-10-19T00:00:00Z","completed_at":"2026-10-19T00:01:00Z"}
+    ]'
+}
+export -f gh
+out="$("$POLL" --sha deadbeef --check "audit" --check "ACP protocol smoke test (Zed / JetBrains compatible)" --timeout-s 5 --interval-s 1)"
+if echo "$out" | grep -qx "audit=failure" && echo "$out" | grep -qx "ACP protocol smoke test (Zed / JetBrains compatible)=failure"; then
+    ok "CREDIBLE-1560: neutral conclusion on audit and ACP smoke maps to failure"
+else
+    fail "CREDIBLE-1560 neutral mapping: got: $out"
+fi
+agg_rc=0
+"$AGG" --lane "audit=failure" --lane "ACP protocol smoke test (Zed / JetBrains compatible)=failure" >/dev/null 2>&1 || agg_rc=$?
+if [[ "$agg_rc" -eq 1 ]]; then
+    ok "CREDIBLE-1560: neutral-mapped cross-workflow lanes aggregate to FAIL (exit 1)"
+else
+    fail "CREDIBLE-1560 aggregator exit code: expected 1, got $agg_rc"
 fi
 
 echo
