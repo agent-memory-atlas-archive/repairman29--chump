@@ -165,18 +165,14 @@ PY
     fi
   fi
 
-  # ── 3. Uncommitted changes or unpushed commits ─────────────────────────────
+  # ── 3. Uncommitted changes or unpushed commits (RESILIENT-1638 shared lib) ──
   if [ -z "$reason" ]; then
-    if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+    if declare -F wt_is_dirty >/dev/null 2>&1 && wt_is_dirty "$wt"; then
       reason="uncommitted changes"
-    elif git -C "$wt" rev-parse '@{upstream}' >/dev/null 2>&1; then
-      if [ -n "$(git -C "$wt" rev-list '@{upstream}..HEAD' 2>/dev/null | head -1)" ]; then
+    elif declare -F wt_has_unpushed_commits >/dev/null 2>&1 && wt_has_unpushed_commits "$wt"; then
+      if [ "${WT_UNPUSHED_DETAIL:-}" = "ahead_of_upstream" ] || [ "${WT_UNPUSHED_DETAIL:-}" = "ahead_of_remote_branch" ]; then
         reason="unpushed commits (ahead of upstream)"
-      fi
-    else
-      # No upstream configured: if HEAD is on no remote branch, it's unpushed work.
-      local head; head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
-      if [ -n "$head" ] && [ -z "$(git -C "$wt" branch -r --contains "$head" 2>/dev/null | head -1)" ]; then
+      else
         reason="unpushed work (HEAD on no remote)"
       fi
     fi

@@ -130,23 +130,8 @@ _prune_is_inflight() {
 _prune_has_unpushed_commits() {
     local wt_dir="$1"
     [[ "$REAPER_SAFETY_CHECK" != "1" ]] && return 1
-    local branch
-    branch=$(cd "$wt_dir" 2>/dev/null && git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
-    [[ -z "$branch" || "$branch" == "HEAD" ]] && return 1
-    local upstream="origin/${branch#refs/heads/}"
-    local ahead=0
-    # INFRA-1347: the prior `if cd ...` was NOT subshell-wrapped, which
-    # changed the outer pwd and broke relative-path resolution in the
-    # surrounding `for wt_dir in ".claude/worktrees/*/"` loop (subsequent
-    # iterations failed with "No such file or directory" and skipped real
-    # worktrees). Subshell-wrap so cwd never escapes the function.
-    if ( cd "$wt_dir" 2>/dev/null && git rev-parse --verify --quiet "$upstream" >/dev/null 2>&1 ); then
-        ahead=$(cd "$wt_dir" && git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)
-    else
-        # No upstream — count vs origin/main as the conservative fallback.
-        ahead=$(cd "$wt_dir" && git rev-list --count "origin/main..HEAD" 2>/dev/null || echo 0)
-    fi
-    if [[ "${ahead:-0}" -gt 0 ]]; then
+    # RESILIENT-1638: delegate to shared wt_has_unpushed_commits predicate in worktree-iter.sh.
+    if wt_has_unpushed_commits "$wt_dir" "origin"; then
         emit_reaper_event "worktree_reaper_skipped_active" "$wt_dir" "unpushed_commits"
         return 0
     fi
@@ -264,6 +249,9 @@ for wt_dir in $(scan_worktrees --no-tmp); do
             if _prune_is_inflight "$wt_dir"; then
                 action="KEEP — in-flight (active lease or fresh .git/index)"
                 kept_count=$((kept_count + 1))
+            elif _prune_has_unpushed_commits "$wt_dir"; then
+                action="KEEP — unpushed local commits (PR #$pr_num merged)"
+                kept_count=$((kept_count + 1))
             else
                 action="PRUNE"
                 pruned_count=$((pruned_count + 1))
@@ -302,10 +290,11 @@ for wt_dir in $(scan_worktrees --no-tmp); do
             kept_count=$((kept_count + 1))
             ;;
         *)
-            # No PR. Check if branch is ahead of main — if so, WIP, keep.
-            ahead=$(cd "$wt_dir" 2>/dev/null && \
-                { git log origin/main..HEAD --oneline 2>/dev/null | wc -l | tr -d ' '; } \
-                || echo "0")
+            # No PR. RESILIENT-1638: shared wt_has_unpushed_commits check.
+            ahead=0
+            if wt_has_unpushed_commits "$wt_dir" "origin"; then
+                ahead="${WT_UNPUSHED_COUNT:-1}"
+            fi
             if [[ "$ahead" -gt 0 ]]; then
                 action="KEEP — $ahead WIP commits, no PR yet"
                 kept_count=$((kept_count + 1))

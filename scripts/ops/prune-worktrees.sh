@@ -132,10 +132,12 @@ while IFS= read -r wt_dir; do
 
     echo "[prune-worktrees] checking $wt_dir (branch=$branch)"
 
-    # Safety: skip if there are uncommitted changes.
-    if ! git -C "$wt_dir" diff --quiet HEAD 2>/dev/null; then
-        echo "[prune-worktrees] SKIP $wt_dir — has uncommitted changes"
-        emit_ambient "worktree_orphan_skipped" "\"path\":\"$wt_dir\",\"reason\":\"uncommitted_changes\",\"branch\":\"$branch\""
+    # RESILIENT-1638: shared predicate refuses to prune worktrees with uncommitted
+    # or untracked changes, or commits not reachable from origin.
+    if wt_has_unsaved_work "$wt_dir"; then
+        echo "[prune-worktrees] SKIP $wt_dir — has unsaved work ($WT_UNSAVED_REASON)"
+        emit_ambient "worktree_orphan_skipped" "\"path\":\"$wt_dir\",\"reason\":\"$WT_UNSAVED_REASON\",\"branch\":\"$branch\""
+        emit_reaper_event "worktree_reaper_skipped_active" "$wt_dir" "$WT_UNSAVED_REASON"
         SKIPPED=$((SKIPPED + 1))
         continue
     fi

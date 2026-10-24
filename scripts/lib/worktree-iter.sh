@@ -212,6 +212,200 @@ wt_is_dirty() {
     [[ -n "$out" ]]
 }
 
+# ── Public: wt_branch_merged_in_cache (RESILIENT-1638) ──────────────────────
+
+# wt_branch_merged_in_cache <wt_path> [<branch>]
+#
+# Return 0 iff <branch> (or <wt_path>'s HEAD) is recorded as MERGED/CLOSED in
+# .chump/github_cache.db (or done in .chump/state.db gap_prs) AND <wt_path>'s
+# HEAD has no new local commits beyond the recorded PR head_sha.
+wt_branch_merged_in_cache() {
+    local wt_path="$1"
+    local branch="${2:-}"
+    [[ -d "$wt_path" ]] || return 1
+    if [[ -z "$branch" ]]; then
+        branch="$(git -C "$wt_path" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    fi
+    branch="${branch#refs/heads/}"
+    [[ -n "$branch" && "$branch" != "HEAD" ]] || return 1
+
+    local head_sha
+    head_sha="$(git -C "$wt_path" rev-parse HEAD 2>/dev/null || true)"
+    local repo
+    repo="$(_wt_main_repo)"
+    local cache_db="${CHUMP_GITHUB_CACHE_DB:-$repo/.chump/github_cache.db}"
+    if [[ -f "$cache_db" ]] && command -v sqlite3 >/dev/null 2>&1; then
+        local row
+        # Support both the live schema (merged_at / head_sha / raw_payload_json)
+        # and synthetic test schemas that define a state column.
+        row="$(sqlite3 "$cache_db" "SELECT head_sha, COALESCE(merged_at, ''), COALESCE(raw_payload_json, '') FROM pr_state WHERE head_ref = '$branch' ORDER BY number DESC LIMIT 1;" 2>/dev/null || true)"
+        if [[ -n "$row" ]]; then
+            local pr_sha pr_merged pr_json
+            IFS='|' read -r pr_sha pr_merged pr_json <<<"$row"
+            local is_merged_or_closed=0
+            if [[ -n "$pr_merged" ]]; then
+                is_merged_or_closed=1
+            elif printf '%s' "$pr_json" | grep -qiE '"merged"[[:space:]]*:[[:space:]]*true|"state"[[:space:]]*:[[:space:]]*"(MERGED|CLOSED|closed)"'; then
+                is_merged_or_closed=1
+            fi
+            if [[ "$is_merged_or_closed" -eq 1 ]]; then
+                if [[ -z "$pr_sha" || -z "$head_sha" || "$pr_sha" == "$head_sha" ]]; then
+                    return 0
+                fi
+                if git -C "$wt_path" merge-base --is-ancestor "$head_sha" "$pr_sha" 2>/dev/null; then
+                    return 0
+                fi
+                # Local commits exist after the PR's head_sha -> not fully merged.
+                return 1
+            fi
+        fi
+        local syn_state
+        syn_state="$(sqlite3 "$cache_db" "SELECT state FROM pr_state WHERE head_ref = '$branch' AND UPPER(state) IN ('MERGED','CLOSED') LIMIT 1;" 2>/dev/null || true)"
+        if [[ -n "$syn_state" ]]; then
+            return 0
+        fi
+    fi
+
+    local sdb
+    if command -v chump_state_db >/dev/null 2>&1; then
+        sdb="$(chump_state_db)"
+    else
+        sdb="${CHUMP_STATE_DB:-$repo/.chump/state.db}"
+    fi
+    if [[ -n "$head_sha" && -f "$sdb" ]] && command -v sqlite3 >/dev/null 2>&1; then
+        local done_hit
+        done_hit="$(sqlite3 "$sdb" "SELECT 1 FROM gap_prs gp JOIN gaps g ON g.id = gp.gap_id WHERE gp.sha = '$head_sha' AND g.status = 'done' LIMIT 1;" 2>/dev/null || true)"
+        [[ -n "$done_hit" ]] && return 0
+    fi
+
+    return 1
+}
+
+# ── Public: wt_has_unpushed_commits (RESILIENT-1638) ────────────────────────
+
+# wt_has_unpushed_commits <wt_path> [<remote>]
+#
+# Return 0 iff <wt_path> has commits on HEAD that are not reachable from <remote>
+# (default: ${REMOTE:-origin}). Sets WT_UNPUSHED_COUNT and WT_UNPUSHED_DETAIL.
+wt_has_unpushed_commits() {
+    local wt_path="$1"
+    local remote="${2:-${REMOTE:-origin}}"
+    WT_UNPUSHED_COUNT=0
+    WT_UNPUSHED_DETAIL=""
+    [[ -d "$wt_path" ]] || return 1
+    [[ -f "$wt_path/.git" || -d "$wt_path/.git" ]] || return 1
+
+    local branch ahead
+    branch="$(git -C "$wt_path" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    branch="${branch#refs/heads/}"
+
+    # 1. Remote-tracking branch for this branch (origin/<branch>).
+    if [[ -n "$branch" && "$branch" != "HEAD" ]] &&        git -C "$wt_path" rev-parse --verify --quiet "refs/remotes/${remote}/${branch}" >/dev/null 2>&1; then
+        ahead="$(git -C "$wt_path" rev-list --count "refs/remotes/${remote}/${branch}..HEAD" 2>/dev/null || echo 0)"
+        if [[ "${ahead:-0}" -gt 0 ]]; then
+            WT_UNPUSHED_COUNT="$ahead"
+            WT_UNPUSHED_DETAIL="ahead_of_remote_branch"
+            return 0
+        fi
+        return 1
+    fi
+
+    # 2. Explicit @{upstream} that tracks a dedicated non-main remote branch.
+    local upstream
+    upstream="$(git -C "$wt_path" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+    if [[ -n "$upstream" && "$upstream" != "${remote}/main" && "$upstream" != "${remote}/master" ]] &&        git -C "$wt_path" rev-parse --verify --quiet "$upstream" >/dev/null 2>&1; then
+        ahead="$(git -C "$wt_path" rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)"
+        if [[ "${ahead:-0}" -gt 0 ]]; then
+            WT_UNPUSHED_COUNT="$ahead"
+            WT_UNPUSHED_DETAIL="ahead_of_upstream"
+            return 0
+        fi
+        return 1
+    fi
+
+    # 3. No remote-tracking branch for <branch>: either never pushed, or deleted
+    #    after merge. Check cache-first if the PR for <branch> already merged at HEAD.
+    if [[ -n "$branch" && "$branch" != "HEAD" ]] && wt_branch_merged_in_cache "$wt_path" "$branch"; then
+        return 1
+    fi
+
+    # Full-history check: any commit on HEAD not reachable from any ref on <remote>.
+    if git -C "$wt_path" for-each-ref --count=1 "refs/remotes/${remote}/" 2>/dev/null | grep -q .; then
+        ahead="$(git -C "$wt_path" rev-list --count HEAD --not --remotes="$remote" 2>/dev/null || echo 0)"
+        if [[ "${ahead:-0}" -gt 0 ]]; then
+            WT_UNPUSHED_COUNT="$ahead"
+            WT_UNPUSHED_DETAIL="head_not_on_remote"
+            return 0
+        fi
+        return 1
+    fi
+
+    # Repo has no remote-tracking refs at all (e.g. local-only git init fixture):
+    # if branched off local main/master with 0 commits ahead, treat as clean;
+    # otherwise HEAD is unpushed local work.
+    local local_base=""
+    if git -C "$wt_path" rev-parse --verify --quiet refs/heads/main >/dev/null 2>&1; then
+        local_base="refs/heads/main"
+    elif git -C "$wt_path" rev-parse --verify --quiet refs/heads/master >/dev/null 2>&1; then
+        local_base="refs/heads/master"
+    fi
+    if [[ -n "$branch" && "$branch" != "main" && "$branch" != "master" && -n "$local_base" ]]; then
+        ahead="$(git -C "$wt_path" rev-list --count "${local_base}..HEAD" 2>/dev/null || echo 0)"
+        if [[ "${ahead:-0}" -gt 0 ]]; then
+            WT_UNPUSHED_COUNT="$ahead"
+            WT_UNPUSHED_DETAIL="head_not_on_remote"
+            return 0
+        fi
+        return 1
+    fi
+
+    local head_sha
+    head_sha="$(git -C "$wt_path" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -n "$head_sha" ]] && [[ -z "$(git -C "$wt_path" branch -r --contains "$head_sha" 2>/dev/null | head -1)" ]]; then
+        WT_UNPUSHED_COUNT=1
+        WT_UNPUSHED_DETAIL="head_not_on_remote"
+        return 0
+    fi
+    return 1
+}
+
+# ── Public: wt_has_unsaved_work (RESILIENT-1638) ────────────────────────────
+
+# wt_has_unsaved_work <wt_path> [<remote>]
+#
+# Return 0 iff <wt_path> has uncommitted changes, untracked non-ignored files,
+# unreadable git status (fail-closed), or commits not reachable from <remote>.
+# Sets WT_UNSAVED_REASON ("uncommitted_changes" | "untracked_unignored" |
+# "unpushed_commits" | "unreadable_git_status").
+wt_has_unsaved_work() {
+    local wt_path="$1"
+    local remote="${2:-${REMOTE:-origin}}"
+    WT_UNSAVED_REASON=""
+    [[ -d "$wt_path" ]] || return 1
+    [[ -f "$wt_path/.git" || -d "$wt_path/.git" ]] || return 1
+
+    local status_out status_rc
+    status_out="$(git -C "$wt_path" status --porcelain 2>/dev/null)"
+    status_rc=$?
+    if [[ "$status_rc" -ne 0 ]]; then
+        WT_UNSAVED_REASON="unreadable_git_status"
+        return 0
+    fi
+    if [[ -n "$status_out" ]]; then
+        if [[ -z "$(grep -v '^??' <<<"$status_out")" ]]; then
+            WT_UNSAVED_REASON="untracked_unignored"
+        else
+            WT_UNSAVED_REASON="uncommitted_changes"
+        fi
+        return 0
+    fi
+    if wt_has_unpushed_commits "$wt_path" "$remote"; then
+        WT_UNSAVED_REASON="unpushed_commits"
+        return 0
+    fi
+    return 1
+}
+
 # _wt_live_cwds_refresh — "<pid>\t<cwd>" for every live process, cached for
 # CHUMP_WT_CWD_CACHE_S (default 15) seconds into $_WT_CWD_CACHE so a reaper sweeping hundreds of
 # worktrees runs lsof once, not once per worktree. lsof -d cwd, else /proc.

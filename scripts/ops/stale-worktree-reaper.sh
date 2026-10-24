@@ -558,6 +558,14 @@ process_worktree() {
                 fi
             fi
         fi
+        # RESILIENT-1638: no reaper removes a worktree whose branch has commits
+        # not reachable from origin, or that has uncommitted changes. Such
+        # worktrees are LISTED, never deleted, and the event names them.
+        if declare -F wt_has_unsaved_work >/dev/null 2>&1 && wt_has_unsaved_work "$wt_path" "$REMOTE"; then
+            info "  LISTED (not reaped): worktree has $WT_UNSAVED_REASON${WT_UNPUSHED_COUNT:+ ($WT_UNPUSHED_COUNT unpushed commit(s))} — keeping $wt_path"
+            _emit_reaper_skipped "$wt_path" "$WT_UNSAVED_REASON"
+            KEPT=$((KEPT+1)); return 0
+        fi
     fi
 
     # Process-aware safety check (INFRA-WORKTREE-REAPER-FIX, EVAL-026c).
@@ -647,7 +655,20 @@ process_worktree() {
             reapable=1; reason="branch merged into $REMOTE/$BASE"
         fi
     elif [[ $remote_exists -eq 0 ]]; then
-        reapable=1; reason="origin branch deleted"
+        # RESILIENT-1638: distinguish deleted-after-merge (e.g. merged PR in
+        # github_cache.db / state.db, or no unpushed commits ahead of origin)
+        # from a never-pushed branch holding local-only commits.
+        if declare -F wt_branch_merged_in_cache >/dev/null 2>&1 && wt_branch_merged_in_cache "$wt_path" "$wt_branch"; then
+            reapable=1; reason="origin branch deleted (merged PR in cache)"
+        elif [[ "${REAPER_SAFETY_CHECK}" != "1" ]]; then
+            reapable=1; reason="origin branch deleted"
+        elif declare -F wt_has_unpushed_commits >/dev/null 2>&1 && ! wt_has_unpushed_commits "$wt_path" "$REMOTE"; then
+            reapable=1; reason="origin branch deleted"
+        else
+            info "  LISTED (not reaped): branch '$wt_branch' has ${WT_UNPUSHED_COUNT:-1} unpushed commit(s) not on $REMOTE (never pushed, no merged PR in cache) — keeping"
+            _emit_reaper_skipped "$wt_path" "unpushed_commits"
+            KEPT=$((KEPT+1)); return 0
+        fi
     fi
 
     # INFRA-2020: for /tmp/chump-<gap-id>/ worktrees, additionally check gap
