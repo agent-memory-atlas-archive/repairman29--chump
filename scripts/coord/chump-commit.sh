@@ -22,6 +22,12 @@
 #                                warning. Recommended for CI and one-off
 #                                scripts; bot sessions should get their
 #                                own `.claude/worktrees/<name>/` instead.
+#
+# INFRA-8579 env-var auto-register detector rules:
+#   - Auto-registers only real env-var READ patterns in added lines of *.rs/*.sh/*.py
+#     (bash ${CHUMP_*} / $CHUMP_*, Rust std::env::var/option_env!, Python os.environ/getenv).
+#   - Ignores comments, grep/rg assertions, and scripts/ci/test-* or tests/ paths.
+#   - Ambiguous non-test mentions emit an INFRA-8579 warning on stderr without writing.
 
 set -euo pipefail
 
@@ -732,17 +738,106 @@ if [[ "$_has_code_staged" -eq 1 ]] && [[ -f "$_envvar_file" ]]; then
         # Extract CHUMP_* refs from staged diff hunks only (not whole files).
         # Restrict to .rs/.sh/.py to avoid noise from docs/comments in markdown.
         _new_envvars=$(
-            git diff --cached --no-color -U0 -- '*.rs' '*.sh' '*.py' 2>/dev/null \
-              | grep -oE '\bCHUMP_[A-Z][A-Z0-9_]+\b' \
-              | sort -u \
-              | while read -r ev; do
-                    # Skip if already in env-vars-internal.txt (exact-line match
-                    # to avoid substring false positives — entries are typically
-                    # "CHUMP_FOO" on their own line, possibly trailing comment).
-                    if ! grep -qE "^${ev}\b" "$_envvar_file" 2>/dev/null; then
-                        echo "$ev"
-                    fi
-                done
+            python3 - "$_envvar_file" <(git diff --cached --no-color -U0 -- '*.rs' '*.sh' '*.py' 2>/dev/null) <<'PYENV'
+import re, sys
+
+envvar_file = sys.argv[1]
+diff_file = sys.argv[2]
+try:
+    with open(envvar_file, encoding="utf-8", errors="replace") as f:
+        doc = f.read()
+except OSError:
+    sys.exit(0)
+
+try:
+    with open(diff_file, encoding="utf-8", errors="replace") as f:
+        diff_lines = f.readlines()
+except OSError:
+    sys.exit(0)
+
+documented = set(re.findall(r'^(CHUMP_[A-Z][A-Z0-9_]+)\b', doc, re.M))
+
+TOKEN_RE = re.compile(r'\b(CHUMP_[A-Z][A-Z0-9_]+)\b')
+RS_READ_RE = re.compile(
+    r'(?:std::env::var(?:_os)?|env::var(?:_os)?|option_env!|env!)\s*\(\s*"(CHUMP_[A-Z][A-Z0-9_]+)"'
+)
+PY_READ_RE = re.compile(
+    r'(?:os\.environ(?:\.get)?|os\.getenv)\s*[\[\(]\s*[\'"](CHUMP_[A-Z][A-Z0-9_]+)[\'"]'
+)
+SH_BRACE_READ_RE = re.compile(
+    r'\$\{(CHUMP_[A-Z][A-Z0-9_]+)(?:[:?+#%/\-=][^}]*)?\}'
+)
+SH_SIMPLE_READ_RE = re.compile(
+    r'\$(CHUMP_[A-Z][A-Z0-9_]+)\b'
+)
+NEG_ASSERT_RE = re.compile(r'\b(?:grep|rg|assert|expect)\b')
+
+def is_test_path(p):
+    return (
+        p.startswith("scripts/ci/test-")
+        or p.startswith("tests/")
+        or "/tests/" in p
+        or p.endswith("_test.rs")
+    )
+
+cur_path = ""
+cur_ext = None
+real_reads = set()
+ambiguous = set()
+
+for raw in diff_lines:
+    if raw.startswith("+++ b/"):
+        cur_path = raw[6:].strip()
+        if cur_path.endswith(".rs"):
+            cur_ext = "rs"
+        elif cur_path.endswith(".sh"):
+            cur_ext = "sh"
+        elif cur_path.endswith(".py"):
+            cur_ext = "py"
+        else:
+            cur_ext = None
+        continue
+    if raw.startswith("+++ ") or raw.startswith("--- ") or raw.startswith("@@"):
+        continue
+    if not raw.startswith("+") or cur_ext is None:
+        continue
+    line = raw[1:]
+    stripped = line.lstrip()
+
+    # Ignore comment lines across all languages.
+    if (cur_ext in ("sh", "py") and stripped.startswith("#")) or (
+        cur_ext == "rs" and stripped.startswith("//")
+    ):
+        continue
+
+    all_tokens = set(TOKEN_RE.findall(line))
+    if not all_tokens:
+        continue
+
+    line_reads = set()
+    if not is_test_path(cur_path) and not NEG_ASSERT_RE.search(line):
+        if cur_ext == "rs":
+            line_reads.update(m.group(1) for m in RS_READ_RE.finditer(line))
+        elif cur_ext == "py":
+            line_reads.update(m.group(1) for m in PY_READ_RE.finditer(line))
+        elif cur_ext == "sh":
+            line_reads.update(m.group(1) for m in SH_BRACE_READ_RE.finditer(line))
+            line_reads.update(m.group(1) for m in SH_SIMPLE_READ_RE.finditer(line))
+
+    real_reads.update(line_reads)
+    if not is_test_path(cur_path):
+        for tok in all_tokens - line_reads:
+            if tok not in documented:
+                ambiguous.add(tok)
+
+for tok in sorted(ambiguous - real_reads):
+    sys.stderr.write(
+        f"[chump-commit] INFRA-8579: warning: skipping ambiguous CHUMP_* token {tok} (not a recognized env-var read)\n"
+    )
+
+for ev in sorted(real_reads - documented):
+    print(ev)
+PYENV
         ) || true   # RESILIENT-065: grep-no-match (commit adds no new CHUMP_*) exits 1 under pipefail; without this guard the bare assignment trips set -e and silently aborts before git commit
         if [[ -n "$_new_envvars" ]]; then
             # Find which staged file(s) introduce each new env (breadcrumb).

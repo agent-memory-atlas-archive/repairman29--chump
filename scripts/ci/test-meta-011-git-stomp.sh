@@ -181,5 +181,11 @@ else
 fi
 
 echo ""
+if bash "$REPO_ROOT/scripts/ci/test-chump-commit-auto-envvar.sh"; then
+    pass "test-chump-commit-auto-envvar.sh (INFRA-1853 / INFRA-8579) passed"
+else
+    fail "test-chump-commit-auto-envvar.sh failed"
+fi
+
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]
