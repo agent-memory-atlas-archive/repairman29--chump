@@ -3396,6 +3396,13 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
 
+        // CREDIBLE-1529 (PHASE-R R3): code-reviewer unavailable exit 5 gate.
+        steps.push(step(
+            "code-reviewer-authskip",
+            &["bash", "scripts/ci/test-code-reviewer-authskip.sh"],
+            GateKind::Scripts,
+        ));
+
         // INFRA-5000 (META-070/INFRA-3373 slice): cli_observability_misc
         // gate — mirrors the 41 remaining cli-observability-misc cluster
         // scripts from docs/process/AUDIT_JOB_DECOMPOSITION.md.

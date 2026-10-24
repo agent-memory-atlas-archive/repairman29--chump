@@ -1,0 +1,12 @@
+  - kind: code_review_unavailable
+    effect_metric: credible
+    emitter: scripts/coord/bot-merge.sh (CREDIBLE-1529)
+    trigger: >-
+      Emitted when scripts/coord/code-reviewer-agent.sh exits 5 (UNAVAILABLE) on
+      a src/* PR because no LLM provider or auth path is available for `chump
+      llm-complete`. Counted over a trailing 7-day window by `chump kpi report`
+      as `unreviewed_src_merges_7d`.
+    consumers: [kpi-report, fleet-brief]
+    fields_required: [ts, kind, pr, gap_id, exit_code, policy, reason]
+    expected_volume: "0 when reviewer gateway is healthy; 1 per unavailable src PR review"
+    status: stable

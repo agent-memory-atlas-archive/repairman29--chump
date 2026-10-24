@@ -1599,6 +1599,8 @@ pub struct KpiReport {
     pub ci_census: CiCensusSection,
     /// CREDIBLE-1525: admin_merges_7d — merges that bypassed the verified gate.
     pub admin_merges: crate::admin_merges::AdminMergesSection,
+    /// CREDIBLE-1529: unreviewed_src_merges_7d — src/* PR reviews skipped due to gateway unavailability.
+    pub unreviewed_src_merges: UnreviewedSrcMergesSection,
 }
 
 impl KpiReport {
@@ -1636,12 +1638,14 @@ impl KpiReport {
         out.push_str(&self.ci_census.render_text());
         out.push('\n');
         out.push_str(&self.admin_merges.render_text());
+        out.push('\n');
+        out.push_str(&self.unreviewed_src_merges.render_text());
         out
     }
 
     pub fn render_json(&self) -> String {
         format!(
-            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"shell_invariant_writers":{},"shell_loc_by_month":{},"ci_pickup":{},"ci_census":{},"admin_merges":{}}}"#,
+            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"shell_invariant_writers":{},"shell_loc_by_month":{},"ci_pickup":{},"ci_census":{},"admin_merges":{},"unreviewed_src_merges":{}}}"#,
             self.ship_rate.render_json(),
             self.mission_history.render_json(),
             self.cost_savings.render_json(),
@@ -1657,6 +1661,7 @@ impl KpiReport {
             self.ci_pickup.render_json(),
             self.ci_census.render_json(),
             self.admin_merges.render_json(),
+            self.unreviewed_src_merges.render_json(),
         )
     }
 }
@@ -1904,6 +1909,84 @@ pub fn build_full_report(repo_root: &Path, window_days: u64) -> KpiReport {
         ci_pickup: crate::ci_pickup::build_ci_pickup_report(repo_root, 24),
         ci_census: build_ci_census_section(repo_root),
         admin_merges: crate::admin_merges::build_admin_merges_section(repo_root),
+        unreviewed_src_merges: build_unreviewed_src_merges_section(repo_root),
+    }
+}
+
+/// CREDIBLE-1529 (PHASE-R R3): trailing 7-day count of `kind=code_review_unavailable`
+/// events recorded in `.chump-locks/ambient.jsonl`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnreviewedSrcMergesSection {
+    pub unreviewed_src_merges_7d: u64,
+    pub prs: Vec<u64>,
+}
+
+impl UnreviewedSrcMergesSection {
+    pub fn render_text(&self) -> String {
+        format!(
+            "═══ Unreviewed Src Merges (CREDIBLE-1529) ═══\n  unreviewed_src_merges_7d: {}\n",
+            self.unreviewed_src_merges_7d,
+        )
+    }
+
+    pub fn render_json(&self) -> String {
+        let prs_json: Vec<String> = self.prs.iter().map(|p| p.to_string()).collect();
+        format!(
+            r#"{{"unreviewed_src_merges_7d":{},"prs":[{}]}}"#,
+            self.unreviewed_src_merges_7d,
+            prs_json.join(","),
+        )
+    }
+}
+
+/// Build the `UnreviewedSrcMergesSection` over a trailing 7-day window ending now.
+pub fn build_unreviewed_src_merges_section(repo_root: &Path) -> UnreviewedSrcMergesSection {
+    build_unreviewed_src_merges_section_at(repo_root, current_unix())
+}
+
+/// Build the `UnreviewedSrcMergesSection` over a trailing 7-day window ending at `now_unix`.
+pub fn build_unreviewed_src_merges_section_at(
+    repo_root: &Path,
+    now_unix: u64,
+) -> UnreviewedSrcMergesSection {
+    let cutoff = now_unix.saturating_sub(7 * 86_400);
+    let ambient = repo_root.join(".chump-locks/ambient.jsonl");
+    let content = match std::fs::read_to_string(&ambient) {
+        Ok(c) => c,
+        Err(_) => return UnreviewedSrcMergesSection::default(),
+    };
+    let mut prs = std::collections::BTreeSet::new();
+    let mut unkeyed_count = 0u64;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || !line.contains("code_review_unavailable") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v.get("kind").and_then(|k| k.as_str()) != Some("code_review_unavailable") {
+            continue;
+        }
+        let Some(ts_str) = v.get("ts").and_then(|t| t.as_str()) else {
+            continue;
+        };
+        let Some(ts) = parse_iso8601_to_unix(ts_str) else {
+            continue;
+        };
+        if ts < cutoff || ts > now_unix {
+            continue;
+        }
+        if let Some(pr) = v.get("pr").and_then(|p| p.as_u64()) {
+            prs.insert(pr);
+        } else {
+            unkeyed_count += 1;
+        }
+    }
+    let prs_vec: Vec<u64> = prs.into_iter().collect();
+    UnreviewedSrcMergesSection {
+        unreviewed_src_merges_7d: (prs_vec.len() as u64) + unkeyed_count,
+        prs: prs_vec,
     }
 }
 
@@ -4571,6 +4654,37 @@ mod tests {
         let text = section.render_text();
         assert!(text.contains("2026-08=n/a"), "text: {text}");
 
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn credible1529_unreviewed_src_merges_counts_window_and_dedups_prs() {
+        let tmp = tempdir();
+        let now_unix = parse_iso8601_to_unix("2026-10-23T12:00:00Z").unwrap();
+        write_ambient_handoff(
+            &tmp,
+            &[
+                // Within 7d window — PR 5584 (emitted twice, deduped to 1)
+                r#"{"ts":"2026-10-20T10:00:00Z","kind":"code_review_unavailable","pr":5584,"gap_id":"CREDIBLE-1519","exit_code":5,"policy":"hold","reason":"reviewer_gateway_unavailable"}"#,
+                r#"{"ts":"2026-10-20T10:05:00Z","kind":"code_review_unavailable","pr":5584,"gap_id":"CREDIBLE-1519","exit_code":5,"policy":"hold","reason":"reviewer_gateway_unavailable"}"#,
+                // Within 7d window — PR 5590
+                r#"{"ts":"2026-10-22T08:00:00Z","kind":"code_review_unavailable","pr":5590,"gap_id":"CREDIBLE-1529","exit_code":5,"policy":"hold","reason":"reviewer_gateway_unavailable"}"#,
+                // Outside 7d window (10 days old) — excluded
+                r#"{"ts":"2026-10-13T11:59:59Z","kind":"code_review_unavailable","pr":5500,"gap_id":"OLD-1","exit_code":5,"policy":"hold","reason":"reviewer_gateway_unavailable"}"#,
+                // Different kind — excluded
+                r#"{"ts":"2026-10-22T09:00:00Z","kind":"review_verdict","pr":5591}"#,
+            ],
+        );
+        let section = build_unreviewed_src_merges_section_at(&tmp, now_unix);
+        assert_eq!(section.unreviewed_src_merges_7d, 2);
+        assert_eq!(section.prs, vec![5584, 5590]);
+        assert!(section
+            .render_text()
+            .contains("unreviewed_src_merges_7d: 2"));
+        assert_eq!(
+            section.render_json(),
+            r#"{"unreviewed_src_merges_7d":2,"prs":[5584,5590]}"#
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

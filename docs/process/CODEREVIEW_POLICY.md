@@ -13,13 +13,14 @@ fires. This document defines the auto-approve / concern / escalate matrix.
 
 The agent emits exactly one of three verdicts on the first line of its response:
 
-| Verdict     | Exit code | Action                                           |
-|-------------|-----------|--------------------------------------------------|
-| `APPROVE`   | 0         | `gh pr review --approve` — auto-merge proceeds  |
-| `CONCERN`   | 1         | `gh pr review --request-changes` — merge blocks |
-| `ESCALATE`  | 2         | `gh pr comment` — human review required          |
-| `SKIP`      | 3         | Docs-only PR — no review run                     |
-| `ERROR`     | 4         | API/env failure — treat as ESCALATE              |
+| Verdict       | Exit code | Action                                                                 |
+|---------------|-----------|------------------------------------------------------------------------|
+| `APPROVE`     | 0         | `gh pr review --approve` — auto-merge proceeds                        |
+| `CONCERN`     | 1         | `gh pr review --request-changes` — merge blocks                       |
+| `ESCALATE`    | 2         | `gh pr comment` — human review required                                |
+| `SKIP`        | 3         | Docs-only PR — no review run (strictly reserved for `DOCS_ONLY=1`)     |
+| `ERROR`       | 4         | Could not fetch diff / missing CLI args — merge blocks                 |
+| `UNAVAILABLE` | 5         | LLM gateway unavailable on `src/*` PR — emit `code_review_unavailable`, hold auto-merge (CREDIBLE-1529) |
 
 ## Auto-approve criteria (ALL must hold)
 
@@ -80,10 +81,29 @@ case $? in
     0) gh pr merge --auto --squash ;;            # APPROVE
     1) echo "Code-reviewer raised concerns — merge blocked." ;;
     2) echo "Escalated to human — merge blocked." ;;
-    3) gh pr merge --auto --squash ;;            # SKIP (docs-only)
+    3) gh pr merge --auto --squash ;;            # SKIP (docs-only ONLY)
+    5)                                           # UNAVAILABLE (CREDIBLE-1529)
+       # Emit kind=code_review_unavailable to .chump-locks/ambient.jsonl
+       # (counted over trailing 7d by `chump kpi report` as unreviewed_src_merges_7d)
+       # and hold auto-merge so an unreviewed src/* PR is never silently treated as approved.
+       echo "Code-reviewer gateway unavailable — emitted kind=code_review_unavailable; merge held." ;;
     *) echo "code-reviewer-agent errored — merge blocked." ;;
 esac
 ```
+
+### Gateway-unavailable policy (`CREDIBLE-1529`)
+
+Exit code `3` (`SKIP`) is reserved **strictly** for docs-only PRs (`DOCS_ONLY=1`).
+When a PR touches `src/*` or `crates/*/src/*` and `code-reviewer-agent.sh` cannot
+obtain a Tier-2 review from `chump llm-complete` (either because no LLM auth path
+is configured or because the gateway returns empty/non-zero), the script prints
+`UNAVAILABLE: reviewer gateway unavailable (no provider configured for chump llm-complete)`
+and exits `5` (`UNAVAILABLE`), never `3`.
+
+`scripts/coord/bot-merge.sh` handles exit `5` in a dedicated branch:
+1. Emits `kind=code_review_unavailable` (registered in `docs/observability/events.d/code_review_unavailable.yaml`) to `.chump-locks/ambient.jsonl` with `pr`, `gap_id`, `exit_code: 5`, `policy: "hold"`, and `reason: "reviewer_gateway_unavailable"`.
+2. Holds auto-merge (`exit 1`) so an unreviewed `src/*` PR is never conflated with an approved or docs-only PR.
+3. `chump kpi report` aggregates `kind=code_review_unavailable` events over a trailing 7-day window as `unreviewed_src_merges_7d`.
 
 ## MVP scope vs deferred work
 

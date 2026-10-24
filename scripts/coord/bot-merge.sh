@@ -4579,6 +4579,22 @@ if [[ $AUTO_MERGE -eq 1 ]]; then
                     2)
                         red "Code-reviewer ESCALATED — human review required, auto-merge NOT enabled."
                         exit 1 ;;
+                    5)
+                        # CREDIBLE-1529: reviewer LLM gateway unavailable on a src/* PR.
+                        # Never conflate with exit 3 (docs-only SKIP). Emit
+                        # kind=code_review_unavailable to ambient.jsonl (counted by
+                        # `chump kpi report` as unreviewed_src_merges_7d) and hold
+                        # auto-merge so the review organ or operator reviews before landing.
+                        _cr_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                        _cr_gap="${GAP_IDS[0]:-${GAP_ID:-unknown}}"
+                        _cr_amb=".chump-locks/ambient.jsonl"
+                        [[ -n "${CHUMP_AMBIENT_LOG:-}" ]] && _cr_amb="$CHUMP_AMBIENT_LOG"
+                        # scanner-anchor: "kind":"code_review_unavailable"
+                        _cr_line="$(printf '{"ts":"%s","kind":"code_review_unavailable","pr":%d,"gap_id":"%s","exit_code":5,"policy":"hold","reason":"reviewer_gateway_unavailable"}' \
+                            "$_cr_ts" "$TARGET_PR" "$_cr_gap")"
+                        _ambient_write "$_cr_amb" "$_cr_line"
+                        red "Code-reviewer gateway UNAVAILABLE (exit 5) — emitted kind=code_review_unavailable; auto-merge NOT enabled."
+                        exit 1 ;;
                     *)
                         red "Code-reviewer agent errored (exit $_rc) — auto-merge NOT enabled."
                         exit 1 ;;

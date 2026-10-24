@@ -10,11 +10,12 @@
 # Anthropic API call (uses a stub response) — for offline smoke testing.
 #
 # Exit codes:
-#   0  APPROVE  (auto-approval criteria met)
-#   1  CONCERN  (concerns raised; merge should be blocked)
-#   2  ESCALATE (escalation required — human eyes needed)
-#   3  SKIP     (docs-only PR; no review needed)
-#   4  ERROR    (could not fetch diff, missing API key, etc.)
+#   0  APPROVE     (auto-approval criteria met)
+#   1  CONCERN     (concerns raised; merge should be blocked)
+#   2  ESCALATE    (escalation required — human eyes needed)
+#   3  SKIP        (docs-only PR; no review needed)
+#   4  ERROR       (could not fetch diff, missing args, etc.)
+#   5  UNAVAILABLE (LLM gateway unavailable; src PR review did not run — CREDIBLE-1529)
 #
 # See docs/process/CODEREVIEW_POLICY.md for the auto-approve / concern / escalate matrix.
 
@@ -30,7 +31,7 @@ while [[ $# -gt 0 ]]; do
         --gap)     GAP_ID="$2"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --post)    POST=1; shift ;;
-        --help|-h) sed -n '2,18p' "$0"; exit 0 ;;
+        --help|-h) sed -n '2,19p' "$0"; exit 0 ;;
         *)         PR="$1"; shift ;;
     esac
 done
@@ -372,9 +373,12 @@ else
         done
     fi
     if [[ $_has_llm_auth -eq 0 ]]; then
-        yellow "No LLM auth path configured (no ANTHROPIC_API_KEY, no OAuth token, no provider slot) — SKIPPING (GitHub required checks still gate this merge)."
-        echo "SKIP: reviewer gateway unavailable (no provider configured for chump llm-complete)"
-        exit 3
+        yellow "No LLM auth path configured (no ANTHROPIC_API_KEY, no OAuth token, no provider slot) — UNAVAILABLE (src PR review did not run; CREDIBLE-1529)."
+        echo "UNAVAILABLE: reviewer gateway unavailable (no provider configured for chump llm-complete)"
+        if [[ $POST -eq 1 ]]; then
+            gh pr comment "$PR" --body "🤖 **code-reviewer-agent**: UNAVAILABLE — reviewer LLM gateway unavailable (no auth configured for \`chump llm-complete\`); \`src/*\` review did not run (CREDIBLE-1529)." >&2 || true
+        fi
+        exit 5
     fi
 
     # INFRA-3462: route the Tier-2 review through the SHARED LLM service via the
@@ -389,14 +393,16 @@ else
         && [[ -n "${RESPONSE//[[:space:]]/}" ]]; then
         : # got a review
     else
-        # The gateway itself couldn't produce a review (no provider configured at
-        # all). Same INFRA-3457 rationale: the reviewer is a BONUS gate and
-        # GitHub's required checks are the real protection, so SKIP (exit 3,
-        # non-blocking) rather than block auto-merge. The 'SKIP:' line is captured
-        # in bot-merge's log so a chronically-skipping reviewer stays visible.
-        yellow "chump llm-complete produced no review — SKIPPING (GitHub required checks still gate this merge)."
-        echo "SKIP: reviewer gateway unavailable (no provider configured for chump llm-complete)"
-        exit 3
+        # CREDIBLE-1529: exit 3 is reserved strictly for docs-only PRs. When a
+        # src/* PR cannot be reviewed because the gateway produced no output,
+        # exit 5 (UNAVAILABLE) so bot-merge never mistakes an unreviewed src PR
+        # for an approved or docs-only one.
+        yellow "chump llm-complete produced no review — UNAVAILABLE (src PR review did not run; CREDIBLE-1529)."
+        echo "UNAVAILABLE: reviewer gateway unavailable (no provider configured for chump llm-complete)"
+        if [[ $POST -eq 1 ]]; then
+            gh pr comment "$PR" --body "🤖 **code-reviewer-agent**: UNAVAILABLE — reviewer LLM gateway unavailable (\`chump llm-complete\` produced no review); \`src/*\` review did not run (CREDIBLE-1529)." >&2 || true
+        fi
+        exit 5
     fi
 fi
 

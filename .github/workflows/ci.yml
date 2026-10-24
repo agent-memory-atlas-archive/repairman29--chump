@@ -1978,6 +1978,9 @@ jobs:
       - name: self-hosted-runner-stats emit smoke (CREDIBLE-069)
         run: bash scripts/ci/test-self-hosted-run-stats-emit.sh
 
+      - name: code-reviewer unavailable exit 5 smoke (CREDIBLE-1529)
+        run: bash scripts/ci/test-code-reviewer-authskip.sh
+
       - name: Emit self-hosted runner stats (CREDIBLE-069)
         if: always() && runner.os != 'Linux'
         uses: ./.github/actions/emit-self-hosted-run-stats
