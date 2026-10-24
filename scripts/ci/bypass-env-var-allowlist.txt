@@ -7,8 +7,8 @@
 # Removals happen automatically when each deletion gap ships and the var is
 # purged from the codebase.
 #
-# DO NOT add CHUMP_*_DISABLED vars here — those are Category B operator
-# emergency kill-switches that are intentionally exempt from this lint.
+# CREDIBLE-1531: CHUMP_*_DISABLE, _DISABLED, _OFF, _GATE, _CHECK are covered
+# by this lint; existing gate-disablers are grandfathered below.
 #
 # Format: <VAR_NAME>  # Bypass-Justification: <why>  gap: <INFRA-NNNN>
 
@@ -92,3 +92,94 @@ CHUMP_SKIP_ALMANAC_REFRESH
 # proper test fixtures (CREDIBLE-1500 addendum).
 CHUMP_SKIP_SUPERSEDED_CLOSE        # Bypass-Justification: integration-test isolation  gap: CREDIBLE-1500
 CHUMP_GAP_SHIP_SKIP_STALE_CHECK    # Bypass-Justification: integration-test isolation  gap: CREDIBLE-1500
+
+# ── CREDIBLE-1531 grandfathered gate-disablers ───────────────────────────────
+CHUMP_A2A_COORD_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_ACP_REAL_CLIENT_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_ACTIVATION_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_AC_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_ADMISSION_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_AGENT_POINTER_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_AMBIENT_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_AUTOPILOT_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_BACKPRESSURE_RERUN_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_BOT_MERGE_STEP_TIMEOUT_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_BOUNDARY_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CIRCUIT_BREAKER_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CI_FLEET_SWEEP_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CI_HEALTH_GATE_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CLIPPY_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_COG027_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CONSENSUS_MERGE_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CURATOR_AC_FILL_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DAEMON_EXIT_LOOP_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DAEMON_SILENCE_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DAILY_PRODUCTIZE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DISABLE_OFF  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DISCORD_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DISPATCH_FLATLINE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DOR_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DURABLE_AMBIENT_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_ENFORCE_INTENT_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_EXTERNAL_COLLAB_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_EXTERNAL_VERIFY_MERGE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_FLEET_KEEPER_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_FMT_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_GAP_CURATE_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_HITL_PROACTIVE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_HOT_FILE_LOCK_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_IMPROVE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_INBOX_URGENT_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_INCIDENT_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_JIT_SCHEDULER_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_KAPPA_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_LAST_MILE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_LEASE_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_LIAISON_WEBHOOK_HEALTH_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_LINT_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_MAIN_HEALTH_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_MAIN_PREFLIGHT_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_MERGE_SERIALIZER_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_MERGE_SERIALIZER_SYSTEMIC_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_MERGE_SERIALIZER_TRUNK_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_MIXED_FLEET_XS_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_NET_PROBE_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_NOSHIP_LOOP_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_ONBOARD_SCOUT_AGENTIC_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_ORACLE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_ORPHAN_WATCHDOG_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_PILLAR_BALANCE_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_PR_AUTO_REARM_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_PR_DEDUP_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_PULSE_CONSUMER_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_QT_LAUNCHCTL_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_QUEUE_STAGNATION_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_QUEUE_TENDER_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_RCA_REFLEX_LLM_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_REAPER_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_REAPER_PRESSURE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_SCCACHE_WIRED_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_SCRATCH_GUARD_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_SYSTEMIC_RED_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_TEST_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_TICK_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_TMP_CLEANUP_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_TRANSIENT_RETRIGGER_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_TTS_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_URGENT_INBOX_POLL_LOOP_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_VERIFY_COMPREHEND_GATE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_VERIFY_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_VOICE_LINT_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_WEDGE_HANDLER_DISABLE  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_WORKTREE_BUILD_CACHE_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_WTBC_CARGO_DISABLED  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_ACTIONLINT_GUARD  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CHECK_BUILD  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CI_REGRESSION_GUARD  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_CLAIM_LINT  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_DUP_CLOSE_GUARD  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_FIXTURE_AUTHOR_GUARD  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_GATE_TELEMETRY  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_LINT_STORM_DETECTOR  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_SHIP_GROUNDTRUTH_RECHECK  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531
+CHUMP_SUB_AUTH_PRECHECK  # Bypass-Justification: grandfathered existing gate-disabler (CREDIBLE-1531)  gap: CREDIBLE-1531

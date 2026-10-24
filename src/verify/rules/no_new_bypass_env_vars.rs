@@ -31,6 +31,7 @@ const RECEIPT: &str = "INFRA-2429 zero-bypass thesis + EFFECTIVE-094: the bypass
 const EXEMPT_PATHS: &[&str] = &[
     "scripts/ci/test-no-new-bypass-env-vars.sh",
     "scripts/ci/bypass-env-var-allowlist.txt",
+    "scripts/ci/bypass-var-ceiling.txt",
     "scripts/ci/env-vars-internal.txt",
     "src/verify/rules/no_new_bypass_env_vars.rs",
 ];
@@ -43,8 +44,59 @@ fn suffix_skip() -> &'static str {
     concat!("SK", "IP")
 }
 
+fn suffix_disable() -> &'static str {
+    concat!("_DIS", "ABLE")
+}
+
+fn suffix_disabled() -> &'static str {
+    concat!("_DIS", "ABLED")
+}
+
+fn suffix_off() -> &'static str {
+    concat!("_O", "FF")
+}
+
+fn suffix_gate() -> &'static str {
+    concat!("_GA", "TE")
+}
+
+fn suffix_check() -> &'static str {
+    concat!("_CH", "ECK")
+}
+
+fn token_no_mid() -> &'static str {
+    concat!("_N", "O_")
+}
+
 fn ignore_prefix() -> String {
     format!("CHUMP_{}{}_", "IGN", "ORE")
+}
+
+fn is_advertised_escape_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    let has_msg_or_hint = lower.contains("echo ")
+        || lower.contains("printf ")
+        || lower.contains("println!")
+        || lower.contains("eprintln!")
+        || lower.contains("format!")
+        || lower.contains("bail!")
+        || lower.contains("anyhow!")
+        || lower.contains("warn!")
+        || lower.contains("error!")
+        || lower.contains("bypass")
+        || lower.contains("skip")
+        || lower.contains("disable")
+        || lower.contains("escape")
+        || lower.contains("override");
+    let has_gate_escape_word = lower.contains("bypass")
+        || lower.contains("skip")
+        || lower.contains("disable")
+        || lower.contains("escape")
+        || lower.contains("override")
+        || lower.contains("turn off")
+        || lower.contains("opt out")
+        || lower.contains("gate");
+    has_msg_or_hint && has_gate_escape_word
 }
 
 impl Rule for NoNewBypassEnvVars {
@@ -74,8 +126,15 @@ impl Rule for NoNewBypassEnvVars {
                 {
                     continue;
                 }
+                let advertised = is_advertised_escape_line(line);
                 for token in extract_chump_tokens(line) {
-                    if is_bypass_class(&token) {
+                    if is_bypass_class(&token)
+                        || (advertised
+                            && (line.contains(&format!("{token}=0"))
+                                || line.contains(&format!("{token}=1"))
+                                || line.contains(&format!("{token}=true"))
+                                || line.contains(&format!("{token}=false"))))
+                    {
                         candidates.insert(token);
                     }
                 }
@@ -137,15 +196,21 @@ fn extract_chump_tokens(line: &str) -> Vec<String> {
     out
 }
 
-/// A token is bypass-class when it carries a bypass/skip suffix fragment or
-/// the ignore-prefix, and is not a *_DISABLED Category B kill-switch.
+/// A token is bypass-class when it carries a bypass/skip/check/no fragment,
+/// the ignore-prefix, or ends in _DISABLE, _DISABLED, _OFF, _GATE, _CHECK (CREDIBLE-1531).
 fn is_bypass_class(token: &str) -> bool {
-    if token.ends_with("_DISABLED") {
+    if token.ends_with("_CMD") {
         return false;
     }
     let ip = ignore_prefix();
     token.contains(suffix_bypass())
         || token.contains(suffix_skip())
+        || token.contains(suffix_check())
+        || token.contains(token_no_mid())
+        || token.ends_with(suffix_disable())
+        || token.ends_with(suffix_disabled())
+        || token.ends_with(suffix_off())
+        || token.ends_with(suffix_gate())
         || (token.len() > ip.len() && token.starts_with(&ip))
 }
 
@@ -240,13 +305,37 @@ mod tests {
     }
 
     #[test]
-    fn disabled_kill_switches_are_exempt() {
-        let v = format!("CHUMP_THING_{}_DISABLED", suffix_skip());
-        let ev = eval(vec![diff("scripts/foo.sh", &[format!("export {v}=1")])]);
-        assert!(
-            matches!(ev, Evaluation::Pass(_)),
-            "{v} should be Category B exempt"
-        );
+    fn flags_disable_disabled_gate_off_and_advertised_escape() {
+        let dis_sh = format!("CHUMP_FOO{}", suffix_disable());
+        let dis_rs = format!("CHUMP_BAR{}", suffix_disabled());
+        let gate_v = format!("CHUMP_BAZ{}", suffix_gate());
+        let off_v = format!("CHUMP_QUX{}", suffix_off());
+        let esc_v = "CHUMP_ESCAPE_HINT".to_string();
+        let ev = eval(vec![
+            diff(
+                "scripts/foo.sh",
+                &[
+                    format!("if [[ \"${{{dis_sh}:-0}}\" == \"1\" ]]; then exit 0; fi"),
+                    format!("echo \"Bypass (rare): {esc_v}=1\""),
+                ],
+            ),
+            diff(
+                "src/x.rs",
+                &[
+                    format!("let _ = std::env::var(\"{dis_rs}\");"),
+                    format!("let _ = std::env::var(\"{gate_v}\");"),
+                    format!("let _ = std::env::var(\"{off_v}\");"),
+                ],
+            ),
+        ]);
+        match ev {
+            Evaluation::Fail { detail, .. } => {
+                for expected in [&dis_sh, &dis_rs, &gate_v, &off_v, &esc_v] {
+                    assert!(detail.contains(expected), "missing {expected} in {detail}");
+                }
+            }
+            _ => panic!("expected fail for CREDIBLE-1531 gate-disablers and advertised escape"),
+        }
     }
 
     #[test]

@@ -100,20 +100,16 @@ _strip_comments() {
 # string-mentions in prose. NOTE: scripts/ci/test-*.sh files are NOT excluded — in this
 # repo those ARE the real CI gate implementations (e.g. this file, test-silent-failure-
 # tax.sh), so their bypass reads are genuine debt. Prints the integer count to stdout.
+_is_grandfathered_gate_disabler() {
+  local _var="$1"
+  local _cfile="$REPO_ROOT/scripts/ci/bypass-var-ceiling.txt"
+  [[ -f "$_cfile" ]] && grep -qE "^#[[:space:]]*GRANDFATHERED_GATE_DISABLER:[[:space:]]*${_var}([[:space:]]|$)" "$_cfile"
+}
+
 _count_bypass_debt() {
-  local _cands _hayfile _v _n=0
-  _cands="$(grep -rhoE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP|IGNORE|_CHECK|NO_)[A-Z0-9_]*' \
-            "$@" 2>/dev/null \
-            --exclude='test-no-new-bypass-env-vars.sh' \
-            --exclude='bypass-var-ceiling.txt' \
-            --exclude='bypass-env-var-allowlist.txt' \
-            --exclude='env-vars-internal.txt' \
-            --exclude='*.md' \
-            | grep -vE '_CMD$' | sort -u)"
-  # Speed: build a one-pass, comment-stripped haystack of every line mentioning a
-  # candidate token, then read-site-test each candidate against that small file.
+  local _cands _cmp0_cands _hayfile _v _n=0
   _hayfile="$(mktemp)"
-  grep -rhE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP|IGNORE|_CHECK|NO_)' \
+  grep -rhE 'CHUMP_[A-Z0-9_]+' \
     "$@" 2>/dev/null \
     --exclude='test-no-new-bypass-env-vars.sh' \
     --exclude='bypass-var-ceiling.txt' \
@@ -121,8 +117,20 @@ _count_bypass_debt() {
     --exclude='env-vars-internal.txt' \
     --exclude='*.md' \
     | _strip_comments > "$_hayfile" || true
+  _cands="$( {
+    grep -oE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP|IGNORE|_CHECK|NO_)[A-Z0-9_]*' "$_hayfile" 2>/dev/null || true
+    grep -oE 'CHUMP_[A-Z0-9_]*(_DISABLE|_DISABLED|_OFF|_GATE)\b' "$_hayfile" 2>/dev/null || true
+  } | grep -vE '_CMD$' | sort -u || true)"
+  # CREDIBLE-1531: also capture CHUMP_* vars compared to 0/false to turn off a gate
+  # when their name indicates a gate/check/guard/lint/verify/enforce toggle.
+  _cmp0_cands="$(grep -oE '\$\{?CHUMP_[A-Z0-9_]*(GATE|CHECK|GUARD|LINT|VERIFY|ENFORCE)[A-Z0-9_]*(:-1|:-[a-z0-9]+)?\}?"?[[:space:]]*[=!]=?[[:space:]]*"?(0|false)"?|env_trim_eq\([[:space:]]*"CHUMP_[A-Z0-9_]*(GATE|CHECK|GUARD|LINT|VERIFY|ENFORCE)[A-Z0-9_]*"[[:space:]]*,[[:space:]]*"(0|false)"' "$_hayfile" 2>/dev/null \
+                 | grep -oE 'CHUMP_[A-Z0-9_]+' | grep -vE '_CMD$' | sort -u || true)"
+  _cands="$(printf '%s\n%s\n' "$_cands" "$_cmp0_cands" | sort -u)"
   while IFS= read -r _v; do
     [ -z "$_v" ] && continue
+    if _is_grandfathered_gate_disabler "$_v"; then
+      continue
+    fi
     if _bypass_var_has_readsite "$_v" "$_hayfile"; then
       _n=$((_n + 1))
     fi
@@ -131,7 +139,7 @@ _count_bypass_debt() {
   printf '%s\n' "$_n"
 }
 
-if [[ "${1:-}" != "--self-test" ]]; then
+if [[ "${1:-}" != "--self-test" && -z "${BYPASS_DIFF_OVERRIDE:-}" ]]; then
   # CREDIBLE-1553 (Phase R R1/R2 AC2): CHUMP_BYPASS_PROOF_OF_MERGE is permanently
   # forbidden across all scripts, workflows, and Rust sources (excluding CI test
   # scripts that assert its absence and registries).
@@ -174,6 +182,9 @@ if [[ "${1:-}" != "--self-test" ]]; then
   fi
   if [ "${_now:-0}" -lt "$_ceiling" ]; then
     echo "[bypass-lint] debt-ceiling OK: ${_now} < ceiling ${_ceiling} — culled $((_ceiling - _now)). Ratchet it down: echo ${_now} > scripts/ci/bypass-var-ceiling.txt" >&2
+  fi
+  if [[ -z "${BYPASS_DIFF_OVERRIDE:-}" ]]; then
+    bash "$REPO_ROOT/scripts/ci/test-no-new-bypass-env-vars.sh" --self-test || exit 1
   fi
 fi
 
@@ -224,10 +235,29 @@ if [[ "${1:-}" == "--self-test" ]]; then
     '+CHUMP_AUDIT_BYPASS=1' \
     0
 
-  # Case 3: *_DISABLED var (Category B kill-switch) → exit 0 (exempt)
-  run_case "CHUMP_FLEET_DOCTOR_DISABLED is Category B, exempt" \
-    '+CHUMP_FLEET_DOCTOR_DISABLED=1' \
-    0
+  # Case 3: grandfathered *_DISABLED var in allowlist → exit 0; new *_DISABLED → exit 1 (CREDIBLE-1531)
+  run_case "new unallowlisted CHUMP_NEW_KILL_DISABLED is flagged (CREDIBLE-1531)" \
+    '+CHUMP_NEW_KILL_DISABLED=1' \
+    1
+
+  # CREDIBLE-1531 AC1: synthetic new CHUMP_FOO_DISABLE read in shell and in Rust → exit 1
+  run_case "CREDIBLE-1531 AC1a: synthetic new CHUMP_FOO_DISABLE read in shell → exit 1" \
+    '+if [[ "${CHUMP_FOO_DISABLE:-0}" == "1" ]]; then exit 0; fi' \
+    1
+  run_case "CREDIBLE-1531 AC1b: synthetic new CHUMP_FOO_DISABLE read in Rust → exit 1" \
+    '+if std::env::var("CHUMP_FOO_DISABLE").is_ok() { return Ok(()); }' \
+    1
+  run_case "CREDIBLE-1531: synthetic new CHUMP_FOO_GATE=0 or _OFF read → exit 1" \
+    '+if [[ "${CHUMP_FOO_GATE:-1}" == "0" || "${CHUMP_FOO_OFF:-0}" == "1" ]]; then return 0; fi' \
+    1
+
+  # CREDIBLE-1531 AC2: new message advertising a CHUMP_*=1 or CHUMP_*=0 gate escape → exit 1
+  run_case "CREDIBLE-1531 AC2a: new message advertising CHUMP_*=1 gate escape (#5587 pattern) → exit 1" \
+    '+echo "Bypass (rare): CHUMP_STRUCTURAL_GATE_DISABLE=1"' \
+    1
+  run_case "CREDIBLE-1531 AC2b: new message advertising arbitrary CHUMP_FOO_ESCAPE=1 gate escape → exit 1" \
+    '+eprintln!("To skip this gate, set CHUMP_FOO_ESCAPE=1 before pushing");' \
+    1
 
   # Case 4: Diff with no bypass vars → exit 0
   run_case "clean diff with no bypass vars" \
@@ -310,6 +340,20 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo "  FAIL: expected count 1 (real read only), got '$_cm_count' — comment phantom leaked"; FAIL=$((FAIL + 1))
   fi
   rm -rf "$_cm_root"
+
+  # ── CREDIBLE-1531 AC1+AC3: _count_bypass_debt counts new CHUMP_FOO_DISABLE in shell and Rust
+  # while grandfathered gate-disablers do not inflate the ceiling count.
+  _gd_root="$(mktemp -d)"
+  printf '%s\n' 'if [[ "${CHUMP_FOO_DISABLE:-0}" == "1" ]]; then :; fi' > "$_gd_root/sh_disable.sh"
+  printf '%s\n' 'let _ = std::env::var("CHUMP_BAR_DISABLE");' > "$_gd_root/rs_disable.rs"
+  printf '%s\n' 'if [[ "${CHUMP_TEST_GATE:-1}" == "0" ]]; then :; fi' > "$_gd_root/grandfathered.sh"
+  _gd_count="$(_count_bypass_debt "$_gd_root")"
+  if [[ "$_gd_count" == "2" ]]; then
+    echo "  PASS: CREDIBLE-1531 _count_bypass_debt counts new shell+Rust _DISABLE (2) and skips grandfathered CHUMP_TEST_GATE"; PASS=$((PASS + 1))
+  else
+    echo "  FAIL: CREDIBLE-1531 expected count 2 for new shell+Rust _DISABLE (grandfathered skipped), got '$_gd_count'"; FAIL=$((FAIL + 1))
+  fi
+  rm -rf "$_gd_root"
 
   echo ""
   if [[ $FAIL -gt 0 ]]; then
@@ -452,31 +496,36 @@ extract_bypass_varnames() {
   ' "$added_file" > "$code_only_file"
   rm -f "$added_file"
 
-  # Extract var names matching the bypass patterns.
-  # Strategy: grep for the CHUMP_*_BYPASS|SKIP|IGNORE_* substrings using -o.
-  # CHUMP_IGNORE_ requires at least one trailing [A-Z0-9] to avoid matching
-  # bare pattern-description text like "CHUMP_IGNORE_*" in comments.
-  # Then filter out _DISABLED (Category B exempt).
-  local raw_hits
-  raw_hits="$(grep -oE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP)[A-Z0-9_]*|CHUMP_IGNORE_[A-Z0-9][A-Z0-9_]*' \
-    "$code_only_file" 2>/dev/null || true)"
+  # Extract var names matching the bypass and gate-disabler patterns (CREDIBLE-1531):
+  #   1. CHUMP_* ending in or containing BYPASS, SKIP, _CHECK, NO_, _DISABLE, _DISABLED, _OFF, _GATE
+  #      or starting with CHUMP_IGNORE_
+  #   2. CHUMP_* compared to 0/false to turn off a gate/check/guard/lint/verify
+  #   3. User-facing text advertising a CHUMP_*=0 or CHUMP_*=1 gate escape (#5587 hint pattern)
+  local raw_hits cmp0_hits adv_hits
+  raw_hits="$( {
+    grep -oE 'CHUMP_[A-Z0-9_]*(BYPASS|SKIP|_CHECK|NO_)[A-Z0-9_]*|CHUMP_IGNORE_[A-Z0-9][A-Z0-9_]*' "$code_only_file" 2>/dev/null || true
+    grep -oE 'CHUMP_[A-Z0-9_]*(_DISABLE|_DISABLED|_OFF|_GATE)\b' "$code_only_file" 2>/dev/null || true
+  } )"
+  cmp0_hits="$(grep -oE '\$\{?CHUMP_[A-Z0-9_]*(GATE|CHECK|GUARD|LINT|VERIFY|ENFORCE)[A-Z0-9_]*(:-1|:-[a-z0-9]+)?\}?"?[[:space:]]*[=!]=?[[:space:]]*"?(0|false)"?|env_trim_eq\([[:space:]]*"CHUMP_[A-Z0-9_]*(GATE|CHECK|GUARD|LINT|VERIFY|ENFORCE)[A-Z0-9_]*"[[:space:]]*,[[:space:]]*"(0|false)"' \
+    "$code_only_file" 2>/dev/null | grep -oE 'CHUMP_[A-Z0-9_]+' || true)"
+  adv_hits="$(grep -iE '(echo|printf|println!|eprintln!|format!|bail!|anyhow!|warn!|error!|bypass|skip|disable|escape|override|turn off|opt out)' \
+    "$code_only_file" 2>/dev/null \
+    | grep -iE '(bypass|skip|disable|escape|override|turn off|opt out|gate)' \
+    | grep -oE 'CHUMP_[A-Z0-9_]+=(0|1|true|false)' \
+    | sed -E 's/=(0|1|true|false)$//' || true)"
   rm -f "$code_only_file"
 
-  if [[ -z "$raw_hits" ]]; then
+  local combined_hits
+  combined_hits="$(printf '%s\n%s\n%s\n' "$raw_hits" "$cmp0_hits" "$adv_hits" | grep -vE '^$|_CMD$' | sort -u || true)"
+  if [[ -z "$combined_hits" ]]; then
     return
   fi
 
-  # Filter out _DISABLED vars (Category B exempt).
   local name
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
-    # Skip if the var name itself ends in _DISABLED — this shouldn't happen
-    # since _DISABLED doesn't match our grep patterns above, but belt+suspenders.
-    case "$name" in
-      *_DISABLED) continue ;;
-    esac
     printf '%s\n' "$name"
-  done <<< "$raw_hits" | sort -u
+  done <<< "$combined_hits" | sort -u
 }
 
 # ── Main scan ──────────────────────────────────────────────────────────────────
