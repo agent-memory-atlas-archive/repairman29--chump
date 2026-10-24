@@ -28,6 +28,8 @@ info() { printf '\033[0;36m→\033[0m    %s\n' "$*"; }
 TMPDIR_BASE=$(mktemp -d /tmp/test-sccache-dir-XXXX)
 trap 'rm -rf "$TMPDIR_BASE"' EXIT
 
+REAL_DF="$(command -v df)"
+export REAL_DF
 FAKE_BIN_DIR="$TMPDIR_BASE/bin"
 mkdir -p "$FAKE_BIN_DIR"
 cat > "$FAKE_BIN_DIR/df" <<'FAKEDF'
@@ -54,7 +56,7 @@ case "$args" in
     fi
     ;;
   *)
-    command df "$@"
+    "$REAL_DF" "$@"
     ;;
 esac
 FAKEDF

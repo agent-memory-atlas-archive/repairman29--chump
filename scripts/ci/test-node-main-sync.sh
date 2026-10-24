@@ -96,6 +96,8 @@ grep -q 'git reset --hard origin/main exited 0' "$LOGFILE2" \
 ok "logfile records fetch and reset exit codes"
 
 # ── 4. Fetch failure aborts the rebuild sequence before any reset ──────────
+REAL_GIT="$(command -v git)"
+export REAL_GIT
 FAKE_GIT_DIR="$TMP/fakebin"
 mkdir -p "$FAKE_GIT_DIR"
 cat > "$FAKE_GIT_DIR/git" <<'EOF'
@@ -104,7 +106,7 @@ if [[ "$1" == "fetch" ]]; then
     echo "fatal: unable to access origin: simulated network failure" >&2
     exit 1
 fi
-exec /usr/bin/env git "$@"
+exec "$REAL_GIT" "$@"
 EOF
 chmod +x "$FAKE_GIT_DIR/git"
 
