@@ -508,6 +508,9 @@ cache_query_open_prs_by_title "X"    # same shape, filtered by LOWER(title) LIKE
 # Per-PR file list — replaces gh api repos/X/pulls/N/files
 cache_lookup_pr_files "<number>"     # background-tagged REST under the hood
 
+# Branch -> PR number + state (open/merged/closed), including merged & closed PRs (INFRA-8578)
+cache_lookup_pr_state_by_branch "<branch>"  # returns `number\tstate`; REST fallback on miss
+
 # Bulk refill — call once on cold cache, REST not GraphQL
 cache_refresh_open_prs               # writes up to 100 open PRs into pr_state
 ```

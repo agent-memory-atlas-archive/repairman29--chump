@@ -127,6 +127,84 @@ cache_ensure_pr_state_fresh() {
 }
 # ── End INFRA-8176 helpers ────────────────────────────────────────────────
 
+# INFRA-8578: cache_lookup_pr_state_by_branch <head_ref>
+#   Resolve branch name -> `<number>\t<state>` where `<state>` is one of
+#   `open`, `merged`, `closed` (or `unknown` if a cached row exists with
+#   missing/unparseable state). Includes merged and closed rows (unlike
+#   cache_lookup_pr_by_branch, which filters merged_at IS NULL).
+#   Falls back to REST (`chump_gh` / `gh pr list --state all`) on cache miss.
+#   rc=0 when state is open/merged/closed, rc=1 when cached row is unknown,
+#   rc=2 on miss/no PR.
+cache_lookup_pr_state_by_branch() {
+    local head_ref="${1:?cache_lookup_pr_state_by_branch <head_ref>}"
+    local db
+    if [[ -n "${CHUMP_CACHE_DB:-}" ]]; then
+        db="$CHUMP_CACHE_DB"
+    else
+        db="$(_cache_root_dir)/.chump/github_cache.db"
+    fi
+    local amb="${CHUMP_AMBIENT_LOG:-$(_cache_root_dir)/.chump-locks/ambient.jsonl}"
+    local ts
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if command -v sqlite3 >/dev/null 2>&1 && [[ -n "$db" && -f "$db" ]]; then
+        local esc="${head_ref//\'/\'\'}"
+        local row
+        row="$(sqlite3 -separator $'\t' "$db" \
+            "SELECT number,
+                    CASE
+                        WHEN merged_at IS NOT NULL AND merged_at != '' THEN 'merged'
+                        WHEN json_valid(raw_payload_json) THEN (CASE lower(COALESCE(
+                            json_extract(raw_payload_json, '\$.state'),
+                            json_extract(raw_payload_json, '\$.pull_request.state'), ''))
+                            WHEN 'merged' THEN 'merged'
+                            WHEN 'closed' THEN 'closed'
+                            WHEN 'open' THEN 'open'
+                            ELSE 'unknown' END)
+                        ELSE 'unknown' END
+             FROM pr_state WHERE head_ref = '${esc}'
+             ORDER BY number DESC LIMIT 1" 2>/dev/null || true)"
+        if [[ -n "$row" && "$row" == *$'\t'* ]]; then
+            local num="${row%%$'\t'*}"
+            local st="${row#*$'\t'}"
+            if [[ "${CHUMP_AMBIENT_DISABLE:-0}" != "1" ]]; then
+                printf '{"ts":"%s","kind":"cache_hit","helper":"cache_lookup_pr_state_by_branch","target":"%s","pr":%s,"state":"%s"}\n' \
+                    "$ts" "$head_ref" "$num" "$st" >> "$amb" 2>/dev/null || true
+            fi
+            printf '%s\t%s\n' "$num" "$st"
+            [[ "$st" == "unknown" ]] && return 1
+            return 0
+        fi
+    fi
+    if [[ "${CHUMP_AMBIENT_DISABLE:-0}" != "1" ]]; then
+        printf '{"ts":"%s","kind":"cache_miss","helper":"cache_lookup_pr_state_by_branch","target":"%s","reason":"not_found"}\n' \
+            "$ts" "$head_ref" >> "$amb" 2>/dev/null || true
+    fi
+    local _gh_cmd="gh"
+    command -v chump_gh >/dev/null 2>&1 && _gh_cmd="chump_gh"
+    local pr_json gh_rc=0
+    pr_json="$(CHUMP_GH_CALL_CRITICALITY=background \
+        "$_gh_cmd" pr list --head "$head_ref" --state all --json number,state --limit 1 2>/dev/null)" || gh_rc=$?
+    [[ $gh_rc -eq 0 && -n "$pr_json" ]] || return 2
+    local parsed
+    parsed="$(printf '%s' "$pr_json" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(d, list) or not d or not isinstance(d[0], dict):
+    sys.exit(1)
+num = d[0].get("number")
+st = str(d[0].get("state") or "").strip().lower()
+if num is None or st not in ("open", "merged", "closed"):
+    sys.exit(1)
+print(f"{num}\t{st}")
+' 2>/dev/null)" || return 2
+    [[ -n "$parsed" ]] || return 2
+    printf '%s\n' "$parsed"
+    return 0
+}
+
 # ── INFRA-1999 Phase 1: feature-flagged Rust path ────────────────────────
 # CHUMP_GITHUB_CACHE_RUST=1 routes all reader-side helpers through the
 # chump-github-cache-cli binary (crates/chump-github-cache). The 493 LOC

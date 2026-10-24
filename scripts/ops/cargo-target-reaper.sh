@@ -491,67 +491,23 @@ _classd_has_lease() {
 }
 
 # _classd_pr_merged_or_closed <branch> — echo "yes" if the branch's PR is
-# merged or closed, "no" if open, "" if unknown/no PR. Cache-first (reads the
-# local github_cache.db directly), chump_gh fallback.
+# merged or closed, "no" if open, "" if unknown/no PR. Cache-first via
+# cache_lookup_pr_state_by_branch (INFRA-8578), with REST fallback on miss.
 _classd_pr_merged_or_closed() {
     local branch="$1"
-    local state=""
-    # Cache-first: the webhook-fed SQLite cache knows merged_at / closed state.
-    if command -v sqlite3 >/dev/null 2>&1; then
-        local db=""
-        if command -v _cache_db_path >/dev/null 2>&1; then
-            db="$(_cache_db_path 2>/dev/null || true)"
-        elif [[ -n "${CHUMP_CACHE_DB:-}" ]]; then
-            db="$CHUMP_CACHE_DB"
-        fi
-        if [[ -n "$db" && -f "$db" ]]; then
-            local esc="${branch//\'/\'\'}"
-            local row
-            # RESILIENT-1635 (CREDIBLE-1574): parse the state with
-            # json_extract, never LIKE — the receiver writes json.dumps output
-            # ("state": "closed", with a space) that the old LIKE never matched.
-            # A REST row carries $.state; a webhook row $.pull_request.state.
-            # Only an explicit "open" reads as open; a row whose state is
-            # missing or unparseable is UNKNOWN (kept), never open.
-            row="$(sqlite3 "$db" \
-                "SELECT CASE \
-                    WHEN merged_at IS NOT NULL THEN 'yes' \
-                    WHEN json_valid(raw_payload_json) THEN (CASE lower(COALESCE( \
-                        json_extract(raw_payload_json, '\$.state'), \
-                        json_extract(raw_payload_json, '\$.pull_request.state'), '')) \
-                        WHEN 'closed' THEN 'yes' WHEN 'open' THEN 'no' ELSE 'unknown' END) \
-                    ELSE 'unknown' END \
-                 FROM pr_state WHERE head_ref = '${esc}' \
-                 ORDER BY number DESC LIMIT 1" 2>/dev/null || true)"
-            case "$row" in
-                yes|no)  printf '%s' "$row"; return 0 ;;
-                unknown) printf ''; return 0 ;;
+    local out state
+    if command -v cache_lookup_pr_state_by_branch >/dev/null 2>&1; then
+        out="$(cache_lookup_pr_state_by_branch "$branch" 2>/dev/null || true)"
+        if [[ -n "$out" && "$out" == *$'\t'* ]]; then
+            state="${out#*$'\t'}"
+            case "$state" in
+                merged|closed) printf 'yes'; return 0 ;;
+                open)          printf 'no';  return 0 ;;
+                *)             printf '';    return 0 ;;
             esac
         fi
     fi
-    # chump_gh fallback (background-tagged) — --state all so merged/closed PRs
-    # are visible. cache_lookup_pr_by_branch filters merged_at IS NULL, so it
-    # cannot answer "merged or closed"; the inline cache read above covers that.
-    # RESILIENT-1635: a failing gh is UNKNOWN, never a state — whatever it
-    # printed before failing (partial/stale JSON) is discarded, so an outage
-    # can't read as OPEN and admit the idle open-PR reap.
-    local pr_json gh_rc=0
-    pr_json="$(CHUMP_GH_CALL_CRITICALITY=background \
-        chump_gh pr list --head "$branch" --state all --json number,state --limit 1 2>/dev/null)" || gh_rc=$?
-    [[ $gh_rc -eq 0 ]] || { printf ''; return 0; }
-    [[ -n "$pr_json" ]] || { printf ''; return 0; }
-    state="$(printf '%s' "$pr_json" | python3 -c \
-        "import json,sys
-try:
-    d=json.load(sys.stdin)
-except Exception:
-    d=[]
-print(d[0]['state'] if d else '')" 2>/dev/null || true)"
-    case "$state" in
-        MERGED|CLOSED) printf 'yes' ;;
-        OPEN)          printf 'no' ;;
-        *)             printf '' ;;
-    esac
+    printf ''
 }
 
 # ── RESILIENT-1635: open-PR idle-worktree guards ────────────────────────────

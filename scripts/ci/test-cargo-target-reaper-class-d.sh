@@ -181,4 +181,77 @@ grep -q '"kind":"disk_low_cargo_reaper_triggered"' "$DISK_AMBIENT" \
     || fail "AC4: disk_low_cargo_reaper_triggered not emitted"
 pass "AC4: disk-health-monitor fired cargo-target-reaper --class-d-only under 10% free"
 
+# ── INFRA-8578: cache_lookup_pr_state_by_branch (open, merged, closed, miss) ──
+echo "--- INFRA-8578: cache_lookup_pr_state_by_branch + Class D delegation ---"
+# AC2: cargo-target-reaper.sh Class D delegates to cache_lookup_pr_state_by_branch
+# instead of carrying a private sqlite3 SELECT ... FROM pr_state query.
+if grep -q "cache_lookup_pr_state_by_branch" "$REAPER" && ! awk '/^_classd_pr_merged_or_closed\(\)/,/^\}/' "$REAPER" | grep -q "sqlite3"; then
+    pass "INFRA-8578 AC2: _classd_pr_merged_or_closed uses cache_lookup_pr_state_by_branch (no private sqlite query)"
+else
+    fail "INFRA-8578 AC2: _classd_pr_merged_or_closed still contains a private sqlite query or lacks cache_lookup_pr_state_by_branch"
+fi
+
+grep -q "cache_lookup_pr_state_by_branch" "$REPO_ROOT/CLAUDE.md" \
+    || fail "INFRA-8578: CLAUDE.md does not document cache_lookup_pr_state_by_branch"
+pass "INFRA-8578: CLAUDE.md documents cache_lookup_pr_state_by_branch"
+
+CACHE_FIXTURE_DB="$TMP/infra-8578-cache.db"
+sqlite3 "$CACHE_FIXTURE_DB" <<'SQL'
+CREATE TABLE pr_state (
+    number INTEGER PRIMARY KEY,
+    head_ref TEXT,
+    merged_at TEXT,
+    raw_payload_json TEXT
+);
+INSERT INTO pr_state VALUES (801, 'claude/branch-open', NULL, '{"number": 801, "state": "open"}');
+INSERT INTO pr_state VALUES (802, 'claude/branch-merged', '2026-10-24T08:00:00Z', '{"number": 802, "state": "closed", "merged_at": "2026-10-24T08:00:00Z"}');
+INSERT INTO pr_state VALUES (803, 'claude/branch-closed', NULL, '{"number": 803, "state": "closed"}');
+SQL
+
+# Source github_cache.sh in a subshell with a stubbed gh for the cache-miss fallback.
+STUB_GH_8578="$TMP/bin-8578"
+mkdir -p "$STUB_GH_8578"
+cat > "$STUB_GH_8578/gh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "pr" && "$2" == "list" ]]; then
+    case "$*" in
+        *claude/branch-miss-merged*)
+            echo '[{"number": 804, "state": "MERGED"}]'
+            exit 0
+            ;;
+        *claude/branch-miss-none*)
+            echo '[]'
+            exit 0
+            ;;
+    esac
+fi
+exit 1
+EOF
+chmod +x "$STUB_GH_8578/gh"
+
+# shellcheck source=../coord/lib/github_cache.sh
+source "$REPO_ROOT/scripts/coord/lib/github_cache.sh"
+
+out_open="$(CHUMP_CACHE_DB="$CACHE_FIXTURE_DB" PATH="$STUB_GH_8578:$PATH" cache_lookup_pr_state_by_branch "claude/branch-open")"
+[[ "$out_open" == $'801\topen' ]] || fail "INFRA-8578 AC1/AC3: expected '801\topen' for cached open PR, got '$out_open'"
+pass "INFRA-8578 AC1/AC3: cached open PR returns 801<TAB>open"
+
+out_merged="$(CHUMP_CACHE_DB="$CACHE_FIXTURE_DB" PATH="$STUB_GH_8578:$PATH" cache_lookup_pr_state_by_branch "claude/branch-merged")"
+[[ "$out_merged" == $'802\tmerged' ]] || fail "INFRA-8578 AC1/AC3: expected '802\tmerged' for cached merged PR, got '$out_merged'"
+pass "INFRA-8578 AC1/AC3: cached merged PR returns 802<TAB>merged"
+
+out_closed="$(CHUMP_CACHE_DB="$CACHE_FIXTURE_DB" PATH="$STUB_GH_8578:$PATH" cache_lookup_pr_state_by_branch "claude/branch-closed")"
+[[ "$out_closed" == $'803\tclosed' ]] || fail "INFRA-8578 AC1/AC3: expected '803\tclosed' for cached closed PR, got '$out_closed'"
+pass "INFRA-8578 AC1/AC3: cached closed PR returns 803<TAB>closed"
+
+out_miss_hit="$(CHUMP_CACHE_DB="$CACHE_FIXTURE_DB" PATH="$STUB_GH_8578:$PATH" cache_lookup_pr_state_by_branch "claude/branch-miss-merged")"
+[[ "$out_miss_hit" == $'804\tmerged' ]] || fail "INFRA-8578 AC1/AC3: expected '804\tmerged' on cache miss REST fallback, got '$out_miss_hit'"
+pass "INFRA-8578 AC1/AC3: cache miss falls back to REST and returns 804<TAB>merged"
+
+if CHUMP_CACHE_DB="$CACHE_FIXTURE_DB" PATH="$STUB_GH_8578:$PATH" cache_lookup_pr_state_by_branch "claude/branch-miss-none" >/dev/null 2>&1; then
+    fail "INFRA-8578 AC1/AC3: expected non-zero rc when branch has no PR in cache or REST"
+else
+    pass "INFRA-8578 AC1/AC3: cache miss with no PR returns non-zero"
+fi
+
 echo "=== all Class-D tests passed ==="
