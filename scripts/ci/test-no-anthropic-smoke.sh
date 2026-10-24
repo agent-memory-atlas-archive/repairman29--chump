@@ -36,6 +36,7 @@ export CLAUDE_CODE_OAUTH_TOKEN=""
 # Resolve chump binary
 CHUMP_BIN="${CHUMP_BIN:-chump}"
 command -v "$CHUMP_BIN" >/dev/null 2>&1 || fail "Cannot find chump binary at CHUMP_BIN=$CHUMP_BIN"
+CHUMP_BIN="$(command -v "$CHUMP_BIN")"
 
 TMP="$(mktemp -d -t test-credible-046.XXXXXX)"
 cleanup() { rm -rf "$TMP"; }
@@ -48,8 +49,11 @@ echo ""
 
 # ── Test 1: chump gap list works without creds ──────────────────────────────
 echo "--- Test 1: gap list ---"
-# Use a fresh temp state.db so we don't depend on main repo state in CI
-export CHUMP_STATE_DB="$TMP/state.db"
+# Use a fresh sandboxed temp state.db so we don't depend on main repo state in CI (CREDIBLE-1537 / INFRA-8190)
+export CHUMP_TEST_STORE_SANDBOX=1
+export CHUMP_STATE_DIR="$TMP/.chump"
+export CHUMP_STATE_DB="$TMP/.chump/state.db"
+mkdir -p "$CHUMP_STATE_DIR"
 output=$("$CHUMP_BIN" gap list --status open 2>&1 || true)
 # Should not error out, may print "state.db is empty" or a list
 # INFRA-1900: anchor the grep to actual Anthropic-call failure markers, not
@@ -102,18 +106,24 @@ echo "--- Test 4: gap ship ---"
 proof_repo="$TMP/proof-repo-$$"
 mkdir -p "$proof_repo"
 git -C "$proof_repo" init -q
+git -C "$proof_repo" checkout -q -b main
 git -C "$proof_repo" config user.email "test@integration.local"
 git -C "$proof_repo" config user.name "Integration Test"
 echo "proof" > "$proof_repo/marker.txt"
 git -C "$proof_repo" add marker.txt
-git -C "$proof_repo" commit -q -m "feat(${gap_id}): no-anthropic smoke proof-of-merge marker"
-CHUMP_REPO="$proof_repo" \
-CHUMP_SKIP_SUPERSEDED_CLOSE=1 \
-CHUMP_SHIP_NO_AUTOSTAGE=1 \
-CHUMP_ALLOW_STALE_DESTRUCTIVE=1 \
-CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 \
-"$CHUMP_BIN" gap ship "$gap_id" --closed-pr 9999 \
-    || fail "gap ship failed"
+git -C "$proof_repo" commit -q -m "feat(${gap_id}): no-anthropic smoke proof-of-merge marker (#9999)"
+proof_sha="$(git -C "$proof_repo" rev-parse HEAD)"
+"$CHUMP_BIN" gap link-pr "$gap_id" 9999 --sha "$proof_sha" \
+    || fail "gap link-pr failed"
+(
+    cd "$proof_repo" && \
+    CHUMP_REPO="$proof_repo" \
+    CHUMP_SKIP_SUPERSEDED_CLOSE=1 \
+    CHUMP_SHIP_NO_AUTOSTAGE=1 \
+    CHUMP_ALLOW_STALE_DESTRUCTIVE=1 \
+    CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 \
+    "$CHUMP_BIN" gap ship "$gap_id" --closed-pr 9999
+) || fail "gap ship failed"
 # ZERO-WASTE-020: state.db is canonical; gap ship no longer writes a
 # docs/gaps/<ID>.yaml mirror (--update-yaml is now a documented no-op).
 # NOTE: capture to a variable before grepping — see Test 2's comment above
