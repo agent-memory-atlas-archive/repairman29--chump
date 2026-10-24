@@ -78,7 +78,42 @@ else
 fi
 
 # ── Test 6: per-worktree path uses REPO_ROOT_T (worktree root, not shared) ───
-if grep -q '_WT_TEST_TARGET.*REPO_ROOT_T\|REPO_ROOT_T.*cargo-test-target' "$PRE_PUSH"; then
+# CREDIBLE-1601: extract the fenced RESILIENT-1669:BEGIN-TEST-TARGET .. END-TEST-TARGET
+# block and isolate the exact primary _WT_TEST_TARGET assignment line (plus its
+# worktree resolver binding) instead of grepping the whole hook file.
+check_primary_wt_test_target() {
+    local hook_file="$1"
+    local block primary_line source_line
+    block="$(awk '
+        index($0, "RESILIENT-1669:BEGIN-TEST-TARGET") { in_block = 1; next }
+        index($0, "RESILIENT-1669:END-TEST-TARGET")   { in_block = 0; exit }
+        in_block { print }
+    ' "$hook_file")"
+    [[ -n "$block" ]] || return 1
+    primary_line="$(printf '%s\n' "$block" | awk '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*else([[:space:]]|$)/ { exit }
+        /_WT_TEST_TARGET=/ { print; exit }
+    ')"
+    source_line="$(printf '%s\n' "$block" | awk '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*else([[:space:]]|$)/ { exit }
+        /resolve-cargo-target-dir\.sh/ && /source[[:space:]]/ { print; exit }
+    ')"
+    [[ -n "$primary_line" ]] || return 1
+    if printf '%s\n' "$primary_line" | grep -q '_WT_TEST_TARGET.*REPO_ROOT_T\|REPO_ROOT_T.*cargo-test-target'; then
+        return 0
+    fi
+    # Post-INFRA-8620 per-node shared target: primary line must call
+    # chump_cargo_target_dir/cargo-test-target AND the primary branch must
+    # source resolve-cargo-target-dir.sh via $REPO_ROOT_T (not a whole-file match).
+    printf '%s\n' "$primary_line" | grep -qE '_WT_TEST_TARGET="\$\(chump_cargo_target_dir\)/cargo-test-target(\/\$\(basename "\$REPO_ROOT_T"\))?"' \
+        && printf '%s\n' "$source_line" | grep -q '"\$REPO_ROOT_T/scripts/ci/lib/resolve-cargo-target-dir\.sh"'
+}
+
+if { grep -q '_WT_TEST_TARGET.*REPO_ROOT_T\|REPO_ROOT_T.*cargo-test-target' "$PRE_PUSH" \
+    || grep -q 'RESILIENT-1669:BEGIN-TEST-TARGET' "$PRE_PUSH"; } \
+    && check_primary_wt_test_target "$PRE_PUSH"; then
     ok "per-worktree test target path uses REPO_ROOT_T (not shared main repo)"
 else
     fail "per-worktree test target path missing REPO_ROOT_T binding"
@@ -97,6 +132,38 @@ if grep -q "_WT_TEST_TARGET" "$PRE_PUSH" && grep -q "CARGO_TARGET_DIR.*_WT_TEST_
     ok "cargo test block sets up per-worktree _WT_TEST_TARGET then uses it as CARGO_TARGET_DIR"
 else
     fail "cargo test block missing _WT_TEST_TARGET / CARGO_TARGET_DIR=\$_WT_TEST_TARGET setup"
+fi
+
+# ── Test 9 (CREDIBLE-1601): M4 mutant — dropping REPO_ROOT_T / primary assignment is killed ──
+TMP_M4="$(mktemp -d)"
+trap 'rm -rf "$TMP_M4"' EXIT
+
+# Mutant 4a: pre-INFRA-8620 form with $(basename "$REPO_ROOT_T") dropped to a non-resolver literal
+# while keeping REPO_ROOT_T and cargo-test-target elsewhere in the file (comments / fallback).
+awk '
+    index($0, "RESILIENT-1669:BEGIN-TEST-TARGET") { in_block = 1 }
+    index($0, "RESILIENT-1669:END-TEST-TARGET")   { in_block = 0 }
+    in_block && /_WT_TEST_TARGET="\$\(chump_cargo_target_dir\)\/cargo-test-target/ {
+        sub(/\$\(chump_cargo_target_dir\)\/cargo-test-target.*/, "/tmp/unscoped-target\"")
+    }
+    { print }
+' "$PRE_PUSH" > "$TMP_M4/pre-push-m4a"
+
+# Mutant 4b: drop REPO_ROOT_T from the primary resolver source line inside the fenced block
+# while REPO_ROOT_T still appears elsewhere in pre-push.
+awk '
+    index($0, "RESILIENT-1669:BEGIN-TEST-TARGET") { in_block = 1 }
+    index($0, "RESILIENT-1669:END-TEST-TARGET")   { in_block = 0 }
+    in_block && /source "\$REPO_ROOT_T\/scripts\/ci\/lib\/resolve-cargo-target-dir\.sh"/ {
+        sub(/\$REPO_ROOT_T\//, "")
+    }
+    { print }
+' "$PRE_PUSH" > "$TMP_M4/pre-push-m4b"
+
+if ! check_primary_wt_test_target "$TMP_M4/pre-push-m4a" && ! check_primary_wt_test_target "$TMP_M4/pre-push-m4b"; then
+    ok "M4 mutant (drop REPO_ROOT_T / primary _WT_TEST_TARGET binding inside fenced block) is killed"
+else
+    fail "M4 mutant survived primary _WT_TEST_TARGET fenced-block check"
 fi
 
 echo
