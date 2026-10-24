@@ -1434,6 +1434,8 @@ fn discover_test_scripts(repo_root: &std::path::Path) -> Vec<std::path::PathBuf>
         // RESILIENT-1681: shared-target-cache-reaper regression gate (RESILIENT-1680).
         // Pure sandbox-HOME + stubbed du/df/ps fixture test, no network, ~3s.
         "scripts/ci/test-shared-target-cache-reaper.sh",
+        // CREDIBLE-1567: shared claude -p allowlist/denylist lint + stubbed runtime argv check.
+        "scripts/ci/test-readonly-claude-allowlists.sh",
         // RESILIENT-1544: do NOT append new test scripts to this array — it is a
         // hot file that collides when parallel PRs each add a gate (the 2026-10-06
         // burst DIRTY-treadmill). Add new scripts to the union-merged overflow file
@@ -2919,6 +2921,12 @@ pub fn run(argv: &[String]) -> i32 {
             &["bash", "scripts/ci/test-shared-target-cache-reaper.sh"],
             GateKind::Scripts,
         ));
+        // CREDIBLE-1567: shared claude -p allowlist/denylist lint + stubbed runtime argv check.
+        steps.push(step(
+            "readonly-claude-allowlists",
+            &["bash", "scripts/ci/test-readonly-claude-allowlists.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "bot-merge-recovery-in-progress-smoke",
             &["bash", "scripts/ci/test-bot-merge-recovery-in-progress.sh"],
@@ -4347,6 +4355,31 @@ mod tests {
     // but was never in the discover_test_scripts allowlist, so a regression
     // in the detector's core cluster math (threshold/window/cooldown) could
     // ship without preflight or CI ever running it. Guard the wiring.
+    #[test]
+    fn credible1567_readonly_claude_allowlists_test_is_wired_in_ci_and_preflight() {
+        let repo_root = find_repo_root().expect("repo root");
+        let scripts = discover_test_scripts(&repo_root);
+        assert!(
+            scripts
+                .iter()
+                .any(|p| p.ends_with("scripts/ci/test-readonly-claude-allowlists.sh")),
+            "test-readonly-claude-allowlists.sh must be wired into preflight's discover_test_scripts allowlist (CREDIBLE-1567)"
+        );
+        let pf_src =
+            std::fs::read_to_string(repo_root.join("crates/chump-preflight/src/preflight.rs"))
+                .expect("read crates/chump-preflight/src/preflight.rs");
+        assert!(
+            pf_src.contains("\"readonly-claude-allowlists\""),
+            "readonly-claude-allowlists step must be wired in preflight.rs run() (CREDIBLE-1567)"
+        );
+        let ci_yml = std::fs::read_to_string(repo_root.join(".github/workflows/ci.yml"))
+            .expect("read .github/workflows/ci.yml");
+        assert!(
+            ci_yml.contains("bash scripts/ci/test-readonly-claude-allowlists.sh"),
+            "test-readonly-claude-allowlists.sh must be wired as a required step in .github/workflows/ci.yml (CREDIBLE-1567)"
+        );
+    }
+
     #[test]
     fn resilient1681_shared_target_cache_reaper_test_is_wired_in_ci_and_preflight() {
         let repo_root = find_repo_root().expect("repo root");

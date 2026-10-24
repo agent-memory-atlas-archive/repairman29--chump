@@ -131,14 +131,26 @@ saying so — a silent failure is worse than an honest one."
 # those stay outside the allowlist as the structural guardrail (see
 # lib/peer-guardrails.sh for the same category list enforced on the
 # judgment-tick side).
+# CREDIBLE-1567: no raw git log/diff/fetch or sqlite3 in ALLOWED_TOOLS —
+# sqlite3 runs .shell/.system/-cmd, git fetch runs --upload-pack, and git log/diff
+# write via --output. Route git history and GitHub cache reads through the
+# vetted fixed-query wrapper scripts/dispatch/architect-ro.sh, and deny all
+# escape-capable binaries and write/merge paths explicitly.
 ALLOWED_TOOLS=(
-    'Bash(git log*)' 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git fetch*)'
-    'Bash(gh pr list*)' 'Bash(gh pr view*)' 'Bash(gh issue list*)' 'Bash(sqlite3*)'
+    'Bash(scripts/dispatch/architect-ro.sh *)' 'Bash(git status*)'
+    'Bash(gh pr list*)' 'Bash(gh pr view*)' 'Bash(gh issue list*)'
     'Bash(chump gap list*)' 'Bash(chump gap view*)' 'Bash(chump gap reserve*)'
     'Bash(chump gap set*)' 'Bash(chump dispatch*)'
     'Bash(chump --briefing*)' 'Bash(cat*)' 'Bash(tail*)'
     'Bash(CHUMP_NOTIFY_KIND=discord_command_reply scripts/coord/lib/notify-operator.sh*)'
     'Bash(scripts/coord/lib/notify-operator.sh*)' 'Bash(printf*)' 'Bash(echo*)'
+)
+DENIED_TOOLS=(
+    'Edit' 'Write' 'NotebookEdit'
+    'Bash(gh pr merge*)' 'Bash(gh api*)' 'Bash(git push*)'
+    'Bash(bash*)' 'Bash(sh*)' 'Bash(zsh*)' 'Bash(env*)' 'Bash(sudo*)'
+    'Bash(python*)' 'Bash(perl*)' 'Bash(eval*)' 'Bash(exec*)' 'Bash(xargs*)'
+    'Bash(sqlite3*)' 'Bash(git fetch*)' 'Bash(git log*)' 'Bash(git diff*)' 'Bash(git -c*)'
 )
 
 cycle_output=""
@@ -146,7 +158,7 @@ cycle_rc=0
 CLAUDE_ARGS=(-p "$PROMPT"
     --tools "Read,Grep,Glob,Bash"
     --allowedTools "${ALLOWED_TOOLS[@]}"
-    --disallowedTools "Edit,Write,NotebookEdit"
+    --disallowedTools "${DENIED_TOOLS[@]}"
     --permission-mode dontAsk
     --max-budget-usd "$BUDGET_USD"
     --model "$MODEL")

@@ -132,16 +132,16 @@ saying so — a silent failure is worse than an honest one."
 # itself; this comment is the pairing anchor the registry gate scans for
 # since the literal above lives inside an escaped-quote bash string).
 
+# CREDIBLE-1567: route git history and GitHub cache reads through the vetted
+# read-only wrapper scripts/dispatch/architect-ro.sh instead of raw git/sqlite3,
+# and explicitly deny all escape-capable binaries and write/merge paths.
 ALLOWED_TOOLS=(
     "Bash(${ALMANAC_BIN}*)"
-    "Bash(git log*)"
+    "Bash(scripts/dispatch/architect-ro.sh *)"
     "Bash(git status*)"
-    "Bash(git diff*)"
-    "Bash(git fetch*)"
     "Bash(gh pr list*)"
     "Bash(gh pr view*)"
     "Bash(gh issue list*)"
-    "Bash(sqlite3*)"
     "Bash(chump gap list*)"
     "Bash(chump gap view*)"
     "Bash(chump --briefing*)"
@@ -151,6 +151,13 @@ ALLOWED_TOOLS=(
     "Bash(scripts/coord/lib/notify-operator.sh*)"
     "Bash(printf*)"
     "Bash(echo*)"
+)
+DENIED_TOOLS=(
+    'Edit' 'Write' 'NotebookEdit'
+    'Bash(gh pr merge*)' 'Bash(gh api*)' 'Bash(git push*)'
+    'Bash(bash*)' 'Bash(sh*)' 'Bash(zsh*)' 'Bash(env*)' 'Bash(sudo*)'
+    'Bash(python*)' 'Bash(perl*)' 'Bash(eval*)' 'Bash(exec*)' 'Bash(xargs*)'
+    'Bash(sqlite3*)' 'Bash(git fetch*)' 'Bash(git log*)' 'Bash(git diff*)' 'Bash(git -c*)'
 )
 
 # INFRA-3602: OAUTH defensive read — the Discord gateway invokes this script
@@ -179,7 +186,7 @@ cycle_rc=0
 CLAUDE_ARGS=(-p "$PROMPT"
     --tools "Read,Grep,Glob,Bash"
     --allowedTools "${ALLOWED_TOOLS[@]}"
-    --disallowedTools "Edit,Write,NotebookEdit"
+    --disallowedTools "${DENIED_TOOLS[@]}"
     --permission-mode dontAsk
     --max-budget-usd "$BUDGET_USD"
     --model "$MODEL")

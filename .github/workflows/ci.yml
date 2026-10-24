@@ -1319,6 +1319,9 @@ jobs:
       - name: shared-target-cache-reaper — incremental-only reap, floor/budget CLI, lane locks (RESILIENT-1680 / RESILIENT-1681)
         run: bash scripts/ci/test-shared-target-cache-reaper.sh
 
+      - name: readonly-claude-allowlists — shared claude -p allowlist/denylist lint and runtime argv verification (CREDIBLE-1567)
+        run: bash scripts/ci/test-readonly-claude-allowlists.sh
+
       - name: worktree-reaper active-worktree safety guard (INFRA-1074)
         run: bash scripts/ci/test-worktree-reaper-safety.sh
 

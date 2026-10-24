@@ -351,13 +351,23 @@ cmd_judgment_tick() {
         return 0
     fi
 
+    # CREDIBLE-1567: route git history and GitHub cache reads through
+    # scripts/dispatch/architect-ro.sh instead of raw git/sqlite3, and explicitly
+    # deny escape-capable binaries and write/merge paths.
     local allowed=(
-        'Bash(git log*)' 'Bash(git status*)' 'Bash(git diff*)' 'Bash(git fetch*)'
-        'Bash(gh pr list*)' 'Bash(gh pr view*)' 'Bash(sqlite3*)'
+        'Bash(scripts/dispatch/architect-ro.sh *)' 'Bash(git status*)'
+        'Bash(gh pr list*)' 'Bash(gh pr view*)'
         'Bash(chump gap list*)' 'Bash(chump gap view*)' 'Bash(chump gap reserve*)'
         'Bash(chump gap set*)' 'Bash(chump dispatch*)'
         'Bash(scripts/coord/broadcast.sh*)' 'Bash(scripts/coord/lib/notify-operator.sh*)'
         'Bash(tail*)' 'Bash(cat*)' 'Bash(printf*)'
+    )
+    local denied=(
+        'Edit' 'Write' 'NotebookEdit'
+        'Bash(gh pr merge*)' 'Bash(gh api*)' 'Bash(git push*)'
+        'Bash(bash*)' 'Bash(sh*)' 'Bash(zsh*)' 'Bash(env*)' 'Bash(sudo*)'
+        'Bash(python*)' 'Bash(perl*)' 'Bash(eval*)' 'Bash(exec*)' 'Bash(xargs*)'
+        'Bash(sqlite3*)' 'Bash(git fetch*)' 'Bash(git log*)' 'Bash(git diff*)' 'Bash(git -c*)'
     )
 
     local prompt
@@ -390,7 +400,7 @@ one-line summary of what you judged + did (or chose not to do), via: \
         out="$(timeout "${timeout_s}s" "$claude_bin" -p "$prompt" \
             --tools "Read,Grep,Glob,Bash" \
             --allowedTools "${allowed[@]}" \
-            --disallowedTools "Edit,Write,NotebookEdit" \
+            --disallowedTools "${denied[@]}" \
             --permission-mode dontAsk \
             --max-budget-usd "$budget" \
             --model "$model" 2>&1)" || rc=$?
@@ -398,7 +408,7 @@ one-line summary of what you judged + did (or chose not to do), via: \
         out="$("$claude_bin" -p "$prompt" \
             --tools "Read,Grep,Glob,Bash" \
             --allowedTools "${allowed[@]}" \
-            --disallowedTools "Edit,Write,NotebookEdit" \
+            --disallowedTools "${denied[@]}" \
             --permission-mode dontAsk \
             --max-budget-usd "$budget" \
             --model "$model" 2>&1)" || rc=$?
