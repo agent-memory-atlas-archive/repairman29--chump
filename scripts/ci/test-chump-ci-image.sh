@@ -3,7 +3,7 @@
 #
 # Smoke-test the chump-ci Docker image deliverables:
 #   1. docker/Dockerfile.ci exists, references cargo-chef (AC #8) and the
-#      expected toolchain pins (rust:1.82-bookworm, sccache, cargo-nextest,
+#      expected toolchain pins (rust:1.96-bookworm, sccache, cargo-nextest,
 #      cargo-deny, clippy, jq).
 #   2. .github/workflows/build-ci-image.yml exists with the required triggers
 #      (weekly cron + push to docker/Dockerfile.ci), permissions
@@ -49,9 +49,9 @@ grep -q "INFRA-2241" "$DOCKERFILE" 2>/dev/null \
     && ok "Dockerfile references INFRA-2241" \
     || fail "Dockerfile missing INFRA-2241 reference"
 
-grep -q "rust:1.82-bookworm" "$DOCKERFILE" 2>/dev/null \
-    && ok "Rust 1.82-bookworm pinned" \
-    || fail "Rust 1.82-bookworm pin not found"
+grep -q "rust:1.96-bookworm" "$DOCKERFILE" 2>/dev/null \
+    && ok "Rust 1.96-bookworm pinned" \
+    || fail "Rust 1.96-bookworm pin not found"
 
 # AC #8 — cargo-chef integration
 grep -q "cargo chef prepare" "$DOCKERFILE" 2>/dev/null \
@@ -119,9 +119,18 @@ grep -qE "packages:\s*write" "$WORKFLOW" 2>/dev/null \
     && ok "packages: write permission declared" \
     || fail "packages: write permission missing"
 
-grep -q "docker/build-push-action@v5" "$WORKFLOW" 2>/dev/null \
-    && ok "docker/build-push-action@v5 used" \
-    || fail "docker/build-push-action@v5 not referenced"
+grep -qE "docker/build-push-action@v[5-9]" "$WORKFLOW" 2>/dev/null \
+    && ok "docker/build-push-action@v5+ used" \
+    || fail "docker/build-push-action@v5+ not referenced"
+
+# CREDIBLE-1541: Verify Dockerfile.ci Rust base image matches rust-toolchain.toml
+# major.minor and is >= 1.85 (required for Cargo edition2024 in cargo-chef/binstall).
+TOOLCHAIN_MM="$(sed -n 's/^channel = "\([0-9]*\.[0-9]*\).*"/\1/p' "$REPO_ROOT/rust-toolchain.toml" | head -1)"
+if [[ -n "$TOOLCHAIN_MM" ]] && grep -q "FROM rust:${TOOLCHAIN_MM}-bookworm AS chef" "$DOCKERFILE" && grep -q "^FROM rust:${TOOLCHAIN_MM}-bookworm$" "$DOCKERFILE"; then
+    ok "CREDIBLE-1541: Dockerfile.ci base stages match rust-toolchain.toml (${TOOLCHAIN_MM})"
+else
+    fail "CREDIBLE-1541: Dockerfile.ci base stages do not match rust-toolchain.toml (${TOOLCHAIN_MM})"
+fi
 
 grep -q "ghcr.io/repairman29/chump-ci" "$WORKFLOW" 2>/dev/null \
     && ok "ghcr.io/repairman29/chump-ci image name present" \
