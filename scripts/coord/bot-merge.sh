@@ -669,11 +669,21 @@ _bm_link_pr() {
     local head_sha
     head_sha="$(git rev-parse HEAD 2>/dev/null || echo "")"
     [[ -z "$head_sha" ]] && return 0
-    local gid
+    local gid _bm_first=1 _bm_flag
     for gid in "${GAP_IDS[@]}"; do
         [[ -z "$gid" || "$gid" == "none" ]] && continue
-        if chump gap link-pr "$gid" "$pr_number" --sha "$head_sha" >/dev/null 2>&1; then
-            info "CREDIBLE-1520: linked $gid → PR #$pr_number in gap_prs ($head_sha)"
+        # CREDIBLE-1559 AC3: the first cited gap passes --move so re-scoping an
+        # existing PR from an umbrella gap to a slice moves the link instead of
+        # leaving a stale umbrella row; any additional gap explicitly cited on
+        # the same bot-merge invocation passes --multi.
+        if [[ "$_bm_first" -eq 1 ]]; then
+            _bm_flag="--move"
+            _bm_first=0
+        else
+            _bm_flag="--multi"
+        fi
+        if chump gap link-pr "$gid" "$pr_number" --sha "$head_sha" "$_bm_flag" >/dev/null 2>&1; then
+            info "CREDIBLE-1520: linked $gid → PR #$pr_number in gap_prs ($head_sha, $_bm_flag)"
         fi
     done
 }

@@ -136,6 +136,34 @@ else
     ok "dispatch path: dispatch.rs has no independent gh pr create (no bypass)"
 fi
 
+# ── T4: CREDIBLE-1559 AC2 + AC3 — refuse second gap without --multi; move on re-scope ──
+DB4="$TMP/t4.db"
+( cd "$REPO" && CHUMP_STATE_DB="$DB4" "$CHUMP" gap link-pr CREDIBLE-1550-T4 "$STUB_PR" --sha "$HEAD_SHA" >/dev/null 2>&1 )
+refuse_out="$( cd "$REPO" && CHUMP_STATE_DB="$DB4" "$CHUMP" gap link-pr CREDIBLE-1552-T4 "$STUB_PR" --sha "$HEAD_SHA" 2>&1 )"; refuse_rc=$?
+if [[ "$refuse_rc" -ne 0 && "$refuse_out" == *"CREDIBLE-1550-T4"* ]]; then
+    ok "CREDIBLE-1559 AC2: 'chump gap link-pr' refuses a second gap without --multi and prints existing link"
+else
+    fail "CREDIBLE-1559 AC2: expected non-zero + CREDIBLE-1550-T4 in output, got rc=$refuse_rc out=$refuse_out"
+fi
+if [[ -n "$FN" ]]; then
+    (
+        cd "$REPO"
+        export CHUMP_STATE_DB="$DB4"
+        info() { :; }
+        # Re-scope PR from umbrella CREDIBLE-1550-T4 to slice CREDIBLE-1552-T4:
+        GAP_IDS=("CREDIBLE-1552-T4")
+        eval "$FN"
+        _bm_link_pr "$STUB_PR"
+    )
+    old_cnt="$(count_rows "$DB4" CREDIBLE-1550-T4 "$STUB_PR")"
+    new_cnt="$(count_rows "$DB4" CREDIBLE-1552-T4 "$STUB_PR")"
+    if [[ "$old_cnt" == 0 && "$new_cnt" == 1 ]]; then
+        ok "CREDIBLE-1559 AC3: re-scoping via bot-merge _bm_link_pr (--move) moves the link instead of adding a second row"
+    else
+        fail "CREDIBLE-1559 AC3: expected old_cnt=0 new_cnt=1 after re-scope, got old=$old_cnt new=$new_cnt"
+    fi
+fi
+
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]

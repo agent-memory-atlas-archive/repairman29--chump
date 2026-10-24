@@ -228,6 +228,10 @@ pub struct GapPrRow {
     pub opened_at: i64,
     /// open | merged | closed.
     pub state: String,
+    /// CREDIBLE-1559: true when this link was explicitly added with `--multi`
+    /// so a multi-gap PR is permitted to close more than one gap.
+    #[serde(default)]
+    pub multi_ok: bool,
 }
 
 // ────────────────────────── DB open/migrate ──────────────────────────
@@ -876,10 +880,17 @@ impl GapStore {
                 head_sha    TEXT NOT NULL,
                 opened_at   INTEGER NOT NULL,
                 state       TEXT NOT NULL DEFAULT 'open',
+                multi_ok    INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (gap_id, pr_number)
              );
              CREATE INDEX IF NOT EXISTS gap_prs_pr_number ON gap_prs(pr_number);
             ",
+        );
+        // CREDIBLE-1559 (Phase R R2): multi_ok column on gap_prs (0 = single-gap
+        // default; 1 = extra link explicitly blessed with `chump gap link-pr --multi`).
+        let _ = self.conn.execute(
+            "ALTER TABLE gap_prs ADD COLUMN multi_ok INTEGER NOT NULL DEFAULT 0",
+            [],
         );
 
         // MISSION-033: first-class repos table + 3 indexes.
@@ -3340,6 +3351,17 @@ impl GapStore {
                      is written at PR-open time (`chump gap link-pr`, called by bot-merge.sh \
                      right after `gh pr create`). If PR #{pr} genuinely implemented {gap_id}, \
                      run `chump gap link-pr {gap_id} {pr} --sha <merge-sha>` first, then retry."
+                );
+            }
+            if let Some(conflict_gaps) = self.check_unblessed_multi_gap_pr(pr)? {
+                self.emit_pr_links_multiple_gaps(pr, &conflict_gaps);
+                bail!(
+                    "CREDIBLE-1559 AC1: refusing to flip {gap_id} to status=done from \
+                     PR #{pr} — gap_prs links PR #{pr} to multiple gaps ({}) without \
+                     --multi. Resolve the stale link with `chump gap unlink-pr <OLD-GAP> \
+                     {pr} --reason <text>` (or `chump gap link-pr {gap_id} {pr} --sha \
+                     <merge-sha> --move`) and retry.",
+                    conflict_gaps.join(", ")
                 );
             }
         }
@@ -7127,6 +7149,7 @@ impl GapStore {
             head_sha: row.get(2)?,
             opened_at: row.get(3)?,
             state: row.get(4)?,
+            multi_ok: row.get::<_, i64>(5).unwrap_or(0) != 0,
         })
     }
 
@@ -7134,13 +7157,60 @@ impl GapStore {
     /// succeeds. Idempotent: re-running with the same (gap_id, pr_number)
     /// UPSERTs the head_sha/state rather than erroring, so a bot-merge retry
     /// on the same branch doesn't fail here.
+    ///
+    /// CREDIBLE-1559 AC2: refuses to link a second, different gap to a PR that
+    /// already has a link unless `--multi` or `--move` is passed via
+    /// [`Self::link_pr_opts`].
     pub fn link_pr(&self, gap_id: &str, pr_number: i64, head_sha: &str) -> Result<()> {
+        self.link_pr_opts(gap_id, pr_number, head_sha, false, false)
+    }
+
+    /// CREDIBLE-1559 (Phase R R2, AC2 + AC3): record a gap-to-PR link with
+    /// explicit multi-gap (`--multi`) or re-scope (`--move`) semantics:
+    /// - Default (`!multi && !move_link`): refuses if `gap_prs` already holds a
+    ///   row for `pr_number` with a different `gap_id`, printing the existing
+    ///   link.
+    /// - `move_link == true` (`--move`): atomically unlinks any existing row(s)
+    ///   for `pr_number` whose `gap_id != gap_id` (emitting `gap_pr_unlinked`
+    ///   with reason `"moved to <gap_id>"`) before writing the new link.
+    /// - `multi == true` (`--multi`): permits linking an additional gap to
+    ///   `pr_number` and marks the row `multi_ok = 1` so closers know the
+    ///   multi-gap link was intentional.
+    pub fn link_pr_opts(
+        &self,
+        gap_id: &str,
+        pr_number: i64,
+        head_sha: &str,
+        multi: bool,
+        move_link: bool,
+    ) -> Result<()> {
+        let existing = self.list_links_for_pr(pr_number)?;
+        let other_links: Vec<&GapPrRow> = existing.iter().filter(|r| r.gap_id != gap_id).collect();
+        if !other_links.is_empty() {
+            if move_link {
+                for old in &other_links {
+                    self.unlink_pr(&old.gap_id, pr_number, &format!("moved to {gap_id}"))?;
+                }
+            } else if !multi {
+                let existing_desc: Vec<String> = other_links
+                    .iter()
+                    .map(|r| format!("{} (head_sha={})", r.gap_id, r.head_sha))
+                    .collect();
+                bail!(
+                    "CREDIBLE-1559 AC2: PR #{pr_number} is already linked to {} — refusing to link                      second gap {gap_id} without --multi (or pass --move to re-scope PR #{pr_number}                      to {gap_id})",
+                    existing_desc.join(", ")
+                );
+            }
+        }
         let now = unix_now();
+        let multi_flag: i64 = if multi { 1 } else { 0 };
         self.conn.execute(
-            "INSERT INTO gap_prs(gap_id, pr_number, head_sha, opened_at, state)
-             VALUES(?1, ?2, ?3, ?4, 'open')
-             ON CONFLICT(gap_id, pr_number) DO UPDATE SET head_sha=excluded.head_sha",
-            params![gap_id, pr_number, head_sha, now],
+            "INSERT INTO gap_prs(gap_id, pr_number, head_sha, opened_at, state, multi_ok)
+             VALUES(?1, ?2, ?3, ?4, 'open', ?5)
+             ON CONFLICT(gap_id, pr_number) DO UPDATE SET
+                 head_sha=excluded.head_sha,
+                 multi_ok=MAX(gap_prs.multi_ok, excluded.multi_ok)",
+            params![gap_id, pr_number, head_sha, now, multi_flag],
         )?;
         Ok(())
     }
@@ -7190,10 +7260,40 @@ impl GapStore {
         }
     }
 
+    /// Emit a `pr_links_multiple_gaps` event to `.chump-locks/ambient.jsonl`
+    /// when a PR holds >1 gap link in `gap_prs` without `--multi` on each
+    /// extra link (CREDIBLE-1559 AC1).
+    // scanner-anchor: "kind":"pr_links_multiple_gaps"
+    fn emit_pr_links_multiple_gaps(&self, pr_number: i64, gap_ids: &[String]) {
+        let amb = self.repo_root.join(".chump-locks").join("ambient.jsonl");
+        let ts = unix_to_iso_full(unix_now());
+        let line = format!(
+            "{}\n",
+            serde_json::json!({
+                "ts": ts,
+                "kind": "pr_links_multiple_gaps",
+                "pr": pr_number,
+                "gap_ids": gap_ids,
+                "gaps": gap_ids.join(","),
+            })
+        );
+        use std::io::Write as _;
+        if let Some(parent) = amb.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&amb)
+        {
+            let _ = f.write_all(line.as_bytes());
+        }
+    }
+
     /// List all PR links recorded for a gap, most-recently-opened first.
     pub fn list_prs_for_gap(&self, gap_id: &str) -> Result<Vec<GapPrRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT gap_id, pr_number, head_sha, opened_at, state FROM gap_prs \
+            "SELECT gap_id, pr_number, head_sha, opened_at, state, multi_ok FROM gap_prs \
              WHERE gap_id=?1 ORDER BY opened_at DESC",
         )?;
         let rows = stmt
@@ -7202,10 +7302,36 @@ impl GapStore {
         Ok(rows)
     }
 
+    /// CREDIBLE-1559: list all gap_prs rows for `pr_number`, oldest-opened
+    /// first (`ORDER BY opened_at ASC, gap_id ASC`).
+    pub fn list_links_for_pr(&self, pr_number: i64) -> Result<Vec<GapPrRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT gap_id, pr_number, head_sha, opened_at, state, multi_ok FROM gap_prs \
+             WHERE pr_number=?1 ORDER BY opened_at ASC, gap_id ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![pr_number], Self::row_to_gap_pr)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// CREDIBLE-1559 AC1: check whether `pr_number` is linked to more than one
+    /// gap without `--multi` on each extra link. Returns `Some(gap_ids)` when
+    /// closure must be refused, or `None` when 0/1 links exist or all extra
+    /// links carry `multi_ok = true`.
+    fn check_unblessed_multi_gap_pr(&self, pr_number: i64) -> Result<Option<Vec<String>>> {
+        let links = self.list_links_for_pr(pr_number)?;
+        if links.len() > 1 && links.iter().filter(|r| !r.multi_ok).count() > 1 {
+            let ids: Vec<String> = links.into_iter().map(|r| r.gap_id).collect();
+            return Ok(Some(ids));
+        }
+        Ok(None)
+    }
+
     /// Fetch one gap_prs row by (gap_id, pr_number). Returns None if not found.
     pub fn get_pr_link(&self, gap_id: &str, pr_number: i64) -> Result<Option<GapPrRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT gap_id, pr_number, head_sha, opened_at, state FROM gap_prs \
+            "SELECT gap_id, pr_number, head_sha, opened_at, state, multi_ok FROM gap_prs \
              WHERE gap_id=?1 AND pr_number=?2",
         )?;
         stmt.query_row(params![gap_id, pr_number], Self::row_to_gap_pr)
@@ -7213,15 +7339,18 @@ impl GapStore {
             .map_err(Into::into)
     }
 
-    /// CREDIBLE-1551 (Phase R R2, AC2): reverse lookup — the gap(s) a typed
-    /// gap_prs row links to this PR number, most-recently-opened first. This is
-    /// the FK-backed replacement for parsing gap IDs out of a merged PR's
-    /// title/body (what the two legacy title-regex closers did —
-    /// stale-pr-reaper's INFRA-674 ghost block and chump-pr-triage's
-    /// `--apply ship-gap`). A caller resolves the gap from the link, never the
-    /// title, so the close routes through the same proof `chump gap ship` now
-    /// enforces.
+    /// CREDIBLE-1551 (Phase R R2, AC2) + CREDIBLE-1559 (AC1): reverse lookup —
+    /// the gap(s) a typed gap_prs row links to this PR number,
+    /// most-recently-opened first. By default one PR closes at most one gap:
+    /// when `gap_prs` holds >1 gap for `pr_number` and at least one extra link
+    /// was not written with `--multi`, emits `kind=pr_links_multiple_gaps` and
+    /// returns an empty list so closers close NONE of them until the stale link
+    /// is unlinked or moved.
     pub fn gaps_for_pr(&self, pr_number: i64) -> Result<Vec<String>> {
+        if let Some(conflict_gaps) = self.check_unblessed_multi_gap_pr(pr_number)? {
+            self.emit_pr_links_multiple_gaps(pr_number, &conflict_gaps);
+            return Ok(Vec::new());
+        }
         let mut stmt = self
             .conn
             .prepare("SELECT gap_id FROM gap_prs WHERE pr_number=?1 ORDER BY opened_at DESC")?;
@@ -8970,7 +9099,9 @@ mod tests {
     fn unlink_pr_removes_one_row_and_leaves_siblings() {
         let (store, _dir) = test_store();
         store.link_pr("CREDIBLE-1550", 5600, "abc123").unwrap();
-        store.link_pr("CREDIBLE-1552", 5600, "abc123").unwrap();
+        store
+            .link_pr_opts("CREDIBLE-1552", 5600, "abc123", true, false)
+            .unwrap();
 
         // Undo the mislink to the umbrella; the slice's own link survives.
         let removed = store
@@ -9051,7 +9182,9 @@ mod tests {
     fn gaps_for_pr_returns_every_gap_linked_to_a_pr() {
         let (store, _dir) = test_store();
         store.link_pr("CREDIBLE-1551", 5600, "aaa").unwrap();
-        store.link_pr("CREDIBLE-1552", 5600, "bbb").unwrap();
+        store
+            .link_pr_opts("CREDIBLE-1552", 5600, "bbb", true, false)
+            .unwrap();
         store.link_pr("INFRA-9999", 6001, "ccc").unwrap();
 
         let mut gaps = store.gaps_for_pr(5600).unwrap();
@@ -9061,6 +9194,158 @@ mod tests {
             store.gaps_for_pr(424242).unwrap().is_empty(),
             "a PR with no link resolves to no gap (closers close nothing)"
         );
+    }
+
+    // ── CREDIBLE-1559 (Phase R R2): one PR closes at most one gap by default ─
+
+    #[test]
+    fn credible1559_link_pr_refuses_second_gap_without_multi_and_names_existing_link() {
+        let (store, _dir) = test_store();
+        store.link_pr("CREDIBLE-1550", 5600, "7c728ee7a").unwrap();
+
+        let err = store
+            .link_pr("CREDIBLE-1552", 5600, "a5bb9d0c2")
+            .expect_err("second gap on same PR without --multi must be refused");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("CREDIBLE-1550") && msg.contains("7c728ee7a"),
+            "refusal must print the existing link; got: {msg}"
+        );
+        assert!(
+            msg.contains("--multi") && msg.contains("--move"),
+            "refusal must mention --multi and --move; got: {msg}"
+        );
+        assert!(
+            store.get_pr_link("CREDIBLE-1552", 5600).unwrap().is_none(),
+            "refused second gap must not be written to gap_prs"
+        );
+    }
+
+    #[test]
+    fn credible1559_link_pr_move_replaces_old_gap_and_emits_unlinked() {
+        let (store, dir) = test_store();
+        let amb = dir.path().join(".chump-locks").join("ambient.jsonl");
+
+        store.link_pr("CREDIBLE-1550", 5600, "7c728ee7a").unwrap();
+        store
+            .link_pr_opts("CREDIBLE-1552", 5600, "a5bb9d0c2", false, true)
+            .unwrap();
+
+        assert!(
+            store.get_pr_link("CREDIBLE-1550", 5600).unwrap().is_none(),
+            "--move must remove the old umbrella link"
+        );
+        let new_link = store
+            .get_pr_link("CREDIBLE-1552", 5600)
+            .unwrap()
+            .expect("new slice link present");
+        assert_eq!(new_link.head_sha, "a5bb9d0c2");
+        assert_eq!(
+            store.gaps_for_pr(5600).unwrap(),
+            vec!["CREDIBLE-1552"],
+            "moved PR resolves strictly to the new slice gap"
+        );
+
+        let body = std::fs::read_to_string(&amb).expect("ambient.jsonl written");
+        let unlinked: Vec<serde_json::Value> = body
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v["kind"] == "gap_pr_unlinked")
+            .collect();
+        assert_eq!(unlinked.len(), 1, "move emits one gap_pr_unlinked event");
+        assert_eq!(unlinked[0]["gap"], "CREDIBLE-1550");
+        assert_eq!(unlinked[0]["pr"], 5600);
+        assert_eq!(unlinked[0]["reason"], "moved to CREDIBLE-1552");
+    }
+
+    #[test]
+    fn credible1559_two_unblessed_gaps_close_neither_and_emit_pr_links_multiple_gaps() {
+        let (store, dir) = test_store();
+        let amb = dir.path().join(".chump-locks").join("ambient.jsonl");
+
+        let g1 = store
+            .reserve("CREDIBLE", "umbrella gap", "P1", "m")
+            .unwrap();
+        let g2 = store.reserve("CREDIBLE", "slice gap", "P1", "s").unwrap();
+        let g_single = store
+            .reserve("CREDIBLE", "single-link gap", "P1", "s")
+            .unwrap();
+
+        store.claim(&g1, "s1", "/wt1", 3600).unwrap();
+        store.claim(&g2, "s2", "/wt2", 3600).unwrap();
+        store.claim(&g_single, "s3", "/wt3", 3600).unwrap();
+
+        // Simulate the #5600 failure mode: two rows in gap_prs for PR #5600
+        // where neither extra link carries multi_ok=1 (e.g. legacy pre-1559 rows).
+        store.link_pr(&g1, 5600, "landed").unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO gap_prs(gap_id, pr_number, head_sha, opened_at, state, multi_ok)                  VALUES(?1, 5600, 'landed', ?2, 'open', 0)",
+                params![g2, unix_now() + 1],
+            )
+            .unwrap();
+
+        // 1) Reverse lookup used by every closer returns empty and emits pr_links_multiple_gaps.
+        let resolved = store.gaps_for_pr(5600).unwrap();
+        assert!(
+            resolved.is_empty(),
+            "closer lookup must return no gaps when PR links >1 gap without --multi; got {resolved:?}"
+        );
+
+        // 2) Direct ship() of either gap via PR #5600 is ALSO refused; neither gap closes.
+        let err1 = store
+            .ship(&g1, "s1", Some(5600))
+            .expect_err("ship of g1 must be refused when PR #5600 links two unblessed gaps");
+        assert!(
+            format!("{err1:#}").contains("CREDIBLE-1559 AC1"),
+            "unexpected error for g1: {err1:#}"
+        );
+        let err2 = store
+            .ship(&g2, "s2", Some(5600))
+            .expect_err("ship of g2 must be refused when PR #5600 links two unblessed gaps");
+        assert!(
+            format!("{err2:#}").contains("CREDIBLE-1559 AC1"),
+            "unexpected error for g2: {err2:#}"
+        );
+        assert_eq!(store.get(&g1).unwrap().unwrap().status, "open");
+        assert_eq!(store.get(&g2).unwrap().unwrap().status, "open");
+
+        // Verify kind=pr_links_multiple_gaps was emitted with pr and gap_ids.
+        let body = std::fs::read_to_string(&amb).expect("ambient.jsonl written");
+        let events: Vec<serde_json::Value> = body
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v["kind"] == "pr_links_multiple_gaps")
+            .collect();
+        assert!(
+            !events.is_empty(),
+            "expected kind=pr_links_multiple_gaps in ambient.jsonl"
+        );
+        assert_eq!(events[0]["pr"], 5600);
+        let mut emitted_ids: Vec<String> = events[0]["gap_ids"]
+            .as_array()
+            .expect("gap_ids array")
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        emitted_ids.sort();
+        let mut expected_ids = vec![g1.clone(), g2.clone()];
+        expected_ids.sort();
+        assert_eq!(emitted_ids, expected_ids);
+
+        // 3) A single-link PR (#5601 -> g_single) still resolves and closes its gap cleanly.
+        store.link_pr(&g_single, 5601, "landed").unwrap();
+        assert_eq!(store.gaps_for_pr(5601).unwrap(), vec![g_single.clone()]);
+        store.ship(&g_single, "s3", Some(5601)).unwrap();
+        assert_eq!(store.get(&g_single).unwrap().unwrap().status, "done");
+
+        // 4) Once the stale umbrella link (g1) on PR #5600 is unlinked, g2 closes cleanly.
+        store.unlink_pr(&g1, 5600, "re-scoped to slice").unwrap();
+        assert_eq!(store.gaps_for_pr(5600).unwrap(), vec![g2.clone()]);
+        store.ship(&g2, "s2", Some(5600)).unwrap();
+        assert_eq!(store.get(&g2).unwrap().unwrap().status, "done");
+        assert_eq!(store.get(&g1).unwrap().unwrap().status, "open");
     }
 
     #[test]

@@ -13276,14 +13276,18 @@ async fn main() -> Result<()> {
                     .any(|a| matches!(a.as_str(), "--help" | "-h"))
                 {
                     println!(
-                        "Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA>\n\n\
+                        "Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA> [--multi] [--move]\n\n\
                          Record a typed gap-to-PR link in state.db (gap_prs table).\n\
-                         Idempotent: re-running with the same GAP-ID/PR-NUMBER updates head_sha."
+                         Idempotent: re-running with the same GAP-ID/PR-NUMBER updates head_sha.\n\
+                         CREDIBLE-1559: refuses to add a second gap to a PR unless --multi is passed,\n\
+                         or --move is passed to re-scope the PR (unlinking the previous gap)."
                     );
                     return Ok(());
                 }
                 let gap_id = args.get(3).cloned().unwrap_or_else(|| {
-                    eprintln!("Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA>");
+                    eprintln!(
+                        "Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA> [--multi] [--move]"
+                    );
                     std::process::exit(2);
                 });
                 let pr_number: i64 = args
@@ -13298,10 +13302,14 @@ async fn main() -> Result<()> {
                         std::process::exit(2);
                     });
                 let head_sha = flag("--sha").unwrap_or_else(|| {
-                    eprintln!("Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA>");
+                    eprintln!(
+                        "Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA> [--multi] [--move]"
+                    );
                     std::process::exit(2);
                 });
-                match store.link_pr(&gap_id, pr_number, &head_sha) {
+                let multi = args.iter().skip(3).any(|a| a == "--multi");
+                let move_link = args.iter().skip(3).any(|a| a == "--move");
+                match store.link_pr_opts(&gap_id, pr_number, &head_sha, multi, move_link) {
                     Ok(()) => {
                         println!("linked {gap_id} -> PR #{pr_number} ({head_sha})");
                     }

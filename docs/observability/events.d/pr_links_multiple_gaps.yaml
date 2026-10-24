@@ -1,0 +1,11 @@
+  - kind: pr_links_multiple_gaps
+    effect_metric: self
+    emitter: crates/chump-gap-store/src/lib.rs (CREDIBLE-1559, gaps_for_pr + ship)
+    trigger: >-
+      gap_prs holds more than one gap for a merged PR and at least one extra link
+      was not written with an explicit --multi flag (e.g. a PR was re-scoped to a
+      slice without moving or unlinking the original umbrella link). The closer
+      refuses to close any of the linked gaps until the stale link is removed via
+      chump gap unlink-pr (or moved via chump gap link-pr --move).
+    consumers: [fleet-brief, audit-priorities]
+    fields_required: [ts, kind, pr, gap_ids]

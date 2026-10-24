@@ -931,3 +931,5 @@ canonical_checkout_dirty  # reason: RESILIENT-1686 — registered as a RESILIENT
 worker_loop_backend  # reason: registered via RESILIENT-1618 fragment docs/observability/events.d/worker_loop_backend.yaml (INFRA-8582)
 # ── CREDIBLE-1529: code-reviewer unavailable exit 5 ───────────────────────
 code_review_unavailable  # reason: CREDIBLE-1529 — registered as a RESILIENT-1618 fragment (docs/observability/events.d/code_review_unavailable.yaml), which the CI coverage gate reads via gen-registries.sh but src/verify/rules/event_registry.rs does not (reads only monolith EVENT_REGISTRY.yaml).
+# ── CREDIBLE-1559: one PR closes at most one gap by default ──────────────
+pr_links_multiple_gaps  # reason: CREDIBLE-1559 — registered as a RESILIENT-1618 fragment (docs/observability/events.d/pr_links_multiple_gaps.yaml), which the CI coverage gate reads via gen-registries.sh but src/verify/rules/event_registry.rs does not (reads only monolith EVENT_REGISTRY.yaml).
