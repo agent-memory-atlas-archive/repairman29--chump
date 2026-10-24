@@ -254,4 +254,108 @@ else
     pass "INFRA-8578 AC1/AC3: cache miss with no PR returns non-zero"
 fi
 
+# ── RESILIENT-1641: idle open-PR target/ + .cargo-build-target/, live-cwd & active-cargo skip ──
+echo "--- RESILIENT-1641: idle open-PR target/ + .cargo-build-target/ reap, live-cwd & active-cargo skip ---"
+backdate_3h() {
+    local secs=10800 e ts
+    e=$(( $(date +%s) - secs ))
+    ts="$(date -d "@$e" +%Y%m%d%H%M.%S 2>/dev/null || date -r "$e" +%Y%m%d%H%M.%S)"
+    touch -t "$ts" "$@"
+}
+
+mk_open_idle_wt() {
+    local name="$1" branch="$2"
+    local wt
+    wt="$(mk_wt "$name" "$branch")"
+    mkdir -p "$wt/.cargo-build-target/debug"
+    echo build-artifact > "$wt/.cargo-build-target/debug/chump"
+    local p
+    while IFS= read -r p; do backdate_3h "$p"; done < <(
+        find "$wt/target" "$wt/.cargo-test-target" "$wt/.cargo-build-target" -depth)
+    printf '%s' "$wt"
+}
+
+WT_R1641_IDLE="$(mk_open_idle_wt test-1641 chump/test-1641-open)"
+WT_R1641_CWD="$(mk_open_idle_wt test-1642 chump/test-1642-open)"
+WT_R1641_CARGO="$(mk_open_idle_wt test-1643 chump/test-1643-open)"
+
+# Live cwd inside WT_R1641_CWD
+( cd "$WT_R1641_CWD" && exec sleep 300 ) >/dev/null 2>&1 &
+R1641_CWD_PID=$!
+
+# Active cargo running against WT_R1641_CARGO (cwd outside, argv names worktree)
+( cd "$TMP" && exec -a "cargo check --manifest-path $WT_R1641_CARGO/Cargo.toml" sleep 300 ) >/dev/null 2>&1 &
+R1641_CARGO_PID=$!
+sleep 0.4
+
+# 1. Default dry-run: does NOT delete WT_R1641_IDLE's target/ or .cargo-build-target/
+HOME="$SANDBOX_HOME" \
+CHUMP_LOCK_DIR="$FOREIGN_LOCKS" \
+CHUMP_STATE_DB="$TMP/foreign-state.db" \
+REAPER_REPO_ROOT="$FAKE_REPO" \
+CHUMP_WORKTREE_BASE="$WT_BASE" \
+CHUMP_AMBIENT_LOG="$AMBIENT" \
+CHUMP_REAPER_SAFETY_CHECK=1 \
+CHUMP_REAPER_AUTO_EXECUTE_PCT=101 \
+    bash "$REAPER" --class-d-only >/dev/null 2>&1 || fail "RESILIENT-1641: dry-run exited non-zero"
+
+[[ -d "$WT_R1641_IDLE/target" && -d "$WT_R1641_IDLE/.cargo-build-target" ]] \
+    || fail "RESILIENT-1641: default dry-run deleted target/ or .cargo-build-target/"
+pass "RESILIENT-1641: dry-run by default preserves target/ and .cargo-build-target/"
+
+# 2. Auto-execute under CHUMP_REAPER_AUTO_EXECUTE_PCT=0 (or --execute) reaps idle open-PR target/ + .cargo-build-target/
+: > "$AMBIENT"
+OUT_R1641="$(
+    HOME="$SANDBOX_HOME" \
+    CHUMP_LOCK_DIR="$FOREIGN_LOCKS" \
+    CHUMP_STATE_DB="$TMP/foreign-state.db" \
+    REAPER_REPO_ROOT="$FAKE_REPO" \
+    CHUMP_WORKTREE_BASE="$WT_BASE" \
+    CHUMP_AMBIENT_LOG="$AMBIENT" \
+    CHUMP_REAPER_SAFETY_CHECK=1 \
+    CHUMP_REAPER_AUTO_EXECUTE_PCT=0 \
+        bash "$REAPER" --class-d-only 2>&1
+)" || fail "RESILIENT-1641: auto-execute exited non-zero"
+echo "$OUT_R1641" | sed 's/^/    /'
+
+kill "$R1641_CWD_PID" "$R1641_CARGO_PID" 2>/dev/null || true
+
+# Idle open-PR worktree: target/ and .cargo-build-target/ removed, sources and .git intact
+[[ ! -d "$WT_R1641_IDLE/target" ]]               || fail "RESILIENT-1641: idle open-PR target/ not removed"
+[[ ! -d "$WT_R1641_IDLE/.cargo-build-target" ]]  || fail "RESILIENT-1641: idle open-PR .cargo-build-target/ not removed"
+[[ -f "$WT_R1641_IDLE/main.rs" ]]                || fail "RESILIENT-1641: idle open-PR sources removed!"
+[[ -d "$WT_R1641_IDLE/.git" ]]                   || fail "RESILIENT-1641: idle open-PR .git removed!"
+pass "RESILIENT-1641: idle open-PR worktree target/ + .cargo-build-target/ removed; sources and .git intact"
+
+# Live-cwd worktree skipped
+[[ -d "$WT_R1641_CWD/target" && -d "$WT_R1641_CWD/.cargo-build-target" ]] \
+    || fail "RESILIENT-1641: live-cwd worktree build dirs were removed"
+pass "RESILIENT-1641: live-cwd worktree skipped"
+
+# Active-cargo worktree skipped
+[[ -d "$WT_R1641_CARGO/target" && -d "$WT_R1641_CARGO/.cargo-build-target" ]] \
+    || fail "RESILIENT-1641: active-cargo worktree build dirs were removed"
+pass "RESILIENT-1641: active-cargo worktree skipped"
+
+# One kind=cargo_target_reaped event per dir with bytes_freed > 0
+IDLE_REAL="$(cd -P "$WT_R1641_IDLE" && pwd -P)"
+python3 - "$AMBIENT" "$IDLE_REAL/target" "$IDLE_REAL/.cargo-build-target" <<'PY' || fail "RESILIENT-1641: missing cargo_target_reaped events with bytes_freed"
+import json, sys
+amb, want_paths = sys.argv[1], sys.argv[2:]
+by_path = {}
+for line in open(amb):
+    try:
+        e = json.loads(line)
+    except Exception:
+        continue
+    if e.get("kind") == "cargo_target_reaped":
+        by_path[e.get("path")] = e
+for p in want_paths:
+    if p not in by_path:
+        sys.exit(f"missing cargo_target_reaped event for {p}")
+    if int(by_path[p].get("bytes_freed", 0)) <= 0:
+        sys.exit(f"expected bytes_freed > 0 for {p}, got {by_path[p]}")
+PY
+pass "RESILIENT-1641: emits one kind=cargo_target_reaped event per dir with bytes_freed > 0"
+
 echo "=== all Class-D tests passed ==="

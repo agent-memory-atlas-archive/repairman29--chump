@@ -440,6 +440,96 @@ KEPT=0
 # Fields we care about: worktree <path>, branch refs/heads/<name>.
 WTLIST=$(git worktree list --porcelain)
 
+# RESILIENT-1639: build the complete set of git-registered worktree paths from
+# `git worktree list --porcelain` (both raw and /tmp <-> /private/tmp normalized)
+# so process_worktree classifies any candidate dir not in this set as a
+# non-worktree and NEVER calls `git worktree remove` on it.
+_GIT_REGISTERED_PATHS=""
+_RESCUE_SCAN_BASE="${CHUMP_RESCUE_SCAN_BASE:-/tmp}"
+while IFS= read -r _gwl_line; do
+    case "$_gwl_line" in
+        worktree\ *)
+            _gwl_p="${_gwl_line#worktree }"
+            _GIT_REGISTERED_PATHS="$_GIT_REGISTERED_PATHS $_gwl_p"
+            if [[ "$_gwl_p" == /private/tmp/* ]]; then
+                _GIT_REGISTERED_PATHS="$_GIT_REGISTERED_PATHS ${_gwl_p#/private}"
+            elif [[ "$_gwl_p" == /tmp/* ]]; then
+                _GIT_REGISTERED_PATHS="$_GIT_REGISTERED_PATHS /private${_gwl_p}"
+            fi
+            ;;
+    esac
+done <<< "$WTLIST"
+
+is_git_registered_worktree() {
+    local d="${1%/}" d_real=""
+    case " $_GIT_REGISTERED_PATHS " in
+        *" $d "*) return 0 ;;
+    esac
+    if [[ -d "$d" ]]; then
+        d_real="$(cd -P "$d" 2>/dev/null && pwd -P || true)"
+        if [[ -n "$d_real" ]]; then
+            case " $_GIT_REGISTERED_PATHS " in
+                *" $d_real "*) return 0 ;;
+            esac
+        fi
+    fi
+    return 1
+}
+
+# RESILIENT-1639 AC3: state directories under /tmp/chump-* that must NEVER be
+# touched or treated as scratch worktrees (e.g. /tmp/chump-pr-watch-cooldown).
+is_protected_state_dir() {
+    local d="${1%/}"
+    local name; name=$(basename "$d")
+    case "$d" in
+        /tmp/chump-pr-watch-cooldown|/private/tmp/chump-pr-watch-cooldown|*/chump-pr-watch-cooldown)
+            return 0
+            ;;
+    esac
+    case "$name" in
+        chump-pr-watch-cooldown|chump-pr-watch-*|chump-reaper-*|chump-stale-*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# RESILIENT-1639 AC2: allow-listed scratch patterns eligible for safe-delete
+# (rm -rf) when not in `git worktree list` and past the age threshold.
+is_allowlisted_scratch_dir() {
+    local d="${1%/}"
+    is_protected_state_dir "$d" && return 1
+    local name; name=$(basename "$d")
+    case "$name" in
+        infra-[0-9]*|INFRA-[0-9]*|ship-[0-9]*|fix-*|*-rescue|*-fix)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+# RESILIENT-1639 AC2: log `reason=not_a_worktree` at most once per dir per day
+# (86400s) via a per-dir stamp file.
+NOT_WT_STAMP_DIR="${CHUMP_REAPER_STAMP_DIR:-${LOCKS_DIR:-/tmp}/not-a-worktree-stamps}"
+_skip_not_a_worktree() {
+    local wt_path="$1"
+    local stamp_key stamp_file now stamp_mtime=0
+    stamp_key="$(printf '%s' "$wt_path" | tr '/: ' '___')"
+    stamp_file="${NOT_WT_STAMP_DIR}/${stamp_key}.stamp"
+    now=$(date +%s)
+    if [[ -f "$stamp_file" ]]; then
+        stamp_mtime=$(stat -f%m "$stamp_file" 2>/dev/null || stat -c%Y "$stamp_file" 2>/dev/null || echo 0)
+    fi
+    if [[ $(( now - stamp_mtime )) -ge 86400 ]]; then
+        mkdir -p "$NOT_WT_STAMP_DIR" 2>/dev/null || true
+        touch "$stamp_file" 2>/dev/null || true
+        info "  SKIP: $wt_path reason=not_a_worktree"
+        log "SKIP $wt_path reason=not_a_worktree"
+    fi
+}
+
+_PROCESSED_PATHS=" "
+
 current_path=""
 current_branch=""
 
@@ -453,6 +543,11 @@ process_worktree() {
     local wt_source="${3:-claude_worktrees}"
     [[ -z "$wt_path" ]] && return 0
 
+    # Avoid double-processing a path already handled in an earlier pass.
+    case "$_PROCESSED_PATHS" in
+        *" ${wt_path%/} "*) return 0 ;;
+    esac
+
     # Only consider worktrees under the worktree-base (never the main repo).
     # INFRA-1053: the legacy .claude/worktrees/ check is preserved; additionally
     # accept anything under CHUMP_WORKTREE_BASE when configured.
@@ -465,9 +560,10 @@ process_worktree() {
         */\.claude/worktrees/*) ;;
         /tmp/chump-*) ;;
         /tmp/*)
-            # INFRA-2339: accept any /tmp/* when it comes from a broad-scan source.
+            [[ "$wt_path" == "$REPO_ROOT" ]] && return 0
+            # INFRA-2339: accept any /tmp/* when it comes from a broad-scan or tmp_chump source.
             case "$wt_source" in
-                git-list|rescue-pattern|tmp-age) ;;
+                tmp_chump|git-list|rescue-pattern|tmp-age) ;;
                 *)
                     if [[ -n "${CHUMP_WORKTREE_BASE:-}" && "$wt_path" == "${CHUMP_WORKTREE_BASE%/}/"* ]]; then
                         :
@@ -479,13 +575,22 @@ process_worktree() {
             esac
             ;;
         *)
-            if [[ -n "${CHUMP_WORKTREE_BASE:-}" && "$wt_path" == "${CHUMP_WORKTREE_BASE%/}/"* ]]; then
-                :
-            else
-                return 0
-            fi
+            case "$wt_source" in
+                tmp_chump|rescue-pattern|tmp-age)
+                    [[ "$wt_path" == "$REPO_ROOT" ]] && return 0
+                    ;;
+                *)
+                    if [[ -n "${CHUMP_WORKTREE_BASE:-}" && "$wt_path" == "${CHUMP_WORKTREE_BASE%/}/"* ]]; then
+                        :
+                    else
+                        return 0
+                    fi
+                    ;;
+            esac
             ;;
     esac
+
+    _PROCESSED_PATHS="${_PROCESSED_PATHS}${wt_path%/} "
 
     local wt_name; wt_name=$(basename "$wt_path")
     info "----"
@@ -494,6 +599,26 @@ process_worktree() {
     if [[ ! -d "$wt_path" ]]; then
         warn "  path missing — git worktree prune would clean this; skipping"
         SKIPPED=$((SKIPPED+1)); return 0
+    fi
+
+    # RESILIENT-1639 AC3: never touch /tmp/chump-pr-watch-cooldown (state, not a worktree).
+    if is_protected_state_dir "$wt_path"; then
+        _skip_not_a_worktree "$wt_path"
+        SKIPPED=$((SKIPPED+1)); return 0
+    fi
+
+    # RESILIENT-1639 AC1/AC2: classify any candidate dir not in `git worktree list`
+    # as non-worktree. Never call `git worktree remove` on a non-worktree dir:
+    # skip with reason=not_a_worktree (logged at most once per dir per day), OR
+    # remove only via the safe-delete (rm -rf) path when it matches an
+    # allow-listed scratch pattern and is past the age threshold.
+    local is_non_worktree=0
+    if ! is_git_registered_worktree "$wt_path"; then
+        is_non_worktree=1
+        if ! is_allowlisted_scratch_dir "$wt_path"; then
+            _skip_not_a_worktree "$wt_path"
+            SKIPPED=$((SKIPPED+1)); return 0
+        fi
     fi
 
     if [[ -e "$wt_path/.chump-no-reap" ]]; then
@@ -600,6 +725,47 @@ process_worktree() {
         fi
     else
         info "  WARN: --force-skip-process-check active; lsof + log-mtime checks bypassed"
+    fi
+
+    # RESILIENT-1639: non-worktree candidate dir matching an allow-listed scratch
+    # pattern. Never call `git worktree remove` on it; remove only via the
+    # safe-delete (rm -rf) path once past the age threshold.
+    if [[ $is_non_worktree -eq 1 ]]; then
+        local _scratch_mtime _scratch_now _scratch_age_h _scratch_min_h
+        _scratch_mtime=$(stat -f%m "$wt_path" 2>/dev/null || stat -c%Y "$wt_path" 2>/dev/null || echo 0)
+        _scratch_now=$(date +%s)
+        _scratch_age_h=$(( (_scratch_now - _scratch_mtime) / 3600 ))
+        _scratch_min_h="$AGE_MIN_HOURS"
+        if [[ "$wt_source" == "rescue-pattern" && "${ORPHAN_AGE_MIN_HOURS:-12}" -gt "$_scratch_min_h" ]]; then
+            _scratch_min_h="${ORPHAN_AGE_MIN_HOURS:-12}"
+        fi
+        info "  age: $_scratch_age_h h since dir mtime (non-worktree scratch — source=$wt_source)"
+        if [[ $_scratch_age_h -lt $_scratch_min_h ]]; then
+            info "  below age threshold ($_scratch_min_h h) — keeping for now"
+            log "SKIP $wt_path reason=below_age_threshold age_h=$_scratch_age_h min_h=$_scratch_min_h scan_source=$wt_source"
+            KEPT=$((KEPT+1)); return 0
+        fi
+        local _scratch_reason="allow-listed scratch dir past age threshold"
+        red "  REAPABLE: $_scratch_reason"
+        if [[ $DRY_RUN -eq 1 ]]; then
+            info "  [dry-run] would: rm -rf $wt_path  [scan_source=$wt_source]"
+            log "DRY_RUN_REAPABLE $wt_path branch= reason='$_scratch_reason' scan_source=$wt_source"
+            REAPED=$((REAPED+1))
+            return 0
+        fi
+        if rm -rf "$wt_path" 2>>"$LOG"; then
+            green "  REMOVED (safe-delete) $wt_path  [scan_source=$wt_source]"
+            log "REMOVED (rm -rf) $wt_path branch= reason='$_scratch_reason'"
+            log "REAPED $wt_path branch= reason='$_scratch_reason' scan_source=$wt_source"
+            emit_reaper_event "worktree_reaped" "$wt_path" "$_scratch_reason" \
+                "\"source\":\"$wt_source\",\"scan_source\":\"$wt_source\",\"branch\":\"\",\"dry_run\":0"
+            REAPED=$((REAPED+1))
+        else
+            red "  FAILED to remove $wt_path  [scan_source=$wt_source]"
+            log "REAP_FAIL $wt_path reason='$_scratch_reason' scan_source=$wt_source"
+            SKIPPED=$((SKIPPED+1))
+        fi
+        return 0
     fi
 
     # Reapability:
@@ -988,22 +1154,11 @@ process_worktree() {
         log "ARCHIVE $wt_path -> $arch_dest"
     fi
 
-    # INFRA-2020: /tmp/chump-* directories may not be git-linked worktrees
-    # (chump claim creates a bare dir then does git worktree add, but after
-    # manual reaping or partial cleanup the git link may be gone). Try
-    # git worktree remove first; fall back to rm -rf for bare dirs.
+    # RESILIENT-1639: non-worktrees are handled above and never reach here;
+    # every directory reaching this point is a git-registered worktree.
     local removed=0
-    if [[ "$wt_source" == "tmp_chump" ]]; then
-        if git worktree remove --force "$wt_path" 2>>"$LOG"; then
-            removed=1
-        elif rm -rf "$wt_path" 2>>"$LOG"; then
-            removed=1
-            log "REMOVED (rm -rf) $wt_path branch=$wt_branch reason='$reason'"
-        fi
-    else
-        if git worktree remove --force "$wt_path" 2>>"$LOG"; then
-            removed=1
-        fi
+    if git worktree remove --force "$wt_path" 2>>"$LOG"; then
+        removed=1
     fi
 
     if [[ $removed -eq 1 ]]; then
@@ -1032,21 +1187,6 @@ process_worktree() {
 # Emits one path per line to stdout. The caller tags each with scan_source.
 ORPHAN_AGE_MIN_HOURS="${ORPHAN_AGE_MIN_HOURS:-12}"
 
-# Build the set of all git-registered worktree paths so we can exclude them
-# (they are already handled by the git-worktree-list pass).
-_GIT_REGISTERED_PATHS=""
-_RESCUE_SCAN_BASE="${CHUMP_RESCUE_SCAN_BASE:-/tmp}"
-while IFS= read -r _gwl_line; do
-    case "$_gwl_line" in
-        worktree\ /tmp/*) _GIT_REGISTERED_PATHS="$_GIT_REGISTERED_PATHS ${_gwl_line#worktree }" ;;
-    esac
-    # Also collect paths under CHUMP_RESCUE_SCAN_BASE when overridden for testing
-    # (case patterns don't expand variables, so use [[ == ]] prefix match instead).
-    if [[ "$_RESCUE_SCAN_BASE" != "/tmp" && "$_gwl_line" == "worktree ${_RESCUE_SCAN_BASE}/"* ]]; then
-        _GIT_REGISTERED_PATHS="$_GIT_REGISTERED_PATHS ${_gwl_line#worktree }"
-    fi
-done <<< "$WTLIST"
-
 enumerate_tmp_rescue_orphans() {
     local min_age_h="${1:-$ORPHAN_AGE_MIN_HOURS}"
     local now; now=$(date +%s)
@@ -1064,26 +1204,17 @@ enumerate_tmp_rescue_orphans() {
         [[ "$_d" == "$REPO_ROOT" ]] && continue
 
         # Skip if already git-registered (handled by the git-worktree-list pass).
-        case " $_GIT_REGISTERED_PATHS " in
-            *" $_d "*) continue ;;
-        esac
+        if is_git_registered_worktree "$_d"; then
+            continue
+        fi
 
         # Skip if it looks like a chump-claim worktree (handled by tmp_chump pass).
         case "$_name" in
             chump-*) continue ;;
         esac
 
-        # Pattern match — rescue/work naming conventions.
-        local _matched=0
-        case "$_name" in
-            infra-[0-9]*|INFRA-[0-9]*)        _matched=1 ;;
-            ship-[0-9]*)                        _matched=1 ;;
-            fix-*)                              _matched=1 ;;
-            *-rescue)                           _matched=1 ;;
-            *-fix)                              _matched=1 ;;
-        esac
-
-        if [[ $_matched -eq 0 ]]; then
+        # Pattern match — allow-listed rescue/scratch naming conventions.
+        if ! is_allowlisted_scratch_dir "$_d"; then
             continue
         fi
 
@@ -1164,7 +1295,7 @@ for _scan_pattern in $WORKTREE_SCAN_PATHS; do
 
         # Determine if this is a git-linked worktree to find its branch.
         _tmp_branch=""
-        if [[ -f "$_wt/.git" ]]; then
+        if is_git_registered_worktree "$_wt" && [[ -f "$_wt/.git" ]]; then
             _tmp_branch=$(git -C "$_wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
             [[ "$_tmp_branch" == "HEAD" ]] && _tmp_branch=""
         fi

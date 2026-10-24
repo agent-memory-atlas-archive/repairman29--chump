@@ -443,6 +443,40 @@ _classd_blind_pid_busy() {
     return 1
 }
 
+# _classd_cargo_rustc_busy <wt_real> [<wt_alt>] — RESILIENT-1641: 0 iff a live
+# cargo/rustc/nextest/clippy/rustdoc process runs against <wt_real> (or
+# <wt_alt>) via its command-line arguments (e.g. --manifest-path or
+# --target-dir), even when its cwd is elsewhere and CARGO_TARGET_DIR is unset.
+CLASSD_CARGO_BUSY_DETAIL=""
+_classd_cargo_rustc_busy() {
+    local wt="$1" alt="${2:-}" out line pid rest cmd0 w
+    command -v ps >/dev/null 2>&1 || return 0
+    out="$(ps -A -ww -o pid=,command= 2>/dev/null || true)"
+    [[ -n "$out" ]] || return 0
+    while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        [[ -n "$line" ]] || continue
+        pid="${line%% *}"
+        [[ "$pid" == "$$" ]] && continue
+        rest="${line#* }"
+        cmd0="${rest%% *}"
+        cmd0="${cmd0##*/}"
+        case "$cmd0" in
+            cargo|rustc|nextest|cargo-nextest|rustdoc|cargo-clippy|clippy-driver|sccache) ;;
+            *) continue ;;
+        esac
+        for w in "$wt" "$alt"; do
+            [[ -n "$w" ]] || continue
+            w="${w%/}"
+            if _classd_names_path "$rest" "$w"; then
+                CLASSD_CARGO_BUSY_DETAIL="pid=${pid} cmd=${cmd0}"
+                return 0
+            fi
+        done
+    done <<< "$out"
+    return 1
+}
+
 # _classd_build_files_open <dir>... — RESILIENT-1635: 0 iff a live process
 # holds an open file at or under any existing <dir> (the build dirs). Linux
 # scans /proc/<pid>/fd links with one find; macOS uses `lsof +D <dir>`. Fails
@@ -588,7 +622,7 @@ _classd_recent_activity() {
     local now cutoff p mt hit g
     now="$(date +%s)"
     cutoff=$(( now - window_min * 60 ))
-    for p in "$wt/target" "$wt/.cargo-test-target"; do
+    for p in "$wt/target" "$wt/.cargo-test-target" "$wt/.cargo-build-target"; do
         [[ -e "$p" ]] || continue
         hit="$(find "$p" -mmin "-${window_min}" -print -quit 2>/dev/null || true)"
         [[ -n "$hit" ]] && return 0
@@ -805,14 +839,15 @@ _classd_scan() {
         fi
         local target="$wt/target"
         local ctt="$wt/.cargo-test-target"
-        # Nothing to reap if neither build dir exists.
-        [[ -e "$target" || -e "$ctt" || -L "$target" || -L "$ctt" ]] || continue
+        local cbt="$wt/.cargo-build-target"
+        # Nothing to reap if no build dir exists.
+        [[ -e "$target" || -e "$ctt" || -e "$cbt" || -L "$target" || -L "$ctt" || -L "$cbt" ]] || continue
         # RESILIENT-1635: a symlinked build dir points at someone else's build.
-        if [[ -L "$target" || -L "$ctt" ]]; then
+        if [[ -L "$target" || -L "$ctt" || -L "$cbt" ]]; then
             echo "  skip (build dir is a symlink): ${wt}"
             continue
         fi
-        [[ -d "$target" || -d "$ctt" ]] || continue
+        [[ -d "$target" || -d "$ctt" || -d "$cbt" ]] || continue
 
         # Opt-out sentinel (same marker the other reapers honor).
         if [[ -e "$wt/.chump-no-reap" ]]; then
@@ -888,7 +923,12 @@ _classd_scan() {
             echo "  skip (a process has CARGO_TARGET_DIR inside the worktree): ${wt}"
             continue
         fi
-        if _classd_build_files_open "$target" "$ctt"; then
+        CLASSD_CARGO_BUSY_DETAIL=""
+        if _classd_cargo_rustc_busy "$wt" "$wt_entry"; then
+            echo "  skip (active cargo/rustc process against worktree: ${CLASSD_CARGO_BUSY_DETAIL:-?}): ${wt}"
+            continue
+        fi
+        if _classd_build_files_open "$target" "$ctt" "$cbt"; then
             echo "  skip (a process holds an open file under the build dirs): ${wt}"
             continue
         fi
@@ -902,7 +942,7 @@ _classd_scan() {
 
         # Reap ONLY the build dirs — never the source tree.
         local reap_dir size_bytes age_days
-        for reap_dir in "$target" "$ctt"; do
+        for reap_dir in "$target" "$ctt" "$cbt"; do
             [[ -d "$reap_dir" ]] || continue
             [[ -L "$reap_dir" ]] && continue
             # Belt-and-suspenders: skip if a cargo lock says a build is in flight.

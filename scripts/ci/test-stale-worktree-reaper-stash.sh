@@ -459,6 +459,92 @@ else
     fail "DOC-164: fleet-reaper ref parse wrong"
 fi
 
+# ─── RESILIENT-1639: non-worktree vs real-worktree classification ───────────
+echo ""
+echo "RESILIENT-1639: non-worktree plain dir vs real worktree + cooldown state dir"
+R1639_SCAN="$TMPBASE/r1639-scan"
+R1639_RESCUE="$TMPBASE/r1639-rescue"
+R1639_STAMPS="$TMPBASE/r1639-stamps"
+mkdir -p "$R1639_SCAN" "$R1639_RESCUE" "$R1639_STAMPS"
+
+# 1. Fixture plain dir (not in git worktree list, not an allow-listed scratch pattern)
+PLAIN_DIR="$R1639_SCAN/chump-plain-state"
+mkdir -p "$PLAIN_DIR"
+echo "keep-me" > "$PLAIN_DIR/state.txt"
+
+# 2. Fixture cooldown state dir (/tmp/chump-pr-watch-cooldown shape)
+COOLDOWN_DIR="$R1639_SCAN/chump-pr-watch-cooldown"
+mkdir -p "$COOLDOWN_DIR"
+echo "cooldown-marker" > "$COOLDOWN_DIR/pr-123"
+touch -t 202001010000 "$COOLDOWN_DIR" 2>/dev/null || true
+
+# 3. Fixture allow-listed scratch dir (not in git worktree list, matches *-fix, past age threshold)
+SCRATCH_FIX_DIR="$R1639_RESCUE/meta197-fix"
+mkdir -p "$SCRATCH_FIX_DIR"
+touch -t 202001010000 "$SCRATCH_FIX_DIR" 2>/dev/null || true
+
+# 4. Fixture real git worktree (in git worktree list, branch merged)
+REAL_WT=$(make_merged_worktree "t7-real-wt")
+
+run_r1639_reaper() {
+    CHUMP_REAPER_SAFETY_CHECK=0 \
+    CHUMP_REAPER_NEW_WORKTREE_GRACE_MIN=0 \
+    CHUMP_REPO_ROOT_OVERRIDE="$FAKE_REPO" \
+    CHUMP_WORKTREE_BASE="$WT_BASE" \
+    WORKTREE_SCAN_PATHS="$WT_BASE $R1639_SCAN/chump-*" \
+    CHUMP_RESCUE_SCAN_BASE="$R1639_RESCUE" \
+    CHUMP_REAPER_STAMP_DIR="$R1639_STAMPS" \
+    ORPHAN_AGE_MIN_HOURS=12 \
+    REMOTE=origin \
+    BASE=main \
+    LOCKS_DIR="$LOCKS_DIR" \
+    REAPER_LOCK_DIR="$LOCKS_DIR" \
+        bash "$REAPER" --execute --age-min 0 --force-skip-process-check 2>&1
+}
+
+OUT_R1639_1=$(run_r1639_reaper || true)
+
+# Real worktree was reaped via git worktree remove
+if [[ ! -d "$REAL_WT" ]]; then
+    ok "RESILIENT-1639: fixture real worktree reaped"
+else
+    fail "RESILIENT-1639: fixture real worktree was NOT reaped"
+fi
+
+# Plain non-worktree dir was skipped with reason=not_a_worktree and kept intact
+if [[ -d "$PLAIN_DIR" && -f "$PLAIN_DIR/state.txt" ]]; then
+    ok "RESILIENT-1639: fixture plain dir kept intact (never passed to git worktree remove)"
+else
+    fail "RESILIENT-1639: fixture plain dir was modified or deleted"
+fi
+if printf '%s\n' "$OUT_R1639_1" | grep -qF "SKIP: $PLAIN_DIR reason=not_a_worktree"; then
+    ok "RESILIENT-1639: first run logged reason=not_a_worktree for plain dir"
+else
+    fail "RESILIENT-1639: first run did NOT log reason=not_a_worktree for plain dir"
+fi
+
+# Second run on same day: reason=not_a_worktree is NOT logged again (stamp file rate-limit)
+OUT_R1639_2=$(run_r1639_reaper || true)
+if printf '%s\n' "$OUT_R1639_2" | grep -qF "SKIP: $PLAIN_DIR reason=not_a_worktree"; then
+    fail "RESILIENT-1639: second run on same day logged reason=not_a_worktree again (stamp rate-limit broken)"
+else
+    ok "RESILIENT-1639: second run suppressed duplicate reason=not_a_worktree via daily stamp"
+fi
+
+# chump-pr-watch-cooldown state dir is never touched
+if [[ -d "$COOLDOWN_DIR" && -f "$COOLDOWN_DIR/pr-123" ]]; then
+    ok "RESILIENT-1639: chump-pr-watch-cooldown state dir untouched"
+else
+    fail "RESILIENT-1639: chump-pr-watch-cooldown state dir was touched or deleted!"
+fi
+
+# Allow-listed scratch dir (meta197-fix) past age threshold is removed via safe-delete (rm -rf), no REAP_FAIL
+if [[ ! -d "$SCRATCH_FIX_DIR" ]] && ! printf '%s\n' "$OUT_R1639_1" | grep -q "FAILED to remove.*meta197-fix"; then
+    ok "RESILIENT-1639: allow-listed scratch dir (meta197-fix) removed via safe-delete without git worktree remove failure"
+else
+    fail "RESILIENT-1639: allow-listed scratch dir (meta197-fix) was not cleanly safe-deleted"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="

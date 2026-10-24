@@ -7242,16 +7242,17 @@ events:
   - kind: cargo_target_reaped
     effect_metric: self
     emitter: >
-      scripts/ops/cargo-target-reaper.sh (INFRA-1250 + INFRA-1170 + RESILIENT-1620 + RESILIENT-1635)
+      scripts/ops/cargo-target-reaper.sh (INFRA-1250 + INFRA-1170 + RESILIENT-1620 + RESILIENT-1635 + RESILIENT-1641)
     trigger: >
       cargo-target-reaper.sh reaped a stale fingerprint dir, rlib, fleet
       target directory, or an orphaned /tmp/chump-*/target/ whose originating
       git worktree is no longer registered. RESILIENT-1620 Class D (class:"D")
-      reaps target/ + .cargo-test-target/ of a lease-less dispatch worktree
-      under .claude/worktrees whose branch PR is merged/closed; RESILIENT-1635
-      extends Class D to an OPEN-PR worktree that is idle (no running dispatch
-      for its gap, clean source tree, no bot-merge/dispatch activity in 2h) and
-      to stale bot-merge-active-dispatch-*.path markers older than the
+      reaps target/ + .cargo-test-target/ + .cargo-build-target/ of a lease-less
+      dispatch worktree under .claude/worktrees whose branch PR is merged/closed;
+      RESILIENT-1635 + RESILIENT-1641 extend Class D to an OPEN-PR worktree that
+      is idle (no running dispatch for its gap, clean source tree, no
+      bot-merge/dispatch activity in 2h, no active cargo/rustc running against it)
+      and to stale bot-merge-active-dispatch-*.path markers older than the
       RESILIENT-1609 grace (also class:"D"). Failure events (cargo lock active,
       rm failure) also use this kind with an error + failure_class field.
     consumers: [fleet-brief, waste-tally]
