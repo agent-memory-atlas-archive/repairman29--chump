@@ -71,6 +71,38 @@ fn env_or<K: AsRef<str>>(key: K, default: &str) -> String {
     std::env::var(key.as_ref()).unwrap_or_else(|_| default.to_string())
 }
 
+/// Default subagent budget (`CHUMP_SUBAGENT_BUDGET_S` in `src/dispatch.rs`).
+pub const DEFAULT_SUBAGENT_BUDGET_SECS: u64 = 900;
+
+/// Read the active subagent wall-clock budget floor (`CHUMP_SUBAGENT_BUDGET_S`,
+/// defaulting to `DEFAULT_SUBAGENT_BUDGET_SECS`). A non-zero `chumpd worker`
+/// tick budget must never be lower than this floor because `budget_killed`
+/// kills the entire tick body including any live `claude -p` child (INFRA-8584).
+pub fn subagent_budget_floor_secs() -> u64 {
+    std::env::var("CHUMP_SUBAGENT_BUDGET_S")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(DEFAULT_SUBAGENT_BUDGET_SECS)
+}
+
+/// Enforce the INFRA-8584 invariant: `0` stays `0` (unbounded default config so
+/// `budget_killed` never fires before the subagent budget), while any non-zero
+/// `requested` tick budget below `subagent_floor` is clamped up to
+/// `subagent_floor` with a warning on stderr. Returns `(effective_budget, clamped)`.
+pub fn clamp_tick_budget_to_subagent_floor(requested: u64, subagent_floor: u64) -> (u64, bool) {
+    if requested == 0 {
+        return (0, false);
+    }
+    if requested < subagent_floor {
+        eprintln!(
+            "chumpd worker: warning: configured tick budget ({requested}s) is below CHUMP_SUBAGENT_BUDGET_S ({subagent_floor}s); clamping budget_secs={subagent_floor} so budget_killed never reaps a live subagent before its own budget [INFRA-8584]"
+        );
+        return (subagent_floor, true);
+    }
+    (requested, false)
+}
+
 impl WorkerConfig {
     /// Parse `chumpd worker [flags]`. `args` is argv *after* the `worker`
     /// subcommand token.
@@ -171,6 +203,9 @@ impl WorkerConfig {
             }
             i += 1;
         }
+        let (clamped, _) =
+            clamp_tick_budget_to_subagent_floor(cfg.budget_secs, subagent_budget_floor_secs());
+        cfg.budget_secs = clamped;
         cfg
     }
 
@@ -226,11 +261,13 @@ fn run_tick_with_budget(cfg: &WorkerConfig) -> i32 {
         }
     };
 
-    if cfg.budget_secs == 0 {
+    let (effective_budget_secs, _) =
+        clamp_tick_budget_to_subagent_floor(cfg.budget_secs, subagent_budget_floor_secs());
+    if effective_budget_secs == 0 {
         return child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
     }
 
-    let deadline = now_epoch() + cfg.budget_secs;
+    let deadline = now_epoch() + effective_budget_secs;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return status.code().unwrap_or(-1),
@@ -376,7 +413,7 @@ mod tests {
             "--cadence-secs",
             "7",
             "--budget-secs",
-            "30",
+            "1200",
             "--max-ticks",
             "2",
             "--tick-cmd",
@@ -391,7 +428,7 @@ mod tests {
         .collect();
         let cfg = WorkerConfig::from_args(&args);
         assert_eq!(cfg.cadence_secs, 7);
-        assert_eq!(cfg.budget_secs, 30);
+        assert_eq!(cfg.budget_secs, 1200);
         assert_eq!(cfg.max_ticks, 2);
         assert_eq!(cfg.tick_cmd, "true");
         assert_eq!(cfg.pause_file, PathBuf::from("/tmp/p"));
@@ -469,6 +506,81 @@ mod tests {
             "ambient must record chumpd_worker_paused, got: {amb_body:?}"
         );
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tick_budget_below_subagent_budget_is_clamped_with_warning() {
+        // AC1 (INFRA-8584): a non-zero tick budget below CHUMP_SUBAGENT_BUDGET_S
+        // is clamped up to the subagent budget floor.
+        let (effective, clamped) = clamp_tick_budget_to_subagent_floor(30, 900);
+        assert!(
+            clamped,
+            "budget below subagent floor must report clamped=true"
+        );
+        assert_eq!(effective, 900);
+
+        let (at_floor, clamped_at_floor) = clamp_tick_budget_to_subagent_floor(900, 900);
+        assert!(!clamped_at_floor);
+        assert_eq!(at_floor, 900);
+
+        let (above_floor, clamped_above) = clamp_tick_budget_to_subagent_floor(1500, 900);
+        assert!(!clamped_above);
+        assert_eq!(above_floor, 1500);
+
+        let floor = subagent_budget_floor_secs();
+        let args: Vec<String> = ["--budget-secs", "30"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cfg = WorkerConfig::from_args(&args);
+        assert_eq!(
+            cfg.budget_secs, floor,
+            "from_args must clamp --budget-secs 30 up to subagent_budget_floor_secs ({floor})"
+        );
+    }
+
+    #[test]
+    fn default_zero_tick_budget_never_fires_budget_killed() {
+        // AC2 (INFRA-8584): default config has budget_secs == 0 (unbounded) and
+        // never fires chumpd_worker_tick_budget_killed.
+        let (effective, clamped) = clamp_tick_budget_to_subagent_floor(0, 900);
+        assert!(!clamped);
+        assert_eq!(effective, 0);
+
+        let default_cfg = WorkerConfig::from_args(&[]);
+        assert_eq!(default_cfg.budget_secs, 0);
+
+        let dir = std::env::temp_dir().join(format!("chumpd-wl-infra8584-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let state_dir = dir.join("state");
+        let repo_dir = dir.join("repo");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::create_dir_all(&repo_dir).unwrap();
+
+        let marker = dir.join("tick_ok");
+        let hb = dir.join("worker.hb");
+        let amb = dir.join("ambient.jsonl");
+        let cfg = WorkerConfig {
+            repo: repo_dir.clone(),
+            tick_cmd: format!("touch {}", marker.display()),
+            cadence_secs: 0,
+            budget_secs: 0,
+            pause_file: repo_dir.join(".chump/fleet-paused"),
+            state_dir,
+            heartbeat_file: hb,
+            ambient: amb.clone(),
+            agent_id: "test-8584".to_string(),
+            max_ticks: 1,
+        };
+        let rc = run_with_config(cfg);
+        assert_eq!(rc, 0);
+        assert!(marker.exists(), "default zero-budget tick must complete");
+        let amb_body = fs::read_to_string(&amb).unwrap();
+        assert!(
+            !amb_body.contains("chumpd_worker_tick_budget_killed"),
+            "default config (budget_secs=0) must never emit chumpd_worker_tick_budget_killed: {amb_body:?}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

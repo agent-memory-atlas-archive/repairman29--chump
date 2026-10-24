@@ -130,6 +130,23 @@ else
     fail "worker.sh shim did not emit worker_loop_backend backend=legacy"
 fi
 
+# ── Part 5 (INFRA-8584): non-zero tick budget below CHUMP_SUBAGENT_BUDGET_S is clamped with warning ──
+rm -f "$PAUSE"
+: > "$AMBIENT"
+CLAMP_OUT="$(REPO_ROOT="$FIX/repo" AGENT_ID=7 CHUMP_SUBAGENT_BUDGET_S=600 "$BIN" worker \
+    --tick-cmd "bash $STUB" --cadence-secs 0 --budget-secs 30 --max-ticks 1 \
+    --pause-file "$PAUSE" --heartbeat-file "$HB" --ambient "$AMBIENT" 2>&1)"
+if printf '%s\n' "$CLAMP_OUT" | grep -q "below CHUMP_SUBAGENT_BUDGET_S (600s); clamping budget_secs=600"; then
+    ok "INFRA-8584: tick budget below CHUMP_SUBAGENT_BUDGET_S warns and clamps to 600s"
+else
+    fail "INFRA-8584: missing clamp warning for --budget-secs 30 under CHUMP_SUBAGENT_BUDGET_S=600 (out: $CLAMP_OUT)"
+fi
+if grep -q '"kind":"chumpd_worker_loop_started"' "$AMBIENT" && grep -q '"budget_secs":600' "$AMBIENT"; then
+    ok "INFRA-8584: chumpd_worker_loop_started records clamped budget_secs=600"
+else
+    fail "INFRA-8584: ambient did not record clamped budget_secs=600"
+fi
+
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]
