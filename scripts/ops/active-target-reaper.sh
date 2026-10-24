@@ -119,6 +119,13 @@ for wt in "${CANDIDATE_DIRS[@]+"${CANDIDATE_DIRS[@]}"}"; do
         continue
     fi
 
+    # RESILIENT-1623: fail closed if wt_has_active_lease is unavailable.
+    if [[ "$REAPER_SAFETY_CHECK" == "1" ]] && ! declare -F wt_has_active_lease >/dev/null 2>&1; then
+        echo "SKIP $wt — wt_has_active_lease unavailable (lease lib missing)"
+        SKIPPED=$((SKIPPED + 1))
+        continue
+    fi
+
     # INFRA-1124/1211: Active-lease check via shared lib — wt_has_active_lease
     # checks heartbeat freshness and handles /private/tmp macOS aliasing.
     if [[ "$REAPER_SAFETY_CHECK" == "1" ]] && wt_has_active_lease "$wt" "${CHUMP_LEASE_HEARTBEAT_TTL_S:-600}"; then

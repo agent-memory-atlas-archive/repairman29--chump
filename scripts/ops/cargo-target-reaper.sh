@@ -472,24 +472,6 @@ _classd_build_files_open() {
     return 1
 }
 
-# _classd_has_lease <wt> — return 0 iff ANY lease store that could hold this
-# worktree's lease names it live. wt_has_active_lease reads ONE store, chosen
-# by env precedence (CHUMP_LOCK_DIR / CHUMP_STATE_DB beat the repo root). When
-# that env points at a different checkout than the repo whose worktrees are
-# being scanned (REAPER_REPO_ROOT), the scanned repo's own .chump-locks and
-# .chump/state.db were never consulted and a leased worktree read as
-# lease-less (CI fast-checks pins CHUMP_LOCK_DIR to the workspace; a node
-# pins CHUMP_STATE_DB). Check the env-resolved store AND the scanned repo's
-# stores; more stores can only skip more, never reap more.
-_classd_has_lease() {
-    local wt="$1" ttl="${CHUMP_LEASE_HEARTBEAT_TTL_S:-600}"
-    local root="${REAPER_REPO_ROOT:-$REPO_ROOT}"
-    wt_has_active_lease "$wt" "$ttl" && return 0
-    CHUMP_LOCK_DIR="${root}/.chump-locks" CHUMP_STATE_DB="${root}/.chump/state.db" \
-        wt_has_active_lease "$wt" "$ttl" && return 0
-    return 1
-}
-
 # _classd_pr_merged_or_closed <branch> — echo "yes" if the branch's PR is
 # merged or closed, "no" if open, "" if unknown/no PR. Cache-first via
 # cache_lookup_pr_state_by_branch (INFRA-8578), with REST fallback on miss.
@@ -839,7 +821,9 @@ _classd_scan() {
         fi
 
         # Safety: never reap a worktree with a live lease (either spelling).
-        if _classd_has_lease "$wt" || { [[ "$wt_entry" != "$wt" ]] && _classd_has_lease "$wt_entry"; }; then
+        # RESILIENT-1623: wt_has_active_lease checks the union of env and repo stores.
+        local _lease_ttl="${CHUMP_LEASE_HEARTBEAT_TTL_S:-600}"
+        if wt_has_active_lease "$wt" "$_lease_ttl" || { [[ "$wt_entry" != "$wt" ]] && wt_has_active_lease "$wt_entry" "$_lease_ttl"; }; then
             echo "  skip (active lease): ${wt}"
             continue
         fi

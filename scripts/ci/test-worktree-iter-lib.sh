@@ -315,6 +315,206 @@ else
     fail "RESILIENT-1638 (q): deleted-after-merge worktree was NOT reaped"
 fi
 
+echo
+# ── (r..x) RESILIENT-1623: union-of-stores lease check + mismatched CHUMP_LOCK_DIR reaper tests ─
+R1623_DIR="$TMP/r1623"
+FOREIGN_LOCKS="$R1623_DIR/foreign-locks"
+FOREIGN_DB="$R1623_DIR/foreign-state.db"
+mkdir -p "$FOREIGN_LOCKS"
+
+# (r) wt_has_active_lease finds a repo .chump-locks lease even when CHUMP_LOCK_DIR points at an empty foreign dir
+WT_R1623_JSON="$R1638_REPO/.claude/worktrees/chump-r1623-leased"
+git -C "$R1638_REPO" worktree add -q -b "claude/r1623-leased" "$WT_R1623_JSON" main
+git -C "$R1638_REPO" push -q origin "claude/r1623-leased"
+NOW_ISO_R1623="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat > "$R1638_REPO/.chump-locks/claim-r1623.json" <<EOF
+{"gap_id":"RESILIENT-1623","worktree":"$WT_R1623_JSON","heartbeat_at":"$NOW_ISO_R1623","taken_at":"$NOW_ISO_R1623"}
+EOF
+
+if CHUMP_LOCK_DIR="$FOREIGN_LOCKS" CHUMP_STATE_DB="$FOREIGN_DB" REAPER_REPO_ROOT="$R1638_REPO" \
+    wt_has_active_lease "$WT_R1623_JSON" 900; then
+    ok "RESILIENT-1623 (r): wt_has_active_lease finds repo .chump-locks lease under mismatched CHUMP_LOCK_DIR"
+else
+    fail "RESILIENT-1623 (r): wt_has_active_lease MISSED repo .chump-locks lease under mismatched CHUMP_LOCK_DIR"
+fi
+
+# (s) wt_has_active_lease finds a repo .chump/state.db lease even when CHUMP_STATE_DB points at a foreign DB
+WT_R1623_DB="$R1638_REPO/.claude/worktrees/chump-r1623-db-leased"
+git -C "$R1638_REPO" worktree add -q -b "claude/r1623-db-leased" "$WT_R1623_DB" main
+EXP_FUTURE=$(( $(date -u +%s) + 3600 ))
+sqlite3 "$R1638_REPO/.chump/state.db" <<SQL
+CREATE TABLE IF NOT EXISTS leases (
+    gap_id TEXT PRIMARY KEY,
+    worktree TEXT,
+    expires_at INTEGER
+);
+INSERT OR REPLACE INTO leases (gap_id, worktree, expires_at) VALUES ('RESILIENT-1623-DB', '$WT_R1623_DB', $EXP_FUTURE);
+SQL
+
+if CHUMP_LOCK_DIR="$FOREIGN_LOCKS" CHUMP_STATE_DB="$FOREIGN_DB" REAPER_REPO_ROOT="$R1638_REPO" \
+    wt_has_active_lease "$WT_R1623_DB" 900; then
+    ok "RESILIENT-1623 (s): wt_has_active_lease finds repo .chump/state.db lease under mismatched CHUMP_STATE_DB"
+else
+    fail "RESILIENT-1623 (s): wt_has_active_lease MISSED repo .chump/state.db lease under mismatched CHUMP_STATE_DB"
+fi
+git -C "$R1638_REPO" worktree remove --force "$WT_R1623_DB" >/dev/null 2>&1 || true
+
+# (t) cargo-target-reaper Class D removes local _classd_has_lease and calls shared wt_has_active_lease
+if ! grep -q "_classd_has_lease" "$REPO_ROOT/scripts/ops/cargo-target-reaper.sh"; then
+    ok "RESILIENT-1623 (t): cargo-target-reaper.sh removed local _classd_has_lease and uses shared wt_has_active_lease"
+else
+    fail "RESILIENT-1623 (t): cargo-target-reaper.sh still contains _classd_has_lease"
+fi
+
+# Prepare WT_R1623_JSON with aged target/ (2 days old) and aged .git/index so only the lease protects it across all 4 reapers
+mkdir -p "$WT_R1623_JSON/target/debug" "$WT_R1623_JSON/.cargo-test-target/debug"
+echo "artifact" > "$WT_R1623_JSON/target/debug/chump"
+echo "artifact" > "$WT_R1623_JSON/.cargo-test-target/debug/chump"
+find "$WT_R1623_JSON" -exec touch -t 202001010000 {} + 2>/dev/null || true
+if [[ -f "$WT_R1623_JSON/.git" ]]; then
+    _gd_r="$(sed 's/^gitdir: //' "$WT_R1623_JSON/.git" 2>/dev/null || true)"
+    [[ -n "$_gd_r" && -f "$_gd_r/index" ]] && touch -t 202001010000 "$_gd_r/index" 2>/dev/null || true
+fi
+
+# Stub gh + chump for reaper runs
+R1623_BIN="$R1623_DIR/bin"
+mkdir -p "$R1623_BIN"
+cat > "$R1623_BIN/gh" <<'GH'
+#!/usr/bin/env bash
+# Report MERGED for claude/r1623-leased so worktree-prune and cargo-target-reaper Class D would reap if lease check failed
+if [[ "$*" == *"--jq"* || "$*" == *"-q"* ]]; then
+    if [[ "$*" == *"pulls?state=open"* ]]; then
+        echo "0"
+    elif [[ "$*" == *"state"* ]]; then
+        echo "MERGED"
+    else
+        echo "777"
+    fi
+else
+    echo '[{"number":777,"state":"MERGED"}]'
+fi
+GH
+chmod +x "$R1623_BIN/gh"
+cat > "$R1623_BIN/chump" <<'CHUMP'
+#!/usr/bin/env bash
+exit 0
+CHUMP
+chmod +x "$R1623_BIN/chump"
+R1623_HOME="$R1623_DIR/home"
+mkdir -p "$R1623_HOME/.chump"
+
+# (u1) active-target-reaper.sh --execute with mismatched CHUMP_LOCK_DIR keeps WT_R1623_JSON/target
+cp "$REPO_ROOT/scripts/ops/active-target-reaper.sh" "$R1638_REPO/scripts/ops/active-target-reaper.sh"
+(
+    cd "$R1638_REPO"
+    PATH="$R1623_BIN:$PATH" HOME="$R1623_HOME" \
+    CHUMP_LOCK_DIR="$FOREIGN_LOCKS" CHUMP_STATE_DB="$FOREIGN_DB" \
+    REAPER_REPO_ROOT="$R1638_REPO" CHUMP_WORKTREE_BASE="$R1638_REPO/.claude/worktrees" \
+    CHUMP_WT_SCAN_TMP=0 \
+        bash "$R1638_REPO/scripts/ops/active-target-reaper.sh" --execute --age-days 1
+) >/dev/null 2>&1 || true
+
+if [[ -d "$WT_R1623_JSON/target" ]]; then
+    ok "RESILIENT-1623 (u1): active-target-reaper kept leased target/ under mismatched CHUMP_LOCK_DIR"
+else
+    fail "RESILIENT-1623 (u1): active-target-reaper DELETED leased target/ under mismatched CHUMP_LOCK_DIR"
+fi
+
+# (u2) worktree-prune.sh --execute with mismatched CHUMP_LOCK_DIR keeps WT_R1623_JSON
+mkdir -p "$R1638_REPO/scripts/coord"
+cp "$REPO_ROOT/scripts/coord/worktree-prune.sh" "$R1638_REPO/scripts/coord/worktree-prune.sh"
+(
+    cd "$R1638_REPO"
+    PATH="$R1623_BIN:$PATH" HOME="$R1623_HOME" \
+    CHUMP_LOCK_DIR="$FOREIGN_LOCKS" CHUMP_STATE_DB="$FOREIGN_DB" \
+    REAPER_REPO_ROOT="$R1638_REPO" CHUMP_WORKTREE_BASE=".claude/worktrees" \
+    CHUMP_REAPER_INDEX_MMIN=0 \
+        bash "$R1638_REPO/scripts/coord/worktree-prune.sh" --execute
+) >/dev/null 2>&1 || true
+
+if [[ -d "$WT_R1623_JSON" ]]; then
+    ok "RESILIENT-1623 (u2): worktree-prune kept leased worktree under mismatched CHUMP_LOCK_DIR"
+else
+    fail "RESILIENT-1623 (u2): worktree-prune DELETED leased worktree under mismatched CHUMP_LOCK_DIR"
+fi
+
+# (u3) cargo-target-reaper.sh --class-d-only --execute with mismatched CHUMP_LOCK_DIR keeps WT_R1623_JSON/target
+(
+    cd "$R1638_REPO"
+    PATH="$R1623_BIN:$PATH" HOME="$R1623_HOME" \
+    CHUMP_LOCK_DIR="$FOREIGN_LOCKS" CHUMP_STATE_DB="$FOREIGN_DB" \
+    CHUMP_CACHE_DB="$R1623_DIR/nonexistent-cache.db" \
+    REAPER_REPO_ROOT="$R1638_REPO" CHUMP_WORKTREE_BASE="$R1638_REPO/.claude/worktrees" \
+        bash "$REPO_ROOT/scripts/ops/cargo-target-reaper.sh" --class-d-only --execute
+) >/dev/null 2>&1 || true
+
+if [[ -d "$WT_R1623_JSON/target" ]]; then
+    ok "RESILIENT-1623 (u3): cargo-target-reaper Class D kept leased target/ under mismatched CHUMP_LOCK_DIR"
+else
+    fail "RESILIENT-1623 (u3): cargo-target-reaper Class D DELETED leased target/ under mismatched CHUMP_LOCK_DIR"
+fi
+
+# (u4) prune-worktrees.sh with mismatched CHUMP_LOCK_DIR keeps leased chump-* worktree
+R1623_SCAN="$R1623_DIR/scan"
+mkdir -p "$R1623_SCAN"
+WT_R1623_TMP="$R1623_SCAN/chump-r1623-tmp"
+git -C "$R1638_REPO" worktree add -q -b "claude/r1623-tmp" "$WT_R1623_TMP" main
+git -C "$R1638_REPO" push -q origin "claude/r1623-tmp"
+cat > "$R1638_REPO/.chump-locks/claim-r1623-tmp.json" <<EOF
+{"gap_id":"RESILIENT-1623-TMP","worktree":"$WT_R1623_TMP","heartbeat_at":"$NOW_ISO_R1623","taken_at":"$NOW_ISO_R1623"}
+EOF
+git -C "$R1638_REPO" remote set-url origin "https://github.com/repairman29/chump.git"
+cp "$REPO_ROOT/scripts/ops/prune-worktrees.sh" "$R1638_REPO/scripts/ops/prune-worktrees.sh"
+(
+    cd "$R1638_REPO"
+    PATH="$R1623_BIN:$PATH" HOME="$R1623_HOME" \
+    CHUMP_LOCK_DIR="$FOREIGN_LOCKS" CHUMP_STATE_DB="$FOREIGN_DB" \
+        bash "$R1638_REPO/scripts/ops/prune-worktrees.sh" --scan-dir "$R1623_SCAN"
+) >/dev/null 2>&1 || true
+
+if [[ -d "$WT_R1623_TMP" ]]; then
+    ok "RESILIENT-1623 (u4): prune-worktrees kept leased worktree under mismatched CHUMP_LOCK_DIR"
+else
+    fail "RESILIENT-1623 (u4): prune-worktrees DELETED leased worktree under mismatched CHUMP_LOCK_DIR"
+fi
+
+# (v) AC4: when wt_has_active_lease is unavailable (lease lib fails to define it), reapers skip rather than reap
+rm -f "$R1638_REPO/.chump-locks/claim-r1623-tmp.json"
+# Replace worktree-iter.sh in R1638_REPO with a stub that omits wt_has_active_lease
+rm -f "$R1638_REPO/scripts/lib/worktree-iter.sh"
+cat > "$R1638_REPO/scripts/lib/worktree-iter.sh" <<'BROKEN_LIB'
+scan_worktrees() { printf '%s\n' "$WT_R1623_JSON"; }
+wt_is_dirty() { return 1; }
+wt_has_unpushed_commits() { return 1; }
+wt_has_unsaved_work() { return 1; }
+emit_reaper_event() { :; }
+BROKEN_LIB
+export WT_R1623_JSON
+(
+    cd "$R1638_REPO"
+    PATH="$R1623_BIN:$PATH" HOME="$R1623_HOME" \
+        bash "$R1638_REPO/scripts/ops/prune-worktrees.sh" --scan-dir "$R1623_SCAN"
+) >/dev/null 2>&1 || true
+(
+    cd "$R1638_REPO"
+    PATH="$R1623_BIN:$PATH" HOME="$R1623_HOME" \
+    REAPER_REPO_ROOT="$R1638_REPO" CHUMP_WORKTREE_BASE="$R1638_REPO/.claude/worktrees" \
+        bash "$R1638_REPO/scripts/ops/active-target-reaper.sh" --execute --age-days 1
+) >/dev/null 2>&1 || true
+(
+    cd "$R1638_REPO"
+    PATH="$R1623_BIN:$PATH" HOME="$R1623_HOME" \
+    REAPER_REPO_ROOT="$R1638_REPO" CHUMP_WORKTREE_BASE=".claude/worktrees" \
+    CHUMP_REAPER_INDEX_MMIN=0 \
+        bash "$R1638_REPO/scripts/coord/worktree-prune.sh" --execute
+) >/dev/null 2>&1 || true
+
+if [[ -d "$WT_R1623_TMP" && -d "$WT_R1623_JSON" && -d "$WT_R1623_JSON/target" ]]; then
+    ok "RESILIENT-1623 (v): reapers fail closed (skip rather than reap) when wt_has_active_lease is unavailable"
+else
+    fail "RESILIENT-1623 (v): a reaper reaped when wt_has_active_lease was unavailable"
+fi
+
 echo "=== Summary: $PASS passed, $FAIL failed ==="
 if (( FAIL > 0 )); then
     for f in "${FAILS[@]}"; do printf '  - %s\n' "$f"; done

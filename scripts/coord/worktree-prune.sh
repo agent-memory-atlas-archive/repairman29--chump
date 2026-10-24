@@ -90,6 +90,11 @@ _prune_is_inflight() {
             "\"detail\":\"${WT_LIVE_BOT_MERGE_DETAIL:-}\""
         return 0
     fi
+    # RESILIENT-1623: fail closed if wt_has_active_lease is unavailable.
+    if ! declare -F wt_has_active_lease >/dev/null 2>&1; then
+        emit_reaper_event "worktree_reaper_skipped_active" "$wt_dir" "lease_lib_missing"
+        return 0
+    fi
     # Lease check via shared lib (replaces the old _PRUNE_ACTIVE_WORKTREES loop).
     if wt_has_active_lease "$wt_dir" 900; then
         emit_reaper_event "worktree_reaper_skipped_active" "$wt_dir" "active_lease"

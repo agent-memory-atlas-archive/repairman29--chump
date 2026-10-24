@@ -76,6 +76,10 @@ emit_ambient() {
 is_active_lease() {
     local worktree_path="$1"
     local branch="${2:-}"
+    # RESILIENT-1623: fail closed if wt_has_active_lease is unavailable.
+    if ! declare -F wt_has_active_lease >/dev/null 2>&1; then
+        return 0
+    fi
     # Primary: heartbeat-aware worktree path match via shared lib.
     wt_has_active_lease "$worktree_path" 900 && return 0
     # Fallback: branch name match (some old leases lack worktree field).

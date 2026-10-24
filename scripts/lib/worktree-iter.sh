@@ -108,12 +108,17 @@ scan_worktrees() {
 
 # wt_has_active_lease <wt_path> [<grace_s>]
 #
-# Scans all .chump-locks/*.json and returns 0 iff at least one lease:
-#   (a) names <wt_path> (or /private<wt_path> on macOS) in its "worktree" field, AND
-#   (b) has heartbeat_at within <grace_s> seconds (default 900 = 15 min).
+# RESILIENT-1623: Consults the union of the env-selected lease stores
+# (CHUMP_LOCK_DIR / CHUMP_STATE_DB / chump_state_db) AND the scanned repo's
+# own <repo>/.chump-locks and <repo>/.chump/state.db. When CHUMP_LOCK_DIR or
+# CHUMP_STATE_DB points at another checkout (e.g. CI fast-checks workspace or
+# node-level env), a worktree leased in the scanned repo's store is still
+# protected. Checking more stores can only skip more, never reap more.
 #
-# Requires lease.sh to be sourced. Degrades gracefully if lease.sh helpers
-# are unavailable — falls back to a raw grep scan (sufficient for safety).
+# Returns 0 iff at least one lease across those stores:
+#   (a) names <wt_path> (or /private<wt_path> on macOS) in its "worktree" field, AND
+#   (b) has a live state.db expires_at or a JSON heartbeat_at within <grace_s>
+#       seconds (default 900 = 15 min).
 wt_has_active_lease() {
     local wt_path="$1"
     local grace="${2:-900}"
@@ -128,70 +133,77 @@ wt_has_active_lease() {
 
     local repo; repo="$(_wt_main_repo)"
 
-    # RESILIENT-099: interactive `chump claim` writes the lease to the state.db
-    # `leases` table ONLY (no .chump-locks/*.json sidecar with a heartbeat). Check
-    # it FIRST so an active interactive claim HARD-BLOCKS reap — the reaper ate an
-    # actively-leased worktree this way. Same canonical-store split as INFRA-2744
-    # (bot-merge re-claim) / RESILIENT-103 (lease unification).
+    # RESILIENT-099 + RESILIENT-1623: Check both the env-selected state.db and
+    # the scanned repo's own .chump/state.db.
     if command -v sqlite3 >/dev/null 2>&1; then
-        # INFRA-8190: the ONE shell resolver when loaded (same precedence otherwise).
-        local _sdb
-        if declare -F chump_state_db >/dev/null 2>&1; then _sdb="$(chump_state_db "$repo" 2>/dev/null)"; else _sdb="${CHUMP_STATE_DB:-$repo/.chump/state.db}"; fi
-        if [[ -f "$_sdb" ]]; then
-            local _now _hit
-            _now="$(date -u +%s)"
+        local _env_sdb=""
+        if declare -F chump_state_db >/dev/null 2>&1; then
+            _env_sdb="$(chump_state_db "$repo" 2>/dev/null || true)"
+        else
+            _env_sdb="${CHUMP_STATE_DB:-$repo/.chump/state.db}"
+        fi
+        local _repo_sdb="$repo/.chump/state.db"
+        local _sdb _now
+        _now="$(date -u +%s)"
+        for _sdb in "$_env_sdb" "$_repo_sdb"; do
+            [[ -n "$_sdb" && -f "$_sdb" ]] || continue
+            local _hit
             _hit="$(sqlite3 "$_sdb" "SELECT 1 FROM leases WHERE (worktree='$wt_path' OR worktree='$wt_alt') AND expires_at > $_now LIMIT 1;" 2>/dev/null || true)"
             [[ -n "$_hit" ]] && return 0
-        fi
+        done
     fi
 
-    local lock_dir="${CHUMP_LOCK_DIR:-$repo/.chump-locks}"
-    [[ -d "$lock_dir" ]] || return 1
+    # RESILIENT-1623: Check both the env-selected CHUMP_LOCK_DIR (if any) and
+    # the scanned repo's own <repo>/.chump-locks directory.
+    local _env_lock_dir="${CHUMP_LOCK_DIR:-$repo/.chump-locks}"
+    local _repo_lock_dir="$repo/.chump-locks"
+    local lock_dir lease
+    for lock_dir in "$_env_lock_dir" "$_repo_lock_dir"; do
+        [[ -n "$lock_dir" && -d "$lock_dir" ]] || continue
+        for lease in "$lock_dir"/*.json; do
+            [[ -f "$lease" ]] || continue
 
-    local lease
-    for lease in "$lock_dir"/*.json; do
-        [[ -f "$lease" ]] || continue
-
-        # Read worktree field — use lease.sh if available, else grep.
-        local claimed_wt=""
-        if command -v lease_worktree >/dev/null 2>&1; then
-            claimed_wt="$(lease_worktree "$lease" 2>/dev/null || true)"
-        else
-            claimed_wt="$(grep -oE '"worktree"[[:space:]]*:[[:space:]]*"[^"]*"' "$lease" 2>/dev/null \
-                | head -1 \
-                | sed -E 's/.*"worktree"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
-        fi
-        [[ -z "$claimed_wt" ]] && continue
-
-        # Match either canonical form.
-        if [[ "$claimed_wt" != "$wt_path" && "$claimed_wt" != "$wt_alt" ]]; then
-            continue
-        fi
-
-        # Check heartbeat freshness — use lease.sh if available.
-        if command -v lease_is_fresh >/dev/null 2>&1; then
-            if lease_is_fresh "$lease" "$grace"; then
-                return 0
+            # Read worktree field — use lease.sh if available, else grep.
+            local claimed_wt=""
+            if command -v lease_worktree >/dev/null 2>&1; then
+                claimed_wt="$(lease_worktree "$lease" 2>/dev/null || true)"
+            else
+                claimed_wt="$(grep -oE '"worktree"[[:space:]]*:[[:space:]]*"[^"]*"' "$lease" 2>/dev/null \
+                    | head -1 \
+                    | sed -E 's/.*"worktree"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
             fi
-        else
-            # Fallback: raw grep for heartbeat_at and manual age calculation.
-            local hb
-            hb="$(grep -oE '"heartbeat_at"[[:space:]]*:[[:space:]]*"[^"]*"' "$lease" 2>/dev/null \
-                | head -1 \
-                | sed -E 's/.*"heartbeat_at"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
-            [[ -z "$hb" ]] && hb="$(grep -oE '"taken_at"[[:space:]]*:[[:space:]]*"[^"]*"' "$lease" 2>/dev/null \
-                | head -1 \
-                | sed -E 's/.*"taken_at"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
-            if [[ -n "$hb" ]]; then
-                local hb_epoch now age
-                hb_epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "${hb%Z}" +%s 2>/dev/null \
-                    || date -u -d "$hb" +%s 2>/dev/null \
-                    || echo 0)"
-                now="$(date -u +%s)"
-                age=$(( now - hb_epoch ))
-                [[ "$age" -le "$grace" ]] && return 0
+            [[ -z "$claimed_wt" ]] && continue
+
+            # Match either canonical form.
+            if [[ "$claimed_wt" != "$wt_path" && "$claimed_wt" != "$wt_alt" ]]; then
+                continue
             fi
-        fi
+
+            # Check heartbeat freshness — use lease.sh if available.
+            if command -v lease_is_fresh >/dev/null 2>&1; then
+                if lease_is_fresh "$lease" "$grace"; then
+                    return 0
+                fi
+            else
+                # Fallback: raw grep for heartbeat_at and manual age calculation.
+                local hb
+                hb="$(grep -oE '"heartbeat_at"[[:space:]]*:[[:space:]]*"[^"]*"' "$lease" 2>/dev/null \
+                    | head -1 \
+                    | sed -E 's/.*"heartbeat_at"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+                [[ -z "$hb" ]] && hb="$(grep -oE '"taken_at"[[:space:]]*:[[:space:]]*"[^"]*"' "$lease" 2>/dev/null \
+                    | head -1 \
+                    | sed -E 's/.*"taken_at"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
+                if [[ -n "$hb" ]]; then
+                    local hb_epoch now age
+                    hb_epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "${hb%Z}" +%s 2>/dev/null \
+                        || date -u -d "$hb" +%s 2>/dev/null \
+                        || echo 0)"
+                    now="$(date -u +%s)"
+                    age=$(( now - hb_epoch ))
+                    [[ "$age" -le "$grace" ]] && return 0
+                fi
+            fi
+        done
     done
 
     return 1
