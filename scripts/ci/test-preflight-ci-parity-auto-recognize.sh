@@ -51,6 +51,9 @@ if ! git clone -q "$ORIGIN_BARE" "$CLONE_DIR" >"$TMPDIR_TEST/clone.log" 2>&1; th
 fi
 
 cd "$CLONE_DIR"
+git config user.name "chump-ci-test"
+git config user.email "ci-test@chump.local"
+git config commit.gpgsign false
 git checkout -q main
 git checkout -q -b synthetic-pr-RESILIENT-1495
 
@@ -90,6 +93,48 @@ if grep -q "RESILIENT-586: Auto-recognized gate in ci.yml job='synthetic-added-g
 else
     bad "parity script did not report the new job as recognized via in-diff detection"
     cat "$TMPDIR_TEST/out.log"
+fi
+
+# ── CREDIBLE-1527 AC1: pass under an isolated HOME with no global git identity ─
+if [[ "${CHUMP_CREDIBLE_1527_SUBRUN:-0}" != "1" ]]; then
+    EMPTY_HOME="$(mktemp -d "$TMPDIR_TEST/empty-home.XXXXXX")"
+    if env -i HOME="$EMPTY_HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" \
+        GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_PARAMETERS="'user.useConfigOnly=true'" \
+        CHUMP_CREDIBLE_1527_SUBRUN=1 \
+        bash "$REPO_ROOT/scripts/ci/test-preflight-ci-parity-auto-recognize.sh" >"$TMPDIR_TEST/no-id.log" 2>&1; then
+        ok "CREDIBLE-1527 AC1: passes under isolated HOME with no global git identity"
+    else
+        bad "CREDIBLE-1527 AC1: failed under isolated HOME with no global git identity"
+        cat "$TMPDIR_TEST/no-id.log"
+    fi
+
+    # ── CREDIBLE-1527 AC2: grep audit of scripts/ci/test-*.sh temp-repo git commits ─
+    if audit_missing=$(
+        python3 - "$REPO_ROOT/scripts/ci" <<'PYAUDIT'
+import glob, os, re, sys
+ci_dir = sys.argv[1]
+missing = []
+for p in sorted(glob.glob(os.path.join(ci_dir, "test-*.sh"))):
+    with open(p, encoding="utf-8", errors="replace") as f:
+        s = f.read()
+    code_lines = [ln for ln in s.splitlines() if not ln.lstrip().startswith("#")]
+    code = "\n".join(code_lines)
+    if not re.search(r'\bgit\b[^\n]*\b(?:init|clone|worktree\s+add)\b', code):
+        continue
+    if not re.search(r'\bgit\b(?:(?!pre-commit|commit-msg)[^\n])*\bcommit\b', code):
+        continue
+    has_id = bool(re.search(r'user\.name|user\.email|GIT_AUTHOR_NAME|GIT_COMMITTER_NAME|test-sandbox\.sh', code))
+    if not has_id:
+        missing.append(os.path.basename(p))
+if missing:
+    print(" ".join(missing))
+    sys.exit(1)
+PYAUDIT
+    ); then
+        ok "CREDIBLE-1527 AC2: all scripts/ci/test-*.sh temp-repo git commits set git identity"
+    else
+        bad "CREDIBLE-1527 AC2: scripts/ci tests missing git identity: $audit_missing"
+    fi
 fi
 
 echo

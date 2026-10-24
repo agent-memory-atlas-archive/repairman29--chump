@@ -14,6 +14,9 @@
 # grepping hook source for a specific string, so it stays valid across
 # future refactors of *how* the message is located.
 set -euo pipefail
+# CREDIBLE-1527: ensure temp-repo git commits succeed on runners without global git identity.
+export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-chump-ci-test}" GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-ci-test@chump.local}" GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-chump-ci-test}" GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-ci-test@chump.local}"
+
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"

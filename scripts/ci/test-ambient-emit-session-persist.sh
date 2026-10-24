@@ -21,6 +21,9 @@
 #       weakened).
 
 set -euo pipefail
+# CREDIBLE-1527: ensure temp-repo git commits succeed on runners without global git identity.
+export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-chump-ci-test}" GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-ci-test@chump.local}" GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-chump-ci-test}" GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-ci-test@chump.local}"
+
 
 PASS=0; FAIL=0; FAILS=()
 ok()   { echo "  PASS: $1"; PASS=$((PASS+1)); }
