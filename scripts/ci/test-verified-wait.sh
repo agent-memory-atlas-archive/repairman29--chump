@@ -488,6 +488,155 @@ else
     bad "a single --event-name merge_group: expected BUDGET_S=5400, got <<$OUT>>"
 fi
 
+# 16. (CREDIBLE-1534 / CREDIBLE-1521) verified-recompute.yml shape and execution:
+#     16a. jobs.rerun-verified.if covers pull_request, merge_group, and push on main.
+#     16b. transient HTTP 502 on runs/<id>/jobs poll recovers via gh_api_retry and POSTs /rerun.
+#     16c. transient HTTP 502 on POST /rerun attempt 1 recovers on retry and exits 0.
+#     16d. HTTP 403 ("cannot be re-run") on POST /rerun is treated as idempotent success (exit 0).
+#     16e. persistent POST /rerun 500 failure across all RETRY_MAX attempts exits non-zero (fail-closed).
+echo "--- verified-recompute.yml shape + HTTP 502 retry + push-on-main trigger (test 16) ---"
+RECOMPUTE_YML="${RECOMPUTE_YML:-$REPO_ROOT/.github/workflows/verified-recompute.yml}"
+RECOMPUTE_IF="$(RECOMPUTE_YML="$RECOMPUTE_YML" python3 -c '
+import os, yaml
+with open(os.environ["RECOMPUTE_YML"]) as f:
+    d = yaml.safe_load(f)
+print(d["jobs"]["rerun-verified"].get("if", ""))
+')"
+RECOMPUTE_RUN="$(RECOMPUTE_YML="$RECOMPUTE_YML" python3 -c '
+import os, yaml
+with open(os.environ["RECOMPUTE_YML"]) as f:
+    d = yaml.safe_load(f)
+print(d["jobs"]["rerun-verified"]["steps"][0]["run"])
+')"
+
+if grep -q "pull_request" <<<"$RECOMPUTE_IF" && \
+   grep -q "merge_group" <<<"$RECOMPUTE_IF" && \
+   grep -q "push" <<<"$RECOMPUTE_IF" && \
+   grep -q "main" <<<"$RECOMPUTE_IF"; then
+    ok "16a: verified-recompute.yml rerun-verified if: covers pull_request, merge_group, and push on main"
+else
+    bad "16a: verified-recompute.yml rerun-verified if: missing pull_request/merge_group/push-on-main: <<$RECOMPUTE_IF>>"
+fi
+
+# 16b: HTTP 502 on first jobs poll, then completed failure -> retries and POSTs /rerun
+reset_cnt
+gh() {
+    local args="$*"
+    if [[ "$args" == *"workflows/ci.yml/runs"* ]]; then
+        echo "777"
+        return 0
+    fi
+    if [[ "$args" == *"actions/runs/777/jobs"* ]]; then
+        local c
+        c="$(bump_cnt)"
+        if [[ "$c" -eq 1 ]]; then
+            echo "gh: Server Error (HTTP 502)" >&2
+            return 1
+        fi
+        echo "4242 completed failure"
+        return 0
+    fi
+    if [[ "$args" == *"-X POST repos/owner/repo/actions/jobs/4242/rerun"* ]]; then
+        echo "{}"
+        return 0
+    fi
+    echo "unexpected gh call: $args" >&2
+    return 1
+}
+export -f gh
+OUT="$(GH_REPO="owner/repo" SHA="deadbeef" POLL_MAX=1 POLL_SLEEP_S=0 RETRY_MAX=3 RETRY_SLEEP_S=0 bash -c "$RECOMPUTE_RUN" 2>&1)"
+RC=$?
+if [[ "$RC" -eq 0 ]] && grep -q "re-ran verified job 4242" <<<"$OUT"; then
+    ok "16b: transient HTTP 502 on jobs query recovered via retry and re-ran verified job 4242"
+else
+    bad "16b: expected rc=0 + 're-ran verified job 4242' after HTTP 502 on jobs query, got rc=$RC <<$OUT>>"
+fi
+
+# 16c: HTTP 502 on first POST /rerun, then 200 on retry -> recovers and exits 0
+reset_cnt
+gh() {
+    local args="$*"
+    if [[ "$args" == *"workflows/ci.yml/runs"* ]]; then
+        echo "777"
+        return 0
+    fi
+    if [[ "$args" == *"actions/runs/777/jobs"* ]]; then
+        echo "4242 completed failure"
+        return 0
+    fi
+    if [[ "$args" == *"-X POST repos/owner/repo/actions/jobs/4242/rerun"* ]]; then
+        local c
+        c="$(bump_cnt)"
+        if [[ "$c" -eq 1 ]]; then
+            echo "gh: Server Error (HTTP 502)" >&2
+            return 1
+        fi
+        echo "{}"
+        return 0
+    fi
+    return 1
+}
+export -f gh
+OUT="$(GH_REPO="owner/repo" SHA="deadbeef" POLL_MAX=3 POLL_SLEEP_S=0 RETRY_MAX=3 RETRY_SLEEP_S=0 bash -c "$RECOMPUTE_RUN" 2>&1)"
+RC=$?
+if [[ "$RC" -eq 0 ]] && grep -q "re-ran verified job 4242" <<<"$OUT"; then
+    ok "16c: transient HTTP 502 on POST /rerun recovered on retry and exited 0"
+else
+    bad "16c: expected rc=0 + 're-ran verified job 4242' after POST HTTP 502, got rc=$RC <<$OUT>>"
+fi
+
+# 16d: HTTP 403 ("job cannot be re-run") on POST /rerun -> idempotent exit 0
+gh() {
+    local args="$*"
+    if [[ "$args" == *"workflows/ci.yml/runs"* ]]; then
+        echo "777"
+        return 0
+    fi
+    if [[ "$args" == *"actions/runs/777/jobs"* ]]; then
+        echo "4242 completed failure"
+        return 0
+    fi
+    if [[ "$args" == *"-X POST repos/owner/repo/actions/jobs/4242/rerun"* ]]; then
+        echo "gh: This job cannot be re-run because the workflow is already running (HTTP 403)" >&2
+        return 1
+    fi
+    return 1
+}
+export -f gh
+OUT="$(GH_REPO="owner/repo" SHA="deadbeef" POLL_MAX=3 POLL_SLEEP_S=0 RETRY_MAX=3 RETRY_SLEEP_S=0 bash -c "$RECOMPUTE_RUN" 2>&1)"
+RC=$?
+if [[ "$RC" -eq 0 ]] && grep -q "already queued/running" <<<"$OUT"; then
+    ok "16d: HTTP 403 rerun race treated as idempotent success (exit 0)"
+else
+    bad "16d: expected rc=0 + 'already queued/running' on HTTP 403, got rc=$RC <<$OUT>>"
+fi
+
+# 16e: persistent POST /rerun 500 across all RETRY_MAX attempts -> exits 1
+gh() {
+    local args="$*"
+    if [[ "$args" == *"workflows/ci.yml/runs"* ]]; then
+        echo "777"
+        return 0
+    fi
+    if [[ "$args" == *"actions/runs/777/jobs"* ]]; then
+        echo "4242 completed failure"
+        return 0
+    fi
+    if [[ "$args" == *"-X POST repos/owner/repo/actions/jobs/4242/rerun"* ]]; then
+        echo "gh: Internal Server Error (HTTP 500)" >&2
+        return 1
+    fi
+    return 1
+}
+export -f gh
+OUT="$(GH_REPO="owner/repo" SHA="deadbeef" POLL_MAX=2 POLL_SLEEP_S=0 RETRY_MAX=2 RETRY_SLEEP_S=0 bash -c "$RECOMPUTE_RUN" 2>&1)"
+RC=$?
+if [[ "$RC" -ne 0 ]] && grep -q "failed to re-run verified job 4242" <<<"$OUT"; then
+    ok "16e: persistent POST /rerun HTTP 500 across all retries fails closed (rc=$RC)"
+else
+    bad "16e: expected non-zero rc on persistent POST HTTP 500, got rc=$RC <<$OUT>>"
+fi
+
 rm -f "$CNT" "$AMB"
 
 echo

@@ -500,6 +500,10 @@ roots). `fleet-doctor --strict` reports a two-scope node RED (`check_second_scop
 (`/root/.chumpnode` or `~/.chumpnode` present, or `chump-*` units enabled there). A converged node
 must have exactly ONE install in ONE scope. Test: `scripts/ci/test-resilient-1615-two-scope-refuse.sh`.
 
+## Cross-workflow `verified` recompute on `main` and transient 5xx hardening (CREDIBLE-1534 / CREDIBLE-1521)
+
+`verified` in `.github/workflows/ci.yml` waits in-job (`scripts/ci/verified-wait.sh`) for the cross-workflow lanes (`audit` and ACP smoke) up to 90 minutes (`CREDIBLE-1554`). As defense-in-depth when an upstream `Audit` or `integrations` workflow completes after `verified` concluded non-green (including on `push` to `main`), `.github/workflows/verified-recompute.yml` re-runs the `verified` job for that `head_sha`. Every `gh api` call in `rerun-verified` uses bounded retry (`gh_api_retry`) and treats `HTTP 403` ("cannot be re-run" / already running) as idempotent success so transient GitHub API `HTTP 502` errors never leave `verified-recompute` red on `main`. Covered by `scripts/ci/test-verified-wait.sh` (test 16).
+
 ## Maintenance
 
 This playbook should be **updated whenever a new wedge class is discovered** (new entry in §1), a **new ship-assist tool ships** (entry added to §2), or a **lesson-learning gap closes** (move from §4/§5 in-flight to §6 shipped + cross-link the doc to the fix's PR).
