@@ -94,6 +94,16 @@ def load_json(path):
         return None
 
 
+def is_red_test(t):
+    """CREDIBLE-1528: fail, timeout, OR a SKIP that exited 0 counts as red."""
+    st = t.get("status", "not_run")
+    if st in RED:
+        return True
+    if st == "skip" and t.get("exit", 0) == 0:
+        return True
+    return False
+
+
 def counts_of(tests):
     c = {"total": len(tests), "wired": 0, "unwired": 0, "pass": 0, "fail": 0,
          "timeout": 0, "skip": 0, "not_run": 0, "red": 0,
@@ -103,7 +113,7 @@ def counts_of(tests):
         c[side] += 1
         st = t.get("status", "not_run")
         c[st] = c.get(st, 0) + 1
-        if st in RED:
+        if is_red_test(t):
             c["red"] += 1
             c[side + "_red"] += 1
         elif st == "pass":
@@ -243,7 +253,7 @@ def render_md(doc):
 
     def pick(wired, red):
         return [t for t in tests if t["wired"] == wired and
-                ((t.get("status") in RED) if red else t.get("status") == "pass")]
+                (is_red_test(t) if red else t.get("status") == "pass")]
 
     section("wired-red", pick(True, True))
     section("unwired-red", pick(False, True))

@@ -19,10 +19,10 @@ ok()   { printf '\033[0;32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[0;31mFAIL\033[0m %s\n' "$*"; exit 1; }
 skip() { printf '\033[0;33mSKIP\033[0m %s\n' "$*"; exit 0; }
 
-CHUMP="${CHUMP_BIN:-$(command -v chump 2>/dev/null || true)}"
-if [[ -z "$CHUMP" || ! -x "$CHUMP" ]]; then
-    skip "chump binary not on PATH (set CHUMP_BIN or 'cargo install --path .'); skipping help regression gate"
-fi
+# CREDIBLE-1528: resolve chump via shared discover-chump-bin.sh (exits non-zero instead of SKIP+exit 0).
+# shellcheck source=scripts/ci/lib/discover-chump-bin.sh
+source "$REPO_ROOT/scripts/ci/lib/discover-chump-bin.sh"
+CHUMP="$CHUMP_BIN"
 
 # Skip staleness check + LLM dispatch; help is local.
 export CHUMP_BINARY_STALENESS_CHECK=0

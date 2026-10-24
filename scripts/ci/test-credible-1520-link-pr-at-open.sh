@@ -30,13 +30,13 @@ CLAUDEMD="$REPO_ROOT/CLAUDE.md"
 
 echo "=== CREDIBLE-1520 AC1: gap_prs row written at PR-open on every path ==="
 
-if ! command -v chump >/dev/null 2>&1 && [[ -z "${CHUMP_BIN:-}" ]]; then
-    echo "SKIP: chump binary not found (CHUMP_BIN unset, chump not on PATH)"; exit 0
-fi
+# CREDIBLE-1528: resolve chump via shared discover-chump-bin.sh (exits non-zero instead of SKIP+exit 0).
+# shellcheck source=scripts/ci/lib/discover-chump-bin.sh
+source "$REPO_ROOT/scripts/ci/lib/discover-chump-bin.sh"
 if ! command -v sqlite3 >/dev/null 2>&1; then
-    echo "SKIP: sqlite3 not available"; exit 0
+    echo "ERROR: sqlite3 not available" >&2; exit 1
 fi
-CHUMP="${CHUMP_BIN:-$(command -v chump)}"
+CHUMP="$CHUMP_BIN"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

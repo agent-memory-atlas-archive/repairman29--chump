@@ -48,11 +48,16 @@ elif [[ -x "${REPO_ROOT:-}/target/release/chump" ]]; then
     CHUMP_BIN="$REPO_ROOT/target/release/chump"
 elif [[ -x "${REPO_ROOT:-}/target/debug/chump" ]]; then
     CHUMP_BIN="$REPO_ROOT/target/debug/chump"
+elif command -v chump >/dev/null 2>&1; then
+    CHUMP_BIN="$(command -v chump)"
 else
-    echo "[discover-chump-bin] ERROR: no chump binary found." >&2
+    # CREDIBLE-1528: never print SKIP and exit 0 when no chump binary is found
+    # (especially under CI=true where a silent SKIP-exit-0 makes a green step
+    # prove nothing). Exit non-zero with a clear diagnostic.
+    echo "[discover-chump-bin] ERROR (CREDIBLE-1528, CI=${CI:-unset}): no chump binary found — refusing to SKIP-and-exit-0." >&2
     echo "  Tried cargo-metadata target dir=${_dcb_target:-<unresolved>}/{release,debug}/chump" >&2
     echo "  Tried CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<unset>}/{release,debug}/chump" >&2
-    echo "  Tried $REPO_ROOT/target/{release,debug}/chump" >&2
+    echo "  Tried ${REPO_ROOT:-<unset>}/target/{release,debug}/chump and PATH" >&2
     echo "  Build with: cargo build --release   (or cargo build for debug)" >&2
     exit 1
 fi

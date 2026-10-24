@@ -70,6 +70,68 @@ check "$T/shrunk.json" && ok "shrinkage passes" || bad "shrinkage failed: $(cat 
 CHUMP_CENSUS_ROOT="$fx" bash "$CENSUS" --check-shrink "$T/absent.json" --head-json "$base" >/dev/null 2>&1 \
     && ok "missing base passes (first run)" || bad "missing base failed"
 
+# ── 1b. CREDIBLE-1528: discover-chump-bin.sh loud-fail under CI=true + census SKIP-exit-0 as red ──
+# (a) Under CI=true, a test sourcing discover-chump-bin.sh that cannot resolve chump exits non-zero with a clear message (never SKIP-and-exit-0).
+DCB_FX="$T/dcb-fx"
+mkdir -p "$DCB_FX/scripts/ci/lib"
+cp "$ROOT/scripts/ci/lib/discover-chump-bin.sh" "$DCB_FX/scripts/ci/lib/discover-chump-bin.sh"
+cp "$ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh" "$DCB_FX/scripts/ci/lib/resolve-cargo-target-dir.sh"
+cat > "$DCB_FX/scripts/ci/test-missing-bin.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$REPO_ROOT/scripts/ci/lib/discover-chump-bin.sh"
+echo "PASS: should not reach here"
+EOF
+chmod +x "$DCB_FX/scripts/ci/test-missing-bin.sh"
+
+dcb_rc=0
+dcb_out="$(CI=true PATH="/usr/bin:/bin" CHUMP_BIN="" CARGO_TARGET_DIR="$DCB_FX/empty-target" \
+    bash "$DCB_FX/scripts/ci/test-missing-bin.sh" 2>&1)" || dcb_rc=$?
+if [[ $dcb_rc -ne 0 ]] && grep -q "no chump binary found" <<<"$dcb_out"; then
+    ok "CREDIBLE-1528 (a): under CI=true discover-chump-bin.sh exits non-zero ($dcb_rc) with clear message when binary missing"
+else
+    bad "CREDIBLE-1528 (a): discover-chump-bin.sh did not exit non-zero with clear message (rc=$dcb_rc, out=$dcb_out)"
+fi
+
+# Verify converted tests (test-credible-1520-link-pr-at-open.sh, test-chump-subcommand-help.sh) source discover-chump-bin.sh
+if grep -q "discover-chump-bin.sh" "$ROOT/scripts/ci/test-credible-1520-link-pr-at-open.sh" \
+    && grep -q "discover-chump-bin.sh" "$ROOT/scripts/ci/test-chump-subcommand-help.sh"; then
+    ok "CREDIBLE-1528 (a2): test-credible-1520-link-pr-at-open.sh and test-chump-subcommand-help.sh converted to discover-chump-bin.sh"
+else
+    bad "CREDIBLE-1528 (a2): converted tests missing discover-chump-bin.sh"
+fi
+
+# (b) Census classifies a SKIP-and-exit-0 test step as red (both in counts.red / wired_red and in the wired-red Markdown section), while exit 77 (autotools skip) is NOT red.
+SKIP_FX="$T/skip-fx"
+mkdir -p "$SKIP_FX/scripts/ci" "$SKIP_FX/.github/workflows" "$SKIP_FX/.chump"
+cat > "$SKIP_FX/scripts/ci/test-skip-zero.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "SKIP: binary not found"
+exit 0
+EOF
+cat > "$SKIP_FX/scripts/ci/test-skip-77.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "SKIP: platform not applicable"
+exit 77
+EOF
+chmod +x "$SKIP_FX/scripts/ci/test-skip-zero.sh" "$SKIP_FX/scripts/ci/test-skip-77.sh"
+cat > "$SKIP_FX/.github/workflows/ci.yml" <<'EOF'
+jobs:
+  x:
+    steps:
+      - run: bash scripts/ci/test-skip-zero.sh
+      - run: bash scripts/ci/test-skip-77.sh
+EOF
+CHUMP_CENSUS_ROOT="$SKIP_FX" bash "$CENSUS" --out-dir "$T/skip-out" >/dev/null
+read -r sk_red sk_wred <<<"$(python3 -c 'import json,sys;c=json.load(open(sys.argv[1]))["counts"];print(c["red"],c["wired_red"])' "$T/skip-out/ci-test-census.json")"
+if [[ "$sk_red" == "1" && "$sk_wred" == "1" ]] \
+    && awk '/^## wired-red /{f=1;next} /^## /{f=0} f' "$T/skip-out/CI_TEST_CENSUS.md" | grep -q "test-skip-zero.sh"; then
+    ok "CREDIBLE-1528 (b): census reports SKIP-and-exit-0 step as red (red=$sk_red, wired_red=$sk_wred) and lists it under wired-red"
+else
+    bad "CREDIBLE-1528 (b): census did not classify SKIP-and-exit-0 as red (red=$sk_red, wired_red=$sk_wred)"
+fi
+
 # ── 2. the real gate ────────────────────────────────────────────────────────
 echo "census-shrink: real compare against $BASE_REF"
 if ! git -C "$ROOT" rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
