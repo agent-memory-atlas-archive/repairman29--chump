@@ -6648,6 +6648,21 @@ async fn main() -> Result<()> {
 
         let repo_root = repo_path::repo_root();
 
+        // CREDIBLE-1577 / CREDIBLE-1526 AC5: refuse --auto-merge with exit 2
+        // BEFORE spawning any agent when --paths or the branch diff vs
+        // origin/main touches a ship-gate file. No env override.
+        if let Err(hit) = dispatch::check_workspace_auto_merge_gate(
+            &repo_root,
+            &gap_id,
+            auto_merge,
+            paths.as_deref(),
+        ) {
+            eprintln!(
+                "REFUSED: chump dispatch will not run with --auto-merge — gap {gap_id} touches gate file {hit} (CREDIBLE-1577 / CREDIBLE-1526 AC5). Re-run without --auto-merge so the PR lands through the review organ."
+            );
+            std::process::exit(2);
+        }
+
         // INFRA-8199: run the INFRA-1982 open-PR check BEFORE spawning any
         // work backend. An open PR refuses (PR number + head branch printed)
         // unless CHUMP_CLAIM_ALLOW_DUPLICATE_PR=1, which turns the cycle into

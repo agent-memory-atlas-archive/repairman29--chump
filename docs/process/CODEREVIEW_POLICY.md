@@ -133,3 +133,19 @@ and exits `5` (`UNAVAILABLE`), never `3`.
 Concrete-criteria tuning is preferred over prompt tuning. Edit the criteria
 list above and the matching string in `scripts/coord/code-reviewer-agent.sh` together
 when adjusting thresholds. Keep them in sync.
+
+### Gate-file `--auto-merge` refusal (`CREDIBLE-1526` / `CREDIBLE-1576` / `CREDIBLE-1577`)
+
+Any PR whose `--paths` or branch diff touches a ship-gate file
+(`.github/workflows/*`, `scripts/ci/*`, `scripts/git-hooks/*`,
+`scripts/coord/bot-merge.sh`, `scripts/coord/code-reviewer-agent.sh`,
+`crates/chump-preflight/*`, `crates/chump-ship/*`, `*verified-wait*`) is
+refused with exit `2` when `--auto-merge` is passed to either:
+- `chump dispatch <GAP> --auto-merge` (`src/dispatch.rs::check_workspace_auto_merge_gate`,
+  emitting `kind=dispatch_auto_merge_refused` before spawning the agent), or
+- `scripts/coord/bot-merge.sh --auto-merge` (`bot_merge_gate_arm_refused`).
+
+Gate-file PRs land exclusively via the independent review organ
+(`chump-review-organ.service`), which labels unapproved PRs `review-held`
+and `review-needs-mutants` and merges head-pinned only after a written
+`VERDICT: APPROVE` with mutant-kill receipts.

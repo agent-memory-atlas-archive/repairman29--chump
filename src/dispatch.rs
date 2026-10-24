@@ -213,8 +213,163 @@ pub struct DispatchOutcome {
 /// worktree (per the CLAUDE.md "always work in a linked worktree" rule
 /// plus `gap-claim.sh`'s main-checkout refusal), so `run()` keeps using
 /// `opts.repo_root` as the working directory unchanged.
+/// CREDIBLE-1577 / CREDIBLE-1526 AC5: shared constant of gate-file globs that
+/// must never be dispatched with `--auto-merge`. Matches the union of
+/// `BOT_MERGE_GATE_FILE_GLOBS` (`scripts/coord/bot-merge.sh`, CREDIBLE-1576)
+/// and `CHUMP_SHIP_GATE_GLOBS` (`scripts/coord/lib/ship-gate-files.sh`,
+/// CREDIBLE-1590), plus `crates/chump-ship/*` and
+/// `scripts/coord/code-reviewer-agent.sh` (CREDIBLE-1526 AC5).
+///
+/// Standing rule (Chief 2026-10-20): constant only — NEVER read from any
+/// `CHUMP_*` env var (no env override on a safety input).
+pub const DISPATCH_GATE_FILE_GLOBS: &[&str] = &[
+    ".github/workflows/*",
+    "scripts/ci/*",
+    "scripts/git-hooks/*",
+    "scripts/coord/bot-merge.sh",
+    "scripts/coord/code-reviewer-agent.sh",
+    "crates/chump-preflight/*",
+    "crates/chump-ship/*",
+    "*verified-wait*",
+];
+
+/// CREDIBLE-1577: return true when `raw_path` matches any entry in
+/// [`DISPATCH_GATE_FILE_GLOBS`]. Reads no env var.
+pub fn is_dispatch_gate_file(raw_path: &str) -> bool {
+    let p = raw_path
+        .trim()
+        .trim_start_matches("./")
+        .trim_end_matches('/');
+    if p.is_empty() {
+        return false;
+    }
+    p == ".github/workflows"
+        || p.starts_with(".github/workflows/")
+        || p == "scripts/ci"
+        || p.starts_with("scripts/ci/")
+        || p == "scripts/git-hooks"
+        || p.starts_with("scripts/git-hooks/")
+        || p == "scripts/coord/bot-merge.sh"
+        || p == "scripts/coord/code-reviewer-agent.sh"
+        || p == "crates/chump-preflight"
+        || p.starts_with("crates/chump-preflight/")
+        || p == "crates/chump-ship"
+        || p.starts_with("crates/chump-ship/")
+        || p.contains("verified-wait")
+}
+
+/// CREDIBLE-1577: pure gate-file check for `--auto-merge`. Reads no env var.
+/// When `auto_merge` is true and any path in `paths` (comma-separated `--paths`
+/// lease scope) or `diff_files` (branch diff vs `origin/main`) matches
+/// [`is_dispatch_gate_file`], returns `Err(<first matching gate file>)`.
+pub fn check_auto_merge_gate_refusal(
+    auto_merge: bool,
+    paths: Option<&str>,
+    diff_files: &[String],
+) -> std::result::Result<(), String> {
+    if !auto_merge {
+        return Ok(());
+    }
+    if let Some(raw) = paths {
+        for entry in raw.split(|c: char| c == ',' || c.is_whitespace()) {
+            let trimmed = entry.trim();
+            if !trimmed.is_empty() && is_dispatch_gate_file(trimmed) {
+                return Err(trimmed.to_string());
+            }
+        }
+    }
+    for f in diff_files {
+        let trimmed = f.trim();
+        if !trimmed.is_empty() && is_dispatch_gate_file(trimmed) {
+            return Err(trimmed.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Collect `git diff --name-only origin/main...HEAD` in `dir` when `HEAD` is on
+/// a feature/repair branch. Best-effort empty list when `origin/main` is not
+/// present in a throwaway repo.
+fn collect_branch_diff_files(dir: &Path) -> Vec<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["diff", "--name-only", "origin/main...HEAD"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Emit `kind=dispatch_auto_merge_refused` to `<repo_root>/.chump-locks/ambient.jsonl`
+/// (CREDIBLE-1577 / CREDIBLE-1526 AC5).
+// scanner-anchor: "kind":"dispatch_auto_merge_refused"
+pub fn emit_dispatch_auto_merge_refused(repo_root: &Path, gap_id: &str, gate_file: &str) {
+    let lock_dir = repo_root.join(".chump-locks");
+    let _ = std::fs::create_dir_all(&lock_dir);
+    let ambient_path = lock_dir.join("ambient.jsonl");
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let line = format!(
+        "{}\n",
+        serde_json::json!({
+            "ts": ts,
+            "kind": "dispatch_auto_merge_refused",
+            "gap_id": gap_id,
+            "gate_file": gate_file,
+            "reason": "gate_file_touched",
+        })
+    );
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ambient_path)
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// CREDIBLE-1577 AC1: pre-spawn check invoked by `chump dispatch` before
+/// spawning the agent. Inspects `--paths` and any existing branch diff vs
+/// `origin/main`; if `auto_merge` is true and a gate file is touched, emits
+/// `kind=dispatch_auto_merge_refused` and returns `Err(gate_file)`.
+pub fn check_workspace_auto_merge_gate(
+    repo_root: &Path,
+    gap_id: &str,
+    auto_merge: bool,
+    paths: Option<&str>,
+) -> std::result::Result<(), String> {
+    if !auto_merge {
+        return Ok(());
+    }
+    let diff_files = collect_branch_diff_files(repo_root);
+    if let Err(hit) = check_auto_merge_gate_refusal(auto_merge, paths, &diff_files) {
+        emit_dispatch_auto_merge_refused(repo_root, gap_id, &hit);
+        return Err(hit);
+    }
+    Ok(())
+}
+
 pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
     let started = std::time::Instant::now();
+
+    // CREDIBLE-1577 AC1: refuse --auto-merge before creating worktree or
+    // spawning the agent when --paths or the existing branch diff touches a
+    // gate file.
+    if let Err(hit) =
+        check_workspace_auto_merge_gate(&opts.repo_root, opts.gap_id, opts.auto_merge, opts.paths)
+    {
+        bail!(
+            "CREDIBLE-1577: refusing --auto-merge for {} — touches gate file {}",
+            opts.gap_id,
+            hit
+        );
+    }
 
     // Build the workspace: working_dir is either a fresh worktree (Headless
     // / ExecGap) or the caller's repo_root (Interactive). See [`Workspace`].
@@ -3928,5 +4083,83 @@ mod tests {
             Some(fp1),
             "commit must count as activity"
         );
+    }
+
+    // ── CREDIBLE-1577: dispatch refuses --auto-merge on gate files ──────────
+
+    #[test]
+    fn credible1577_auto_merge_gate_refuses_gate_paths_and_diffs_and_allows_non_gate() {
+        // 1) Refuses when --paths touches any gate file glob.
+        for gate_path in [
+            ".github/workflows/ci.yml",
+            "scripts/ci/test-arm-policy.sh",
+            "scripts/git-hooks/pre-push",
+            "scripts/coord/bot-merge.sh",
+            "scripts/coord/code-reviewer-agent.sh",
+            "crates/chump-preflight/src/preflight.rs",
+            "crates/chump-ship/src/lib.rs",
+            "scripts/ci/verified-wait.sh",
+        ] {
+            let res = check_auto_merge_gate_refusal(true, Some(gate_path), &[]);
+            assert_eq!(
+                res,
+                Err(gate_path.to_string()),
+                "expected --paths={gate_path} with auto_merge=true to be refused"
+            );
+        }
+
+        // 2) Refuses when the branch diff touches a gate file even if --paths is None or clean.
+        let diff = vec![
+            "src/farmer_status.rs".to_string(),
+            ".github/workflows/ci.yml".to_string(),
+        ];
+        assert_eq!(
+            check_auto_merge_gate_refusal(true, Some("src/farmer_status.rs"), &diff),
+            Err(".github/workflows/ci.yml".to_string()),
+            "expected diff touching ci.yml with auto_merge=true to be refused"
+        );
+
+        // 3) Allows when auto_merge=true and neither --paths nor diff touches a gate file.
+        let clean_diff = vec![
+            "src/farmer_status.rs".to_string(),
+            "docs/process/CODEREVIEW_POLICY.md".to_string(),
+        ];
+        assert_eq!(
+            check_auto_merge_gate_refusal(true, Some("src/farmer_status.rs"), &clean_diff),
+            Ok(()),
+            "non-gate paths and diff must be allowed"
+        );
+
+        // 4) Allows when auto_merge=false even if --paths and diff touch gate files.
+        assert_eq!(
+            check_auto_merge_gate_refusal(
+                false,
+                Some("scripts/coord/bot-merge.sh"),
+                &[".github/workflows/ci.yml".to_string()]
+            ),
+            Ok(()),
+            "auto_merge=false must never be refused by the auto-merge gate guard"
+        );
+    }
+
+    #[test]
+    fn credible1577_workspace_gate_emits_dispatch_auto_merge_refused_event() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let res = check_workspace_auto_merge_gate(
+            root,
+            "CREDIBLE-1577",
+            true,
+            Some("src/main.rs,scripts/git-hooks/pre-push"),
+        );
+        assert_eq!(res, Err("scripts/git-hooks/pre-push".to_string()));
+
+        let amb = root.join(".chump-locks/ambient.jsonl");
+        let body = std::fs::read_to_string(&amb).expect("ambient.jsonl written");
+        let v: serde_json::Value =
+            serde_json::from_str(body.lines().next().expect("1 line")).expect("valid json");
+        assert_eq!(v["kind"], "dispatch_auto_merge_refused");
+        assert_eq!(v["gap_id"], "CREDIBLE-1577");
+        assert_eq!(v["gate_file"], "scripts/git-hooks/pre-push");
     }
 }

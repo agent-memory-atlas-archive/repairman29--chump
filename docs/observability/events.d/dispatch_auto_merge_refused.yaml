@@ -1,0 +1,12 @@
+  - kind: dispatch_auto_merge_refused
+    effect_metric: credible
+    emitter: src/dispatch.rs (CREDIBLE-1577 / CREDIBLE-1526 AC5)
+    trigger: >-
+      chump dispatch was invoked with --auto-merge for a gap whose --paths or
+      branch diff vs origin/main touches a ship-gate file (.github/workflows/*,
+      scripts/ci/*, scripts/git-hooks/*, scripts/coord/bot-merge.sh,
+      scripts/coord/code-reviewer-agent.sh, crates/chump-preflight/*,
+      crates/chump-ship/*, *verified-wait*). Exits 2 before spawning the agent
+      (or before arming ship) so a gate change can never self-arm.
+    consumers: [fleet-brief, audit-priorities]
+    fields_required: [ts, kind, gap_id, gate_file, reason]
