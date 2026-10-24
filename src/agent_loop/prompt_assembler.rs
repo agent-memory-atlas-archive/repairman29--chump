@@ -130,15 +130,18 @@ impl PromptAssembler {
         perception: &PerceivedInput,
         tool_hint: Option<&str>,
     ) -> Option<String> {
-        // MEM-006: spawn-time lessons. Defensively gated — only fires when
-        // CHUMP_LESSONS_AT_SPAWN_N is set AND the DB is reachable AND the
-        // ranking returns at least one row. Otherwise this branch is silent
-        // (no prompt mutation, no error path). Precedence: spawn lessons go
-        // FIRST in the assembled prompt, ahead of the user-provided base —
-        // they represent prior-episode learnings that should frame everything
-        // the agent reads after.
+        // MEM-006 / CREDIBLE-1606: spawn-time lessons. Defensively gated — only
+        // fires when spawn_lessons_n() > 0 AND the DB is reachable AND
+        // [`reflection_db::lessons_enabled_for_model`] permits injection for the
+        // active agent model (enforcing COG-023 Sonnet carve-out and INFRA-016
+        // DeepSeek deny-list) AND the ranking returns at least one row.
+        let agent_model = reflection_db::current_agent_model();
         let spawn_block: Option<String> = match reflection_db::spawn_lessons_n() {
-            Some(n) if n > 0 && reflection_db::reflection_available() => {
+            Some(n)
+                if n > 0
+                    && reflection_db::reflection_available()
+                    && reflection_db::lessons_enabled_for_model(&agent_model) =>
+            {
                 // INFRA-424: surface this to the operator (once per process).
                 announce_lessons_injection_active(n);
                 // Domain hint: reuse the first detected entity, else explicit
@@ -188,7 +191,6 @@ impl PromptAssembler {
         // CHUMP_LESSONS_MIN_TIER=frontier|capable|small|none).
         // Scope filter priority: explicit tool_hint > first detected
         // perception entity > None.
-        let agent_model = reflection_db::current_agent_model();
         if reflection_db::reflection_available()
             && reflection_db::lessons_enabled_for_model(&agent_model)
         {
@@ -441,6 +443,41 @@ mod tests {
         assert!(out.starts_with("BASE"));
         assert!(!out.contains("## Lessons from prior episodes"));
         std::env::remove_var("CHUMP_LESSONS_AT_SPAWN_N");
+    }
+
+    #[test]
+    #[serial(reflection_db)]
+    fn credible_1606_spawn_lessons_suppressed_for_denied_or_unopted_models() {
+        std::env::set_var("CHUMP_LESSONS_AT_SPAWN_N", "5");
+        std::env::remove_var("CHUMP_LESSONS_DENY_FAMILIES");
+        std::env::set_var("CHUMP_LESSONS_MIN_TIER", "capable");
+
+        // DeepSeek-R1 is on the default INFRA-016 deny-list even when tier gate is open.
+        std::env::set_var("CHUMP_AGENT_MODEL", "deepseek-ai/DeepSeek-R1");
+        let pa = PromptAssembler {
+            base_system_prompt: Some("BASE".to_string()),
+        };
+        let out_ds = pa
+            .assemble_with_hint(&dummy_perception(vec![]), None)
+            .expect("base preserved");
+        assert!(
+            !out_ds.contains("## Lessons from prior episodes"),
+            "CREDIBLE-1606: DeepSeek must never receive spawn lessons when deny-listed, got: {out_ds}"
+        );
+
+        // Sonnet is carved out by COG-023 even when CHUMP_LESSONS_MIN_TIER=capable.
+        std::env::set_var("CHUMP_AGENT_MODEL", "claude-sonnet-4-5-20250929");
+        let out_sonnet = pa
+            .assemble_with_hint(&dummy_perception(vec![]), None)
+            .expect("base preserved");
+        assert!(
+            !out_sonnet.contains("## Lessons from prior episodes"),
+            "CREDIBLE-1606: Sonnet must never receive spawn lessons via tier gate (COG-023), got: {out_sonnet}"
+        );
+
+        std::env::remove_var("CHUMP_LESSONS_AT_SPAWN_N");
+        std::env::remove_var("CHUMP_LESSONS_MIN_TIER");
+        std::env::remove_var("CHUMP_AGENT_MODEL");
     }
 
     // Note: removed `assemble_falls_back_to_assemble_with_hint_none` because

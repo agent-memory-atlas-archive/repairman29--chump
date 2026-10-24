@@ -377,6 +377,48 @@ pub fn build_almanac_query(gap: &GapRow) -> String {
     after_colon.to_string()
 }
 
+/// ZERO-WASTE-138: zero-LLM-cost Almanac grounding for gaps missing a file
+/// pointer ([`ThinReason::NoFilePointer`]).
+///
+/// When a worker claims a gap before the async `chump-gap-enricher` LLM pass
+/// has rewritten it in place, calling this helper queries the local Almanac
+/// index (<50ms, 0 LLM tokens) and formats up to `limit` `file:line` candidate
+/// pointers for direct prompt injection — preventing open-weight models from
+/// entering a 30-iteration exploration read-loop.
+pub fn deterministic_almanac_grounding(
+    gap: &GapRow,
+    almanac: &dyn AlmanacClient,
+    limit: usize,
+) -> Option<String> {
+    let thinness = classify_thinness(gap);
+    if !thinness.reasons.contains(&ThinReason::NoFilePointer) {
+        return None;
+    }
+    let query = build_almanac_query(gap);
+    if query.is_empty() {
+        return None;
+    }
+    let hits = almanac.search(&query, limit);
+    if hits.is_empty() {
+        return None;
+    }
+    let mut block =
+        String::from("\nCandidate target locations (Almanac grounding — ZERO-WASTE-138):\n");
+    for h in hits {
+        block.push_str("- ");
+        block.push_str(&h.citation);
+        if !h.name.is_empty() {
+            block.push_str("  (");
+            block.push_str(&h.kind);
+            block.push(' ');
+            block.push_str(&h.name);
+            block.push(')');
+        }
+        block.push('\n');
+    }
+    Some(block)
+}
+
 /// Build the ONE capable-model enrichment prompt. Pure — the Almanac hits are
 /// injected as candidate locations so the model names REAL files (grounded),
 /// never a hallucinated path.
@@ -1045,5 +1087,38 @@ mod tests {
             .get_openrouter_model_metadata("anything")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn zero_waste_138_deterministic_almanac_grounding_fires_only_when_no_file_pointer() {
+        let almanac = MockAlmanac(vec![AlmanacHit {
+            citation: "src/model_overlay.rs:244".to_string(),
+            path: "src/model_overlay.rs".to_string(),
+            line: 244,
+            name: "FEW_SHOT_EXEMPLAR".to_string(),
+            kind: "const".to_string(),
+        }]);
+
+        // Gap without any file pointer gets grounded via Almanac hits.
+        let thin = gap(
+            "EFFECTIVE: tighten autonomous recovery instructions",
+            "Make sure recovery does not fabricate commits",
+            r#"["unit test passes"]"#,
+        );
+        let grounded = deterministic_almanac_grounding(&thin, &almanac, 5)
+            .expect("thin gap missing file pointer must receive Almanac grounding");
+        assert!(grounded.contains("src/model_overlay.rs:244"));
+        assert!(grounded.contains("FEW_SHOT_EXEMPLAR"));
+
+        // Gap that already names a file pointer returns None (no redundant noise).
+        let concrete = gap(
+            "EFFECTIVE: tighten autonomous recovery in src/model_overlay.rs",
+            "Edit src/model_overlay.rs:244 to remove phantom commit instruction.",
+            r#"["cargo test --bin chump model_overlay"]"#,
+        );
+        assert!(
+            deterministic_almanac_grounding(&concrete, &almanac, 5).is_none(),
+            "already file-pointed gap must not receive redundant grounding"
+        );
     }
 }

@@ -1630,6 +1630,85 @@ fn verify_not_stub(work_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// EFFECTIVE-1932 (COG-031 step 3b): detect reward-hacked phantom doc commits where the
+/// commit message claims a code fix (`fix:` / `fix(...)` / `bugfix:`) yet the staged diff
+/// modifies ONLY markdown/documentation files (`*.md`, `docs/**`).
+///
+/// Receipt for the failure mode: COG-031 V9 (2026-04-20) — Qwen3-Coder committed
+/// `docs/architecture/COST_TRACKER_DESIGN.md` with message
+/// `fix(COMP-014): ensure record_completion increments call_count and updates cost totals`
+/// and zero source edits.
+///
+/// Legitimate documentation changes (where the subject mentions docs/readme/spec/typo/comment
+/// or does not claim a `fix(...)` code patch) pass untouched.
+pub(crate) fn commit_message_diff_mismatch_reason(
+    commit_msg: &str,
+    changed_paths: &[String],
+) -> Option<String> {
+    if changed_paths.is_empty() {
+        return None;
+    }
+    let all_docs_only = changed_paths.iter().all(|p| {
+        let low = p.to_ascii_lowercase();
+        (low.ends_with(".md") || low.starts_with("docs/")) && !is_source_file(p) && !is_test_file(p)
+    });
+    if !all_docs_only {
+        return None;
+    }
+    let subject = commit_msg
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let claims_code_fix = subject.starts_with("fix:")
+        || subject.starts_with("fix(")
+        || subject.starts_with("bugfix:")
+        || subject.starts_with("bugfix(");
+    let mentions_docs = [
+        "doc",
+        "docs",
+        "readme",
+        "markdown",
+        "comment",
+        "typo",
+        "spec",
+        "changelog",
+        "guide",
+        "roadmap",
+        "audit",
+    ]
+    .iter()
+    .any(|kw| subject.contains(kw));
+    if claims_code_fix && !mentions_docs {
+        return Some(format!(
+            "commit-vs-diff mismatch (EFFECTIVE-1932 / COG-031 step 3b): commit message claims a \
+             code fix ('{}') but staged diff modifies only documentation/markdown files ({}) — \
+             refusing phantom doc commit",
+            commit_msg.lines().next().unwrap_or("").trim(),
+            changed_paths.join(", ")
+        ));
+    }
+    None
+}
+
+fn verify_commit_message_matches_diff(work_dir: &Path, commit_msg: &str) -> Result<()> {
+    let wd = work_dir.to_string_lossy().to_string();
+    let numstat = Command::new("git")
+        .args(["-C", &wd, "diff", "--cached", "--numstat"])
+        .output()
+        .with_context(|| "git diff --cached --numstat (commit-vs-diff guard)")?;
+    let changed_paths: Vec<String> = String::from_utf8_lossy(&numstat.stdout)
+        .lines()
+        .filter_map(|l| l.split('\t').nth(2).map(|p| p.to_string()))
+        .filter(|p| !p.is_empty())
+        .collect();
+    if let Some(reason) = commit_message_diff_mismatch_reason(commit_msg, &changed_paths) {
+        bail!("{reason}");
+    }
+    Ok(())
+}
+
 fn verify_staged_edit(work_dir: &Path) -> Result<()> {
     let wd = work_dir.to_string_lossy().to_string();
     let out = Command::new("git")
@@ -1764,6 +1843,9 @@ fn guarded_stage_and_commit(
     // 3b. CREDIBLE-200: reject a STUB — no source edit + only placeholder test
     // assertions (the olive PR #7 failure mode: assert 1==1 x2, zero source edits).
     verify_not_stub(work_dir)?;
+    // 3c. EFFECTIVE-1932 (COG-031 step 3b): reject a phantom doc commit where the
+    // commit message claims a code fix (`fix(...)`) but the diff only touches `.md`/`docs/`.
+    verify_commit_message_matches_diff(work_dir, commit_msg)?;
     // 4a. resolve the current branch.
     let branch = Command::new("git")
         .args(["-C", &wd, "rev-parse", "--abbrev-ref", "HEAD"])
@@ -4570,6 +4652,37 @@ mod tests {
         // Docs/config-only changes are out of the stub-guard's scope.
         let paths = vec!["README.md".to_string(), "config.yaml".to_string()];
         assert!(stub_reason(&paths, &[]).is_none());
+    }
+
+    #[test]
+    fn effective1932_commit_message_diff_mismatch_guard() {
+        // COG-031 V9 failure mode: commit message claims a code fix on a symbol,
+        // but diff touches only a markdown file under docs/.
+        let doc_only = vec!["docs/architecture/COST_TRACKER_DESIGN.md".to_string()];
+        let v9_msg =
+            "fix(COMP-014): ensure record_completion increments call_count and updates cost totals";
+        let reason = commit_message_diff_mismatch_reason(v9_msg, &doc_only);
+        assert!(
+            reason.is_some(),
+            "V9 phantom doc commit claiming code fix must be rejected"
+        );
+
+        // Real code edit with the same message passes.
+        let code_and_doc = vec![
+            "src/cost_tracker.rs".to_string(),
+            "docs/architecture/COST_TRACKER_DESIGN.md".to_string(),
+        ];
+        assert!(
+            commit_message_diff_mismatch_reason(v9_msg, &code_and_doc).is_none(),
+            "commit touching real source file must pass"
+        );
+
+        // Legitimate doc fix that mentions docs/readme in subject passes.
+        let doc_fix_msg = "fix(docs): correct typo in COST_TRACKER_DESIGN.md";
+        assert!(
+            commit_message_diff_mismatch_reason(doc_fix_msg, &doc_only).is_none(),
+            "legitimate doc fix naming docs must pass"
+        );
     }
 
     #[test]

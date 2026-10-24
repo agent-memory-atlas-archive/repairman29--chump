@@ -241,14 +241,14 @@ is bot-merge.sh — anything else is wasted budget that may exhaust your \
 iteration cap before you ship. Commits that are not pushed via bot-merge.sh \
 are invisible to the orchestrator and the run is marked failed.\n\
 \n\
-## RECOVERY — if there is genuinely no change to make\n\
+## RECOVERY — if the gap is already satisfied on main\n\
 \n\
-If after reading the gap entry you determine the work is already done, or the \
-gap is a documentation/spec task with no code change needed, write the \
-documentation file as your patch_file action, commit it, and ship via \
-bot-merge.sh. \"Nothing to commit\" is never an acceptable terminal state — \
-either find work to do for the gap, or report a concrete blocker (with file \
-path + reason) and exit. Do NOT ask the user to clarify.\n\
+If after reading the target file and running the acceptance check you verify \
+the work is ALREADY implemented on main, do NOT fabricate a cosmetic or \
+documentation commit (phantom commits are rejected by the ship gate). \
+Instead, reply with `GAP_ALREADY_SATISFIED: <file:line proof>` (or \
+`BLOCKED: <file:line + reason>` if a concrete blocker prevents the fix) and \
+exit immediately. Do NOT ask the user to clarify.\n\
 \n\
 Now do the same for your gap.\n\
 \n";
@@ -268,10 +268,10 @@ pub fn overlay_for_family(family: ModelFamily) -> Option<String> {
 }
 
 /// Step-1 per-family directive only — the instructional preamble without
-/// the few-shot exemplar. Kept as a separate function so future steps can
-/// reuse the directives independently (e.g. step 3 might inject directives
-/// into the system message and exemplars into the user message separately).
-fn overlay_directive_for_family(family: ModelFamily) -> Option<&'static str> {
+/// the few-shot exemplar. Exposed publicly for COG-031 step 3c (EFFECTIVE-1932)
+/// so callers can inject the autonomous-job directive into the system prompt
+/// while keeping the few-shot exemplar in the user message.
+pub fn overlay_directive_for_family(family: ModelFamily) -> Option<&'static str> {
     match family {
         ModelFamily::Sonnet | ModelFamily::OtherClaude => None,
         ModelFamily::Other => None,
@@ -343,6 +343,18 @@ fn overlay_directive_for_family(family: ModelFamily) -> Option<&'static str> {
 pub fn maybe_overlay_from_env() -> Option<String> {
     let model = std::env::var("OPENAI_MODEL").ok()?;
     overlay_for_family(detect_model_family(&model))
+}
+
+/// COG-031 step 3c (EFFECTIVE-1932): return the per-family behavioral directive
+/// (`OPERATING MODE: AUTONOMOUS JOB, NOT CHAT`) for injection into the agent's
+/// system prompt when `OPENAI_MODEL` matches a non-Sonnet problem family.
+///
+/// Pairing this with [`maybe_overlay_from_env`] in the user message ensures
+/// open-weight models weight the autonomous-job contract across both system and
+/// user channels instead of letting chat-RLHF priors override a user-only preamble.
+pub fn maybe_system_directive_from_env() -> Option<String> {
+    let model = std::env::var("OPENAI_MODEL").ok()?;
+    overlay_directive_for_family(detect_model_family(&model)).map(str::to_string)
 }
 
 /// INFRA-741: return a human-readable capability summary for `model` using the
@@ -550,9 +562,56 @@ mod tests {
                 "{f:?} overlay must explicitly mandate bot-merge as next call after commit"
             );
             assert!(
-                o.contains("Nothing to commit") && o.contains("never an acceptable terminal state"),
-                "{f:?} overlay must address V8's 'nothing to commit, asking user' failure mode"
+                o.contains("GAP_ALREADY_SATISFIED")
+                    && o.contains("do NOT fabricate a cosmetic or documentation commit"),
+                "{f:?} overlay must require honest GAP_ALREADY_SATISFIED exit instead of phantom commits"
             );
+        }
+    }
+
+    /// CREDIBLE-1605: verify the RECOVERY block never instructs models to
+    /// fabricate documentation commits when a gap is already satisfied on main.
+    #[test]
+    fn credible_1605_recovery_bans_phantom_doc_commits_and_requires_honest_exit() {
+        for f in [
+            ModelFamily::QwenChat,
+            ModelFamily::QwenCoder,
+            ModelFamily::LlamaInstruct,
+            ModelFamily::DeepSeek,
+        ] {
+            let o = overlay_for_family(f).unwrap_or_default();
+            assert!(
+                !o.contains("write the documentation file as your patch_file action"),
+                "{f:?} overlay must not instruct model to fabricate doc files"
+            );
+            assert!(
+                o.contains("GAP_ALREADY_SATISFIED"),
+                "{f:?} overlay must instruct model to emit GAP_ALREADY_SATISFIED"
+            );
+        }
+    }
+
+    /// EFFECTIVE-1932 (COG-031 step 3c): verify system-directive helper returns
+    /// the behavioral framing without duplicating the few-shot exemplar.
+    #[test]
+    #[serial(openai_model_env)]
+    fn effective_1932_system_directive_from_env_splits_framing_from_exemplar() {
+        let prev = std::env::var("OPENAI_MODEL").ok();
+
+        std::env::set_var("OPENAI_MODEL", "deepseek-ai/DeepSeek-V3");
+        let sys = maybe_system_directive_from_env().expect("deepseek should get system directive");
+        assert!(sys.contains("OPERATING MODE: AUTONOMOUS JOB, NOT CHAT"));
+        assert!(
+            !sys.contains("EXAMPLE — what a successful run looks like"),
+            "system directive must stay concise and exclude the user-turn exemplar"
+        );
+
+        std::env::set_var("OPENAI_MODEL", "claude-sonnet-4-5-20250929");
+        assert!(maybe_system_directive_from_env().is_none());
+
+        match prev {
+            Some(v) => std::env::set_var("OPENAI_MODEL", v),
+            None => std::env::remove_var("OPENAI_MODEL"),
         }
     }
 

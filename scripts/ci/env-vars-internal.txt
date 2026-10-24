@@ -3687,3 +3687,8 @@ CHUMPD_BIN
 # budget, state dir, claude binary, handoff source) is pinned in code.
 CHUMP_ARCHITECT_TICK_ENABLED
 CHUMP_ARCHITECT_TICK_MODEL
+
+# AUTO (INFRA-1853): chump-commit.sh detected new CHUMP_* env refs.
+# Replace the AUTO marker with a real description on the next commit.
+# detected in: (standard input)
+CHUMP_LESSONS_MIN_TIER

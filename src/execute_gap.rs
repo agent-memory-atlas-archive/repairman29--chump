@@ -67,7 +67,9 @@ use tokio_util::sync::CancellationToken;
 use crate::agent_factory::build_chump_agent_cli;
 use crate::agent_loop::ChumpAgent;
 use crate::ambient_stream::locate_ambient;
-use crate::model_overlay::{detect_model_family, maybe_overlay_from_env, ModelFamily};
+use crate::model_overlay::{
+    detect_model_family, maybe_overlay_from_env, maybe_system_directive_from_env, ModelFamily,
+};
 use crate::plan_mode::{self, PlanOutcome};
 
 // ──────────────────────────────────────────────────────────────────────
@@ -590,13 +592,24 @@ fn build_free_tier_prompt(gap_id: &str, repo_root: &std::path::Path) -> String {
         .unwrap_or(false);
     let gap_yaml = gap_row
         .map(|row| {
+            let almanac_grounding = if crate::almanac_tool::almanac_available() {
+                let client =
+                    chump_gap_store::maintenance::enricher::CliAlmanacClient::new("chump");
+                chump_gap_store::maintenance::enricher::deterministic_almanac_grounding(
+                    &row, &client, 5,
+                )
+                .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let full_desc = format!("{}{}", row.description, almanac_grounding);
             format!(
                 "id: {}\ntitle: {}\npriority: {}\neffort: {}\ndescription: |\n  {}\nacceptance_criteria: |\n  {}",
                 row.id,
                 row.title,
                 row.priority,
                 row.effort,
-                row.description.replace('\n', "\n  "),
+                full_desc.replace('\n', "\n  "),
                 row.acceptance_criteria.replace('\n', "\n  "),
             )
         })
@@ -754,8 +767,15 @@ fn build_free_tier_agent() -> Result<ChumpAgent> {
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(30);
 
+    // EFFECTIVE-1932 (COG-031 step 3c): inject the per-family autonomous-job
+    // directive into the system prompt so weak instruction-following models
+    // weight both the system channel and the user-turn exemplar.
+    let system_prompt = maybe_system_directive_from_env();
+
     Ok(ChumpAgent::new(
-        provider, registry, None, // no system prompt — user message IS the full prompt
+        provider,
+        registry,
+        system_prompt,
         None, // no session manager — single-shot
         None, // no event channel for CLI
         max_iter,
