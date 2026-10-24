@@ -117,20 +117,66 @@ JSON
 EOF
     chmod +x "$STUBDIR/claude"
 
-    # Create a synthetic medium gap. Keep the description path-free so the AST
-    # pre-step surfaces no candidates (no repo crawl needed).
+    # CREDIBLE-1530: Create a synthetic medium gap deterministically in an
+    # isolated temp repo directory ($WORK, which has no docs/gaps/ mirror so
+    # gap list / reserve never auto-imports ~4,194 repo gaps), pass --force so
+    # host farmer-RED state cannot refuse the fixture seed, and capture the
+    # reserved ID directly (never fall back to the last open gap).
+    # CREDIBLE-1530 AC2: probing `gap list` on the empty temp store with
+    # CHUMP_REPO="$WORK" must not auto-import docs/gaps (~4,194 rows).
+    PRE_COUNT="$(
+        cd "$WORK" && \
+        CHUMP_REPO="$WORK" \
+        CHUMP_STATE_DB="$TMPDB" \
+        "$CHUMP" gap list --status open --json 2>/dev/null | grep -c '"id":' || true
+    )"
+    if [[ "$PRE_COUNT" -ne 0 ]]; then
+        fail "CREDIBLE-1530: empty temp store auto-imported $PRE_COUNT rows on gap list"
+        exit 1
+    fi
+
     FIXTURE_TITLE="INFRA-8573-test-fixture-claude-backend"
-    CHUMP_GAP_RESERVE_NO_SIMILARITY=1 CHUMP_STATE_DB="$TMPDB" "$CHUMP" gap reserve \
-        --domain INFRA --title "$FIXTURE_TITLE" --force-duplicate 2>/dev/null || true
-    # `gap list --json` is pretty-printed: `"id": "INFRA-NNNN"` (note the space).
-    FIXTURE_ID=$(CHUMP_STATE_DB="$TMPDB" "$CHUMP" gap list --status open --json 2>/dev/null \
-        | grep -o '"id": *"[^"]*"' | tail -1 | sed 's/.*"id": *"//;s/"//') || true
+    RESERVE_OUT="$(
+        cd "$WORK" && \
+        CHUMP_REPO="$WORK" \
+        CHUMP_STATE_DB="$TMPDB" \
+        CHUMP_RESERVE_SCAN_OPEN_PRS=0 \
+        FLEET_029_AMBIENT_GLANCE_SKIP=1 \
+        "$CHUMP" gap reserve \
+            --domain INFRA \
+            --title "$FIXTURE_TITLE" \
+            --priority P2 \
+            --force \
+            --force-duplicate 2>&1
+    )" || {
+        fail "CREDIBLE-1530: gap reserve failed: $RESERVE_OUT"
+        exit 1
+    }
+    FIXTURE_ID="$(echo "$RESERVE_OUT" | grep -E '^INFRA-[0-9]+$' | tail -1)"
+    if [[ -z "${FIXTURE_ID:-}" ]]; then
+        fail "CREDIBLE-1530: gap reserve did not return an INFRA-* ID: $RESERVE_OUT"
+        exit 1
+    fi
+    ok "CREDIBLE-1530: created deterministic fixture gap $FIXTURE_ID"
+
+    # CREDIBLE-1530 AC2: temp state.db holds only fixture rows (no auto-import of docs/gaps).
+    ROW_COUNT="$(
+        cd "$WORK" && \
+        CHUMP_REPO="$WORK" \
+        CHUMP_STATE_DB="$TMPDB" \
+        "$CHUMP" gap list --json 2>/dev/null | grep -c '"id":' || true
+    )"
+    if [[ "$ROW_COUNT" -eq 1 ]]; then
+        ok "CREDIBLE-1530: temp state.db holds only the 1 fixture row (no docs/gaps auto-import)"
+    else
+        fail "CREDIBLE-1530: expected 1 row in temp state.db, got $ROW_COUNT"
+    fi
 
     if [[ -z "${FIXTURE_ID:-}" ]]; then
         fail "could not create fixture gap — runtime tests skipped"
     else
-        CHUMP_STATE_DB="$TMPDB" "$CHUMP" gap set "$FIXTURE_ID" --effort m 2>/dev/null || true
-        CHUMP_STATE_DB="$TMPDB" "$CHUMP" gap set "$FIXTURE_ID" \
+        CHUMP_REPO="$WORK" CHUMP_STATE_DB="$TMPDB" "$CHUMP" gap set "$FIXTURE_ID" --effort m 2>/dev/null || true
+        CHUMP_REPO="$WORK" CHUMP_STATE_DB="$TMPDB" "$CHUMP" gap set "$FIXTURE_ID" \
             --description "decompose this placeholder work into slices" 2>/dev/null || true
 
         # Common env for the runtime decompose calls: a DEAD Ollama endpoint so
@@ -139,6 +185,7 @@ EOF
         run_decompose() {
             local backend="$1"
             PATH="$STUBDIR:$PATH" \
+            CHUMP_REPO="$WORK" \
             CHUMP_STATE_DB="$TMPDB" \
             OPENAI_API_BASE="http://127.0.0.1:9/v1" \
             OPENAI_API_KEY="ollama" \
