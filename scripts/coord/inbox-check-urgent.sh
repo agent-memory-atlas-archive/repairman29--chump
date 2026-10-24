@@ -91,16 +91,13 @@ echo "<system-reminder>"
 if [[ -n "$FIX_TRUNK_SIGNALS" ]]; then
     echo "** FIX-TRUNK PRIORITY SIGNAL (INFRA-2341) **"
     echo "** Trunk (main ci.yml) is RED.  The fix-trunk-dispatcher has claimed the"
-    echo "** following gap(s) and signaled this session to drive them to merge"
-    echo "** BEFORE continuing other work.  Switch to the worktree and ship the fix:"
+    echo "** following gap(s) for trunk repair:"
     echo ""
     while IFS=$'\t' read -r gap prio wt; do
         [[ -z "$gap" ]] && continue
         printf '   %s  %s  worktree=%s\n' "$prio" "$gap" "$wt"
     done <<< "$FIX_TRUNK_SIGNALS"
     echo ""
-    echo "** Ship pipeline (from the worktree):"
-    echo "**   scripts/coord/bot-merge.sh --gap <GAP-ID> --auto-merge"
     echo "** Canonical doctrine: docs/process/PR_RESCUE_PROCEDURE.md"
     echo ""
 fi

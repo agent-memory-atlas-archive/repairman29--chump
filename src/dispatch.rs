@@ -1226,6 +1226,13 @@ fn headless_command_skeleton(model: &str) -> Command {
     // Probe on cuphead (claude 2.1.197): with this flag a haiku session lists
     // NONE for tools named *Wakeup*/*Monitor*; without it, both are listed.
     cmd.args(["--disallowedTools", HEADLESS_DISALLOWED_TOOLS]);
+    // CREDIBLE-1581: disable all project hooks in headless `claude -p` runs so
+    // PreToolUse/PostToolUse hooks (inbox-check-urgent.sh, ambient-context-inject.sh)
+    // cannot inject unfiltered URGENT-INBOX or ambient text into fleet workers.
+    cmd.args(["--settings", "{\"disableAllHooks\":true}"]);
+    // CREDIBLE-1581: disable all project hooks in headless `claude -p` runs so
+    // PreToolUse/PostToolUse hooks (inbox-check-urgent.sh, ambient-context-inject.sh)
+    // cannot inject unfiltered URGENT-INBOX or ambient text into fleet workers.
     cmd.stdin(std::process::Stdio::piped());
     if !model.is_empty() {
         cmd.args(["--model", model]);
@@ -2887,13 +2894,15 @@ mod tests {
                 "--dangerously-skip-permissions",
                 "--disallowedTools",
                 "ScheduleWakeup,Monitor",
+                "--settings",
+                "{\"disableAllHooks\":true}",
                 "--model",
                 "claude-sonnet-4-6"
             ],
             "headless command args changed shape — verify no caller reintroduces \
              `.arg(prompt)` after `-p`, which broke 100% of dispatches (INFRA-3675)"
         );
-        // No model → still exactly the fixed two flags, no trailing empty arg.
+        // No model → still exactly the fixed flags, no trailing empty arg.
         let cmd_no_model = headless_command_skeleton("");
         let args_no_model: Vec<&str> = cmd_no_model
             .get_args()
@@ -2905,8 +2914,50 @@ mod tests {
                 "-p",
                 "--dangerously-skip-permissions",
                 "--disallowedTools",
-                "ScheduleWakeup,Monitor"
+                "ScheduleWakeup,Monitor",
+                "--settings",
+                "{\"disableAllHooks\":true}"
             ]
+        );
+    }
+
+    /// CREDIBLE-1581 AC2: spawn a stub claude binary with the exact argv built by
+    /// `headless_command_skeleton` and assert `--settings {"disableAllHooks":true}`
+    /// is delivered to the child process.
+    #[test]
+    fn credible_1581_headless_spawn_argv_disables_all_hooks() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub = tmp.path().join("claude");
+        let out_file = tmp.path().join("argv.txt");
+        let script = format!(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"{}\"\n",
+            out_file.display()
+        );
+        std::fs::write(&stub, script).expect("write stub");
+        let mut perms = std::fs::metadata(&stub).expect("meta").permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&stub, perms).expect("chmod");
+
+        let skel = headless_command_skeleton("claude-sonnet-4-6");
+        let mut cmd = Command::new(&stub);
+        cmd.args(skel.get_args());
+        let status = cmd.status().expect("spawn stub claude");
+        assert!(status.success(), "stub claude exited non-zero");
+
+        let captured: Vec<String> = std::fs::read_to_string(&out_file)
+            .expect("read argv.txt")
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let i = captured
+            .iter()
+            .position(|a| a == "--settings")
+            .expect("--settings flag present in spawned argv");
+        assert_eq!(
+            captured.get(i + 1).map(String::as_str),
+            Some("{\"disableAllHooks\":true}"),
+            "expected disableAllHooks setting immediately after --settings"
         );
     }
 
