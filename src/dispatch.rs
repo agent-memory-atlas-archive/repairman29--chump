@@ -355,8 +355,375 @@ pub fn check_workspace_auto_merge_gate(
     Ok(())
 }
 
+/// INFRA-8114 / RESILIENT-1494: Resolve the path to `~/.chump/oauth-token.json`
+/// (honoring `CHUMP_OAUTH_TOKEN_FILE`, `CHUMP_OAUTH_TOKEN_PATH`, `CHUMP_HOME`,
+/// and `HOME`).
+pub fn oauth_token_file_path() -> Option<PathBuf> {
+    for var in ["CHUMP_OAUTH_TOKEN_FILE", "CHUMP_OAUTH_TOKEN_PATH"] {
+        if let Ok(v) = std::env::var(var) {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                return Some(PathBuf::from(trimmed));
+            }
+        }
+    }
+    if let Ok(chump_home) = std::env::var("CHUMP_HOME") {
+        let trimmed = chump_home.trim();
+        if !trimmed.is_empty() {
+            let candidate = PathBuf::from(trimmed).join(".chump/oauth-token.json");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let trimmed = home.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed).join(".chump/oauth-token.json"));
+        }
+    }
+    None
+}
+
+/// INFRA-8114 / RESILIENT-1494: Read an OAuth token from `path`
+/// (`~/.chump/oauth-token.json`), supporting `"token"`, `"access_token"`,
+/// `"claudeAiOauthToken"`, `"oauth_token"`, or a raw token string.
+pub fn read_oauth_token_from_file(path: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        for key in ["token", "access_token", "claudeAiOauthToken", "oauth_token"] {
+            if let Some(s) = val.get(key).and_then(|v| v.as_str()) {
+                let t = s.trim();
+                if !t.is_empty() {
+                    return Some(t.to_string());
+                }
+            }
+        }
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+/// INFRA-8114 / RESILIENT-1494: Ensure `CLAUDE_CODE_OAUTH_TOKEN` is populated
+/// in the caller environment (and on `cmd`, if provided) by sourcing
+/// `~/.chump/oauth-token.json` when `CLAUDE_CODE_OAUTH_TOKEN` is absent in the
+/// caller environment.
+pub fn ensure_oauth_token_env(cmd: Option<&mut Command>) -> Option<String> {
+    let existing = std::env::var("CLAUDE_CODE_OAUTH_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let token = match existing {
+        Some(tok) => Some(tok),
+        None => {
+            let path = oauth_token_file_path()?;
+            let tok = read_oauth_token_from_file(&path)?;
+            std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", &tok);
+            Some(tok)
+        }
+    };
+    if let (Some(c), Some(ref tok)) = (cmd, &token) {
+        c.env("CLAUDE_CODE_OAUTH_TOKEN", tok);
+    }
+    token
+}
+
+/// INFRA-8114: Return true iff `git log <base>..<branch>` in `repo_dir` shows
+/// at least 1 commit. Used by the resume path and pre-ship guard so dispatch
+/// NEVER skips `IMPLEMENT` or marks a gap implemented on a zero-commit branch.
+pub fn branch_has_commits_ahead(repo_dir: &Path, base: &str, branch: &str) -> bool {
+    let range = format!("{base}..{branch}");
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo_dir)
+        .args(["log", "--oneline", &range])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
+    match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .any(|l| !l.trim().is_empty()),
+        _ => false,
+    }
+}
+
+/// INFRA-8114: Resume gate — returns `true` ONLY when `branch` has `>= 1`
+/// commit ahead of `base` (`origin/main`). A branch with zero commits must
+/// never skip `IMPLEMENT`.
+pub fn can_resume_skip_implement(repo_dir: &Path, base: &str, branch: &str) -> bool {
+    branch_has_commits_ahead(repo_dir, base, branch)
+}
+
+/// INFRA-8114: Clean up orphan worktree, local branch, and lease file when a
+/// dispatch/ship fails on an unshipped branch so no orphan is left to re-pick
+/// or false-close.
+pub fn cleanup_failed_dispatch_workspace(
+    repo_root: &Path,
+    worktree: &Path,
+    branch: &str,
+    session_id: &str,
+) {
+    if !session_id.is_empty() {
+        let wt_lease = worktree
+            .join(".chump-locks")
+            .join(format!("{session_id}.json"));
+        let _ = std::fs::remove_file(wt_lease);
+        let root_lease = repo_root
+            .join(".chump-locks")
+            .join(format!("{session_id}.json"));
+        let _ = std::fs::remove_file(root_lease);
+    }
+    if worktree != repo_root && worktree.exists() {
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(repo_root)
+            .args(["worktree", "remove", "--force"])
+            .arg(worktree)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let _ = std::fs::remove_dir_all(worktree);
+    }
+    if !branch.is_empty() && branch != "main" && branch != "HEAD" {
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(repo_root)
+            .args(["branch", "-D", branch])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
+/// RESILIENT-1642: Resolve the single node-wide shared `CARGO_TARGET_DIR`
+/// (matching `scripts/ci/lib/resolve-cargo-target-dir.sh` from `ZERO-WASTE-134`):
+///   1. `CARGO_TARGET_DIR` if set, non-empty, and not inside `.claude/worktrees/`
+///   2. `CHUMP_CARGO_TARGET` if set, non-empty, and not inside `.claude/worktrees/`
+///   3. `$HOME/.cargo/chump-shared-target`
+pub fn resolve_shared_cargo_target_dir() -> PathBuf {
+    for var in ["CARGO_TARGET_DIR", "CHUMP_CARGO_TARGET"] {
+        if let Ok(val) = std::env::var(var) {
+            let trimmed = val.trim();
+            if !trimmed.is_empty() && !trimmed.contains(".claude/worktrees/") {
+                let p = PathBuf::from(trimmed);
+                let _ = std::fs::create_dir_all(&p);
+                return p;
+            }
+        }
+    }
+    let base = std::env::var("HOME")
+        .ok()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    let shared = base.join(".cargo/chump-shared-target");
+    let _ = std::fs::create_dir_all(&shared);
+    shared
+}
+
+/// RESILIENT-1494: Default subagent budget when no effort or env override is
+/// present (`>= 1800s`, replacing the old 900s cliff).
+pub const DEFAULT_SUBAGENT_BUDGET_SECS: u64 = 1800;
+
+/// RESILIENT-1494: Effort-scaled subagent budget:
+/// `xs` -> 1200s, `s` -> 2400s, `m` -> 3600s, `l` -> 5400s, `xl`/unknown -> 5400s.
+pub fn budget_secs_for_effort(effort: &str) -> u64 {
+    match effort.trim().to_ascii_lowercase().as_str() {
+        "xs" => 1200,
+        "s" => 2400,
+        "m" => 3600,
+        "l" => 5400,
+        "xl" => 5400,
+        _ => 5400,
+    }
+}
+
+/// RESILIENT-1494: Resolve subagent budget in seconds, honoring
+/// `CHUMP_SUBAGENT_BUDGET_S`, `CHUMP_DISPATCH_TIMEOUT_SECS`, and legacy
+/// `CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S` before scaling by `effort` (or falling
+/// back to [`DEFAULT_SUBAGENT_BUDGET_SECS`]).
+pub fn resolve_subagent_budget_secs(effort: Option<&str>) -> u64 {
+    for var in [
+        "CHUMP_SUBAGENT_BUDGET_S",
+        "CHUMP_DISPATCH_TIMEOUT_SECS",
+        "CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S",
+    ] {
+        if let Ok(val) = std::env::var(var) {
+            if let Ok(parsed) = val.trim().parse::<u64>() {
+                return parsed;
+            }
+        }
+    }
+    match effort.map(str::trim).filter(|e| !e.is_empty()) {
+        Some(eff) => budget_secs_for_effort(eff),
+        None => DEFAULT_SUBAGENT_BUDGET_SECS,
+    }
+}
+
+/// RESILIENT-1494: Resolve the subagent budget for `gap_id` by checking env
+/// overrides first, then looking up the gap's `effort` in the canonical store.
+pub fn resolve_subagent_budget_secs_for_gap(repo_root: &Path, gap_id: &str) -> u64 {
+    let effort = crate::dispatch_repair::load_canonical_gap(repo_root, gap_id)
+        .ok()
+        .map(|row| row.effort);
+    resolve_subagent_budget_secs(effort.as_deref())
+}
+
+/// RESILIENT-1494: Pure predicate — returns `true` when the 1-minute load
+/// average exceeds `nproc` (`load_1m > nproc as f64`), pausing the dispatch
+/// budget clock while the host is CPU-saturated.
+pub fn is_load_exceeding_nproc(load_1m: f64, nproc: usize) -> bool {
+    nproc > 0 && load_1m > (nproc as f64)
+}
+
+/// Read `(load_1m, nproc)` from the OS.
+pub fn current_load_1m_and_nproc() -> (f64, usize) {
+    let nproc = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    #[cfg(unix)]
+    let load_1m = {
+        let mut avg = [0.0f64; 1];
+        // SAFETY: getloadavg writes at most 1 element into `avg`.
+        let n = unsafe { libc::getloadavg(avg.as_mut_ptr(), 1) };
+        if n == 1 {
+            avg[0]
+        } else {
+            0.0
+        }
+    };
+    #[cfg(not(unix))]
+    let load_1m = 0.0;
+    (load_1m, nproc)
+}
+
+fn host_load_exceeds_nproc() -> bool {
+    let (load_1m, nproc) = current_load_1m_and_nproc();
+    is_load_exceeding_nproc(load_1m, nproc)
+}
+
+/// RESILIENT-1494: Before a budget kill (`SIGTERM`), commit any staged or
+/// modified work with a `wip:` subject, push `HEAD` to
+/// `origin refs/stash/<gap>-<ts>`, and append an entry to
+/// `docs/process/STASHED_WORK.md`. Returns `Some(stash_ref)` if a commit was
+/// salvaged/pushed.
+pub fn salvage_wip_before_budget_kill(worktree: &Path, gap_id: &str) -> Option<String> {
+    if !worktree.is_dir() {
+        return None;
+    }
+    let status_out = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["status", "--porcelain"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let dirty = status_out.status.success()
+        && String::from_utf8_lossy(&status_out.stdout)
+            .lines()
+            .any(|l| !l.trim().is_empty());
+    if dirty {
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(worktree)
+            .args(["add", "-A"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        let msg = format!("wip({gap_id}): partial progress salvaged before budget kill");
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(worktree)
+            .args([
+                "-c",
+                "user.name=chump-dispatch",
+                "-c",
+                "user.email=chump@fleet.local",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "commit",
+                "--no-verify",
+                "-m",
+                &msg,
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    } else if !branch_has_commits_ahead(worktree, "origin/main", "HEAD") {
+        return None;
+    }
+
+    let head_sha = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["rev-parse", "--short", "HEAD"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())?;
+
+    let now = chrono::Utc::now();
+    let ts = now.format("%Y%m%d-%H%M%S").to_string();
+    let date = now.format("%Y-%m-%d").to_string();
+    let slug = gap_id.to_ascii_lowercase().replace('_', "-");
+    let stash_ref = format!("refs/stash/{slug}-{ts}");
+    let refspec = format!("HEAD:{stash_ref}");
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(worktree)
+        .args(["push", "--no-verify", "origin", &refspec])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    let row = format!(
+        "| `{stash_ref}` | {gap_id} | {date} | `{head_sha}` | wip: dispatch budget-kill salvage |\n"
+    );
+    let mut targets = vec![worktree.join("docs/process/STASHED_WORK.md")];
+    if let Some(checkout) = chump_gap_store::store_path::resolve(worktree).checkout {
+        let main_doc = checkout.join("docs/process/STASHED_WORK.md");
+        if !targets.contains(&main_doc) {
+            targets.push(main_doc);
+        }
+    }
+    for doc in targets {
+        if let Some(parent) = doc.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        use std::io::Write as _;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&doc)
+        {
+            let _ = f.write_all(row.as_bytes());
+        }
+    }
+    Some(stash_ref)
+}
+
 pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
     let started = std::time::Instant::now();
+
+    // INFRA-8114 / RESILIENT-1494: source ~/.chump/oauth-token.json into
+    // CLAUDE_CODE_OAUTH_TOKEN when absent in caller env so manual `chump dispatch`
+    // and `claude -p` authenticate from any shell.
+    ensure_oauth_token_env(None);
 
     // CREDIBLE-1577 AC1: refuse --auto-merge before creating worktree or
     // spawning the agent when --paths or the existing branch diff touches a
@@ -369,6 +736,21 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
             opts.gap_id,
             hit
         );
+    }
+
+    // RESILIENT-1494: Resolve the gap from the CANONICAL store before creating
+    // a worktree or spawning an agent; fail loud if the gap cannot be loaded so
+    // we never spawn `claude -p` on an empty/fallback prompt.
+    if opts.mode == DispatchMode::Work && !matches!(opts.work, WorkBackend::Interactive) {
+        let row = crate::dispatch_repair::load_canonical_gap(&opts.repo_root, opts.gap_id)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        if std::env::var_os("CHUMP_SUBAGENT_BUDGET_S").is_none()
+            && std::env::var_os("CHUMP_DISPATCH_TIMEOUT_SECS").is_none()
+            && std::env::var_os("CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S").is_none()
+        {
+            let effort_budget = budget_secs_for_effort(&row.effort);
+            std::env::set_var("CHUMP_SUBAGENT_BUDGET_S", effort_budget.to_string());
+        }
     }
 
     // Build the workspace: working_dir is either a fresh worktree (Headless
@@ -396,13 +778,20 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
 
     // Step 3: caller's work happens here. Interactive = caller already did
     // it; Headless / ExecGap = spawn the work-doing process and wait.
-    // INFRA-8198: do NOT early-`return` on error — every branch below falls
-    // through to the single exit block at the end of this function so the
-    // `[dispatch] ... exit=` line and `kind=dispatch_exit` ambient emit
-    // happen exactly once, no matter which path was taken. This is the
-    // fix for the bug where a dispatch could print nothing distinguishing
-    // success/failure and exit 0 while its `claude -p` child kept running.
-    let work_result = do_work(&workspace);
+    // INFRA-8114: if resume is requested, verify the branch actually has >= 1
+    // commit ahead of origin/main before skipping IMPLEMENT. Never skip
+    // IMPLEMENT on an empty/commitless branch.
+    let resume_skip = std::env::var("CHUMP_DISPATCH_RESUME").as_deref() == Ok("1")
+        && can_resume_skip_implement(workspace.working_dir(), "origin/main", &branch);
+    let work_result = if resume_skip {
+        eprintln!(
+            "[dispatch] {}: resume verified commits on origin/main..{} — skipping IMPLEMENT",
+            opts.gap_id, branch
+        );
+        Ok(())
+    } else {
+        do_work(&workspace)
+    };
     // INFRA-8203: a work child that exited (or was killed) with its changes
     // uncommitted and nothing committed above origin/main has stranded its
     // work. Save it as <GAP>.stranded.patch and emit kind=dispatch_work_stranded
@@ -412,17 +801,47 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
         // Always release before propagating the error so a failed work
         // step doesn't leave a stale lease. INFRA-1243: use retry+emit path.
         release_with_retry(&workspace)?;
+        cleanup_failed_dispatch_workspace(
+            &opts.repo_root,
+            workspace.working_dir(),
+            &branch,
+            &workspace.session_id,
+        );
         ShipResult::Aborted {
             error: format!("work step failed: {e:#}"),
         }
     } else if let Some(s) = stranded {
         release_with_retry(&workspace)?;
+        cleanup_failed_dispatch_workspace(
+            &opts.repo_root,
+            workspace.working_dir(),
+            &branch,
+            &workspace.session_id,
+        );
         ShipResult::Aborted {
             error: format!(
                 "work stranded: {} uncommitted path(s), no commit above origin/main; \
                  patch saved to {} (INFRA-8203)",
                 s.files,
                 s.patch_path.display()
+            ),
+        }
+    } else if opts.mode == DispatchMode::Work
+        && !matches!(opts.work, WorkBackend::Interactive)
+        && !branch_has_commits_ahead(workspace.working_dir(), "origin/main", "HEAD")
+    {
+        // INFRA-8114: never ship or mark a gap implemented when the branch has
+        // ZERO commits ahead of origin/main.
+        release_with_retry(&workspace)?;
+        cleanup_failed_dispatch_workspace(
+            &opts.repo_root,
+            workspace.working_dir(),
+            &branch,
+            &workspace.session_id,
+        );
+        ShipResult::Aborted {
+            error: format!(
+                "INFRA-8114: branch {branch} has zero commits ahead of origin/main — refusing to ship empty branch"
             ),
         }
     } else {
@@ -447,6 +866,14 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
 
         // Step 5: always release the lease. INFRA-1243: retry+emit on failure.
         release_with_retry(&workspace)?;
+        if matches!(ship_result, ShipResult::Aborted { .. }) {
+            cleanup_failed_dispatch_workspace(
+                &opts.repo_root,
+                workspace.working_dir(),
+                &branch,
+                &workspace.session_id,
+            );
+        }
         ship_result
     };
 
@@ -1230,13 +1657,16 @@ fn headless_command_skeleton(model: &str) -> Command {
     // PreToolUse/PostToolUse hooks (inbox-check-urgent.sh, ambient-context-inject.sh)
     // cannot inject unfiltered URGENT-INBOX or ambient text into fleet workers.
     cmd.args(["--settings", "{\"disableAllHooks\":true}"]);
-    // CREDIBLE-1581: disable all project hooks in headless `claude -p` runs so
-    // PreToolUse/PostToolUse hooks (inbox-check-urgent.sh, ambient-context-inject.sh)
-    // cannot inject unfiltered URGENT-INBOX or ambient text into fleet workers.
     cmd.stdin(std::process::Stdio::piped());
     if !model.is_empty() {
         cmd.args(["--model", model]);
     }
+    // RESILIENT-1642: always export the node-wide shared CARGO_TARGET_DIR into
+    // the `claude -p` child so worktrees never grow private target/ dirs.
+    cmd.env("CARGO_TARGET_DIR", resolve_shared_cargo_target_dir());
+    // INFRA-8114 / RESILIENT-1494: populate CLAUDE_CODE_OAUTH_TOKEN from
+    // ~/.chump/oauth-token.json when absent in caller env.
+    ensure_oauth_token_env(Some(&mut cmd));
     cmd
 }
 
@@ -1258,6 +1688,9 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     // marks an intentional sandboxed root env. Fleet root nodes (helsinki runs as
     // root) need this or EVERY headless dispatch aborts with claude -p exit 1.
     cmd.env("IS_SANDBOX", "1");
+    // RESILIENT-1642: export the ZERO-WASTE-134 shared CARGO_TARGET_DIR into
+    // the `claude -p` child environment at the spawn site.
+    cmd.env("CARGO_TARGET_DIR", resolve_shared_cargo_target_dir());
     // Inherit env so spawned process sees CLAUDE_SESSION_ID / CHUMP_SESSION_ID
     // / lease metadata. Inherit stdio so the operator can see progress.
     // INFRA-302 blocker (3): cwd is the FRESH WORKTREE, NOT opts.repo_root —
@@ -1271,6 +1704,9 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     for (k, v) in active_auth.env_pairs() {
         cmd.env(k, v);
     }
+    // INFRA-8114 / RESILIENT-1494: ensure CLAUDE_CODE_OAUTH_TOKEN is sourced
+    // from ~/.chump/oauth-token.json when absent in caller env.
+    ensure_oauth_token_env(Some(&mut cmd));
     // INFRA-8204: explicit, not merely inherited — see ship()'s comment.
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
@@ -1375,8 +1811,9 @@ fn spawn_exec_gap(ws: &Workspace) -> Result<()> {
 /// loop can be driven in tests with second-scale values instead of the
 /// production 900s/3600s deadlines, without mutating process env.
 struct HangConfig {
-    /// CHUMP_SUBAGENT_BUDGET_S (legacy CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S),
-    /// default 900. Wall-clock; 0 disables.
+    /// CHUMP_SUBAGENT_BUDGET_S / CHUMP_DISPATCH_TIMEOUT_SECS (legacy
+    /// CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S), effort-scaled (default >= 1800s).
+    /// Wall-clock (paused while 1m load > nproc); 0 disables.
     budget_secs: u64,
     /// CHUMP_DISPATCH_HANG_TIMEOUT_SECS, default 3600. IDLE time (no observed
     /// worktree activity), not wall-clock since spawn; 0 disables.
@@ -1391,22 +1828,14 @@ struct HangConfig {
     /// ZERO-WASTE-133: age past which one agent tool call is stalled
     /// (derived from CHUMP_DISPATCH_TOOL_CALL_TIMEOUT_SECS); 0 disables.
     tool_stall_secs: u64,
+    /// RESILIENT-1494: returns true when the 1-minute load average exceeds
+    /// `nproc`, pausing the budget clock while the host is CPU-saturated.
+    load_paused_probe: Option<fn() -> bool>,
 }
 
 impl HangConfig {
     fn from_env() -> Self {
-        let budget_secs: u64 = std::env::var("CHUMP_SUBAGENT_BUDGET_S")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .or_else(|| {
-                // Fall back to the legacy bot-merge-specific name if set,
-                // so existing env configs keep working (CLAUDE.md still
-                // documents CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S=900).
-                std::env::var("CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-            })
-            .unwrap_or(900);
+        let budget_secs: u64 = resolve_subagent_budget_secs(None);
         let hang_secs: u64 = std::env::var("CHUMP_DISPATCH_HANG_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -1423,6 +1852,10 @@ impl HangConfig {
             tick: Duration::from_secs(1),
             grace_secs: 30,
             tool_stall_secs: tool_watch::stall_threshold_secs(tool_watch::tool_call_timeout_secs()),
+            // Enable host load pause on real dispatch budgets (>= 60s) so short
+            // synthetic 3s smoke tests don't block on busy CI runners.
+            load_paused_probe: (budget_secs >= 60)
+                .then_some(host_load_exceeds_nproc as fn() -> bool),
         }
     }
 }
@@ -1685,6 +2118,8 @@ fn wait_with_hang_detection_cfg(
     let mut last_poll = start;
     let mut last_tool_poll = start;
     let mut stalled_reported: Vec<u32> = Vec::new();
+    let mut budget_elapsed = Duration::ZERO;
+    let mut last_budget_tick = start;
 
     // Re-fingerprint; true (and clock reset) when the worktree changed.
     let refresh = |last_fp: &mut Option<ActivityFingerprint>,
@@ -1705,14 +2140,27 @@ fn wait_with_hang_detection_cfg(
         match child.try_wait() {
             Ok(Some(status)) => return Ok(status),
             Ok(None) => {
-                let elapsed = start.elapsed();
+                let now = std::time::Instant::now();
+                let tick_delta = now.saturating_duration_since(last_budget_tick);
+                last_budget_tick = now;
+                let load_paused = cfg.load_paused_probe.map(|probe| probe()).unwrap_or(false);
+                if !load_paused {
+                    budget_elapsed += tick_delta;
+                }
 
                 // Budget enforcement (faster, graceful)
                 if !no_budget
                     && budget_kill_in_flight.is_none()
-                    && elapsed.as_secs() > cfg.budget_secs
+                    && budget_elapsed.as_secs() > cfg.budget_secs
                 {
                     on_event(HangEvent::BudgetKill { pid: child_pid });
+                    // RESILIENT-1494: before sending SIGTERM on budget kill,
+                    // commit any dirty/staged work with a `wip:` subject, push
+                    // it to `origin refs/stash/<gap>-<ts>`, and append an entry
+                    // to `docs/process/STASHED_WORK.md`.
+                    if let Some(root) = activity_root {
+                        let _ = salvage_wip_before_budget_kill(root, gap_id);
+                    }
                     // INFRA-8198: signal the whole GROUP (negative pgid),
                     // not just the direct child pid — `configure_child_lifetime`
                     // made the child its own process-group leader, so this
@@ -2382,6 +2830,14 @@ fn claim(ws: &Workspace) -> Result<()> {
 
 fn ship(ws: &Workspace) -> Result<ShipResult> {
     let opts = ws.opts();
+    // RESILIENT-1640: call `admit cargo` before the ship phase (not only
+    // `admit claude` before spawning `claude -p`). Waits bounded by step budget,
+    // emits `kind=admission_deferred` once on contention, and does NOT fail open
+    // into a contended build.
+    let step_budget = resolve_subagent_budget_secs_for_gap(&opts.repo_root, opts.gap_id);
+    if let Err(msg) = crate::admit::gate_cargo_before_ship(&opts.repo_root, step_budget) {
+        return Ok(ShipResult::Aborted { error: msg });
+    }
     let script = opts.repo_root.join("scripts/coord/bot-merge.sh");
     if !script.exists() {
         bail!("bot-merge.sh missing at {}", script.display());
@@ -2394,6 +2850,8 @@ fn ship(ws: &Workspace) -> Result<ShipResult> {
     if opts.skip_tests {
         cmd.arg("--skip-tests");
     }
+    // RESILIENT-1642: export shared CARGO_TARGET_DIR into the ship phase too.
+    cmd.env("CARGO_TARGET_DIR", resolve_shared_cargo_target_dir());
     // INFRA-8204: explicit, not merely inherited — bot-merge.sh's own
     // session-ID auto-detection only scans $LOCK_DIR/*.json + state.db, never
     // the dispatch worktree's own .chump-locks/, so without this the ship
@@ -3920,6 +4378,7 @@ mod tests {
             tick: Duration::from_millis(100),
             grace_secs: 1,
             tool_stall_secs: 0,
+            load_paused_probe: None,
         }
     }
 
@@ -3936,6 +4395,7 @@ mod tests {
             tick: Duration::from_millis(100),
             grace_secs: 1,
             tool_stall_secs: 1,
+            load_paused_probe: None,
         };
         let marker = td.path().join("continued");
         let script = format!(
@@ -4212,5 +4672,326 @@ mod tests {
         assert_eq!(v["kind"], "dispatch_auto_merge_refused");
         assert_eq!(v["gap_id"], "CREDIBLE-1577");
         assert_eq!(v["gate_file"], "scripts/git-hooks/pre-push");
+    }
+
+    // ── INFRA-8114 / RESILIENT-1494 / RESILIENT-1642 / RESILIENT-1640 tests ──
+
+    #[test]
+    fn infra_8114_resume_refuses_to_skip_implement_on_zero_commit_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        git(dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("seed.txt"), "base").unwrap();
+        git(dir, &["add", "seed.txt"]);
+        git(dir, &["commit", "-qm", "base"]);
+        git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        git(dir, &["checkout", "-qb", "claude/infra-8114"]);
+
+        // Zero commits ahead of origin/main → must NOT skip IMPLEMENT.
+        assert!(
+            !branch_has_commits_ahead(dir, "origin/main", "claude/infra-8114"),
+            "empty branch must report 0 commits ahead of origin/main"
+        );
+        assert!(
+            !can_resume_skip_implement(dir, "origin/main", "claude/infra-8114"),
+            "INFRA-8114: resume must not skip IMPLEMENT on a zero-commit branch"
+        );
+
+        // Once >= 1 commit lands on the branch, resume may skip IMPLEMENT.
+        std::fs::write(dir.join("work.txt"), "implemented").unwrap();
+        git(dir, &["add", "work.txt"]);
+        git(dir, &["commit", "-qm", "feat: implement gap"]);
+        assert!(
+            branch_has_commits_ahead(dir, "origin/main", "claude/infra-8114"),
+            "branch with 1 commit must report ahead of origin/main"
+        );
+        assert!(
+            can_resume_skip_implement(dir, "origin/main", "claude/infra-8114"),
+            "INFRA-8114: resume may skip IMPLEMENT once >= 1 commit exists"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(oauth_env)]
+    fn infra_8114_resilient_1494_oauth_token_loaded_from_file_when_absent_in_env() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tok_file = tmp.path().join("oauth-token.json");
+        let expected = format!("sk-ant-oat01-{}", "unit-test-token-fixture");
+        std::fs::write(
+            &tok_file,
+            format!("{{\"token\":\"{expected}\",\"source\":\"test\"}}"),
+        )
+        .unwrap();
+
+        let prev_tok = std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok();
+        let prev_file = std::env::var("CHUMP_OAUTH_TOKEN_FILE").ok();
+        std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN");
+        std::env::set_var("CHUMP_OAUTH_TOKEN_FILE", &tok_file);
+
+        let mut cmd = Command::new("claude");
+        let resolved = ensure_oauth_token_env(Some(&mut cmd));
+
+        assert_eq!(resolved.as_deref(), Some(expected.as_str()));
+        assert_eq!(
+            std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok().as_deref(),
+            Some(expected.as_str())
+        );
+        let cmd_envs: Vec<(String, String)> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        assert!(
+            cmd_envs
+                .iter()
+                .any(|(k, v)| k == "CLAUDE_CODE_OAUTH_TOKEN" && v == &expected),
+            "expected CLAUDE_CODE_OAUTH_TOKEN on Command env, got {cmd_envs:?}"
+        );
+
+        match prev_tok {
+            Some(v) => std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", v),
+            None => std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN"),
+        }
+        match prev_file {
+            Some(v) => std::env::set_var("CHUMP_OAUTH_TOKEN_FILE", v),
+            None => std::env::remove_var("CHUMP_OAUTH_TOKEN_FILE"),
+        }
+    }
+
+    #[test]
+    fn resilient_1494_canonical_gap_resolves_from_main_checkout_and_fails_loud_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main_repo = tmp.path().join("main-repo");
+        std::fs::create_dir_all(&main_repo).unwrap();
+        git(&main_repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(main_repo.join("README.md"), "init\n").unwrap();
+        git(&main_repo, &["add", "README.md"]);
+        git(&main_repo, &["commit", "-qm", "init"]);
+
+        // Seed a gap into the canonical store at main_repo/.chump/state.db.
+        let store = chump_gap_store::GapStore::open(&main_repo).expect("open canonical store");
+        let gap_id = store
+            .reserve(
+                "RESILIENT",
+                "RESILIENT-1494 canonical store test",
+                "P1",
+                "m",
+            )
+            .expect("reserve gap");
+        drop(store);
+
+        // Create a linked worktree with its own empty .chump/ directory.
+        let wt = tmp.path().join("wt-resilient-1494");
+        git(
+            &main_repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "claude/resilient-1494",
+                wt.to_str().unwrap(),
+                "main",
+            ],
+        );
+        std::fs::create_dir_all(wt.join(".chump")).unwrap();
+
+        // 1. Resolving from the linked worktree finds the gap in main_repo's canonical state.db.
+        let loaded = crate::dispatch_repair::load_canonical_gap(&wt, &gap_id)
+            .expect("linked worktree must resolve gap from canonical store");
+        assert_eq!(loaded.id, gap_id);
+        assert_eq!(loaded.effort, "m");
+
+        // 2. A missing gap ID fails loud (Err) instead of returning an empty/fallback prompt.
+        let err = crate::dispatch_repair::build_auto_prompt_checked("RESILIENT-999999", &wt, None)
+            .expect_err("missing gap must fail loud");
+        assert!(
+            err.contains("RESILIENT-1494") && err.contains("not found in canonical gap store"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(budget_env)]
+    fn resilient_1494_budget_scales_with_effort_and_honors_env_overrides() {
+        assert_eq!(budget_secs_for_effort("xs"), 1200);
+        assert_eq!(budget_secs_for_effort("s"), 2400);
+        assert_eq!(budget_secs_for_effort("m"), 3600);
+        assert_eq!(budget_secs_for_effort("l"), 5400);
+        assert_eq!(budget_secs_for_effort("xl"), 5400);
+        assert_eq!(budget_secs_for_effort("unknown"), 5400);
+        assert_eq!(budget_secs_for_effort(""), 5400);
+        const {
+            assert!(
+                DEFAULT_SUBAGENT_BUDGET_SECS >= 1800,
+                "default subagent budget must be >= 1800s"
+            );
+        }
+
+        std::env::remove_var("CHUMP_SUBAGENT_BUDGET_S");
+        std::env::remove_var("CHUMP_DISPATCH_TIMEOUT_SECS");
+        std::env::remove_var("CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S");
+        assert_eq!(resolve_subagent_budget_secs(Some("xs")), 1200);
+        assert_eq!(resolve_subagent_budget_secs(Some("m")), 3600);
+        assert_eq!(
+            resolve_subagent_budget_secs(None),
+            DEFAULT_SUBAGENT_BUDGET_SECS
+        );
+
+        std::env::set_var("CHUMP_DISPATCH_TIMEOUT_SECS", "2700");
+        assert_eq!(resolve_subagent_budget_secs(Some("xs")), 2700);
+        std::env::set_var("CHUMP_SUBAGENT_BUDGET_S", "4200");
+        assert_eq!(resolve_subagent_budget_secs(Some("xs")), 4200);
+        std::env::remove_var("CHUMP_SUBAGENT_BUDGET_S");
+        std::env::remove_var("CHUMP_DISPATCH_TIMEOUT_SECS");
+    }
+
+    #[test]
+    fn resilient_1494_budget_clock_pauses_while_load_exceeds_nproc() {
+        assert!(is_load_exceeding_nproc(4.5, 4));
+        assert!(!is_load_exceeding_nproc(4.0, 4));
+        assert!(!is_load_exceeding_nproc(2.0, 4));
+
+        // With budget_secs=1 and load_paused_probe always returning true
+        // (simulating 1m load > nproc), a 2.5s child must NOT be killed at 1s.
+        fn always_overloaded() -> bool {
+            true
+        }
+        let td = tempfile::tempdir().unwrap();
+        let cfg = HangConfig {
+            budget_secs: 1,
+            hang_secs: 0,
+            activity_poll: Duration::from_secs(1),
+            tick: Duration::from_millis(100),
+            grace_secs: 1,
+            tool_stall_secs: 0,
+            load_paused_probe: Some(always_overloaded),
+        };
+        let (res, events, elapsed) = run_hang(None, td.path(), "sleep 2", &cfg);
+        let status = res.expect("child should survive when budget clock is paused by high load");
+        assert!(status.success());
+        assert!(elapsed >= Duration::from_secs(2));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, HangEvent::BudgetKill { .. })),
+            "budget kill must not fire while load > nproc pauses clock, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn resilient_1494_pre_sigterm_salvages_wip_to_origin_refs_stash_and_stashed_work_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let origin = tmp.path().join("origin.git");
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(&origin).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let st = Command::new("git")
+            .args(["init", "--quiet", "--bare"])
+            .arg(&origin)
+            .status()
+            .unwrap();
+        assert!(st.success());
+
+        git(&worktree, &["init", "-q", "-b", "main"]);
+        std::fs::write(worktree.join("README.md"), "base\n").unwrap();
+        git(&worktree, &["add", "README.md"]);
+        git(&worktree, &["commit", "-qm", "init"]);
+        git(
+            &worktree,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        git(&worktree, &["push", "-q", "origin", "main"]);
+        git(&worktree, &["checkout", "-qb", "claude/resilient-1494"]);
+
+        // Simulate a child that modifies a file and then stalls past the 1s budget.
+        let cfg = HangConfig {
+            budget_secs: 1,
+            hang_secs: 0,
+            activity_poll: Duration::from_secs(1),
+            tick: Duration::from_millis(100),
+            grace_secs: 1,
+            tool_stall_secs: 0,
+            load_paused_probe: None,
+        };
+        let script = "echo 'partial wip change' >> README.md; sleep 60";
+        let (_res, events, _elapsed) = run_hang(Some(&worktree), &worktree, script, &cfg);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, HangEvent::BudgetKill { .. })),
+            "expected BudgetKill event, got {events:?}"
+        );
+
+        // Verify wip: commit landed on the worktree before SIGTERM.
+        let log_out = Command::new("git")
+            .arg("-C")
+            .arg(&worktree)
+            .args(["log", "-1", "--pretty=%s"])
+            .output()
+            .unwrap();
+        let subj = String::from_utf8_lossy(&log_out.stdout).trim().to_string();
+        assert!(
+            subj.starts_with("wip("),
+            "expected wip: commit subject before budget kill, got: {subj}"
+        );
+
+        // Verify refs/stash/<gap>-<ts> was pushed to origin.
+        let refs_out = Command::new("git")
+            .arg("-C")
+            .arg(&origin)
+            .args(["for-each-ref", "--format=%(refname)", "refs/stash/"])
+            .output()
+            .unwrap();
+        let refs = String::from_utf8_lossy(&refs_out.stdout);
+        assert!(
+            refs.contains("refs/stash/resilient-1612-"),
+            "expected refs/stash/<gap>-<ts> in origin, got: {refs}"
+        );
+
+        // Verify docs/process/STASHED_WORK.md has the appended entry.
+        let manifest = std::fs::read_to_string(worktree.join("docs/process/STASHED_WORK.md"))
+            .expect("docs/process/STASHED_WORK.md must be written");
+        assert!(
+            manifest.contains("refs/stash/resilient-1612-") && manifest.contains("RESILIENT-1612"),
+            "STASHED_WORK.md missing stash row: {manifest}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(cargo_target_env)]
+    fn resilient_1642_headless_command_skeleton_exports_shared_cargo_target_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let custom_shared = tmp.path().join("shared-target");
+        let prev = std::env::var("CARGO_TARGET_DIR").ok();
+        std::env::set_var("CARGO_TARGET_DIR", &custom_shared);
+
+        let resolved = resolve_shared_cargo_target_dir();
+        assert_eq!(resolved, custom_shared);
+
+        let cmd = headless_command_skeleton("claude-sonnet-4-6");
+        let envs: Vec<(String, String)> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "CARGO_TARGET_DIR" && Path::new(v) == custom_shared.as_path()),
+            "RESILIENT-1642: headless_command_skeleton must export CARGO_TARGET_DIR, got {envs:?}"
+        );
+
+        // Worktree-local target path in CARGO_TARGET_DIR must be rejected in favor of shared target.
+        std::env::set_var("CARGO_TARGET_DIR", "/repo/.claude/worktrees/foo/target");
+        let fallback = resolve_shared_cargo_target_dir();
+        assert!(
+            !fallback.to_string_lossy().contains(".claude/worktrees/"),
+            "resolver must reject worktree-private target dir, got {}",
+            fallback.display()
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("CARGO_TARGET_DIR", v),
+            None => std::env::remove_var("CARGO_TARGET_DIR"),
+        }
     }
 }

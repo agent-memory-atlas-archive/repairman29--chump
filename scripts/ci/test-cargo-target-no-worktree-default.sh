@@ -161,5 +161,54 @@ else
   bad ".cargo-test-target build tree created under .claude/worktrees/* ($WT3/.cargo-test-target or $WT3B/.cargo-test-target)"
 fi
 
+# 4. RESILIENT-1642: src/dispatch.rs exports the shared resolver's CARGO_TARGET_DIR
+#    into the `claude -p` child environment, and any `.claude/worktrees/*`
+#    growing a private `target/`, `.cargo-build-target/`, or `.cargo-test-target/`
+#    fails the check.
+if grep -q 'pub fn resolve_shared_cargo_target_dir' src/dispatch.rs \
+   && grep -q 'cmd.env("CARGO_TARGET_DIR", resolve_shared_cargo_target_dir())' src/dispatch.rs; then
+  ok "RESILIENT-1642: src/dispatch.rs exports shared CARGO_TARGET_DIR into claude -p child"
+else
+  bad "RESILIENT-1642: src/dispatch.rs must export CARGO_TARGET_DIR via resolve_shared_cargo_target_dir()"
+fi
+
+check_no_worktree_private_targets() {
+  local wt_root="$1"
+  local found=0
+  if [[ -d "$wt_root" ]]; then
+    for wt in "$wt_root"/*; do
+      [[ -d "$wt" ]] || continue
+      for priv in target .cargo-build-target .cargo-test-target; do
+        if [[ -e "$wt/$priv" ]]; then
+          found=1
+        fi
+      done
+    done
+  fi
+  return "$found"
+}
+
+if check_no_worktree_private_targets "$TMP/.claude/worktrees"; then
+  ok "RESILIENT-1642: clean .claude/worktrees/* has no private target/, .cargo-build-target/, or .cargo-test-target/"
+else
+  bad "RESILIENT-1642: unexpected private target dir in $TMP/.claude/worktrees/*"
+fi
+
+mkdir -p "$WT3/target"
+if ! check_no_worktree_private_targets "$TMP/.claude/worktrees"; then
+  ok "RESILIENT-1642: detector flags .claude/worktrees/* growing a private target/ dir"
+else
+  bad "RESILIENT-1642: detector failed to flag $WT3/target"
+fi
+rm -rf "$WT3/target"
+
+if [[ -d "$REPO_ROOT/.claude/worktrees" ]]; then
+  if check_no_worktree_private_targets "$REPO_ROOT/.claude/worktrees"; then
+    ok "RESILIENT-1642: live .claude/worktrees/* has no private target dirs"
+  else
+    bad "RESILIENT-1642: live .claude/worktrees/* contains a private target/, .cargo-build-target/, or .cargo-test-target/"
+  fi
+fi
+
 if [[ "$FAILS" -gt 0 ]]; then echo "test-cargo-target-no-worktree-default: $FAILS failure(s)" >&2; exit 1; fi
 echo "test-cargo-target-no-worktree-default: PASS"

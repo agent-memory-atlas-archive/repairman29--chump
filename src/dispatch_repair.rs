@@ -424,13 +424,100 @@ pub fn select_auto_prompt(
     )
 }
 
-fn gap_description(gap_id: &str) -> String {
-    let canonical = crate::repo_path::main_checkout_root();
-    chump_gap_store::GapStore::open(&canonical)
-        .ok()
-        .and_then(|store| store.get(gap_id).ok().flatten())
+/// RESILIENT-1494: Resolve `gap_id` from the CANONICAL `GapStore` (never from
+/// a fresh linked worktree's empty `.chump/state.db`).
+///
+/// `chump_gap_store::store_path::resolve(repo_root)` walks any linked worktree
+/// back to its main checkout's `.chump/state.db` (or `CHUMP_STATE_DB` when set).
+/// If `repo_root` does not resolve the row, we also probe `main_checkout_root()`.
+/// If the gap cannot be loaded or has an empty title, returns `Err` (fails loud)
+/// so `chump dispatch` refuses to spawn `claude -p` on an empty/fallback prompt.
+pub fn load_canonical_gap(
+    repo_root: &Path,
+    gap_id: &str,
+) -> Result<chump_gap_store::GapRow, String> {
+    let resolved = chump_gap_store::store_path::resolve(repo_root);
+    let primary_root = resolved.checkout.as_deref().unwrap_or(repo_root);
+    if let Ok(store) = chump_gap_store::GapStore::open(primary_root) {
+        if let Ok(Some(row)) = store.get(gap_id) {
+            if !row.title.trim().is_empty() {
+                return Ok(row);
+            }
+        }
+    }
+    let main_root = crate::repo_path::main_checkout_root();
+    if main_root != primary_root {
+        if let Ok(store) = chump_gap_store::GapStore::open(&main_root) {
+            if let Ok(Some(row)) = store.get(gap_id) {
+                if !row.title.trim().is_empty() {
+                    return Ok(row);
+                }
+            }
+        }
+    }
+    Err(format!(
+        "RESILIENT-1494: gap {gap_id} not found in canonical gap store ({}) — \
+         refusing to spawn agent on an empty/fallback prompt",
+        resolved.path.display()
+    ))
+}
+
+fn gap_description(repo_root: &Path, gap_id: &str) -> String {
+    load_canonical_gap(repo_root, gap_id)
         .map(|row| row.description)
         .unwrap_or_default()
+}
+
+/// Build the auto prompt for `chump dispatch` when actually spawning an agent
+/// (`RESILIENT-1494`). For ordinary work (no open PR), resolves the gap from
+/// the canonical store and **fails loud** (`Err`) if the gap cannot be loaded.
+pub fn build_auto_prompt_checked(
+    gap_id: &str,
+    repo_root: &Path,
+    open_pr: Option<&OpenPr>,
+) -> Result<(AutoPromptKind, String), String> {
+    let rules = std::fs::read_to_string(repo_root.join("docs/process/CHUMP_DISPATCH_RULES.md"))
+        .unwrap_or_default();
+    match open_pr {
+        Some(pr) => {
+            let description = gap_description(repo_root, gap_id);
+            let (failing, source) = lookup_failing_checks(repo_root, pr);
+            let out = select_auto_prompt(
+                gap_id,
+                &description,
+                Some((pr, &failing, source)),
+                "",
+                &rules,
+            );
+            emit_dispatch_repair_brief_built(gap_id, pr, &failing, source);
+            Ok(out)
+        }
+        None => {
+            let row = load_canonical_gap(repo_root, gap_id)?;
+            if description_requests_decompose(&row.description) {
+                Ok(select_auto_prompt(
+                    gap_id,
+                    &row.description,
+                    None,
+                    "",
+                    &rules,
+                ))
+            } else {
+                let base = crate::execute_gap::build_execute_gap_prompt_with_row(
+                    gap_id,
+                    repo_root,
+                    Some(&row),
+                );
+                Ok(select_auto_prompt(
+                    gap_id,
+                    &row.description,
+                    None,
+                    &base,
+                    "",
+                ))
+            }
+        }
+    }
 }
 
 /// Build the auto prompt for `chump dispatch --backend headless` with no
@@ -443,7 +530,11 @@ pub fn build_auto_prompt(
 ) -> (AutoPromptKind, String) {
     let rules = std::fs::read_to_string(repo_root.join("docs/process/CHUMP_DISPATCH_RULES.md"))
         .unwrap_or_default();
-    let description = gap_description(gap_id);
+    let row = load_canonical_gap(repo_root, gap_id).ok();
+    let description = row
+        .as_ref()
+        .map(|r| r.description.clone())
+        .unwrap_or_default();
     match open_pr {
         Some(pr) => {
             let (failing, source) = lookup_failing_checks(repo_root, pr);
@@ -461,7 +552,11 @@ pub fn build_auto_prompt(
             if description_requests_decompose(&description) {
                 select_auto_prompt(gap_id, &description, None, "", &rules)
             } else {
-                let base = crate::execute_gap::build_execute_gap_prompt(gap_id, repo_root);
+                let base = crate::execute_gap::build_execute_gap_prompt_with_row(
+                    gap_id,
+                    repo_root,
+                    row.as_ref(),
+                );
                 select_auto_prompt(gap_id, &description, None, &base, "")
             }
         }

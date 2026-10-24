@@ -247,6 +247,18 @@ pub fn current_head_sha() -> String {
 /// models get no overlay (Sonnet ships fine on the bare prompt; Other lacks
 /// empirical signal to justify a guess).
 pub fn build_execute_gap_prompt(gap_id: &str, repo_root: &std::path::Path) -> String {
+    let row = crate::dispatch_repair::load_canonical_gap(repo_root, gap_id).ok();
+    build_execute_gap_prompt_with_row(gap_id, repo_root, row.as_ref())
+}
+
+/// Build the execute-gap prompt, inlining the canonical gap's title,
+/// description, and acceptance criteria when available from the canonical
+/// `state.db` store (`RESILIENT-1494`).
+pub fn build_execute_gap_prompt_with_row(
+    gap_id: &str,
+    repo_root: &std::path::Path,
+    row: Option<&chump_gap_store::GapRow>,
+) -> String {
     let rules = std::fs::read_to_string(repo_root.join("docs/process/CHUMP_DISPATCH_RULES.md"))
         .unwrap_or_default();
     let rules_block = if rules.is_empty() {
@@ -267,15 +279,34 @@ pub fn build_execute_gap_prompt(gap_id: &str, repo_root: &std::path::Path) -> St
     } else {
         format!("\n\n---\n\n{epilogue}")
     };
+    let gap_spec_block = match row {
+        Some(r) => {
+            let ac = if r.acceptance_criteria.trim().is_empty() {
+                String::new()
+            } else {
+                format!("\nAcceptance Criteria:\n{}\n", r.acceptance_criteria)
+            };
+            format!(
+                "\n\nCanonical Gap Specification ({gap}):\nTitle: {title}\nEffort: {effort}\n\n{desc}\n{ac}\n",
+                gap = gap_id,
+                title = r.title,
+                effort = r.effort,
+                desc = r.description,
+                ac = ac,
+            )
+        }
+        None => String::new(),
+    };
     format!(
         "{overlay}{rules}You are a Chump dispatched agent working on gap {gap}. \
 The gap is already claimed in this worktree. \
-Read the gap entry in docs/gaps/<ID>.yaml for full acceptance criteria. \
+Read the gap entry in docs/gaps/<ID>.yaml for full acceptance criteria.{spec} \
 Do the work, then ship via:\n  scripts/coord/bot-merge.sh --gap {gap} --auto-merge\n\
 After ship, exit. Reply ONLY with the PR number.{epilogue}",
         overlay = overlay_block,
         rules = rules_block,
         gap = gap_id,
+        spec = gap_spec_block,
         epilogue = epilogue_block,
     )
 }

@@ -1028,6 +1028,12 @@ elif command -v cargo &>/dev/null; then
         mkdir -p "$_WT_CLIPPY_TARGET" 2>/dev/null || true
 
         # Run clippy; capture exit code.
+        # RESILIENT-1640: honor node-wide cargo admission ceiling before clippy gate.
+        if [[ -r "$REPO_ROOT_CL/scripts/coord/lib/admission-gate.sh" ]]; then
+            # shellcheck source=../coord/lib/admission-gate.sh
+            . "$REPO_ROOT_CL/scripts/coord/lib/admission-gate.sh"
+            chump_admission_wait_cargo
+        fi
         # INFRA-5126: per-phase timeout via _pp_run_timed — wrapped in
         # `bash -c` (positional args, not string interpolation) so the cd +
         # env-var invocation still runs under `timeout`.
@@ -1355,6 +1361,13 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                         _PREPUSH_WRAPPER_OVERRIDE=(env CARGO_BUILD_RUSTC_WRAPPER= RUSTC_WRAPPER=)
                     fi
                 fi
+            fi
+
+            # RESILIENT-1640: honor node-wide cargo admission ceiling before test gate.
+            if [[ -r "$REPO_ROOT_T/scripts/coord/lib/admission-gate.sh" ]]; then
+                # shellcheck source=../coord/lib/admission-gate.sh
+                . "$REPO_ROOT_T/scripts/coord/lib/admission-gate.sh"
+                chump_admission_wait_cargo
             fi
 
             if [[ -x "$_RERUN_SCRIPT" ]]; then

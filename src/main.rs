@@ -6734,8 +6734,12 @@ async fn main() -> Result<()> {
                         "[dispatch] layer-aware default: model={} budget={}s ({})",
                         sel.model, sel.budget_secs, sel.reason
                     );
-                    // Honor an operator-set budget; only fill in our default.
-                    if std::env::var_os("CHUMP_SUBAGENT_BUDGET_S").is_none() {
+                    // Honor an operator-set budget or effort-scaled canonical gap budget;
+                    // only fall back to the layer default when neither is set.
+                    if std::env::var_os("CHUMP_SUBAGENT_BUDGET_S").is_none()
+                        && std::env::var_os("CHUMP_DISPATCH_TIMEOUT_SECS").is_none()
+                        && dispatch_repair::load_canonical_gap(&repo_root, &gap_id).is_err()
+                    {
                         std::env::set_var("CHUMP_SUBAGENT_BUDGET_S", sel.budget_secs.to_string());
                     }
                     dispatch_model_defaults::emit_dispatch_model_selected(&gap_id, &sel);
@@ -6772,8 +6776,24 @@ async fn main() -> Result<()> {
                     // INFRA-8199: repair brief when a PR is open; decompose
                     // --dry-run + stop when the description asks for it;
                     // never self-directed decomposition.
-                    let (kind, built) =
-                        dispatch_repair::build_auto_prompt(&gap_id, &repo_root, open_pr.as_ref());
+                    // RESILIENT-1494: when actually spawning (not --print-prompt),
+                    // require the gap to exist in the canonical store and fail loud
+                    // rather than spawning claude -p on an empty/fallback prompt.
+                    let (kind, built) = if print_prompt {
+                        dispatch_repair::build_auto_prompt(&gap_id, &repo_root, open_pr.as_ref())
+                    } else {
+                        match dispatch_repair::build_auto_prompt_checked(
+                            &gap_id,
+                            &repo_root,
+                            open_pr.as_ref(),
+                        ) {
+                            Ok(pair) => pair,
+                            Err(e) => {
+                                eprintln!("chump dispatch: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    };
                     if kind == dispatch_repair::AutoPromptKind::DecomposeReview {
                         mode = dispatch::DispatchMode::ReviewOnly;
                     }

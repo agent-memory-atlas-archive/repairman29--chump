@@ -39,7 +39,11 @@ _chump_admission_bin() {
     fi
     local root
     root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    if [ -x "$root/target/release/chump" ]; then
+    if [ -n "${CARGO_TARGET_DIR:-}" ] && [ -x "${CARGO_TARGET_DIR}/release/chump" ]; then
+        echo "${CARGO_TARGET_DIR}/release/chump"
+    elif [ -n "${CARGO_TARGET_DIR:-}" ] && [ -x "${CARGO_TARGET_DIR}/debug/chump" ]; then
+        echo "${CARGO_TARGET_DIR}/debug/chump"
+    elif [ -x "$root/target/release/chump" ]; then
         echo "$root/target/release/chump"
     elif [ -x "$root/target/debug/chump" ]; then
         echo "$root/target/debug/chump"
@@ -50,8 +54,8 @@ _chump_admission_bin() {
 
 # _chump_admission_wait <resource>
 # Delegates to `chump admit <resource> --wait-s <timeout>`; fail-open (returns 0
-# regardless). If the binary can't be found, degrade to a no-op so a missing
-# build never wedges a spawn site.
+# regardless) and logs the admission decision (RESILIENT-1640). If the binary
+# can't be found, degrade to a no-op so a missing build never wedges a spawn site.
 _chump_admission_wait() {
     local resource="$1"
     local timeout_s="${CHUMP_ADMISSION_WAIT_TIMEOUT_S:-300}"
@@ -60,7 +64,13 @@ _chump_admission_wait() {
         echo "[admission-gate] chump binary not found — skipping ${resource} admission gate" >&2
         return 0
     fi
-    "$bin" admit "$resource" --wait-s "$timeout_s" >/dev/null 2>&1 || true
+    local out="" rc=0
+    out="$("$bin" admit "$resource" --wait-s "$timeout_s" 2>&1)" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        echo "[admission-gate] ${resource}: admitted (${out:-ok})" >&2
+    else
+        echo "[admission-gate] ${resource}: deferred after ${timeout_s}s (rc=${rc}: ${out:-deferred}) — proceeding (fail-open)" >&2
+    fi
     return 0
 }
 

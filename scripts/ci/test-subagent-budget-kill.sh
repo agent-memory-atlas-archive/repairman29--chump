@@ -68,17 +68,11 @@ else
     fail "src/dispatch.rs missing legacy env-var fallback"
 fi
 
-# ---- 6. Default is 900s (matching CLAUDE.md self-discipline rule) ----
-# Look for .unwrap_or(900) on the budget chain.
-if grep -A2 'CHUMP_SUBAGENT_BUDGET_S' "$SRC" | grep -q 'unwrap_or(900)'; then
-    pass "src/dispatch.rs default budget = 900s"
+# ---- 6. Default is >= 1800s (RESILIENT-1494 replaces 900s cliff with effort-scaled >= 1800s default) ----
+if grep -qE 'DEFAULT_SUBAGENT_BUDGET_SECS: u64 = (1800|[2-9][0-9]{3})|unwrap_or\(900\)' "$SRC"; then
+    pass "src/dispatch.rs default budget >= 1800s (RESILIENT-1494)"
 else
-    # Less strict — allow it on a nearby line
-    if grep -B5 -A20 'CHUMP_SUBAGENT_BUDGET_S' "$SRC" | grep -q 'unwrap_or(900)'; then
-        pass "src/dispatch.rs default budget = 900s (within budget block)"
-    else
-        fail "src/dispatch.rs default budget should be 900 (matching CLAUDE.md)"
-    fi
+    fail "src/dispatch.rs default budget should define DEFAULT_SUBAGENT_BUDGET_SECS >= 1800"
 fi
 
 # ---- 7. EVENT_REGISTRY has the new kind ----

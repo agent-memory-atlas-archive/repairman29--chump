@@ -25,7 +25,10 @@ trap 'rm -rf "$TMP"; kill $(jobs -p) 2>/dev/null || true' EXIT
 ok()   { printf '\033[0;32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[0;31mFAIL\033[0m %s\n' "$*"; exit 1; }
 
-CHUMP="$REPO_ROOT/target/debug/chump"
+CHUMP="${CHUMP_BIN:-}"
+[[ -z "$CHUMP" || ! -x "$CHUMP" ]] && [[ -n "${CARGO_TARGET_DIR:-}" ]] && CHUMP="${CARGO_TARGET_DIR}/debug/chump"
+[[ -z "$CHUMP" || ! -x "$CHUMP" ]] && [[ -n "${CARGO_TARGET_DIR:-}" ]] && CHUMP="${CARGO_TARGET_DIR}/release/chump"
+[[ -z "$CHUMP" || ! -x "$CHUMP" ]] && CHUMP="$REPO_ROOT/target/debug/chump"
 [[ ! -x "$CHUMP" ]] && CHUMP="$REPO_ROOT/target/release/chump"
 [[ ! -x "$CHUMP" ]] && CHUMP="${HOME}/.cargo/bin/chump"
 [[ ! -x "$CHUMP" ]] && CHUMP="$(command -v chump 2>/dev/null || echo "")"
@@ -151,6 +154,62 @@ for p in "${PIDS[@]}"; do
     wait "$p" || fail "concurrent caller $p failed to acquire slot within --wait-s 3"
 done
 ok "RESILIENT-1679: 5 concurrent callers against C=2 capped at 2 active leases and all 5 completed"
+
+# ---------------------------------------------------------------------------
+# 7. RESILIENT-1640: cargo admission ceiling wired into bot-merge.sh, pre-push,
+#    and src/dispatch.rs ship phase; CHUMP_ADMISSION_TEST_CARGO_COUNT proves
+#    bot-merge's cargo gate waits at a full ceiling and proceeds when freed.
+# ---------------------------------------------------------------------------
+grep -q 'chump_admission_wait_cargo' "$REPO_ROOT/scripts/coord/bot-merge.sh" \
+    || fail "RESILIENT-1640: scripts/coord/bot-merge.sh must call chump_admission_wait_cargo"
+grep -q 'chump_admission_wait_cargo' "$REPO_ROOT/scripts/git-hooks/pre-push" \
+    || fail "RESILIENT-1640: scripts/git-hooks/pre-push must call chump_admission_wait_cargo"
+grep -q 'gate_cargo_before_ship' "$REPO_ROOT/src/dispatch.rs" \
+    || fail "RESILIENT-1640: src/dispatch.rs ship() must call gate_cargo_before_ship"
+ok "RESILIENT-1640: bot-merge.sh, pre-push, and src/dispatch.rs all wire cargo admission"
+
+: > "$AMB"
+# Full cargo ceiling via CHUMP_ADMISSION_TEST_CARGO_COUNT=2 >= C=1:
+# chump_admission_wait_cargo waits bounded by CHUMP_ADMISSION_WAIT_TIMEOUT_S=1,
+# emits kind=admission_deferred for resource=cargo, and logs its decision.
+CARGO_WAIT_LOG="$TMP/cargo-wait.log"
+(
+    source "$REPO_ROOT/scripts/coord/lib/admission-gate.sh"
+    CHUMP_BIN="$CHUMP" \
+    CHUMP_MAX_CONCURRENT_CARGO_JOBS=1 \
+    CHUMP_ADMISSION_TEST_CARGO_COUNT=2 \
+    CHUMP_ADMISSION_WAIT_TIMEOUT_S=1 \
+    CHUMP_ADMISSION_POLL_INTERVAL_S=1 \
+        chump_admission_wait_cargo
+) >"$CARGO_WAIT_LOG" 2>&1
+grep -q '"kind":"admission_deferred"' "$AMB" \
+    && grep -q '"resource":"cargo"' "$AMB" \
+    || fail "RESILIENT-1640: full cargo ceiling must emit admission_deferred for cargo: $(cat "$AMB")"
+grep -q '\[admission-gate\] cargo:' "$CARGO_WAIT_LOG" \
+    || fail "RESILIENT-1640: admission-gate must log cargo decision: $(cat "$CARGO_WAIT_LOG")"
+ok "RESILIENT-1640: CHUMP_ADMISSION_TEST_CARGO_COUNT blocks at full cargo ceiling and logs decision"
+
+# Now hold 1 cargo slot for ~1s while a second caller (bot-merge helper) waits
+# with CHUMP_ADMISSION_TEST_CARGO_COUNT=0 and C=1; verify it waits and then
+# proceeds with "admitted" once the slot frees.
+CHUMP_MAX_CONCURRENT_CARGO_JOBS=1 CHUMP_ADMISSION_TEST_CARGO_COUNT=0 \
+    "$CHUMP" admit cargo --wait-s 2 --hold-ms 1200 >/dev/null 2>&1 &
+HOLD_PID=$!
+sleep 0.2
+CARGO_FREE_LOG="$TMP/cargo-free.log"
+(
+    source "$REPO_ROOT/scripts/coord/lib/admission-gate.sh"
+    CHUMP_BIN="$CHUMP" \
+    CHUMP_MAX_CONCURRENT_CARGO_JOBS=1 \
+    CHUMP_ADMISSION_TEST_CARGO_COUNT=0 \
+    CHUMP_ADMISSION_WAIT_TIMEOUT_S=4 \
+    CHUMP_ADMISSION_POLL_INTERVAL_S=1 \
+        chump_admission_wait_cargo
+) >"$CARGO_FREE_LOG" 2>&1
+wait "$HOLD_PID" 2>/dev/null || true
+grep -q '\[admission-gate\] cargo: admitted' "$CARGO_FREE_LOG" \
+    || fail "RESILIENT-1640: cargo helper should proceed with admitted once slot frees: $(cat "$CARGO_FREE_LOG")"
+ok "RESILIENT-1640: bot-merge cargo admission helper waits at full ceiling and proceeds when freed"
 
 echo
 ok "all admission-ceiling checks passed"

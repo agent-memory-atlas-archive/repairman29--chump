@@ -226,10 +226,16 @@ pub fn count(resource: Resource) -> u32 {
     }
     let pattern = std::env::var(resource.pattern_env_key())
         .unwrap_or_else(|_| resource.default_pattern().to_string());
-    // `pgrep -fc <pattern>` prints the match count; exit 1 means "no matches"
-    // (count 0), which we treat as a normal 0, not an error.
-    match Command::new("pgrep").arg("-fc").arg(&pattern).output() {
-        Ok(out) => parse_count(&String::from_utf8_lossy(&out.stdout)),
+    // `pgrep -f <pattern>` prints one matching PID per line on both Linux and
+    // macOS (BSD `pgrep` lacks `-c`). Exclude our own PID so `chump admit`
+    // never counts itself.
+    let self_pid = std::process::id();
+    match Command::new("pgrep").arg("-f").arg(&pattern).output() {
+        Ok(out) => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.trim().parse::<u32>().ok())
+            .filter(|&pid| pid != self_pid)
+            .count() as u32,
         Err(_) => 0,
     }
 }
@@ -668,6 +674,103 @@ pub fn gate_before_spawn(resource: Resource, repo_root: &Path) {
             resource.label()
         );
     }
+}
+
+/// RESILIENT-1640: Cargo admission gate for the `chump dispatch` ship phase.
+///
+/// Unlike [`gate_before_spawn`] (which fails open after its wait timeout),
+/// the ship phase must **not** fail open into a contended build: if the cargo
+/// ceiling is hit, it emits `kind=admission_deferred` **once** and waits bounded
+/// by the step budget (`step_budget_s`, or `CHUMP_ADMISSION_WAIT_TIMEOUT_S` when
+/// smaller). If the ceiling does not free within the bounded wait, returns `Err`
+/// rather than launching another concurrent cargo build.
+pub fn gate_cargo_before_ship(repo_root: &Path, step_budget_s: u64) -> Result<Decision, String> {
+    if std::env::var("CHUMP_ADMISSION_DISABLE").as_deref() == Ok("1") {
+        return Ok(Decision::Free {
+            active: 0,
+            ceiling: u32::MAX,
+        });
+    }
+    let env_wait_s = std::env::var("CHUMP_ADMISSION_WAIT_TIMEOUT_S")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    let wait_s = match (env_wait_s, step_budget_s) {
+        (Some(w), b) if b > 0 => w.min(b),
+        (Some(w), _) => w,
+        (None, b) if b > 0 => b,
+        (None, _) => 300,
+    };
+    let poll_s = std::env::var("CHUMP_ADMISSION_POLL_INTERVAL_S")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(5);
+    let node_env = default_node_env();
+    gate_cargo_before_ship_with(
+        repo_root,
+        &node_env,
+        wait_s.saturating_mul(1000),
+        poll_s.saturating_mul(1000).max(1),
+    )
+}
+
+/// Testable core for [`gate_cargo_before_ship`] with explicit `node_env` and
+/// millisecond wait/poll intervals. Emits `kind=admission_deferred` at most once
+/// on contention and returns `Err` when still contended after `wait_ms`.
+pub fn gate_cargo_before_ship_with(
+    repo_root: &Path,
+    node_env: &Path,
+    wait_ms: u64,
+    poll_ms: u64,
+) -> Result<Decision, String> {
+    let ceil = ceiling(Resource::Cargo, node_env);
+    let pid = std::process::id();
+    let holder = format!("pid-{pid}-ship-gate");
+    match try_acquire_slot(Resource::Cargo, ceil, node_env, pid, &holder, true) {
+        Ok((_lease, active)) => {
+            eprintln!("[admission] cargo (ship): admitted ({active}/{ceil})");
+            return Ok(Decision::Free {
+                active,
+                ceiling: ceil,
+            });
+        }
+        Err(active) => {
+            emit_deferred(repo_root, Resource::Cargo, active, ceil, 0, "deferred");
+            if wait_ms == 0 {
+                return Err(format!(
+                    "[admission] cargo (ship): {active} active >= ceiling {ceil} (wait_ms=0) — refusing to fail open into contended build"
+                ));
+            }
+        }
+    }
+
+    let step_ms = poll_ms.clamp(1, wait_ms);
+    let mut waited_ms = 0u64;
+    let mut last_active = ceil;
+    while waited_ms < wait_ms {
+        std::thread::sleep(Duration::from_millis(step_ms));
+        waited_ms += step_ms;
+        match try_acquire_slot(Resource::Cargo, ceil, node_env, pid, &holder, true) {
+            Ok((_lease, active)) => {
+                let waited_s = waited_ms.div_ceil(1000);
+                eprintln!(
+                    "[admission] cargo (ship): admitted after {waited_s}s wait ({active}/{ceil})"
+                );
+                return Ok(Decision::AdmittedAfterWait {
+                    active,
+                    ceiling: ceil,
+                    waited_s,
+                });
+            }
+            Err(active) => {
+                last_active = active;
+            }
+        }
+    }
+
+    let waited_s = waited_ms / 1000;
+    Err(format!(
+        "[admission] cargo (ship): still {last_active} active >= ceiling {ceil} after {waited_s}s — refusing to fail open into contended build"
+    ))
 }
 
 fn print_help() {
@@ -1219,5 +1322,58 @@ mod tests {
 
         assert!(release_lease(Resource::Claude, &node_env, "live-holder"));
         assert!(active_leases(Resource::Claude, &node_env).is_empty());
+    }
+
+    #[test]
+    fn resilient1640_gate_cargo_before_ship_emits_deferred_once_and_does_not_fail_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let node_env = dir.path().join("node.env");
+        std::fs::write(&node_env, "CHUMP_MAX_CONCURRENT_CARGO_JOBS=1\n").unwrap();
+
+        // Hold the sole cargo slot so the ship gate sees contention.
+        let (held_lease, _) = try_acquire_slot(
+            Resource::Cargo,
+            1,
+            &node_env,
+            std::process::id(),
+            "contending-cargo",
+            false,
+        )
+        .expect("initial cargo slot should acquire");
+
+        // 1. Contended across entire wait budget: must NOT fail open (returns Err)
+        //    and must emit kind=admission_deferred exactly once.
+        let res = gate_cargo_before_ship_with(dir.path(), &node_env, 120, 40);
+        let err = res.expect_err("contended cargo ship gate must not fail open");
+        assert!(
+            err.contains("refusing to fail open"),
+            "unexpected error: {err}"
+        );
+        let ambient = dir.path().join(".chump-locks/ambient.jsonl");
+        let body = std::fs::read_to_string(&ambient).expect("ambient.jsonl written");
+        let deferred_lines: Vec<&str> = body
+            .lines()
+            .filter(|l| l.contains("\"kind\":\"admission_deferred\""))
+            .collect();
+        assert_eq!(
+            deferred_lines.len(),
+            1,
+            "must emit admission_deferred exactly once on contention, got: {body}"
+        );
+
+        // 2. When the contending lease frees mid-wait, the gate admits after wait.
+        let node_env_cl = node_env.clone();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(60));
+            drop(held_lease);
+            release_lease(Resource::Cargo, &node_env_cl, "contending-cargo");
+        });
+        let admitted = gate_cargo_before_ship_with(dir.path(), &node_env, 500, 25)
+            .expect("ship gate should admit once slot frees");
+        releaser.join().unwrap();
+        assert!(
+            matches!(admitted, Decision::AdmittedAfterWait { ceiling: 1, .. }),
+            "expected AdmittedAfterWait, got {admitted:?}"
+        );
     }
 }

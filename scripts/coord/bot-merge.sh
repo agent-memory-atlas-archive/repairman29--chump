@@ -481,6 +481,33 @@ _bm_cleanup() {
                 >> "$_bm_marker_ambient" 2>/dev/null || true
         fi
     fi
+    # INFRA-8114: when bot-merge fails on an empty/commitless branch (0 commits
+    # ahead of origin/main), clean up its own lease, worktree, and branch so no
+    # orphan is left to re-pick or false-close.
+    if [[ "$_bm_is_failure" -eq 1 && "${DRY_RUN:-0}" -eq 0 && "${_BM_TIMEOUT_EXIT:-0}" != "1" ]]; then
+        local _bm_ahead_cnt
+        _bm_ahead_cnt="$(git -C "${REPO_ROOT:-.}" log --oneline origin/main..HEAD 2>/dev/null | wc -l | tr -d ' ')"
+        if [[ "${_bm_ahead_cnt:-0}" -eq 0 ]]; then
+            if [[ -n "${CHUMP_SESSION_ID:-}" ]]; then
+                rm -f "${LOCK_DIR:-${REPO_ROOT:-.}/.chump-locks}/${CHUMP_SESSION_ID}.json" 2>/dev/null || true
+                rm -f "${REPO_ROOT:-.}/.chump-locks/${CHUMP_SESSION_ID}.json" 2>/dev/null || true
+                if command -v sqlite3 &>/dev/null; then
+                    local _db_empty="${MAIN_REPO:-${REPO_ROOT:-.}}/.chump/state.db"
+                    if [[ -f "$_db_empty" ]]; then
+                        sqlite3 "$_db_empty" \
+                            "DELETE FROM leases WHERE session_id='${CHUMP_SESSION_ID}'" \
+                            2>/dev/null || true
+                    fi
+                fi
+            fi
+            if [[ -n "${MAIN_REPO:-}" && -n "${REPO_ROOT:-}" && "$REPO_ROOT" != "$MAIN_REPO" ]]; then
+                git -C "$MAIN_REPO" worktree remove --force "$REPO_ROOT" 2>/dev/null || true
+                if [[ -n "${BRANCH:-}" && "$BRANCH" != "main" && "$BRANCH" != "HEAD" ]]; then
+                    git -C "$MAIN_REPO" branch -D "$BRANCH" 2>/dev/null || true
+                fi
+            fi
+        fi
+    fi
 }
 trap '_bm_cleanup' EXIT
 # INFRA-2426: on SIGTERM from the budget watchdog, emit kind=bot_merge_timeout
@@ -3293,6 +3320,15 @@ if [[ -f "$_BM_RESOLVER" ]]; then
     info "ZERO-WASTE-134: CARGO_TARGET_DIR=${CARGO_TARGET_DIR} (shared resolver)"
 fi
 
+# RESILIENT-1640: honor node-wide cargo admission ceiling before every
+# bot-merge cargo build/nextest/clippy step.
+_BM_ADMISSION_GATE="${REPO_ROOT}/scripts/coord/lib/admission-gate.sh"
+if [[ -f "$_BM_ADMISSION_GATE" ]]; then
+    # shellcheck source=lib/admission-gate.sh
+    # shellcheck disable=SC1091
+    source "$_BM_ADMISSION_GATE"
+fi
+
 # INFRA-1063 AC #5: wrapper for cargo invocations that detects build-dir lock
 # contention.  Cargo emits "Blocking waiting for file lock on build directory"
 # to stderr when it cannot acquire the lock; we tee output to a temp file,
@@ -3304,6 +3340,10 @@ fi
 _run_cargo_with_lock_detect() {
     local label="$1" timeout_secs="$2"; shift 2
     local _tmpout _rc
+    if declare -F chump_admission_wait_cargo >/dev/null 2>&1; then
+        info "RESILIENT-1640: checking cargo admission ceiling before '${label}'..."
+        chump_admission_wait_cargo
+    fi
     _tmpout="$(mktemp)"
     set +e
     run_timed_hb "$label" "$timeout_secs" cargo "$@" 2>&1 | tee -a "$_tmpout"
