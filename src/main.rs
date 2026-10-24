@@ -10515,6 +10515,22 @@ async fn main() -> Result<()> {
         };
         let json_out = args.iter().any(|a| a == "--json");
 
+        // CREDIBLE-1565: every state-changing `chump gap` verb (set, ship,
+        // link-pr, unlink-pr, reserve) rejects unknown flags with exit code 2
+        // and handles --help/-h with exit code 0 BEFORE opening state.db or
+        // routing to the canonical server, so zero writes occur.
+        match validate_gap_mutation_args(subcmd, args.get(3..).unwrap_or(&[])) {
+            Ok(GapMutationArgCheck::Help(usage)) => {
+                println!("{usage}");
+                return Ok(());
+            }
+            Ok(GapMutationArgCheck::Valid) => {}
+            Err(msg) => {
+                eprintln!("{msg}");
+                std::process::exit(2);
+            }
+        }
+
         // A client explicitly configured for canonical-server mode must not
         // touch its local state.db before routing. Otherwise a corrupt or
         // stale Mac replica can block the very recovery path intended to
@@ -23305,6 +23321,344 @@ fn run_store_cli(args: &[String]) -> i32 {
     0
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum GapMutationArgCheck {
+    Valid,
+    Help(&'static str),
+}
+
+const GAP_SET_USAGE: &str = "Usage: chump gap set <GAP-ID> [--title T] [--description D] [--priority P]\n                          [--effort E] [--status S] [--notes N] [--add-note TEXT]\n                          [--source-doc S] [--opened-date D] [--closed-date D]\n                          [--closed-pr N] [--acceptance-criteria BULLET ...] [--depends-on \"X,Y\"]\n                          [--skills-required \"a,b\"] [--preferred-backend B] [--preferred-machine M]\n                          [--estimated-minutes N] [--required-model M] [--outcome ID]\n                          [--evidence TEXT] [--artifact-type T]";
+
+const GAP_SHIP_USAGE: &str = "Usage: chump gap ship <GAP-ID> [--update-yaml] [--closed-pr N] [--external-repo owner/name] [--session ID] [--why]";
+
+const GAP_LINK_PR_USAGE: &str =
+    "Usage: chump gap link-pr <GAP-ID> <PR-NUMBER> --sha <SHA> [--multi] [--move]";
+
+const GAP_UNLINK_PR_USAGE: &str = "Usage: chump gap unlink-pr <GAP-ID> <PR-NUMBER> --reason <text>";
+
+const GAP_RESERVE_USAGE: &str = "Usage: chump gap reserve --domain D --title T [--description D] [--priority P] [--effort E]\n                         [--acceptance-criteria \"a|b\"] [--outcome ID] [--evidence TEXT]\n                         [--external-repo owner/name] [--force] [--quiet] [--json]\n   or: chump gap reserve <DOMAIN> <title words...>";
+
+/// CREDIBLE-1565: strict flag/argument validation for all state-changing
+/// `chump gap` verbs (`set`/`update`/`modify`/`edit`/`change`, `ship`,
+/// `link-pr`, `unlink-pr`, `reserve`).
+fn validate_gap_mutation_args(
+    subcmd: &str,
+    rest: &[String],
+) -> Result<GapMutationArgCheck, String> {
+    match subcmd {
+        "set" | "update" | "modify" | "edit" | "change" => {
+            if rest.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
+                return Ok(GapMutationArgCheck::Help(GAP_SET_USAGE));
+            }
+            let Some(gap_id) = rest.first() else {
+                return Err(GAP_SET_USAGE.to_string());
+            };
+            if gap_id.starts_with('-') {
+                return Err(format!(
+                    "chump gap {subcmd}: unknown flag {gap_id:?}. Did you forget the GAP-ID?\n{GAP_SET_USAGE}"
+                ));
+            }
+            const POSITIONAL_ALIASES: &[&str] = &[
+                "acceptance_criteria",
+                "acceptance-criteria",
+                "title",
+                "description",
+                "priority",
+                "effort",
+                "status",
+                "notes",
+                "depends_on",
+                "depends-on",
+                "source_doc",
+                "source-doc",
+                "opened_date",
+                "opened-date",
+                "closed_date",
+                "closed-date",
+                "closed_pr",
+                "closed-pr",
+                "skills_required",
+                "skills-required",
+                "preferred_backend",
+                "preferred-backend",
+                "preferred_machine",
+                "preferred-machine",
+                "estimated_minutes",
+                "estimated-minutes",
+                "required_model",
+                "required-model",
+                "outcome_id",
+                "outcome-id",
+                "artifact_type",
+                "artifact-type",
+                "evidence",
+                "add_note",
+                "add-note",
+            ];
+            const VALUE_FLAGS: &[&str] = &[
+                "--title",
+                "--description",
+                "--priority",
+                "--effort",
+                "--status",
+                "--notes",
+                "--add-note",
+                "--source-doc",
+                "--opened-date",
+                "--closed-date",
+                "--closed-pr",
+                "--acceptance-criteria",
+                "--depends-on",
+                "--skills-required",
+                "--preferred-backend",
+                "--preferred-machine",
+                "--estimated-minutes",
+                "--required-model",
+                "--outcome",
+                "--evidence",
+                "--artifact-type",
+            ];
+            const BOOL_FLAGS: &[&str] = &["--json", "--quiet"];
+
+            let mut i = 1usize;
+            if let Some(first_arg) = rest.get(1) {
+                if !first_arg.starts_with('-') {
+                    if POSITIONAL_ALIASES.contains(&first_arg.as_str()) {
+                        match rest.get(2) {
+                            Some(val) if !val.starts_with("--") => {
+                                i = 3;
+                            }
+                            _ => {
+                                return Err(format!(
+                                    "chump gap {subcmd}: positional field {first_arg:?} requires a value\n{GAP_SET_USAGE}"
+                                ));
+                            }
+                        }
+                    } else {
+                        return Err(format!(
+                            "chump gap {subcmd}: unrecognised positional field name {first_arg:?}. Use --<flag> form.\n{GAP_SET_USAGE}"
+                        ));
+                    }
+                }
+            }
+            while i < rest.len() {
+                let tok = rest[i].as_str();
+                if VALUE_FLAGS.contains(&tok) {
+                    match rest.get(i + 1) {
+                        Some(val) if !val.starts_with("--") => {
+                            i += 2;
+                        }
+                        _ => {
+                            return Err(format!(
+                                "chump gap {subcmd}: {tok} requires a value\n{GAP_SET_USAGE}"
+                            ));
+                        }
+                    }
+                } else if BOOL_FLAGS.contains(&tok) {
+                    i += 1;
+                } else {
+                    return Err(format!(
+                        "chump gap {subcmd}: unknown flag or argument {tok:?}\n{GAP_SET_USAGE}"
+                    ));
+                }
+            }
+            Ok(GapMutationArgCheck::Valid)
+        }
+        "ship" => {
+            if rest.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
+                return Ok(GapMutationArgCheck::Help(GAP_SHIP_USAGE));
+            }
+            let Some(gap_id) = rest.first() else {
+                return Err(GAP_SHIP_USAGE.to_string());
+            };
+            if gap_id.starts_with('-') {
+                return Err(format!(
+                    "chump gap ship: unknown flag {gap_id:?}. Did you forget the GAP-ID?\n{GAP_SHIP_USAGE}"
+                ));
+            }
+            const VALUE_FLAGS: &[&str] = &["--closed-pr", "--external-repo", "--session"];
+            const BOOL_FLAGS: &[&str] = &[
+                "--update-yaml",
+                "--why",
+                "--no-outcome-required",
+                "--json",
+                "--quiet",
+            ];
+            let mut i = 1usize;
+            while i < rest.len() {
+                let tok = rest[i].as_str();
+                if VALUE_FLAGS.contains(&tok) {
+                    match rest.get(i + 1) {
+                        Some(val) if !val.starts_with("--") => i += 2,
+                        _ => {
+                            return Err(format!(
+                                "chump gap ship: {tok} requires a value\n{GAP_SHIP_USAGE}"
+                            ));
+                        }
+                    }
+                } else if BOOL_FLAGS.contains(&tok) {
+                    i += 1;
+                } else {
+                    return Err(format!(
+                        "chump gap ship: unknown flag or argument {tok:?}\n{GAP_SHIP_USAGE}"
+                    ));
+                }
+            }
+            Ok(GapMutationArgCheck::Valid)
+        }
+        "link-pr" => {
+            if rest.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
+                return Ok(GapMutationArgCheck::Help(GAP_LINK_PR_USAGE));
+            }
+            let Some(gap_id) = rest.first() else {
+                return Err(GAP_LINK_PR_USAGE.to_string());
+            };
+            if gap_id.starts_with('-') {
+                return Err(format!(
+                    "chump gap link-pr: unknown flag {gap_id:?}\n{GAP_LINK_PR_USAGE}"
+                ));
+            }
+            let Some(pr_arg) = rest.get(1) else {
+                return Err(GAP_LINK_PR_USAGE.to_string());
+            };
+            if pr_arg.starts_with('-') {
+                return Err(format!(
+                    "chump gap link-pr: unknown flag {pr_arg:?} in PR-NUMBER slot\n{GAP_LINK_PR_USAGE}"
+                ));
+            }
+            const VALUE_FLAGS: &[&str] = &["--sha"];
+            const BOOL_FLAGS: &[&str] = &["--multi", "--move", "--json", "--quiet"];
+            let mut i = 2usize;
+            while i < rest.len() {
+                let tok = rest[i].as_str();
+                if VALUE_FLAGS.contains(&tok) {
+                    match rest.get(i + 1) {
+                        Some(val) if !val.starts_with("--") => i += 2,
+                        _ => {
+                            return Err(format!(
+                                "chump gap link-pr: {tok} requires a value\n{GAP_LINK_PR_USAGE}"
+                            ));
+                        }
+                    }
+                } else if BOOL_FLAGS.contains(&tok) {
+                    i += 1;
+                } else {
+                    return Err(format!(
+                        "chump gap link-pr: unknown flag or argument {tok:?}\n{GAP_LINK_PR_USAGE}"
+                    ));
+                }
+            }
+            Ok(GapMutationArgCheck::Valid)
+        }
+        "unlink-pr" => {
+            if rest.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
+                return Ok(GapMutationArgCheck::Help(GAP_UNLINK_PR_USAGE));
+            }
+            let Some(gap_id) = rest.first() else {
+                return Err(GAP_UNLINK_PR_USAGE.to_string());
+            };
+            if gap_id.starts_with('-') {
+                return Err(format!(
+                    "chump gap unlink-pr: unknown flag {gap_id:?}\n{GAP_UNLINK_PR_USAGE}"
+                ));
+            }
+            let Some(pr_arg) = rest.get(1) else {
+                return Err(GAP_UNLINK_PR_USAGE.to_string());
+            };
+            if pr_arg.starts_with('-') {
+                return Err(format!(
+                    "chump gap unlink-pr: unknown flag {pr_arg:?} in PR-NUMBER slot\n{GAP_UNLINK_PR_USAGE}"
+                ));
+            }
+            const VALUE_FLAGS: &[&str] = &["--reason"];
+            const BOOL_FLAGS: &[&str] = &["--json", "--quiet"];
+            let mut i = 2usize;
+            while i < rest.len() {
+                let tok = rest[i].as_str();
+                if VALUE_FLAGS.contains(&tok) {
+                    match rest.get(i + 1) {
+                        Some(val) if !val.starts_with("--") => i += 2,
+                        _ => {
+                            return Err(format!(
+                                "chump gap unlink-pr: {tok} requires a value\n{GAP_UNLINK_PR_USAGE}"
+                            ));
+                        }
+                    }
+                } else if BOOL_FLAGS.contains(&tok) {
+                    i += 1;
+                } else {
+                    return Err(format!(
+                        "chump gap unlink-pr: unknown flag or argument {tok:?}\n{GAP_UNLINK_PR_USAGE}"
+                    ));
+                }
+            }
+            Ok(GapMutationArgCheck::Valid)
+        }
+        "reserve" => {
+            if rest.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
+                return Ok(GapMutationArgCheck::Help(GAP_RESERVE_USAGE));
+            }
+            if rest.is_empty() {
+                return Err(GAP_RESERVE_USAGE.to_string());
+            }
+            const VALUE_FLAGS: &[&str] = &[
+                "--domain",
+                "--title",
+                "--description",
+                "--priority",
+                "--effort",
+                "--acceptance-criteria",
+                "--outcome",
+                "--evidence",
+                "--external-repo",
+                "--cap-override",
+                "--offline-bypass-reason",
+                "--session",
+                "--stack-on",
+                "--ttl",
+                "--worktree",
+            ];
+            const BOOL_FLAGS: &[&str] = &[
+                "--force",
+                "--force-anti-offline",
+                "--force-duplicate",
+                "--force-pillar",
+                "--json",
+                "--no-ac-required",
+                "--no-evidence-required",
+                "--no-outcome-required",
+                "--quiet",
+                "--skip-obs-acs",
+                "--why",
+            ];
+            let mut i = 0usize;
+            while i < rest.len() {
+                let tok = rest[i].as_str();
+                if VALUE_FLAGS.contains(&tok) {
+                    match rest.get(i + 1) {
+                        Some(val) if !val.starts_with("--") => i += 2,
+                        _ => {
+                            return Err(format!(
+                                "chump gap reserve: {tok} requires a value\n{GAP_RESERVE_USAGE}"
+                            ));
+                        }
+                    }
+                } else if BOOL_FLAGS.contains(&tok) {
+                    i += 1;
+                } else if tok.starts_with('-') {
+                    return Err(format!(
+                        "chump gap reserve: unknown flag {tok:?}\n{GAP_RESERVE_USAGE}"
+                    ));
+                } else {
+                    i += 1;
+                }
+            }
+            Ok(GapMutationArgCheck::Valid)
+        }
+        _ => Ok(GapMutationArgCheck::Valid),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::agent_factory;
@@ -23701,5 +24055,103 @@ mod tests {
         assert!(!super::is_vague_ac_entry(
             "verify the /health endpoint returns 200 under load"
         ));
+    }
+
+    #[test]
+    fn credible_1565_gap_mutation_verbs_reject_unknown_flags_and_handle_help() {
+        let s = |items: &[&str]| -> Vec<String> { items.iter().map(|x| x.to_string()).collect() };
+
+        // AC1: `chump gap set <ID> --acceptance-criteria x --dry-run` is rejected.
+        assert!(super::validate_gap_mutation_args(
+            "set",
+            &s(&["INFRA-8154", "--acceptance-criteria", "x", "--dry-run"])
+        )
+        .is_err());
+
+        // AC2: unknown flags rejected across all five verbs.
+        for (verb, bad_argv) in [
+            ("set", &["INFRA-1", "--title", "ok", "--unknown"][..]),
+            ("ship", &["INFRA-1", "--closed-pr", "42", "--dry-run"][..]),
+            (
+                "link-pr",
+                &["INFRA-1", "42", "--sha", "abc", "--dry-run"][..],
+            ),
+            (
+                "unlink-pr",
+                &["INFRA-1", "42", "--reason", "r", "--dry-run"][..],
+            ),
+            (
+                "reserve",
+                &["--domain", "INFRA", "--title", "t", "--dry-run"][..],
+            ),
+            ("reserve", &["INFRA", "some", "title", "--dry-run"][..]),
+        ] {
+            assert!(
+                super::validate_gap_mutation_args(verb, &s(bad_argv)).is_err(),
+                "verb {verb} should reject {bad_argv:?}"
+            );
+        }
+
+        // AC2: --help on all five verbs returns Help(usage).
+        for verb in ["set", "ship", "link-pr", "unlink-pr", "reserve"] {
+            assert!(
+                matches!(
+                    super::validate_gap_mutation_args(verb, &s(&["--help"])),
+                    Ok(super::GapMutationArgCheck::Help(_))
+                ),
+                "verb {verb} --help should return Help"
+            );
+            assert!(
+                matches!(
+                    super::validate_gap_mutation_args(verb, &s(&["INFRA-1", "-h"])),
+                    Ok(super::GapMutationArgCheck::Help(_))
+                ),
+                "verb {verb} -h should return Help"
+            );
+        }
+
+        // Valid invocations pass.
+        assert_eq!(
+            super::validate_gap_mutation_args(
+                "set",
+                &s(&[
+                    "INFRA-1",
+                    "--acceptance-criteria",
+                    "a",
+                    "--acceptance-criteria",
+                    "b"
+                ])
+            ),
+            Ok(super::GapMutationArgCheck::Valid)
+        );
+        assert_eq!(
+            super::validate_gap_mutation_args("set", &s(&["INFRA-1", "acceptance_criteria", "a"])),
+            Ok(super::GapMutationArgCheck::Valid)
+        );
+        assert_eq!(
+            super::validate_gap_mutation_args("ship", &s(&["INFRA-1", "--closed-pr", "42"])),
+            Ok(super::GapMutationArgCheck::Valid)
+        );
+        assert_eq!(
+            super::validate_gap_mutation_args(
+                "link-pr",
+                &s(&["INFRA-1", "42", "--sha", "deadbeef", "--multi"])
+            ),
+            Ok(super::GapMutationArgCheck::Valid)
+        );
+        assert_eq!(
+            super::validate_gap_mutation_args(
+                "unlink-pr",
+                &s(&["INFRA-1", "42", "--reason", "test"])
+            ),
+            Ok(super::GapMutationArgCheck::Valid)
+        );
+        assert_eq!(
+            super::validate_gap_mutation_args(
+                "reserve",
+                &s(&["--domain", "INFRA", "--title", "ok", "--force"])
+            ),
+            Ok(super::GapMutationArgCheck::Valid)
+        );
     }
 }

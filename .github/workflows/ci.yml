@@ -1511,6 +1511,10 @@ jobs:
       - name: farmer gate ship-wall — re-entry admit + new-claim refuse (RESILIENT-1636)
         run: bash scripts/ci/test-resilient-1636-farmer-gate-ship-wall.sh
 
+      # The script builds ${CARGO_TARGET_DIR:-target}/debug/chump when absent.
+      - name: gap mutation verbs reject unknown flags and handle --help (CREDIBLE-1565)
+        run: bash scripts/ci/test-gap-verb-unknown-flag.sh
+
       - name: pre-push cargo-test full-suite gate (INFRA-761)
         run: bash scripts/ci/test-pre-push-test-gate.sh
 

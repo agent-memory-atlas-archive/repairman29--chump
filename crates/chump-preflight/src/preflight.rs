@@ -3056,6 +3056,14 @@ pub fn run(argv: &[String]) -> i32 {
             ],
             GateKind::Scripts,
         ));
+        // CREDIBLE-1565: every state-changing `chump gap` verb (set, ship,
+        // link-pr, unlink-pr, reserve) rejects unknown flags with exit code 2
+        // and handles --help with exit code 0 without touching state.db.
+        steps.push(step(
+            "gap-verb-unknown-flag",
+            &["bash", "scripts/ci/test-gap-verb-unknown-flag.sh"],
+            GateKind::Scripts,
+        ));
         // INFRA-8193: docs/gaps/*.yaml is an export-only mirror of state.db;
         // fail when a new script or Rust path writes it outside the export.
         steps.push(step(
