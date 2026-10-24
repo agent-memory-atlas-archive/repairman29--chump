@@ -215,8 +215,8 @@ async fn gap_write_auth_op_validation_and_reserve_with_outcome() {
     // tests mutate the shared-process CHUMP_BATPHONE_TOKEN/CHUMP_BIN env
     // vars, and Rust runs tests in the same binary on parallel threads by
     // default — a second test fn here would race this one.
-    async fn get_gaps(app: axum::Router, auth: Option<&str>) -> (StatusCode, Value) {
-        let mut builder = Request::builder().method("GET").uri("/api/gaps");
+    async fn get_gaps_uri(app: axum::Router, uri: &str, auth: Option<&str>) -> (StatusCode, Value) {
+        let mut builder = Request::builder().method("GET").uri(uri);
         if let Some(a) = auth {
             builder = builder.header("authorization", a);
         }
@@ -230,13 +230,17 @@ async fn gap_write_auth_op_validation_and_reserve_with_outcome() {
         (status, val)
     }
 
+    async fn get_gaps(app: axum::Router, auth: Option<&str>) -> (StatusCode, Value) {
+        get_gaps_uri(app, "/api/gaps", auth).await
+    }
+
     let gaps_dir = dir.join("get-gaps");
     std::fs::create_dir_all(&gaps_dir).unwrap();
     let gap_list_bin = gaps_dir.join("fake-chump-gap-list");
     std::fs::write(
         &gap_list_bin,
         r#"#!/bin/sh
-echo '[{"id":"RESILIENT-1030","status":"open"}]'
+echo '[{"id":"INFRA-0100","priority":"P2","status":"open"},{"id":"RESILIENT-1030","priority":"P0","status":"open"},{"id":"INFRA-2000","priority":"P1","status":"open"},{"id":"INFRA-3000","priority":"P0","status":"done"}]'
 exit 0
 "#,
     )
@@ -260,11 +264,43 @@ exit 0
     let (status, _) = get_gaps(build_app(&gaps_dir), Some("Bearer wrong")).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 
-    // Correct bearer -> 200 with the queue JSON passed through untouched.
+    // Correct bearer -> 200 with open gaps sorted P0-first (INFRA-8179).
     std::env::set_var("CHUMP_BIN", &gap_list_bin);
     let (status, body) = get_gaps(build_app(&gaps_dir), Some("Bearer s3cret-token")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body[0]["id"].as_str(), Some("RESILIENT-1030"));
+    let arr = body
+        .as_array()
+        .expect("GET /api/gaps must return JSON array");
+    let ids: Vec<&str> = arr.iter().filter_map(|g| g["id"].as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["RESILIENT-1030", "INFRA-2000", "INFRA-0100"],
+        "GET /api/gaps must sort P0 < P1 < P2 and default to status=open"
+    );
+
+    // INFRA-8179: ?priority=P0 filter honored.
+    let (status, body_p0) = get_gaps_uri(
+        build_app(&gaps_dir),
+        "/api/gaps?priority=P0",
+        Some("Bearer s3cret-token"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let arr_p0 = body_p0.as_array().unwrap();
+    assert_eq!(arr_p0.len(), 1);
+    assert_eq!(arr_p0[0]["id"].as_str(), Some("RESILIENT-1030"));
+
+    // INFRA-8179: ?status=done&priority=P0 filter honored.
+    let (status, body_done) = get_gaps_uri(
+        build_app(&gaps_dir),
+        "/api/gaps?status=done&priority=P0",
+        Some("Bearer s3cret-token"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let arr_done = body_done.as_array().unwrap();
+    assert_eq!(arr_done.len(), 1);
+    assert_eq!(arr_done[0]["id"].as_str(), Some("INFRA-3000"));
 
     std::env::remove_var(BATPHONE_TOKEN_ENV);
     std::env::remove_var("CHUMP_BIN");

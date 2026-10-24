@@ -398,19 +398,179 @@ pub fn execute_gap_write(
     }
 }
 
-/// `GET /api/gaps` (RESILIENT-1030): authed read of the open-gap queue
-/// state, so the operator can see what's pickable over the tailnet instead
-/// of SSH+sqlite. Blocking (shells out to `chump gap list --json`); call
-/// from `spawn_blocking`. Returns the raw JSON array `chump gap list`
-/// already produces — no reshaping, so the CLI and the API never drift.
-pub fn list_open_gaps(repo_root: &Path) -> anyhow::Result<serde_json::Value> {
+/// Canonical priority rank used to order `/api/gaps` P0-first (INFRA-8179).
+///
+/// Maps both `P0..P4` and `critical/high/medium/low` onto `0..=4` so mixed
+/// priority vocabularies sort deterministically with P0 / critical at the top.
+pub fn priority_rank(p: &str) -> u8 {
+    match p.trim().to_ascii_lowercase().as_str() {
+        "p0" | "critical" => 0,
+        "p1" | "high" => 1,
+        "p2" | "medium" => 2,
+        "p3" | "low" => 3,
+        "p4" => 4,
+        _ => 99,
+    }
+}
+
+fn priority_matches(gap_priority: &str, filter_priority: &str) -> bool {
+    let filter_trimmed = filter_priority.trim();
+    if filter_trimmed.is_empty() || filter_trimmed.eq_ignore_ascii_case("all") {
+        return true;
+    }
+    let gap_p = gap_priority.trim();
+    let gap_rank = priority_rank(gap_p);
+    filter_trimmed
+        .split(',')
+        .map(str::trim)
+        .filter(|tok| !tok.is_empty())
+        .any(|tok| {
+            gap_p.eq_ignore_ascii_case(tok) || (gap_rank != 99 && gap_rank == priority_rank(tok))
+        })
+}
+
+fn status_matches(gap_status: &str, filter_status: &str) -> bool {
+    let filter_trimmed = filter_status.trim();
+    if filter_trimmed.is_empty() || filter_trimmed.eq_ignore_ascii_case("all") {
+        return true;
+    }
+    let gap_s = gap_status.trim();
+    filter_trimmed
+        .split(',')
+        .map(str::trim)
+        .filter(|tok| !tok.is_empty())
+        .any(|tok| gap_s.eq_ignore_ascii_case(tok))
+}
+
+fn domain_matches(gap_domain: &str, filter_domain: &str) -> bool {
+    let filter_trimmed = filter_domain.trim();
+    if filter_trimmed.is_empty() || filter_trimmed.eq_ignore_ascii_case("all") {
+        return true;
+    }
+    let gap_d = gap_domain.trim();
+    filter_trimmed
+        .split(',')
+        .map(str::trim)
+        .filter(|tok| !tok.is_empty())
+        .any(|tok| gap_d.eq_ignore_ascii_case(tok))
+}
+
+/// Filter and stably sort a gap-list JSON value by priority (`priority_rank`:
+/// `P0 < P1 < P2 < P3`, `critical < high < medium < low`), honoring optional
+/// `status`, `priority`, and `domain` filters (INFRA-8179).
+pub fn sort_and_filter_gaps_value(
+    value: serde_json::Value,
+    status: Option<&str>,
+    priority: Option<&str>,
+    domain: Option<&str>,
+) -> serde_json::Value {
+    let filter_and_sort = |items: Vec<serde_json::Value>| -> Vec<serde_json::Value> {
+        let mut out: Vec<serde_json::Value> = items
+            .into_iter()
+            .filter(|item| {
+                if let Some(s) = status {
+                    let gs = item.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                    if !status_matches(gs, s) {
+                        return false;
+                    }
+                }
+                if let Some(p) = priority {
+                    let gp = item.get("priority").and_then(|v| v.as_str()).unwrap_or("");
+                    if !priority_matches(gp, p) {
+                        return false;
+                    }
+                }
+                if let Some(d) = domain {
+                    let gd = item.get("domain").and_then(|v| v.as_str()).unwrap_or("");
+                    if !domain_matches(gd, d) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            let pa = a
+                .get("priority")
+                .and_then(|v| v.as_str())
+                .map(priority_rank)
+                .unwrap_or(99);
+            let pb = b
+                .get("priority")
+                .and_then(|v| v.as_str())
+                .map(priority_rank)
+                .unwrap_or(99);
+            pa.cmp(&pb)
+        });
+        out
+    };
+
+    match value {
+        serde_json::Value::Array(items) => serde_json::Value::Array(filter_and_sort(items)),
+        serde_json::Value::Object(mut map) => {
+            if let Some(serde_json::Value::Array(items)) = map.remove("gaps") {
+                let sorted = filter_and_sort(items);
+                if map.contains_key("total") {
+                    map.insert(
+                        "total".to_string(),
+                        serde_json::Value::from(sorted.len() as u64),
+                    );
+                }
+                map.insert("gaps".to_string(), serde_json::Value::Array(sorted));
+            }
+            serde_json::Value::Object(map)
+        }
+        other => other,
+    }
+}
+
+/// `GET /api/gaps` (RESILIENT-1030 / INFRA-8179): authed read of the gap queue
+/// state, sorted by `priority_rank` (`P0 < P1 < P2 < P3`, `critical < high <
+/// medium < low`) and filtered by optional `status`, `priority`, and `domain`
+/// query parameters. Defaults to `status=open` when `status` is omitted.
+pub fn list_gaps_filtered(
+    repo_root: &Path,
+    status: Option<&str>,
+    priority: Option<&str>,
+    domain: Option<&str>,
+) -> anyhow::Result<serde_json::Value> {
     let chump = resolve_chump_bin(repo_root);
-    let stdout = run_chump(
-        &chump,
-        repo_root,
-        &["gap", "list", "--status", "open", "--json"],
-    )?;
-    parse_gap_list_json(&stdout)
+    let effective_status = status
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("open");
+
+    let mut args: Vec<String> = vec!["gap".into(), "list".into()];
+    if !effective_status.contains(',') && !effective_status.eq_ignore_ascii_case("all") {
+        args.push("--status".into());
+        args.push(effective_status.to_string());
+    }
+    if let Some(d) = domain
+        .map(str::trim)
+        .filter(|d| !d.is_empty() && !d.contains(','))
+    {
+        if !d.eq_ignore_ascii_case("all") {
+            args.push("--domain".into());
+            args.push(d.to_string());
+        }
+    }
+    args.push("--json".into());
+
+    let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
+    let stdout = run_chump(&chump, repo_root, &args_ref)?;
+    let parsed = parse_gap_list_json(&stdout)?;
+    Ok(sort_and_filter_gaps_value(
+        parsed,
+        Some(effective_status),
+        priority,
+        domain,
+    ))
+}
+
+/// `GET /api/gaps` (RESILIENT-1030): authed read of the open-gap queue
+/// state, sorted P0-first per INFRA-8179.
+pub fn list_open_gaps(repo_root: &Path) -> anyhow::Result<serde_json::Value> {
+    list_gaps_filtered(repo_root, None, None, None)
 }
 
 /// Pure JSON-parse step, split out from `list_open_gaps` so it's
@@ -553,5 +713,51 @@ mod tests {
     fn parse_gap_list_json_rejects_garbage() {
         let err = parse_gap_list_json("not json").unwrap_err();
         assert!(err.to_string().contains("could not parse"));
+    }
+
+    #[test]
+    fn priority_rank_orders_p0_through_p3_and_critical_through_low() {
+        assert_eq!(priority_rank("P0"), 0);
+        assert_eq!(priority_rank("critical"), 0);
+        assert_eq!(priority_rank("P1"), 1);
+        assert_eq!(priority_rank("high"), 1);
+        assert_eq!(priority_rank("P2"), 2);
+        assert_eq!(priority_rank("medium"), 2);
+        assert_eq!(priority_rank("P3"), 3);
+        assert_eq!(priority_rank("low"), 3);
+        assert!(priority_rank("P0") < priority_rank("P1"));
+        assert!(priority_rank("P1") < priority_rank("P2"));
+        assert!(priority_rank("P2") < priority_rank("P3"));
+        assert!(priority_rank("critical") < priority_rank("high"));
+        assert!(priority_rank("high") < priority_rank("medium"));
+        assert!(priority_rank("medium") < priority_rank("low"));
+    }
+
+    #[test]
+    fn sort_and_filter_gaps_value_sorts_p0_first_and_honors_filters() {
+        let raw = serde_json::json!([
+            {"id": "INFRA-100", "priority": "P2", "status": "open", "domain": "INFRA"},
+            {"id": "INFRA-200", "priority": "P0", "status": "open", "domain": "INFRA"},
+            {"id": "INFRA-300", "priority": "high", "status": "open", "domain": "INFRA"},
+            {"id": "INFRA-400", "priority": "critical", "status": "done", "domain": "INFRA"}
+        ]);
+
+        // Default open filter: drops INFRA-400 (done) and orders P0 < high(P1) < P2.
+        let sorted = sort_and_filter_gaps_value(raw.clone(), Some("open"), None, None);
+        let arr = sorted.as_array().unwrap();
+        let ids: Vec<&str> = arr.iter().map(|g| g["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["INFRA-200", "INFRA-300", "INFRA-100"]);
+
+        // Priority filter ?priority=P0 returns only P0 / critical open gaps.
+        let p0_only = sort_and_filter_gaps_value(raw.clone(), Some("open"), Some("P0"), None);
+        let p0_arr = p0_only.as_array().unwrap();
+        assert_eq!(p0_arr.len(), 1);
+        assert_eq!(p0_arr[0]["id"], "INFRA-200");
+
+        // Status filter ?status=done&priority=P0 matches critical (rank 0) done gap.
+        let done_p0 = sort_and_filter_gaps_value(raw, Some("done"), Some("P0"), None);
+        let done_arr = done_p0.as_array().unwrap();
+        assert_eq!(done_arr.len(), 1);
+        assert_eq!(done_arr[0]["id"], "INFRA-400");
     }
 }

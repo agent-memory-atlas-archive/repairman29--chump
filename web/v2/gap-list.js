@@ -13,12 +13,29 @@
 
 const PAGE_SIZE = 100;
 
-const PRIORITY_ORDER = { P0: 0, P1: 1, P2: 2, P3: 3 };
-const EFFORT_ORDER = { xs: 0, s: 1, m: 2, l: 3 };
+const PRIORITY_ORDER = {
+  P0: 0, p0: 0, critical: 0, CRITICAL: 0,
+  P1: 1, p1: 1, high: 1, HIGH: 1,
+  P2: 2, p2: 2, medium: 2, MEDIUM: 2,
+  P3: 3, p3: 3, low: 3, LOW: 3,
+  P4: 4, p4: 4,
+};
+const EFFORT_ORDER = { xs: 0, s: 1, m: 2, l: 3, xl: 4 };
+
+function priorityRank(p) {
+  if (!p) return 99;
+  const trimmed = String(p).trim();
+  return PRIORITY_ORDER[trimmed] ?? PRIORITY_ORDER[trimmed.toLowerCase()] ?? PRIORITY_ORDER[trimmed.toUpperCase()] ?? 99;
+}
 
 function priorityBadge(p) {
-  const colors = { P0: '#e53e3e', P1: '#dd6b20', P2: '#3182ce', P3: '#718096' };
-  const c = colors[p] ?? '#718096';
+  const colors = {
+    P0: '#e53e3e', critical: '#e53e3e',
+    P1: '#dd6b20', high: '#dd6b20',
+    P2: '#3182ce', medium: '#3182ce',
+    P3: '#718096', low: '#718096',
+  };
+  const c = colors[p] ?? colors[String(p ?? '').toLowerCase()] ?? '#718096';
   return `<span class="gb-badge" style="background:${c}">${p}</span>`;
 }
 function statusBadge(s) {
@@ -64,15 +81,21 @@ class ChumpViewGaps extends HTMLElement {
     this.#setStatus('Loading gaps…');
 
     try {
-      // Fetch all statuses so the browser shows a complete picture.
-      const qs = new URLSearchParams({ status: 'open,claimed,shipped,done' });
+      // Fetch all statuses by default so the browser shows a complete picture,
+      // forwarding active status/priority/domain filters to /api/gaps (INFRA-8179).
+      const qs = new URLSearchParams({
+        status: this.#statusFilter || 'open,claimed,shipped,done',
+      });
+      if (this.#priorityFilter) qs.set('priority', this.#priorityFilter);
+      if (this.#domainFilter) qs.set('domain', this.#domainFilter);
       const r = await fetch(`/api/gaps?${qs}`, {
         headers: { ...this.#authHeaders() },
         credentials: 'same-origin',
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
-      this.#gaps = data.gaps ?? [];
+      const rawGaps = Array.isArray(data) ? data : (data.gaps ?? []);
+      this.#gaps = rawGaps.slice().sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority));
       this.#applyFilters();
     } catch (err) {
       this.#setStatus(`Error loading gaps: ${err.message}`);
@@ -87,10 +110,16 @@ class ChumpViewGaps extends HTMLElement {
     const q = this.#searchQuery.toLowerCase();
     this.#filtered = this.#gaps.filter(g => {
       if (this.#statusFilter && g.status !== this.#statusFilter) return false;
-      if (this.#priorityFilter && g.priority !== this.#priorityFilter) return false;
+      if (
+        this.#priorityFilter &&
+        g.priority !== this.#priorityFilter &&
+        priorityRank(g.priority) !== priorityRank(this.#priorityFilter)
+      ) {
+        return false;
+      }
       if (this.#domainFilter && g.domain !== this.#domainFilter) return false;
       if (this.#pillarFilter && (g.pillar ?? '') !== this.#pillarFilter) return false;
-      if (q && !g.id.toLowerCase().includes(q) && !g.title.toLowerCase().includes(q)) return false;
+      if (q && !(g.id ?? '').toLowerCase().includes(q) && !(g.title ?? '').toLowerCase().includes(q)) return false;
       return true;
     });
     this.#sortGaps();
@@ -104,8 +133,8 @@ class ChumpViewGaps extends HTMLElement {
     this.#filtered.sort((a, b) => {
       let va, vb;
       if (col === 'priority') {
-        va = PRIORITY_ORDER[a.priority] ?? 9;
-        vb = PRIORITY_ORDER[b.priority] ?? 9;
+        va = priorityRank(a.priority);
+        vb = priorityRank(b.priority);
       } else if (col === 'effort') {
         va = EFFORT_ORDER[a.effort] ?? 9;
         vb = EFFORT_ORDER[b.effort] ?? 9;

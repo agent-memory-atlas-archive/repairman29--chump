@@ -51,6 +51,8 @@ pub fn build_router(store: SharedStore, repo_root: PathBuf) -> Router {
         .route("/api/sessions/active", get(get_active_sessions))
         .route("/api/trace/pr/{n}", get(get_trace_pr))
         .route("/api/dashboard-summary", get(get_dashboard_summary))
+        .route("/api/debt", get(get_debt))
+        .route("/api/debt-index", get(get_debt))
         .route("/api/mission", post(post_mission))
         .route("/api/gap", post(post_gap))
         .route("/api/gaps", get(get_gaps))
@@ -87,6 +89,13 @@ pub struct EventsQuery {
 pub struct SegmentsQuery {
     pub from: Option<i64>,
     pub to: Option<i64>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct GapsQuery {
+    pub priority: Option<String>,
+    pub status: Option<String>,
+    pub domain: Option<String>,
 }
 
 // ── response envelopes ────────────────────────────────────────────────────────
@@ -210,6 +219,28 @@ async fn get_dashboard_summary(State(s): State<AppState>) -> Response {
     }
 }
 
+/// GET /api/debt (and alias GET /api/debt-index) (INFRA-8179)
+///
+/// Unauthenticated read (matching `/api/dashboard-summary` and `/api/fleet/nodes`)
+/// exposing the debt/dormancy crown-metric index (`live_pct`, `debt`,
+/// `top5_dormant`, `nba_candidate_count`, `nba_candidates`, `prune_count`).
+async fn get_debt(State(s): State<AppState>) -> Response {
+    let repo_root = s.repo_root.clone();
+    let result = tokio::task::spawn_blocking(move || dashboard::build_debt_index(&repo_root)).await;
+
+    match result {
+        Ok(debt) => Json(debt).into_response(),
+        Err(e) => {
+            tracing::error!("GET /api/debt task error: {e}");
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error building debt index"})),
+            )
+                .into_response()
+        }
+    }
+}
+
 /// WS /api/live
 ///
 /// On connect: server polls events table every 1s, pushes new rows (since
@@ -301,18 +332,36 @@ fn check_bearer_auth(headers: &axum::http::HeaderMap) -> Option<Response> {
     None
 }
 
-/// GET /api/gaps (RESILIENT-1030) — authed read of the open-gap queue state.
+/// GET /api/gaps (RESILIENT-1030 / INFRA-8179) — authed read of the gap queue
+/// state, sorted by `priority_rank` (`P0 < P1 < P2 < P3`, `critical < high <
+/// medium < low`) and filtered by optional `priority`, `status`, and `domain`
+/// query parameters.
 ///
 /// Same fail-closed bearer auth as `/api/mission` and `/api/gap`. Lets the
 /// operator see what's pickable over the tailnet API instead of
 /// SSH+sqlite+`chump gap list`.
-async fn get_gaps(State(s): State<AppState>, headers: axum::http::HeaderMap) -> Response {
+async fn get_gaps(
+    State(s): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<GapsQuery>,
+) -> Response {
     if let Some(rejection) = check_bearer_auth(&headers) {
         return rejection;
     }
 
     let repo_root = s.repo_root.clone();
-    let result = tokio::task::spawn_blocking(move || gap_write::list_open_gaps(&repo_root)).await;
+    let status = q.status;
+    let priority = q.priority;
+    let domain = q.domain;
+    let result = tokio::task::spawn_blocking(move || {
+        gap_write::list_gaps_filtered(
+            &repo_root,
+            status.as_deref(),
+            priority.as_deref(),
+            domain.as_deref(),
+        )
+    })
+    .await;
 
     match result {
         Ok(Ok(gaps)) => Json(gaps).into_response(),

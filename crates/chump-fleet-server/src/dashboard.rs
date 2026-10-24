@@ -43,6 +43,18 @@ pub struct DashboardSummary {
     /// `scripts/dev/chump-dashboard-tui.sh`.
     pub merges_24h: u64,
     pub ci_qa_score: Option<CiQaScore>,
+    /// INFRA-8179: count of open PRs currently stuck or landing-wedged
+    /// (`DIRTY`/`BLOCKED`/`BEHIND`/`UNSTABLE` in `github_cache.db` or active
+    /// `pr_wedged`/`pr_stuck`/`landing_wedged` signals in `ambient.jsonl`).
+    pub stuck_prs: u64,
+    /// INFRA-8179: alias of `stuck_prs` for cockpit landing-health consumers.
+    pub landing_wedged_prs: u64,
+    /// INFRA-8179: honest landing percentage (`0.0..=100.0`) accounting for
+    /// open landing-wedged PRs so the cockpit never shows 100% green while
+    /// PRs are wedged.
+    pub landing_pct: f64,
+    /// INFRA-8179: canonical `green|amber|red|unknown` status for landing health.
+    pub landing_status: CiQaStatus,
     pub active_leases: Vec<ActiveLease>,
     pub window_hours: u32,
     /// RESILIENT-1012: last `node_install_verified` ambient event per node
@@ -52,29 +64,29 @@ pub struct DashboardSummary {
     pub ribbon_acceptance: Vec<NodeInstallVerified>,
 }
 
-/// Payload surfaced from the most-recent `kind=ci_qa_score` ambient event.
+/// Payload surfaced from the most-recent `kind=ci_qa_score` ambient event,
+/// adjusted by `count_stuck_or_wedged_prs` (INFRA-8179) so open landing-wedged
+/// PRs degrade `pct`, `ci_clean_landing_pct`, and `status`.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CiQaScore {
     /// % of merged PRs that landed WITHOUT a bypass signal (0.0–100.0) —
-    /// see `scripts/ops/ci-qa-score.sh`. Kept for back-compat with existing
-    /// consumers; `ci_clean_landing_pct` below is the distinctly-named twin
-    /// (INFRA-3847, parent INFRA-3841 slice 4/9) so this value is never
-    /// confused with `vital-signs.sh`'s `ci_run_pass_rate` (success/decided
-    /// CI *runs* in 24h — a different metric measuring a different thing).
+    /// see `scripts/ops/ci-qa-score.sh`, degraded when open PRs are
+    /// landing-wedged (INFRA-8179).
     pub pct: f64,
     /// Same value as `pct`, under the canonical distinctly-named column —
-    /// % of merged PRs landed clean (no --no-verify / post-CI rebase /
-    /// flake-rerun bypass signal).
+    /// % of PRs landed clean (INFRA-3847 / INFRA-8179).
     pub ci_clean_landing_pct: f64,
-    /// Number of CI runs included in the score.
+    /// Number of PRs/runs included in the score.
     pub sample_size: u64,
     /// Canonical status — always one of `green`/`amber`/`red`/`unknown`
-    /// (INFRA-3854). Emitters historically used ad-hoc labels
-    /// (`OK`/`WARN`/`ALERT`/`no_data`, `healthy`/`degraded`); the dashboard
-    /// normalizes whatever arrives via [`CiQaStatus::normalize`] so every
-    /// consumer of this field sees the same 4-value vocabulary already used
-    /// by `scripts/ops/vital-signs.sh`.
+    /// (INFRA-3854).
     pub status: CiQaStatus,
+    /// INFRA-8179: number of open stuck / landing-wedged PRs factored into this score.
+    #[serde(default)]
+    pub stuck_prs: u64,
+    /// INFRA-8179: alias for `stuck_prs`.
+    #[serde(default)]
+    pub landing_wedged_prs: u64,
 }
 
 /// The single status vocabulary shared across every emitter + the dashboard
@@ -397,6 +409,8 @@ fn extract_ci_qa_score(v: &serde_json::Value) -> Option<CiQaScore> {
                 ci_clean_landing_pct: pct,
                 sample_size,
                 status: CiQaStatus::normalize(&status),
+                stuck_prs: 0,
+                landing_wedged_prs: 0,
             });
         }
     }
@@ -625,6 +639,559 @@ fn parse_claim_json(path: &Path) -> Option<ActiveLease> {
     })
 }
 
+// ── stuck / landing-wedged PRs (INFRA-8179) ───────────────────────────────────
+
+/// Count open PRs that are stuck or landing-wedged from:
+///  1. `.chump/github_cache.db` (`pr_state` rows with `merged_at` null/empty and
+///     wedged/blocked/dirty/unstable/behind mergeable state),
+///  2. `.chump-locks/ambient.jsonl` (`pr_wedged`, `pr_stuck`,
+///     `pr_stuck_announced`, `pr_stuck_cluster`, `landing_wedged`,
+///     `merge_wedged` events within `window_hours`),
+///  3. `.chump-locks/pr-wedged-signaled.json` (if present).
+pub fn count_stuck_or_wedged_prs(repo_root: &Path, window_hours: u32) -> u64 {
+    let mut pr_nums: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+    let mut unnumbered_events: u64 = 0;
+    let mut cluster_count: u64 = 0;
+
+    // 1. Check `.chump/github_cache.db` `pr_state`.
+    collect_wedged_prs_from_cache(repo_root, &mut pr_nums);
+
+    // 2. Check `.chump-locks/ambient.jsonl`.
+    collect_wedged_prs_from_ambient(
+        repo_root,
+        window_hours,
+        &mut pr_nums,
+        &mut unnumbered_events,
+        &mut cluster_count,
+    );
+
+    // 3. Check `.chump-locks/pr-wedged-signaled.json`.
+    collect_wedged_prs_from_signaled_file(repo_root, &mut pr_nums);
+
+    (pr_nums.len() as u64 + unnumbered_events).max(cluster_count)
+}
+
+fn collect_wedged_prs_from_cache(repo_root: &Path, pr_nums: &mut std::collections::BTreeSet<u64>) {
+    let db_path = repo_root.join(".chump").join("github_cache.db");
+    let Ok(conn) = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+        return;
+    };
+
+    let Ok(mut col_stmt) = conn.prepare("PRAGMA table_info(pr_state)") else {
+        return;
+    };
+    let Ok(col_rows) = col_stmt.query_map([], |r| r.get::<_, String>(1)) else {
+        return;
+    };
+    let cols: std::collections::BTreeSet<String> = col_rows
+        .filter_map(|r| r.ok())
+        .map(|s| s.to_ascii_lowercase())
+        .collect();
+
+    let has_mergeable = cols.contains("mergeable_state");
+    let has_merge_status = cols.contains("merge_state_status");
+    let has_auto_merge = cols.contains("auto_merge_enabled");
+    let has_wedged =
+        cols.contains("wedged") || cols.contains("landing_wedged") || cols.contains("stuck");
+    if !has_mergeable && !has_merge_status && !has_auto_merge && !has_wedged {
+        return;
+    }
+
+    let select_mergeable = if has_mergeable {
+        "COALESCE(CAST(mergeable_state AS TEXT), '')"
+    } else {
+        "''"
+    };
+    let select_merge_status = if has_merge_status {
+        "COALESCE(CAST(merge_state_status AS TEXT), '')"
+    } else {
+        "''"
+    };
+    let select_auto_merge = if has_auto_merge {
+        "COALESCE(CAST(auto_merge_enabled AS TEXT), '0')"
+    } else {
+        "'0'"
+    };
+    let select_wedged = if cols.contains("landing_wedged") {
+        "COALESCE(CAST(landing_wedged AS TEXT), '0')"
+    } else if cols.contains("wedged") {
+        "COALESCE(CAST(wedged AS TEXT), '0')"
+    } else if cols.contains("stuck") {
+        "COALESCE(CAST(stuck AS TEXT), '0')"
+    } else {
+        "'0'"
+    };
+    let state_filter = if cols.contains("state") {
+        "AND UPPER(COALESCE(state, 'OPEN')) = 'OPEN'"
+    } else {
+        ""
+    };
+
+    let sql = format!(
+        "SELECT number, {select_mergeable}, {select_merge_status}, {select_auto_merge}, {select_wedged} \
+         FROM pr_state \
+         WHERE (merged_at IS NULL OR merged_at = '') {state_filter}"
+    );
+    let Ok(mut stmt) = conn.prepare(&sql) else {
+        return;
+    };
+    let Ok(rows) = stmt.query_map([], |r| {
+        let num: i64 = r.get(0)?;
+        let m_state: String = r.get(1)?;
+        let ms_status: String = r.get(2)?;
+        let auto_m: String = r.get(3)?;
+        let wedged_flag: String = r.get(4)?;
+        Ok((num, m_state, ms_status, auto_m, wedged_flag))
+    }) else {
+        return;
+    };
+
+    const WEDGED_STATES: &[&str] = &[
+        "DIRTY",
+        "BLOCKED",
+        "BEHIND",
+        "UNSTABLE",
+        "WEDGED",
+        "STUCK",
+        "CONFLICTING",
+        "HAS_HOOKS",
+    ];
+
+    for (num, m_state, ms_status, auto_m, wedged_flag) in rows.flatten() {
+        if num <= 0 {
+            continue;
+        }
+        let m_up = m_state.trim().to_ascii_uppercase();
+        let ms_up = ms_status.trim().to_ascii_uppercase();
+        let auto_on = matches!(auto_m.trim(), "1" | "true" | "TRUE");
+        let explicit_wedged = matches!(wedged_flag.trim(), "1" | "true" | "TRUE");
+        let state_wedged = WEDGED_STATES.contains(&m_up.as_str())
+            || WEDGED_STATES.contains(&ms_up.as_str())
+            || (auto_on
+                && ((!m_up.is_empty() && m_up != "CLEAN")
+                    || (!ms_up.is_empty() && ms_up != "CLEAN")));
+        if explicit_wedged || state_wedged {
+            pr_nums.insert(num as u64);
+        }
+    }
+}
+
+fn parse_pr_num_value(v: &serde_json::Value) -> Option<u64> {
+    v.as_u64().or_else(|| {
+        v.as_str()
+            .and_then(|s| s.trim().trim_start_matches('#').parse::<u64>().ok())
+    })
+}
+
+fn collect_wedged_prs_from_ambient(
+    repo_root: &Path,
+    window_hours: u32,
+    pr_nums: &mut std::collections::BTreeSet<u64>,
+    unnumbered_events: &mut u64,
+    cluster_count: &mut u64,
+) {
+    let ambient_path = repo_root.join(".chump-locks").join("ambient.jsonl");
+    let Ok(content) = std::fs::read_to_string(&ambient_path) else {
+        return;
+    };
+    let cutoff_ms = {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+        (secs.saturating_sub(u64::from(window_hours) * 3600)) as i64 * 1000
+    };
+
+    const WEDGED_KINDS: &[&str] = &[
+        "pr_wedged",
+        "pr_stuck",
+        "pr_stuck_announced",
+        "pr_stuck_cluster",
+        "landing_wedged",
+        "merge_wedged",
+    ];
+
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if !event_in_window(&v, cutoff_ms) {
+            continue;
+        }
+        let Some(kind) = v.get("kind").and_then(|k| k.as_str()) else {
+            continue;
+        };
+        if matches!(kind, "pr_merged" | "pr_closed" | "pr_unwedged") {
+            if let Some(n) = v
+                .get("pr")
+                .or_else(|| v.get("pr_number"))
+                .or_else(|| v.get("number"))
+                .and_then(parse_pr_num_value)
+            {
+                pr_nums.remove(&n);
+            }
+            continue;
+        }
+        if !WEDGED_KINDS.contains(&kind) {
+            continue;
+        }
+
+        let payload = v.get("payload").unwrap_or(&v);
+        let mut matched_specific = false;
+
+        for count_key in ["stuck_count", "wedged_count", "landing_wedged_prs", "count"] {
+            if let Some(c) = v
+                .get(count_key)
+                .or_else(|| payload.get(count_key))
+                .and_then(|c| c.as_u64())
+            {
+                *cluster_count = (*cluster_count).max(c);
+                matched_specific = true;
+            }
+        }
+
+        if let Some(arr) = v
+            .get("prs")
+            .or_else(|| payload.get("prs"))
+            .and_then(|a| a.as_array())
+        {
+            for item in arr {
+                if let Some(n) = parse_pr_num_value(item) {
+                    pr_nums.insert(n);
+                    matched_specific = true;
+                }
+            }
+        }
+
+        for pr_key in ["pr", "pr_number", "number"] {
+            if let Some(n) = v
+                .get(pr_key)
+                .or_else(|| payload.get(pr_key))
+                .and_then(parse_pr_num_value)
+            {
+                pr_nums.insert(n);
+                matched_specific = true;
+            }
+        }
+
+        if !matched_specific {
+            *unnumbered_events += 1;
+        }
+    }
+}
+
+fn collect_wedged_prs_from_signaled_file(
+    repo_root: &Path,
+    pr_nums: &mut std::collections::BTreeSet<u64>,
+) {
+    let path = repo_root
+        .join(".chump-locks")
+        .join("pr-wedged-signaled.json");
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+    match v {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                if let Some(n) = parse_pr_num_value(&item) {
+                    pr_nums.insert(n);
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::Array(items)) = map.get("prs") {
+                for item in items {
+                    if let Some(n) = parse_pr_num_value(item) {
+                        pr_nums.insert(n);
+                    }
+                }
+            } else {
+                for key in map.keys() {
+                    if let Ok(n) = key.trim().trim_start_matches('#').parse::<u64>() {
+                        pr_nums.insert(n);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── debt / dormancy crown-metric index (INFRA-8179) ───────────────────────────
+
+/// One dormant capability entry surfaced in `/api/debt` (`top5_dormant` and
+/// `nba_candidates`).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct DormantCapabilityEntry {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub priority: String,
+    pub criticality: String,
+    pub stages_short: u8,
+    pub status: String,
+}
+
+/// Response payload for `GET /api/debt` (and alias `GET /api/debt-index`).
+///
+/// Mirrors the `CrownGauge` / `DebtIndexSection` schema in `chump-kpi-report`
+/// (`live_pct`, `debt`, `top5_dormant`, `nba_candidate_count`, `nba_candidates`,
+/// `prune_count`) so the cockpit and operators can read the live-capability /
+/// dormancy crown metric over HTTP.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DebtIndexResponse {
+    /// Crit-weighted fraction of capabilities that are live (`0.0..=1.0`).
+    pub live_pct: f64,
+    /// Same live fraction expressed as a `0.0..=100.0` percentage for UI tiles.
+    pub live_pct_100: f64,
+    /// Dormancy debt score: sum of `criticality_weight * stages_short` over
+    /// high-criticality (`Crit`/`Warn`) dormant capabilities.
+    pub debt: f64,
+    /// Alias of `debt` for callers reading `debt_score`.
+    pub debt_score: f64,
+    pub total_capabilities: usize,
+    pub live_count: usize,
+    pub dormant_count: usize,
+    pub prune_count: usize,
+    pub top5_dormant: Vec<DormantCapabilityEntry>,
+    pub nba_candidate_count: usize,
+    pub nba_candidates: Vec<DormantCapabilityEntry>,
+    pub status: CiQaStatus,
+}
+
+fn gap_criticality(priority: &str) -> (&'static str, f64, u8) {
+    match priority.trim().to_ascii_lowercase().as_str() {
+        "p0" | "p1" | "critical" | "high" => ("Crit", 4.0, 2),
+        "p2" | "medium" => ("Warn", 2.0, 1),
+        _ => ("Info", 1.0, 0),
+    }
+}
+
+fn gap_stage_status(status: &str) -> (&'static str, bool) {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "done" | "shipped" | "closed" => ("Complete", true),
+        "in_progress" | "claimed" | "running" => ("Running", true),
+        _ => ("Pending", false),
+    }
+}
+
+fn effort_to_stages_short(effort: &str, is_live: bool) -> u8 {
+    if is_live {
+        return 0;
+    }
+    match effort.trim().to_ascii_lowercase().as_str() {
+        "xs" => 1,
+        "s" => 2,
+        "m" => 3,
+        "l" => 4,
+        "xl" => 5,
+        _ => 2,
+    }
+}
+
+/// Build the debt/dormancy crown-metric index from `.chump/state.db` (`gaps` +
+/// optional `tech_debt_findings`), falling back to `ambient.jsonl`
+/// (`kind=debt_index_computed`) when the DB is absent.
+pub fn build_debt_index(repo_root: &Path) -> DebtIndexResponse {
+    let db_path = chump_store_path::state_db_path(repo_root);
+    if db_path.is_file() {
+        if let Ok(conn) = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            if let Some(resp) = compute_debt_index_from_db(&conn) {
+                return resp;
+            }
+        }
+    }
+    if let Some(resp) = read_debt_index_from_ambient(repo_root) {
+        return resp;
+    }
+    DebtIndexResponse {
+        live_pct: 1.0,
+        live_pct_100: 100.0,
+        debt: 0.0,
+        debt_score: 0.0,
+        total_capabilities: 0,
+        live_count: 0,
+        dormant_count: 0,
+        prune_count: 0,
+        top5_dormant: vec![],
+        nba_candidate_count: 0,
+        nba_candidates: vec![],
+        status: CiQaStatus::Unknown,
+    }
+}
+
+fn compute_debt_index_from_db(conn: &Connection) -> Option<DebtIndexResponse> {
+    let prune_count: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tech_debt_findings \
+             WHERE resolved_by_gap IS NULL OR resolved_by_gap = ''",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .ok()
+        .map(|n| n.max(0) as usize)
+        .unwrap_or(0);
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, COALESCE(title, ''), COALESCE(priority, 'P2'), \
+                    COALESCE(status, 'open'), COALESCE(effort, 's') \
+             FROM gaps",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+            ))
+        })
+        .ok()?;
+
+    let mut total_capabilities = 0usize;
+    let mut live_count = 0usize;
+    let mut total_weight = 0.0f64;
+    let mut live_weight = 0.0f64;
+    let mut debt = 0.0f64;
+    let mut dormant_with_rank: Vec<(u8, DormantCapabilityEntry)> = Vec::new();
+    let mut nba_with_rank: Vec<(u8, DormantCapabilityEntry)> = Vec::new();
+
+    for row in rows.flatten() {
+        let (id, title, priority, status, effort) = row;
+        total_capabilities += 1;
+        let (crit_label, crit_weight, crit_rank) = gap_criticality(&priority);
+        let (stage_label, is_live) = gap_stage_status(&status);
+        let stages_short = effort_to_stages_short(&effort, is_live);
+
+        total_weight += crit_weight;
+        if is_live {
+            live_count += 1;
+            live_weight += crit_weight;
+        } else {
+            let display_name = if title.trim().is_empty() {
+                id.clone()
+            } else {
+                format!("{id}: {}", title.trim())
+            };
+            let entry = DormantCapabilityEntry {
+                id,
+                name: display_name,
+                title,
+                priority,
+                criticality: crit_label.to_string(),
+                stages_short,
+                status: stage_label.to_string(),
+            };
+            if crit_rank >= 1 {
+                debt += crit_weight * f64::from(stages_short);
+                nba_with_rank.push((crit_rank, entry.clone()));
+            }
+            dormant_with_rank.push((crit_rank, entry));
+        }
+    }
+
+    dormant_with_rank.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.stages_short.cmp(&a.1.stages_short))
+            .then_with(|| a.1.name.cmp(&b.1.name))
+    });
+    nba_with_rank.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.stages_short.cmp(&a.1.stages_short))
+            .then_with(|| a.1.name.cmp(&b.1.name))
+    });
+
+    let dormant_count = dormant_with_rank.len();
+    let top5_dormant: Vec<DormantCapabilityEntry> = dormant_with_rank
+        .into_iter()
+        .take(5)
+        .map(|(_, e)| e)
+        .collect();
+    let nba_candidates: Vec<DormantCapabilityEntry> =
+        nba_with_rank.into_iter().map(|(_, e)| e).collect();
+    let nba_candidate_count = nba_candidates.len();
+
+    let live_pct = if total_weight > 0.0 {
+        (live_weight / total_weight).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let live_pct_100 = (live_pct * 1000.0).round() / 10.0;
+
+    let status = if total_capabilities == 0 {
+        CiQaStatus::Unknown
+    } else if debt <= 0.0 {
+        CiQaStatus::Green
+    } else if live_pct >= 0.5 {
+        CiQaStatus::Amber
+    } else {
+        CiQaStatus::Red
+    };
+
+    Some(DebtIndexResponse {
+        live_pct,
+        live_pct_100,
+        debt,
+        debt_score: debt,
+        total_capabilities,
+        live_count,
+        dormant_count,
+        prune_count,
+        top5_dormant,
+        nba_candidate_count,
+        nba_candidates,
+        status,
+    })
+}
+
+fn read_debt_index_from_ambient(repo_root: &Path) -> Option<DebtIndexResponse> {
+    let ambient_path = repo_root.join(".chump-locks").join("ambient.jsonl");
+    let content = std::fs::read_to_string(&ambient_path).ok()?;
+    for line in content.lines().rev() {
+        let v: serde_json::Value = serde_json::from_str(line).ok()?;
+        if v.get("kind").and_then(|k| k.as_str()) != Some("debt_index_computed") {
+            continue;
+        }
+        let live_pct = v.get("live_pct").and_then(|x| x.as_f64()).unwrap_or(1.0);
+        let debt = v.get("debt").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let nba_candidate_count = v
+            .get("nba_count")
+            .or_else(|| v.get("nba_candidate_count"))
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0) as usize;
+        let prune_count = v.get("prune_count").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+        let status = if debt <= 0.0 {
+            CiQaStatus::Green
+        } else if live_pct >= 0.5 {
+            CiQaStatus::Amber
+        } else {
+            CiQaStatus::Red
+        };
+        return Some(DebtIndexResponse {
+            live_pct,
+            live_pct_100: (live_pct * 1000.0).round() / 10.0,
+            debt,
+            debt_score: debt,
+            total_capabilities: nba_candidate_count,
+            live_count: 0,
+            dormant_count: nba_candidate_count,
+            prune_count,
+            top5_dormant: vec![],
+            nba_candidate_count,
+            nba_candidates: vec![],
+            status,
+        });
+    }
+    None
+}
+
 // ── entrypoint called from routes ─────────────────────────────────────────────
 
 /// Build the full `DashboardSummary` for a given repo root.
@@ -633,8 +1200,88 @@ pub fn build_summary(repo_root: &Path) -> DashboardSummary {
     const WINDOW_HOURS: u32 = 24;
 
     let today_ships = count_today_ships(repo_root, WINDOW_HOURS);
-    let ci_qa_score =
+    let raw_ci_qa =
         read_ci_qa_score(repo_root, WINDOW_HOURS).or_else(|| compute_ci_qa_score_live(repo_root));
+    let stuck_prs = count_stuck_or_wedged_prs(repo_root, WINDOW_HOURS);
+
+    let ci_qa_score = match (raw_ci_qa, stuck_prs) {
+        (Some(mut score), n) if n > 0 => {
+            let base_sample = score.sample_size.max(today_ships);
+            let clean_landed = ((score.pct / 100.0) * (base_sample as f64))
+                .round()
+                .max(0.0);
+            let total = base_sample + n;
+            let mut effective_pct = if total > 0 {
+                ((clean_landed * 100.0) / (total as f64) * 10.0).round() / 10.0
+            } else {
+                0.0
+            };
+            if effective_pct >= 100.0 {
+                effective_pct = 99.0;
+            }
+            score.pct = effective_pct;
+            score.ci_clean_landing_pct = effective_pct;
+            score.sample_size = total;
+            score.stuck_prs = n;
+            score.landing_wedged_prs = n;
+            score.status = if effective_pct < 80.0 || n >= 5 {
+                CiQaStatus::Red
+            } else {
+                CiQaStatus::Amber
+            };
+            Some(score)
+        }
+        (None, n) if n > 0 => {
+            let total = today_ships + n;
+            let mut effective_pct = if total > 0 {
+                ((today_ships as f64 * 100.0) / (total as f64) * 10.0).round() / 10.0
+            } else {
+                0.0
+            };
+            if effective_pct >= 100.0 {
+                effective_pct = 99.0;
+            }
+            let status = if effective_pct < 80.0 || n >= 5 {
+                CiQaStatus::Red
+            } else {
+                CiQaStatus::Amber
+            };
+            Some(CiQaScore {
+                pct: effective_pct,
+                ci_clean_landing_pct: effective_pct,
+                sample_size: total,
+                status,
+                stuck_prs: n,
+                landing_wedged_prs: n,
+            })
+        }
+        (other, _) => other,
+    };
+
+    let (landing_pct, landing_status) = if stuck_prs > 0 {
+        let total_landing = today_ships + stuck_prs;
+        let mut pct = if total_landing > 0 {
+            ((today_ships as f64 * 100.0) / (total_landing as f64) * 10.0).round() / 10.0
+        } else {
+            0.0
+        };
+        if pct >= 100.0 {
+            pct = 99.0;
+        }
+        let status = if pct < 80.0 || stuck_prs >= 5 {
+            CiQaStatus::Red
+        } else {
+            CiQaStatus::Amber
+        };
+        (pct, status)
+    } else if let Some(ref s) = ci_qa_score {
+        (s.ci_clean_landing_pct, s.status)
+    } else if today_ships > 0 {
+        (100.0, CiQaStatus::Green)
+    } else {
+        (0.0, CiQaStatus::Unknown)
+    };
+
     let active_leases = read_active_leases(repo_root);
     let ribbon_acceptance = read_ribbon_acceptance(repo_root);
 
@@ -642,6 +1289,10 @@ pub fn build_summary(repo_root: &Path) -> DashboardSummary {
         today_ships,
         merges_24h: today_ships,
         ci_qa_score,
+        stuck_prs,
+        landing_wedged_prs: stuck_prs,
+        landing_pct,
+        landing_status,
         active_leases,
         window_hours: WINDOW_HOURS,
         ribbon_acceptance,
@@ -764,6 +1415,10 @@ mod tests {
             today_ships: 7,
             merges_24h: 7,
             ci_qa_score: None,
+            stuck_prs: 0,
+            landing_wedged_prs: 0,
+            landing_pct: 100.0,
+            landing_status: CiQaStatus::Green,
             active_leases: Vec::new(),
             window_hours: 24,
             ribbon_acceptance: Vec::new(),
@@ -780,6 +1435,126 @@ mod tests {
             v["merges_24h"], v["today_ships"],
             "merges_24h must always equal today_ships"
         );
+    }
+
+    #[test]
+    fn build_summary_degrades_ci_qa_and_landing_when_prs_wedged() {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        let tmp = std::env::temp_dir().join(format!(
+            "infra-8179-wedged-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        let chump_dir = tmp.join(".chump");
+        std::fs::create_dir_all(&chump_dir).unwrap();
+        let db_path = chump_dir.join("github_cache.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE pr_state (
+                number INTEGER PRIMARY KEY,
+                merged_at TEXT,
+                mergeable_state TEXT,
+                updated_at_api TEXT NOT NULL DEFAULT '',
+                fetched_at_local TEXT NOT NULL DEFAULT ''
+            );
+            INSERT INTO pr_state (number, merged_at, mergeable_state) VALUES
+                (101, NULL, 'DIRTY'),
+                (102, NULL, 'BLOCKED'),
+                (103, NULL, 'BEHIND');",
+        )
+        .unwrap();
+        drop(conn);
+
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis() as i64;
+        write_ambient(
+            &tmp,
+            &[
+                format!(
+                    r#"{{"kind":"ci_qa_score","ts_ms":{now_ms},"pct":100.0,"sample_size":7,"status":"green"}}"#
+                ),
+                format!(r#"{{"kind":"pr_wedged","ts_ms":{now_ms},"pr":104}}"#),
+            ],
+        );
+
+        let summary = build_summary(&tmp);
+        std::fs::remove_dir_all(&tmp).ok();
+
+        assert_eq!(summary.stuck_prs, 4);
+        assert_eq!(summary.landing_wedged_prs, 4);
+        assert!(
+            summary.landing_pct < 100.0,
+            "landing_pct must be < 100 when PRs are wedged, got {}",
+            summary.landing_pct
+        );
+        assert_ne!(
+            summary.landing_status,
+            CiQaStatus::Green,
+            "landing_status must not be Green when PRs are wedged"
+        );
+        let qa = summary.ci_qa_score.expect("ci_qa_score must be present");
+        assert!(
+            qa.pct < 100.0,
+            "ci_qa_score.pct must be < 100 when PRs are wedged, got {}",
+            qa.pct
+        );
+        assert!(qa.ci_clean_landing_pct < 100.0);
+        assert_ne!(
+            qa.status,
+            CiQaStatus::Green,
+            "ci_qa_score.status must not be Green when PRs are wedged"
+        );
+        assert_eq!(qa.stuck_prs, 4);
+    }
+
+    #[test]
+    fn build_debt_index_computes_crown_metrics_from_state_db() {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        let tmp = std::env::temp_dir().join(format!(
+            "infra-8179-debt-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_nanos()
+        ));
+        let chump_dir = tmp.join(".chump");
+        std::fs::create_dir_all(&chump_dir).unwrap();
+        let db_path = chump_dir.join("state.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE gaps (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                priority TEXT,
+                status TEXT,
+                effort TEXT
+            );
+            INSERT INTO gaps (id, title, priority, status, effort) VALUES
+                ('INFRA-1', 'Shipped cap', 'P0', 'done', 'm'),
+                ('INFRA-2', 'Dormant P0 cap', 'P0', 'open', 'l'),
+                ('INFRA-3', 'Dormant P2 cap', 'P2', 'open', 's');",
+        )
+        .unwrap();
+        drop(conn);
+
+        let debt = build_debt_index(&tmp);
+        std::fs::remove_dir_all(&tmp).ok();
+
+        assert_eq!(debt.total_capabilities, 3);
+        assert_eq!(debt.live_count, 1);
+        assert_eq!(debt.dormant_count, 2);
+        // P0 live weight 4.0 / total weight (4.0 + 4.0 + 2.0 = 10.0) = 0.4
+        assert!((debt.live_pct - 0.4).abs() < 1e-6, "got {}", debt.live_pct);
+        // Debt = 4.0 * 4 (l) + 2.0 * 2 (s) = 20.0
+        assert!((debt.debt - 20.0).abs() < 1e-6, "got {}", debt.debt);
+        assert_eq!(debt.nba_candidate_count, 2);
+        assert_eq!(debt.top5_dormant.len(), 2);
+        assert_eq!(debt.top5_dormant[0].id, "INFRA-2");
+        assert_eq!(debt.status, CiQaStatus::Red);
     }
 
     /// INFRA-7400 (INFRA-3841 slice): INFRA-3843/INFRA-7142 already unified

@@ -581,10 +581,13 @@ function renderBuild(d){
   ships.textContent = d.today_ships ?? "–";
   ships.className = "mv" + (d.today_ships==null ? " unknown" : "");
   const ci = document.getElementById("ciqa");
+  const wedged = d.landing_wedged_prs ?? d.stuck_prs ?? (d.ci_qa_score && d.ci_qa_score.stuck_prs) ?? 0;
   if (d.ci_qa_score){
     ci.textContent = Math.round(d.ci_qa_score.pct) + "%";
-    ci.className = "mv";
-    ci.title = "n="+d.ci_qa_score.sample_size+" · "+d.ci_qa_score.status;
+    const st = String(d.ci_qa_score.status||"").toLowerCase();
+    const tone = (st === "red" || wedged >= 5) ? " err" : ((st === "amber" || wedged > 0) ? " warn" : (st === "green" ? " ok" : ""));
+    ci.className = "mv" + tone;
+    ci.title = "n="+d.ci_qa_score.sample_size+" · "+d.ci_qa_score.status+(wedged>0?(" · "+wedged+" wedged"):"");
   } else { ci.textContent="–"; ci.className="mv unknown"; }
   const lz = document.getElementById("leases");
   const nL = (d.active_leases||[]).length;

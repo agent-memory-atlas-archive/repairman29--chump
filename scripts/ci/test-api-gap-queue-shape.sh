@@ -208,4 +208,73 @@ else
     fail "ambient.jsonl not created at $AMB"
 fi
 
-ok "ALL INFRA-1197 gap-queue shape checks passed"
+# ── Test 10 (INFRA-8179): /api/gaps sorts P0/critical before P1 even when ID sorts later ──
+sqlite3 "$DB" <<'SQL'
+INSERT INTO gaps (id, domain, title, priority, effort, status, acceptance_criteria, depends_on, created_at, opened_date, closed_pr)
+VALUES
+  ('INFRA-ZZZ', 'INFRA', 'RESILIENT: late-id P0 probe', 'critical', 'xs', 'open', '["a"]', '[]', 1778800000, '2026-05-15', NULL);
+SQL
+R10="$TMP/r10.json"
+curl -sf "http://127.0.0.1:$PORT/api/gaps" >"$R10"
+R10_P0="$TMP/r10_p0.json"
+curl -sf "http://127.0.0.1:$PORT/api/gaps?priority=P0" >"$R10_P0"
+python3 - <<EOF
+import json
+d = json.load(open("$R10"))
+gaps = d["gaps"] if isinstance(d, dict) else d
+ids = [g["id"] for g in gaps]
+assert ids.index("INFRA-ZZZ") < ids.index("INFRA-BBB"), f"P0/critical INFRA-ZZZ must sort before P1 INFRA-BBB, got {ids}"
+assert ids.index("INFRA-AAA") < ids.index("INFRA-BBB"), f"P0 INFRA-AAA must sort before P1 INFRA-BBB, got {ids}"
+
+d_p0 = json.load(open("$R10_P0"))
+gaps_p0 = d_p0["gaps"] if isinstance(d_p0, dict) else d_p0
+ids_p0 = [g["id"] for g in gaps_p0]
+assert set(ids_p0) == {"INFRA-AAA", "INFRA-ZZZ"}, f"?priority=P0 must return only P0/critical open gaps, got {ids_p0}"
+EOF
+ok "INFRA-8179: /api/gaps sorts P0/critical first and honors ?priority=P0"
+
+# ── Test 11 (INFRA-8179): /api/debt exposes crown-metric debt/dormancy index ──
+R11="$TMP/r11.json"
+curl -sf "http://127.0.0.1:$PORT/api/debt" >"$R11"
+python3 - <<EOF
+import json
+d = json.load(open("$R11"))
+assert "live_pct" in d and isinstance(d["live_pct"], (int, float)), f"missing live_pct: {d}"
+assert "debt" in d and d["debt"] > 0, f"expected positive debt for open P0/P1 gaps: {d}"
+assert "top5_dormant" in d and isinstance(d["top5_dormant"], list) and len(d["top5_dormant"]) >= 1, f"missing top5_dormant: {d}"
+assert "nba_candidate_count" in d and d["nba_candidate_count"] >= 2, f"unexpected nba_candidate_count: {d}"
+EOF
+ok "INFRA-8179: /api/debt exposes live_pct, debt, top5_dormant, nba_candidate_count"
+
+# ── Test 12 (INFRA-8179): /api/dashboard-summary reports non-green when PRs are landing-wedged ──
+mkdir -p "$TMP/.chump"
+sqlite3 "$TMP/.chump/github_cache.db" <<'SQL'
+CREATE TABLE pr_state (
+  number INTEGER PRIMARY KEY,
+  merged_at TEXT,
+  mergeable_state TEXT,
+  updated_at_api TEXT NOT NULL DEFAULT '',
+  fetched_at_local TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO pr_state (number, merged_at, mergeable_state) VALUES
+  (501, NULL, 'DIRTY'),
+  (502, NULL, 'BLOCKED'),
+  (503, NULL, 'BEHIND');
+SQL
+printf '{"kind":"ci_qa_score","pct":100.0,"sample_size":10,"status":"green"}\n' >>"$AMB"
+R12="$TMP/r12.json"
+curl -sf "http://127.0.0.1:$PORT/api/dashboard-summary" >"$R12"
+python3 - <<EOF
+import json
+d = json.load(open("$R12"))
+assert d.get("stuck_prs", 0) >= 3, f"expected stuck_prs>=3, got {d}"
+assert d.get("landing_wedged_prs", 0) >= 3, f"expected landing_wedged_prs>=3, got {d}"
+assert d.get("landing_pct", 100.0) < 100.0, f"landing_pct must be <100 when PRs wedged: {d}"
+assert d.get("landing_status") != "green", f"landing_status must not be green when PRs wedged: {d}"
+qa = d.get("ci_qa_score") or {}
+assert qa.get("pct", 100.0) < 100.0, f"ci_qa_score.pct must be <100 when PRs wedged: {qa}"
+assert qa.get("status") != "green", f"ci_qa_score.status must not be green when PRs wedged: {qa}"
+EOF
+ok "INFRA-8179: /api/dashboard-summary degrades ci_qa and landing below 100% green when PRs are wedged"
+
+ok "ALL INFRA-1197 + INFRA-8179 gap-queue/debt/dashboard-summary checks passed"

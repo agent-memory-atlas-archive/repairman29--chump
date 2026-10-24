@@ -2704,9 +2704,9 @@ impl DebtIndexSection {
 
 fn gap_priority_to_criticality(priority: &str) -> crate::live_pct::Criticality {
     use crate::live_pct::Criticality;
-    match priority {
-        "P0" | "P1" => Criticality::Crit,
-        "P2" => Criticality::Warn,
+    match priority.trim().to_ascii_lowercase().as_str() {
+        "p0" | "p1" | "critical" | "high" => Criticality::Crit,
+        "p2" | "medium" => Criticality::Warn,
         _ => Criticality::Info,
     }
 }

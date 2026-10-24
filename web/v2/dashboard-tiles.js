@@ -206,12 +206,16 @@ class ChumpDashboardTiles extends HTMLElement {
     });
     const top10 = leases.slice(0, 10);
 
-    const ciTone = ChumpDashboardTiles.#ciTone(ci);
+    const wedgedPrs = Number.isFinite(data.landing_wedged_prs)
+      ? data.landing_wedged_prs
+      : (Number.isFinite(data.stuck_prs) ? data.stuck_prs : (ci?.stuck_prs ?? 0));
+    const ciTone = ChumpDashboardTiles.#ciTone(ci, wedgedPrs);
     const ciLabel = ci
       ? `${ci.pct.toFixed(0)}%`
       : '—';
+    const wedgedSuffix = wedgedPrs > 0 ? ` · ${wedgedPrs} wedged` : '';
     const ciMeta = ci
-      ? `${ci.sample_size} run${ci.sample_size === 1 ? '' : 's'} · ${ci.status}`
+      ? `${ci.sample_size} run${ci.sample_size === 1 ? '' : 's'} · ${ci.status}${wedgedSuffix}`
       : 'no recent CI/QA score';
 
     const leaseRows = top10.length
@@ -259,11 +263,13 @@ class ChumpDashboardTiles extends HTMLElement {
     });
   }
 
-  static #ciTone(ci) {
+  static #ciTone(ci, wedgedPrs = 0) {
     if (!ci || typeof ci.pct !== 'number') return 'gray';
-    if (ci.pct >= 80) return 'green';
-    if (ci.pct >= 50) return 'amber';
-    return 'red';
+    const st = String(ci.status ?? '').toLowerCase();
+    if (st === 'red' || wedgedPrs >= 5 || ci.pct < 50) return 'red';
+    if (st === 'amber' || wedgedPrs > 0 || ci.pct < 80) return 'amber';
+    if (st === 'unknown') return 'gray';
+    return 'green';
   }
 
   static #renderCountdown(el) {

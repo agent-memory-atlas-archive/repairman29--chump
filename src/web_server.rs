@@ -7264,42 +7264,57 @@ async fn handle_gap_queue(
     }
     let total_pre_filter = all_gaps.len();
 
+    // Sort: priority asc (P0<P1<P2<P3, critical<high<medium<low), effort asc,
+    // created_at desc (newest first within tier) (INFRA-8179).
+    fn priority_ord(p: &str) -> u8 {
+        match p.trim().to_ascii_lowercase().as_str() {
+            "p0" | "critical" => 0,
+            "p1" | "high" => 1,
+            "p2" | "medium" => 2,
+            "p3" | "low" => 3,
+            "p4" => 4,
+            _ => 9,
+        }
+    }
+    fn priority_matches(gap_p: &str, filter_p: &str) -> bool {
+        let f = filter_p.trim();
+        if f.is_empty() || f.eq_ignore_ascii_case("all") {
+            return true;
+        }
+        let gr = priority_ord(gap_p);
+        f.split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .any(|t| gap_p.trim().eq_ignore_ascii_case(t) || (gr != 9 && gr == priority_ord(t)))
+    }
+    fn effort_ord(e: &str) -> u8 {
+        match e.trim().to_ascii_lowercase().as_str() {
+            "xs" => 0,
+            "s" => 1,
+            "m" => 2,
+            "l" => 3,
+            "xl" => 4,
+            _ => 9,
+        }
+    }
+
     // Domain + priority filters.
     let filtered: Vec<gap_store::GapRow> = all_gaps
         .into_iter()
         .filter(|g| {
             domain_filter
                 .as_ref()
-                .map(|d| g.domain == *d)
+                .map(|d| d.trim().is_empty() || g.domain.eq_ignore_ascii_case(d.trim()))
                 .unwrap_or(true)
         })
         .filter(|g| {
             priority_filter
                 .as_ref()
-                .map(|p| g.priority == *p)
+                .map(|p| priority_matches(&g.priority, p))
                 .unwrap_or(true)
         })
         .collect();
 
-    // Sort: priority asc, effort asc, created_at desc (newest first within tier).
-    fn priority_ord(p: &str) -> u8 {
-        match p {
-            "P0" => 0,
-            "P1" => 1,
-            "P2" => 2,
-            "P3" => 3,
-            _ => 9,
-        }
-    }
-    fn effort_ord(e: &str) -> u8 {
-        match e {
-            "xs" => 0,
-            "s" => 1,
-            "m" => 2,
-            "l" => 3,
-            _ => 9,
-        }
-    }
     let mut sorted = filtered;
     sorted.sort_by(|a, b| {
         priority_ord(&a.priority)
@@ -7635,20 +7650,22 @@ async fn handle_gap_next(
         gap_store_inst.active_leases().unwrap_or_default();
 
     fn priority_ord(p: &str) -> u8 {
-        match p {
-            "P0" => 0,
-            "P1" => 1,
-            "P2" => 2,
-            "P3" => 3,
+        match p.trim().to_ascii_lowercase().as_str() {
+            "p0" | "critical" => 0,
+            "p1" | "high" => 1,
+            "p2" | "medium" => 2,
+            "p3" | "low" => 3,
+            "p4" => 4,
             _ => 9,
         }
     }
     fn effort_ord(e: &str) -> u8 {
-        match e {
+        match e.trim().to_ascii_lowercase().as_str() {
             "xs" => 0,
             "s" => 1,
             "m" => 2,
             "l" => 3,
+            "xl" => 4,
             _ => 9,
         }
     }
@@ -7659,13 +7676,19 @@ async fn handle_gap_next(
         .filter(|g| {
             domain_filter
                 .as_ref()
-                .map(|d| &g.domain == d)
+                .map(|d| d.trim().is_empty() || g.domain.eq_ignore_ascii_case(d.trim()))
                 .unwrap_or(true)
         })
         .filter(|g| {
             priority_filter
                 .as_ref()
-                .map(|ps| ps.iter().any(|p| p == &g.priority))
+                .map(|ps| {
+                    let gr = priority_ord(&g.priority);
+                    ps.iter().any(|p| {
+                        p.trim().eq_ignore_ascii_case(g.priority.trim())
+                            || (gr != 9 && gr == priority_ord(p))
+                    })
+                })
                 .unwrap_or(true)
         })
         .filter(|g| {
@@ -7702,6 +7725,183 @@ async fn handle_gap_next(
     });
 
     Ok(Json(serde_json::json!({ "gap": next })))
+}
+
+/// GET /api/debt (and /api/debt-index) — INFRA-8179: debt/dormancy crown-metric
+/// index computed from `.chump/state.db` (`gaps` + optional `tech_debt_findings`).
+async fn handle_debt() -> Json<serde_json::Value> {
+    let repo_root = match std::env::var("CHUMP_REPO") {
+        Ok(r) => PathBuf::from(r),
+        Err(_) => repo_path::runtime_base(),
+    };
+    let section = chump_kpi_report::kpi_report::build_debt_index_section(&repo_root);
+    let live_pct = section.gauge.live_pct;
+    let debt = section.gauge.debt;
+    let live_pct_100 = (live_pct * 1000.0).round() / 10.0;
+    let status = if debt <= 0.0 {
+        "green"
+    } else if live_pct >= 0.5 {
+        "amber"
+    } else {
+        "red"
+    };
+    let top5_dormant: Vec<serde_json::Value> = section
+        .gauge
+        .top5_dormant_names
+        .iter()
+        .map(|name| {
+            let (id, title) = match name.split_once(' ') {
+                Some((i, t)) => (i.to_string(), t.to_string()),
+                None => (name.clone(), String::new()),
+            };
+            serde_json::json!({
+                "id": id,
+                "name": name,
+                "title": title,
+                "status": "Pending",
+            })
+        })
+        .collect();
+    Json(serde_json::json!({
+        "live_pct": live_pct,
+        "live_pct_100": live_pct_100,
+        "debt": debt,
+        "debt_score": debt,
+        "dormant_count": section.nba_candidate_count,
+        "prune_count": 0,
+        "top5_dormant": top5_dormant,
+        "nba_candidate_count": section.nba_candidate_count,
+        "nba_text": section.nba_text,
+        "status": status,
+    }))
+}
+
+/// GET /api/dashboard-summary — INFRA-8179: honest landing/ci_qa health on the
+/// `chump --web` serve path (mirrors `chump-fleet-server::dashboard::build_summary`).
+async fn handle_dashboard_summary() -> Json<serde_json::Value> {
+    let repo_root = match std::env::var("CHUMP_REPO") {
+        Ok(r) => PathBuf::from(r),
+        Err(_) => repo_path::runtime_base(),
+    };
+
+    let mut stuck_prs = 0u64;
+    let mut today_ships = 0u64;
+    let cache_db = repo_root.join(".chump").join("github_cache.db");
+    if let Ok(conn) =
+        rusqlite::Connection::open_with_flags(&cache_db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    {
+        let cutoff = (chrono::Utc::now() - chrono::Duration::hours(24))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        if let Ok(c) = conn.query_row(
+            "SELECT COUNT(*) FROM pr_state WHERE merged_at IS NOT NULL AND merged_at >= ?1",
+            rusqlite::params![cutoff],
+            |r| r.get::<_, i64>(0),
+        ) {
+            today_ships = c.max(0) as u64;
+        }
+        if let Ok(c) = conn.query_row(
+            "SELECT COUNT(*) FROM pr_state \
+             WHERE (merged_at IS NULL OR merged_at = '') \
+               AND UPPER(COALESCE(mergeable_state, '')) IN ('DIRTY', 'BLOCKED', 'BEHIND', 'UNSTABLE', 'WEDGED', 'STUCK')",
+            [],
+            |r| r.get::<_, i64>(0),
+        ) {
+            stuck_prs += c.max(0) as u64;
+        }
+    }
+
+    let ambient_path = repo_root.join(".chump-locks").join("ambient.jsonl");
+    let mut raw_pct: Option<f64> = None;
+    let mut raw_sample: u64 = 0;
+    let mut raw_status = "unknown".to_string();
+    if let Ok(content) = std::fs::read_to_string(&ambient_path) {
+        for line in content.lines() {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                match v.get("kind").and_then(|k| k.as_str()) {
+                    Some("ci_qa_score") => {
+                        if let Some(p) = v.get("pct").and_then(|x| x.as_f64()) {
+                            raw_pct = Some(p);
+                            raw_sample = v.get("sample_size").and_then(|x| x.as_u64()).unwrap_or(0);
+                            raw_status = v
+                                .get("status")
+                                .and_then(|x| x.as_str())
+                                .unwrap_or("green")
+                                .to_ascii_lowercase();
+                        }
+                    }
+                    Some(
+                        "pr_wedged" | "pr_stuck" | "pr_stuck_announced" | "pr_stuck_cluster"
+                        | "landing_wedged",
+                    ) => {
+                        let c = v.get("count").and_then(|x| x.as_u64()).unwrap_or(1);
+                        stuck_prs += c;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let (ci_qa_score, landing_pct, landing_status) = if stuck_prs > 0 {
+        let base_sample = raw_sample.max(today_ships);
+        let clean = raw_pct
+            .map(|p| ((p / 100.0) * (base_sample as f64)).round().max(0.0))
+            .unwrap_or(today_ships as f64);
+        let total = base_sample + stuck_prs;
+        let mut pct = if total > 0 {
+            ((clean * 100.0) / (total as f64) * 10.0).round() / 10.0
+        } else {
+            0.0
+        };
+        if pct >= 100.0 {
+            pct = 99.0;
+        }
+        let st = if pct < 80.0 || stuck_prs >= 5 {
+            "red"
+        } else {
+            "amber"
+        };
+        (
+            serde_json::json!({
+                "pct": pct,
+                "ci_clean_landing_pct": pct,
+                "sample_size": total,
+                "status": st,
+                "stuck_prs": stuck_prs,
+                "landing_wedged_prs": stuck_prs,
+            }),
+            pct,
+            st.to_string(),
+        )
+    } else if let Some(pct) = raw_pct {
+        (
+            serde_json::json!({
+                "pct": pct,
+                "ci_clean_landing_pct": pct,
+                "sample_size": raw_sample,
+                "status": raw_status,
+                "stuck_prs": 0,
+                "landing_wedged_prs": 0,
+            }),
+            pct,
+            raw_status,
+        )
+    } else {
+        (serde_json::Value::Null, 0.0, "unknown".to_string())
+    };
+
+    Json(serde_json::json!({
+        "today_ships": today_ships,
+        "merges_24h": today_ships,
+        "ci_qa_score": ci_qa_score,
+        "stuck_prs": stuck_prs,
+        "landing_wedged_prs": stuck_prs,
+        "landing_pct": landing_pct,
+        "landing_status": landing_status,
+        "active_leases": [],
+        "window_hours": 24,
+        "ribbon_acceptance": [],
+    }))
 }
 
 /// POST /api/gap/claim/:id — Claim a gap and create a worktree for it.
@@ -9900,6 +10100,9 @@ fn build_api_router() -> Router {
         // handler as /api/gap-queue, exposes id/title/status/priority/effort/
         // domain/pillar and accepts ?status=&priority=&domain= query params.
         .route("/api/gaps", get(handle_gap_queue))
+        .route("/api/debt", get(handle_debt))
+        .route("/api/debt-index", get(handle_debt))
+        .route("/api/dashboard-summary", get(handle_dashboard_summary))
         .route("/api/gaps/next", get(handle_gap_next))
         .route("/api/gaps/search", get(handle_gaps_search))
         // PRODUCT-176: the gap write surface — creation and field mutation were

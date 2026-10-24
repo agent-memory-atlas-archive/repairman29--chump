@@ -331,3 +331,125 @@ async fn test_dashboard_summary_lease_cap() {
         leases.len()
     );
 }
+
+/// INFRA-8179: when 14 open PRs are landing-wedged, `/api/dashboard-summary`
+/// must NOT report `ci_qa_score.pct == 100%` / `status == "green"` or
+/// `landing_pct == 100%`.
+#[tokio::test]
+async fn test_dashboard_summary_with_landing_wedged_prs() {
+    let root = tempdir("wedged14");
+    let chump_dir = root.join(".chump");
+    fs::create_dir_all(&chump_dir).unwrap();
+    let db_path = chump_dir.join("github_cache.db");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE pr_state (
+            number INTEGER PRIMARY KEY,
+            merged_at TEXT,
+            mergeable_state TEXT,
+            updated_at_api TEXT NOT NULL DEFAULT '',
+            fetched_at_local TEXT NOT NULL DEFAULT ''
+        );",
+    )
+    .unwrap();
+    for i in 1..=14 {
+        conn.execute(
+            "INSERT INTO pr_state (number, merged_at, mergeable_state) VALUES (?1, NULL, 'DIRTY')",
+            rusqlite::params![100 + i],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    // Even if ambient.jsonl has a stale 100% green ci_qa_score event, 14
+    // landing-wedged PRs must degrade both ci_qa_score and landing_* below 100%.
+    let lock_dir = root.join(".chump-locks");
+    fs::create_dir_all(&lock_dir).unwrap();
+    write_ambient_jsonl(&lock_dir.join("ambient.jsonl"), 100.0, 10, "green");
+
+    let app = build_test_app(root.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/dashboard-summary")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+
+    assert_eq!(v["stuck_prs"].as_u64(), Some(14));
+    assert_eq!(v["landing_wedged_prs"].as_u64(), Some(14));
+    assert!(
+        v["landing_pct"].as_f64().unwrap() < 100.0,
+        "landing_pct must not be 100% while 14 PRs are wedged: {v}"
+    );
+    assert_ne!(
+        v["landing_status"].as_str(),
+        Some("green"),
+        "landing_status must not be green while 14 PRs are wedged: {v}"
+    );
+
+    let score = v["ci_qa_score"].as_object().expect("ci_qa_score object");
+    assert!(
+        score["pct"].as_f64().unwrap() < 100.0,
+        "ci_qa_score.pct must not be 100% while 14 PRs are wedged: {score:?}"
+    );
+    assert_ne!(
+        score["status"].as_str(),
+        Some("green"),
+        "ci_qa_score.status must not be green while 14 PRs are wedged: {score:?}"
+    );
+}
+
+/// INFRA-8179: `GET /api/debt` (and `/api/debt-index`) exposes the
+/// debt/dormancy crown-metric index (`live_pct`, `debt`, `top5_dormant`,
+/// `nba_candidate_count`).
+#[tokio::test]
+async fn test_debt_route_returns_crown_metrics() {
+    let root = tempdir("debt");
+    let chump_dir = root.join(".chump");
+    fs::create_dir_all(&chump_dir).unwrap();
+    let state_db = chump_dir.join("state.db");
+    let conn = Connection::open(&state_db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE gaps (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            priority TEXT,
+            status TEXT,
+            effort TEXT
+        );
+        INSERT INTO gaps (id, title, priority, status, effort) VALUES
+            ('INFRA-10', 'Live capability', 'P0', 'done', 'm'),
+            ('INFRA-20', 'Dormant P0 capability', 'P0', 'open', 'l'),
+            ('INFRA-30', 'Dormant P1 capability', 'P1', 'open', 'm');",
+    )
+    .unwrap();
+    drop(conn);
+
+    for route in ["/api/debt", "/api/debt-index"] {
+        let app = build_test_app(root.clone());
+        let resp = app
+            .oneshot(Request::builder().uri(route).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "route {route} must 200");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        assert!(v.get("live_pct").and_then(|x| x.as_f64()).is_some());
+        assert!(v.get("debt").and_then(|x| x.as_f64()).unwrap() > 0.0);
+        assert_eq!(v["nba_candidate_count"].as_u64(), Some(2));
+        let top5 = v["top5_dormant"].as_array().expect("top5_dormant array");
+        assert_eq!(top5.len(), 2);
+        assert_eq!(top5[0]["id"].as_str(), Some("INFRA-20"));
+    }
+}
