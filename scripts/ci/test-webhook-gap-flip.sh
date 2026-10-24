@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
-# CREDIBLE-092 / CREDIBLE-268 regression guard.
+# CREDIBLE-092 / CREDIBLE-268 / CREDIBLE-1553 regression guard.
 #
-# The webhook receiver (runs LOCALLY, has .chump/state.db access) must flip a
-# merged PR's referenced gaps to status=done. This fixes the root cause that
-# .github/workflows/auto-flip-on-merge.yml could not: CI has no canonical
-# state.db, so merged gaps stayed 'open' and got re-claimed (ghost-gap waste).
-#
-# CREDIBLE-268 hardened this: the original title+body scan flipped every gap
-# a PR merely CITED (30 flips / 8 PRs / ~22 collateral on 2026-08-09).
-# Asserts: (a) the flip fn exists + is wired + routes through `gap ship` (not
-# `gap set`, so PROOF-OF-MERGE + closed_date apply); (b) extraction is
-# title-or-Closes-trailer only — a gap merely cited in body prose must NOT
-# flip; (c) auto-flip stays suppressed by default (CHUMP_WEBHOOK_AUTOFLIP
-# unset); (d) a closed-UNMERGED PR does NOT flip (no regression).
+# Asserts:
+#   (a) _auto_flip_gaps_done + _extract_gap_ids_for_closure exist and route
+#       through `chump gap gaps-for-pr` (typed gap_prs FK) and `chump gap ship`
+#       (never PR title or Closes: trailer regexes, never `gap set`);
+#   (b) only FK-linked gaps returned by `gaps-for-pr` flip on merge — unlinked
+#       PRs naming a gap in title or `Closes:` trailer do NOT flip;
+#   (c) auto-flip stays suppressed by default (CHUMP_WEBHOOK_AUTOFLIP unset);
+#   (d) a closed-UNMERGED PR does NOT flip;
+#   (e) _extract_gap_ids (used for lease release only) remains title-only.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # scripts/
@@ -27,6 +24,9 @@ fail() { echo "  FAIL: $1"; fails=$((fails+1)); }
 grep -q 'def _auto_flip_gaps_done' "$RECV" && ok "flip fn defined" || fail "no _auto_flip_gaps_done"
 grep -q 'def _extract_gap_ids_for_closure' "$RECV" \
   && ok "closure extraction fn defined" || fail "no _extract_gap_ids_for_closure"
+grep -q '"gaps-for-pr"' "$RECV" \
+  && ok "closure extraction routes through chump gap gaps-for-pr" \
+  || fail "closure extraction does not call chump gap gaps-for-pr"
 grep -q '"ship", gid' "$RECV" && grep -q '"--closed-pr",' "$RECV" \
   && ok "flip calls chump gap ship --closed-pr (not gap set)" \
   || fail "flip does not route through chump gap ship"
@@ -41,6 +41,11 @@ trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/chump" <<'STUB'
 #!/usr/bin/env bash
 echo "$*" >> "$CHUMP_STUB_CALLS"
+case "$*" in
+  "gap gaps-for-pr 9999") echo "MISSION-9001" ;;
+  "gap gaps-for-pr 9996") echo "MISSION-9004" ;;
+  "gap gaps-for-pr "*)    : ;;
+esac
 exit 0
 STUB
 chmod +x "$tmp/chump"
@@ -62,11 +67,11 @@ pr = {"number": 9999, "merged": True,
       "head": {"ref": "chump/mission-9001-claim"}}
 print("suppressed_flip_count=%d" % mod._auto_flip_gaps_done(pr, {"action": "closed", "pull_request": pr}))
 PY
-[[ -s "$CHUMP_STUB_CALLS" ]] \
+grep -qE 'gap (ship|set)' "$CHUMP_STUB_CALLS" \
   && fail "auto-flip fired with CHUMP_WEBHOOK_AUTOFLIP unset (should stay suppressed by default)" \
   || ok "auto-flip suppressed by default (CHUMP_WEBHOOK_AUTOFLIP unset)"
 
-# (b)/(d) with CHUMP_WEBHOOK_AUTOFLIP=1: title-id flips, body-citation-only does NOT, unmerged does NOT
+# (b)/(d) with CHUMP_WEBHOOK_AUTOFLIP=1: FK-linked PRs flip, unlinked title/Closes/prose PRs do NOT, unmerged does NOT
 : > "$CHUMP_STUB_CALLS"
 python3 - "$RECV" "$tmp/chump" <<'PY'
 import sys, os, importlib.util
@@ -77,26 +82,33 @@ spec = importlib.util.spec_from_file_location("ghwr_test_enabled", recv_path)
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
-# merged PR naming the gap in its TITLE -> flips
+# merged PR #9999 linked in gap_prs to MISSION-9001 -> flips
 pr = {"number": 9999, "merged": True,
       "title": "fix(MISSION-9001): something",
       "body": "Gap: MISSION-9001",
       "head": {"ref": "chump/mission-9001-claim"}}
-print("title_flip_count=%d" % mod._auto_flip_gaps_done(pr, {"action": "closed", "pull_request": pr}))
+print("fk_flip_count=%d" % mod._auto_flip_gaps_done(pr, {"action": "closed", "pull_request": pr}))
 
-# merged PR that only CITES a gap in body prose (no Closes: trailer) -> must NOT flip
+# merged PR #9995 naming MISSION-9006 in title AND Closes: trailer, but NOT linked in gap_prs -> must NOT flip
+pr_unlinked = {"number": 9995, "merged": True,
+               "title": "fix(MISSION-9006): unlinked title",
+               "body": "Closes: MISSION-9006",
+               "head": {"ref": "chump/mission-9006-claim"}}
+print("unlinked_flip_count=%d" % mod._auto_flip_gaps_done(pr_unlinked, {"action": "closed", "pull_request": pr_unlinked}))
+
+# merged PR #9997 that only CITES a gap in body prose -> must NOT flip
 pr_cite = {"number": 9997, "merged": True,
            "title": "docs: analysis of factory yield",
            "body": "This explains why MISSION-9003 keeps destroying PRs.",
            "head": {"ref": "chump/factory-yield-claim"}}
 print("cite_only_flip_count=%d" % mod._auto_flip_gaps_done(pr_cite, {"action": "closed", "pull_request": pr_cite}))
 
-# merged PR with an explicit Closes: trailer -> flips
-pr_closes = {"number": 9996, "merged": True,
-             "title": "fix: unrelated title",
-             "body": "Some prose mentioning MISSION-9005 in passing.\n\nCloses: MISSION-9004",
-             "head": {"ref": "chump/some-slug-claim"}}
-print("closes_trailer_flip_count=%d" % mod._auto_flip_gaps_done(pr_closes, {"action": "closed", "pull_request": pr_closes}))
+# merged PR #9996 linked in gap_prs to MISSION-9004 -> flips
+pr_linked2 = {"number": 9996, "merged": True,
+              "title": "fix: unrelated title",
+              "body": "Some prose mentioning MISSION-9005 in passing.",
+              "head": {"ref": "chump/some-slug-claim"}}
+print("fk2_flip_count=%d" % mod._auto_flip_gaps_done(pr_linked2, {"action": "closed", "pull_request": pr_linked2}))
 
 # closed-UNMERGED PR — must NOT flip
 pr2 = {"number": 9998, "merged": False,
@@ -106,24 +118,25 @@ print("unmerged_flip_count=%d" % mod._auto_flip_gaps_done(pr2, {"action": "close
 PY
 
 grep -q 'gap ship MISSION-9001 --closed-pr 9999' "$CHUMP_STUB_CALLS" \
-  && ok "merged PR naming gap in TITLE flipped MISSION-9001 -> done via gap ship (closed-pr 9999)" \
-  || fail "title-named flip call wrong/missing. calls: [$(tr '\n' '|' <"$CHUMP_STUB_CALLS")]"
+  && ok "FK-linked PR #9999 flipped MISSION-9001 -> done via gap ship (closed-pr 9999)" \
+  || fail "FK-linked flip call wrong/missing. calls: [$(tr '\n' '|' <"$CHUMP_STUB_CALLS")]"
+grep -q 'MISSION-9006' "$CHUMP_STUB_CALLS" \
+  && fail "unlinked PR #9995 (title+Closes: MISSION-9006, no gap_prs link) wrongly flipped MISSION-9006" \
+  || ok "unlinked PR #9995 did NOT flip MISSION-9006 (CREDIBLE-1553 FK-only closure)"
 grep -q 'MISSION-9003' "$CHUMP_STUB_CALLS" \
   && fail "PR that only CITED MISSION-9003 in body prose wrongly flipped it" \
-  || ok "body-citation-only mention did NOT flip (over-match fixed)"
+  || ok "body-citation-only mention did NOT flip"
 grep -q 'gap ship MISSION-9004 --closed-pr 9996' "$CHUMP_STUB_CALLS" \
-  && ok "explicit Closes: trailer flipped MISSION-9004 -> done via gap ship" \
-  || fail "Closes: trailer flip call wrong/missing. calls: [$(tr '\n' '|' <"$CHUMP_STUB_CALLS")]"
+  && ok "FK-linked PR #9996 flipped MISSION-9004 -> done via gap ship" \
+  || fail "FK-linked #9996 flip call wrong/missing. calls: [$(tr '\n' '|' <"$CHUMP_STUB_CALLS")]"
 grep -q 'MISSION-9005' "$CHUMP_STUB_CALLS" \
-  && fail "prose mention alongside a Closes: trailer wrongly flipped MISSION-9005" \
-  || ok "prose mention beside a Closes: trailer did NOT flip"
+  && fail "prose mention wrongly flipped MISSION-9005" \
+  || ok "prose mention did NOT flip"
 grep -q 'MISSION-9002' "$CHUMP_STUB_CALLS" \
   && fail "closed-UNMERGED PR wrongly flipped MISSION-9002" \
   || ok "closed-unmerged PR did NOT flip (no regression)"
 
-# (e) CREDIBLE-1072: _extract_gap_ids (used by lease-release) is title-only —
-# a gap ID that appears ONLY in the body (even behind a Closes: trailer) must
-# NOT be extracted; a gap ID in the title still is.
+# (e) CREDIBLE-1072: _extract_gap_ids (used by lease-release) is title-only
 extract_out="$(python3 - "$RECV" <<'PY'
 import sys, importlib.util
 recv_path = sys.argv[1]
@@ -153,7 +166,7 @@ echo "$extract_out" | grep -q "title=\['CREDIBLE-1234'\]" \
 
 echo ""
 if [[ "$fails" -eq 0 ]]; then
-  echo "PASS: test-webhook-gap-flip.sh (title/Closes: only extraction; routes through gap ship; suppressed by default)"
+  echo "PASS: test-webhook-gap-flip.sh (FK-only closure via gaps-for-pr; routes through gap ship; suppressed by default)"
   exit 0
 else
   echo "FAIL: test-webhook-gap-flip.sh ($fails assertion(s) failed)"

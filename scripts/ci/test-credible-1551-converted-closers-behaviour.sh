@@ -129,8 +129,16 @@ PATCHED="$TMP/reaper-patched.sh"
 perl -pe "s|^source\b.*reaper-instrumentation\.sh.*|source '$TMP/scripts/lib/reaper-instrumentation.sh'|" \
     "$REAPER" > "$PATCHED"
 : > "$TMP/shipped/ships.log"
+# CREDIBLE-1553: default run (no --close-merged-gaps) must not ship anything
 PATH="$TMP/bin:$PATH" REAPER_LOCK_DIR="$TMP/.chump-locks" REAPER_REPO_ROOT="$TMP" \
     bash "$PATCHED" >/dev/null 2>&1 || true
+if [[ -s "$TMP/shipped/ships.log" ]]; then
+    ko "reaper shipped gaps by default without --close-merged-gaps"
+else
+    ok "reaper does NOT close merged gaps by default (requires --close-merged-gaps)"
+fi
+PATH="$TMP/bin:$PATH" REAPER_LOCK_DIR="$TMP/.chump-locks" REAPER_REPO_ROOT="$TMP" \
+    bash "$PATCHED" --close-merged-gaps >/dev/null 2>&1 || true
 if shipped_has "INFRA-701 9912"; then
     ok "reaper SHIPS INFRA-701 (PR #9912 is FK-linked)"
 else

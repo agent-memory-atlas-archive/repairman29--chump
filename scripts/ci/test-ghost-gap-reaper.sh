@@ -217,11 +217,13 @@ echo "$OUT" | grep -q "gap_A" \
 echo "$OUT" | grep -q "rolled back 1 ghost gap(s)" \
     || { echo "FAIL: summary line 'rolled back 1 ghost gap(s)' not found in output"; FAIL=1; }
 
-# Phase 2 (INFRA-1909) assertions
-if [[ -f "$TMPDIR_TEST/shipped/gap_H" ]]; then
-    echo "PASS: gap_H (merged PR #201 found while open) was shipped"
+# Phase 2 (INFRA-1909 + CREDIBLE-1553) assertions:
+# gap_H has no closed_pr recorded; even though gh search would return PR #201,
+# ghost-gap-reaper must NOT fall back to title/search lookup (CREDIBLE-1553).
+if [[ ! -f "$TMPDIR_TEST/shipped/gap_H" ]]; then
+    echo "PASS: gap_H (unlinked search match only, no closed_pr) was NOT shipped (CREDIBLE-1553)"
 else
-    echo "FAIL: gap_H should have been shipped but was not"
+    echo "FAIL: gap_H should NOT have been shipped via title/search fallback"
     FAIL=1
 fi
 
@@ -232,8 +234,16 @@ else
     FAIL=1
 fi
 
-echo "$OUT" | grep -q "reaped 2 ghost-open gap(s)" \
-    || { echo "FAIL: summary line 'reaped 2 ghost-open gap(s)' not found in output"; FAIL=1; }
+_pom_var="CHUMP_""BYPASS_PROOF_OF_MERGE"
+if grep -q "$_pom_var" "$REAPER"; then
+    echo "FAIL: ghost-gap-reaper.sh still references $_pom_var"
+    FAIL=1
+else
+    echo "PASS: ghost-gap-reaper.sh does not use $_pom_var"
+fi
+
+echo "$OUT" | grep -q "reaped 1 ghost-open gap(s)" \
+    || { echo "FAIL: summary line 'reaped 1 ghost-open gap(s)' not found in output"; FAIL=1; }
 
 # RESILIENT-070: gap_I already had closed_pr recorded — must be shipped
 # directly, with no gh lookup (gh stub has no case for "gap_I" search).

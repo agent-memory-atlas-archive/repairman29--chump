@@ -45,7 +45,13 @@ reaper_rotate_log /tmp/chump-stale-pr-reaper.err.log
 trap 'rc=$?; [[ $rc -ne 0 ]] && reaper_finish fail "{\"exit\":$rc}"' EXIT
 
 DRY_RUN=0
-[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
+CLOSE_MERGED_GAPS=0
+for _arg in "$@"; do
+    case "$_arg" in
+        --dry-run) DRY_RUN=1 ;;
+        --close-merged-gaps) CLOSE_MERGED_GAPS=1 ;;
+    esac
+done
 
 REMOTE="${REMOTE:-origin}"
 BASE="${BASE:-main}"
@@ -317,9 +323,10 @@ done <<< "$PRS"
 # title match was never proof the PR implemented the gap (it falsely closed the
 # R3 umbrella CREDIBLE-1492 from a docs-only receipt PR). `chump gap ship`
 # enforces the same gap_prs link, so a merged PR with no row closes nothing.
+# CREDIBLE-1553: the INFRA-674 close block is off by default behind --close-merged-gaps.
 GHOST_CLOSED=0
 GHOST_CLOSED_PAIRS=""
-if command -v chump >/dev/null 2>&1; then
+if [[ $CLOSE_MERGED_GAPS -eq 1 ]] && command -v chump >/dev/null 2>&1; then
     green "=== ghost-status scan (INFRA-674): checking merged PRs (last 24h) ==="
 
     # gh's --search merged:> filter uses ISO-8601 date; use last 24h window

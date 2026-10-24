@@ -75,35 +75,20 @@ esac
 
 echo "[backfill] mode=$MODE  window=last $DAYS days (since $since_date)"
 
-# Gap-ID regex — a bare "<GAP-ID>: …" title prefix means "this PR SHIPS this gap"
-# and is the only form that closes a gap. A conventional-commit scope like
-# "fix(INFRA-8112): …" REFERENCES the gap without closing it (see
-# check-gap-status-flip.sh §convention + INFRA-066) — e.g. a PR that unblocks a
-# gap's ship but does not implement it. This regex MUST require the bare
-# "<DOMAIN>-<NUM>:" prefix so it matches check-gap-status-flip.sh:34 and
-# gap-doctor-reconcile.py:576 exactly. The old permissive form
-# ^([a-z]+\()?(DOMAIN)-([0-9]+) stripped the "fix(" and false-closed any gap
-# merely named in a fix(X:) title — it closed INFRA-8112 off PR #5317, a
-# clippy-classifier fix that never implemented the toolkit.
-GAP_ID_REGEX='^(INFRA|EFFECTIVE|RESILIENT|DOC|META|MISSION|CREDIBLE)-([0-9]+):'
-
-# Query the merged PRs via `gh pr list --state merged`.
-# gh search prs lacks `mergedAt`; gh pr list returns it cleanly. --limit 1000
-# covers >90d of typical merge volume. Post-process to drop PRs older than
-# since_date (gh pr list sorts newest-first by default).
+# CREDIBLE-1553 (Phase R R2): resolve the gap(s) each merged PR closes from
+# the typed gap_prs FK (`chump gap gaps-for-pr <pr>`), NEVER from the PR title.
 echo "[backfill] querying merged PRs since $since_date …"
 merged_prs_json=$(
     gh pr list \
         --state merged \
         --limit 1000 \
-        --json number,title,mergedAt \
+        --json number,mergedAt \
     || { echo "[backfill] ERROR: gh pr list failed" >&2; exit 2; }
 )
-# Filter to since_date in Python (date arithmetic in bash is fragile).
 merged_prs_json=$(
     echo "$merged_prs_json" | python3 -c "
 import json, sys
-from datetime import datetime, timezone
+from datetime import datetime
 prs = json.load(sys.stdin)
 cutoff = datetime.fromisoformat('${since_date}T00:00:00+00:00')
 keep = [pr for pr in prs if pr.get('mergedAt') and datetime.fromisoformat(pr['mergedAt'].replace('Z','+00:00')) >= cutoff]
@@ -111,8 +96,6 @@ print(json.dumps(keep))
 "
 )
 
-# Iterate. For each PR, extract gap-ID. If extraction succeeds AND the gap
-# is currently status:open, schedule the ship.
 total_prs=0
 matched=0
 already_done=0
@@ -120,23 +103,13 @@ to_ship=0
 shipped=0
 skipped_unknown=0
 
-# Process substitution avoids the pipefail-into-while subshell bug
-# (CLAUDE_GOTCHAS — INFRA-1658 / RESILIENT-031 pattern).
-while IFS=$'\t' read -r pr_number pr_title; do
+while IFS= read -r pr_number; do
+    [[ -z "$pr_number" ]] && continue
     total_prs=$((total_prs + 1))
-    # Bash regex: build inside the [[ ]] guard.
-    # Only a bare "<GAP-ID>: …" prefix closes (ships) the gap; "fix(X:) …" is a
-    # reference, not a close (see GAP_ID_REGEX note above). This prevents the
-    # false-close of a gap merely named in an enabler PR's scope.
-    if [[ "$pr_title" =~ ^(INFRA|EFFECTIVE|RESILIENT|DOC|META|MISSION|CREDIBLE)-([0-9]+): ]]; then
-        domain="${BASH_REMATCH[1]}"
-        num="${BASH_REMATCH[2]}"
-        gap_id="${domain}-${num}"
+    gap_ids="$(chump gap gaps-for-pr "$pr_number" 2>/dev/null | sort -u || true)"
+    [[ -z "$gap_ids" ]] && continue
+    for gap_id in $gap_ids; do
         matched=$((matched + 1))
-
-        # Check current status. `chump gap show` exits non-zero if the gap
-        # does not exist; we count that as "skipped-unknown" rather than
-        # failing the backfill.
         if ! gap_status=$(chump gap show "$gap_id" 2>/dev/null | awk '/^  status:/ {print $2; exit}'); then
             skipped_unknown=$((skipped_unknown + 1))
             continue
@@ -153,14 +126,12 @@ while IFS=$'\t' read -r pr_number pr_title; do
             open|*)
                 to_ship=$((to_ship + 1))
                 if [[ "$MODE" == "dry-run" ]]; then
-                    echo "[backfill] WOULD ship $gap_id (closed_pr=$pr_number)  title='${pr_title:0:60}'"
+                    echo "[backfill] WOULD ship $gap_id (closed_pr=$pr_number)"
                 else
                     if CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 \
                             chump gap ship "$gap_id" --closed-pr "$pr_number" --update-yaml >/dev/null 2>&1; then
                         echo "[backfill] ✓ shipped $gap_id (closed_pr=$pr_number)"
                         shipped=$((shipped + 1))
-                        # INFRA-755: structured ambient emit so the operator
-                        # can audit which gaps were backfill-flipped.
                         ambient_log="${CHUMP_AMBIENT_LOG:-${REPO_ROOT}/.chump-locks/ambient.jsonl}"
                         printf '{"ts":"%s","kind":"gap_backfill_flipped","gap":"%s","pr":%s,"source":"backfill-shipped-gaps"}\n' \
                             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$gap_id" "$pr_number" >> "$ambient_log" 2>/dev/null || true
@@ -170,14 +141,11 @@ while IFS=$'\t' read -r pr_number pr_title; do
                 fi
                 ;;
         esac
-    fi
+    done
 done < <(echo "$merged_prs_json" | python3 -c '
 import json, sys
-prs = json.load(sys.stdin)
-for pr in prs:
-    n = pr["number"]
-    t = pr["title"]
-    print(str(n) + "\t" + t)
+for pr in json.load(sys.stdin):
+    print(pr["number"])
 ')
 
 cat <<SUMMARY

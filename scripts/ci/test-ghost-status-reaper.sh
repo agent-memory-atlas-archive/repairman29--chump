@@ -142,10 +142,22 @@ perl -pe "s|^source\b.*reaper-instrumentation\.sh.*|source '$STUB_LIB'|" \
     "$REAPER" > "$PATCHED"
 chmod +x "$PATCHED"
 
-OUT=$(PATH="$TMPDIR_TEST/bin:$PATH" \
+# CREDIBLE-1553: default invocation (without --close-merged-gaps) must NOT close merged gaps
+OUT_DEFAULT=$(PATH="$TMPDIR_TEST/bin:$PATH" \
     REAPER_LOCK_DIR="$TMPDIR_TEST/.chump-locks" \
     REAPER_REPO_ROOT="$TMPDIR_TEST" \
     bash "$PATCHED" 2>&1 || true)
+if [[ -f "$TMPDIR_TEST/shipped/INFRA-664" ]]; then
+    echo "FAIL: INFRA-664 was shipped without --close-merged-gaps (CREDIBLE-1553 requires opt-in)"
+    exit 1
+else
+    echo "PASS: default invocation did NOT close merged gaps without --close-merged-gaps"
+fi
+
+OUT=$(PATH="$TMPDIR_TEST/bin:$PATH" \
+    REAPER_LOCK_DIR="$TMPDIR_TEST/.chump-locks" \
+    REAPER_REPO_ROOT="$TMPDIR_TEST" \
+    bash "$PATCHED" --close-merged-gaps 2>&1 || true)
 
 echo "$OUT"
 

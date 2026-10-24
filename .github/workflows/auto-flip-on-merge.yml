@@ -1,92 +1,43 @@
-name: Auto-flip-on-merge
+# .github/workflows/auto-flip-on-merge.yml
+# CREDIBLE-1553 (Phase R R2): converted from title-regex extraction to the
+# typed gap_prs FK (`chump gap gaps-for-pr <PR-NUMBER>`). Never parses a gap ID
+# from a PR title, commit subject, or body.
 
-# INFRA-2121 (CI-REVIEW Lever 5) — close the gap-registry drift loop.
-#
-# When a PR with a gap-ID in its title is MERGED, run:
-#     chump gap ship <GAP-ID> --closed-pr <PR-NUMBER> --update-yaml
-#
-# This eliminates the silent-shipped-but-status-still-open backlog (31 gaps as
-# of 2026-05-29). The gap-ID is extracted from the PR title via a regex that
-# matches the canonical conventional-commits-with-domain-prefix format:
-#
-#     ^(?:[a-z]+\()?(INFRA|EFFECTIVE|RESILIENT|DOC|META|MISSION|CREDIBLE)-\d+
-#
-# Examples that match:
-#     "INFRA-2121: auto-flip-on-merge"                   → INFRA-2121
-#     "fix(INFRA-2080): sandbox isolation"               → INFRA-2080
-#     "feat(META-118): wedge auto-dispatch decompose"    → META-118
-#     "docs(DOC-061): cross-link FRESHNESS_DISCIPLINE"   → DOC-061
-#
-# Examples that do NOT match (and silently no-op, by design):
-#     "chore(deps): bump cargo-major group"
-#     "Update README"
-#
-# Idempotent: `chump gap ship` is a no-op when the gap is already status:done.
-#
-# Event registry (INFRA-755 + scanner-anchor pattern):
-#   scanner-anchor: "kind":"gap_auto_flipped" emitted by this workflow (INFRA-2121)
-#   scanner-anchor: "kind":"gap_auto_flip_failed" emitted by this workflow (INFRA-2121)
+name: auto-flip-on-merge
 
 on:
   pull_request:
     types: [closed]
-    branches: [main, master]
+    branches: [main]
 
 permissions:
   contents: write
-  pull-requests: read
 
-# One run per PR-merge event. No cancel-in-progress: each merge is unique.
 concurrency:
   group: auto-flip-on-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   flip-on-merge:
-    # Only fire on actual merges, not closed-without-merge.
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Extract gap-ID from PR title
-        id: extract
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          set -euo pipefail
-          # Build the regex in a heredoc to avoid YAML pipe-scalar issues.
-          regex='^(?:[a-z]+\()?(INFRA|EFFECTIVE|RESILIENT|DOC|META|MISSION|CREDIBLE)-([0-9]+)'
-          if [[ "$PR_TITLE" =~ $regex ]]; then
-            domain="${BASH_REMATCH[1]}"
-            num="${BASH_REMATCH[2]}"
-            gap_id="${domain}-${num}"
-            echo "gap_id=$gap_id" >> "$GITHUB_OUTPUT"
-            echo "[extract] matched gap-ID: $gap_id"
-          else
-            echo "gap_id=" >> "$GITHUB_OUTPUT"
-            echo "[extract] no gap-ID prefix in PR title — skipping flip"
-          fi
-
       - name: Checkout
-        if: steps.extract.outputs.gap_id != ''
         uses: actions/checkout@v7
         with:
-          # Need write to push the YAML mirror update.
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: main
           fetch-depth: 1
 
       - name: Install Rust toolchain
-        if: steps.extract.outputs.gap_id != ''
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build chump
-        if: steps.extract.outputs.gap_id != ''
         run: cargo build --bin chump --release
 
-      - name: Flip gap to done
-        if: steps.extract.outputs.gap_id != ''
+      - name: Flip FK-linked gap(s) to done
         env:
-          GAP_ID: ${{ steps.extract.outputs.gap_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
@@ -95,58 +46,23 @@ jobs:
             echo "[flip] ERROR: chump binary not found at $chump_bin"
             exit 1
           fi
-
-          # Capture pre-flip state for verification.
-          pre_status=$("$chump_bin" gap show "$GAP_ID" 2>/dev/null | awk '/^  status:/ {print $2; exit}' || true)
-          echo "[flip] $GAP_ID pre-status: ${pre_status:-(unknown)}"
-
-          # Idempotent: chump gap ship is a no-op when already status:done.
-          # --update-yaml writes the per-file mirror at docs/gaps/<ID>.yaml.
-          # --closed-pr stores the PR number for retrospective audit.
-          # --bypass-stale-check: in CI we know main is fresh.
+          gap_ids="$("$chump_bin" gap gaps-for-pr "$PR_NUMBER" 2>/dev/null | sort -u || true)"
+          if [[ -z "$gap_ids" ]]; then
+            echo "[flip] no gap_prs row for PR #$PR_NUMBER — skipping flip"
+            exit 0
+          fi
           ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          if CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 \
-             "$chump_bin" gap ship "$GAP_ID" \
-                --closed-pr "$PR_NUMBER" \
-                --update-yaml; then
-            echo "[flip] ✓ flipped $GAP_ID → done (closed_pr=$PR_NUMBER)"
-            # INFRA-755: structured ambient-shape emit; pr-watch picks it up.
-            printf '{"ts":"%s","kind":"gap_auto_flipped","gap":"%s","pr":%s,"outcome":"shipped"}\n' \
-                "$ts" "$GAP_ID" "$PR_NUMBER"
-          else
-            # Non-zero exit when gap doesn't exist or is malformed. Don't
-            # fail the workflow — the merge already landed. Log + emit
-            # observable signal for operator audit, but exit clean.
-            echo "[flip] ⚠ chump gap ship failed for $GAP_ID — gap may not exist or YAML may be malformed"
-            echo "[flip] non-fatal: the PR already merged; this only updates registry state"
-            printf '{"ts":"%s","kind":"gap_auto_flip_failed","gap":"%s","pr":%s,"reason":"chump-gap-ship-nonzero"}\n' \
-                "$ts" "$GAP_ID" "$PR_NUMBER"
-          fi
-
-      - name: Commit YAML update
-        if: steps.extract.outputs.gap_id != ''
-        env:
-          GAP_ID: ${{ steps.extract.outputs.gap_id }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          yaml_path="docs/gaps/${GAP_ID}.yaml"
-          if [[ ! -f "$yaml_path" ]]; then
-            echo "[commit] no YAML at $yaml_path — nothing to commit"
-            exit 0
-          fi
-          if git diff --quiet -- "$yaml_path"; then
-            echo "[commit] no YAML diff — gap was already in done state"
-            exit 0
-          fi
-          git config user.name  "auto-flip-on-merge[bot]"
-          git config user.email "auto-flip-on-merge@chump.local"
-          git add "$yaml_path"
-          git commit -m "$(printf 'chore(auto-flip): mark %s as done (closed_pr=%s)\n\nInvoked by .github/workflows/auto-flip-on-merge.yml (INFRA-2121).\n' "$GAP_ID" "$PR_NUMBER")"
-          # Best-effort push. If main has moved (rare under main-branch lock),
-          # the next merged PR will retry the flip on its own state.
-          git push origin main || {
-            echo "[commit] ⚠ push to main rejected (likely main moved) — skipping; next PR will retry"
-            exit 0
-          }
-          echo "[commit] ✓ pushed YAML update for $GAP_ID"
+          for GAP_ID in $gap_ids; do
+            if CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 \
+               "$chump_bin" gap ship "$GAP_ID" \
+                  --closed-pr "$PR_NUMBER" \
+                  --update-yaml; then
+              echo "[flip] ✓ flipped $GAP_ID → done (closed_pr=$PR_NUMBER)"
+              printf '{"ts":"%s","kind":"gap_auto_flipped","gap":"%s","pr":%s,"outcome":"shipped"}\n' \
+                  "$ts" "$GAP_ID" "$PR_NUMBER"
+            else
+              echo "[flip] ⚠ chump gap ship failed for $GAP_ID"
+              printf '{"ts":"%s","kind":"gap_auto_flip_failed","gap":"%s","pr":%s,"reason":"chump-gap-ship-nonzero"}\n' \
+                  "$ts" "$GAP_ID" "$PR_NUMBER"
+            fi
+          done

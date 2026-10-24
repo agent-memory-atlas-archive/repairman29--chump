@@ -84,6 +84,41 @@ mkdir -p "$FIX/scripts/ci" "$FIX/scripts/coord" "$FIX/scripts/dispatch" \
   echo 'done'
 } > "$FIX/scripts/coord/mg2-closer.sh"
 
+# POSITIVE credible-1553 classes:
+mkdir -p "$FIX/.github/workflows" "$FIX/scripts/lib"
+cat > "$FIX/scripts/coord/sqlite-like-closer.sh" <<'SQLC'
+#!/usr/bin/env bash
+pr=$(sqlite3 .chump/github_cache.db "SELECT pr_number FROM pr_state WHERE state='MERGED' AND title LIKE '%$_gid%' LIMIT 1;")
+chump gap ship "$_gid" --closed-pr "$pr"
+SQLC
+
+cat > "$FIX/scripts/ops/in-title-closer.sh" <<'INTC'
+#!/usr/bin/env bash
+pr=$(gh pr list --state merged --search "$gap in:title" --json number -q '.[0].number')
+chump gap set "$gap" --status done
+INTC
+
+cat > "$FIX/scripts/ops/py-title-closer.py" <<'PYTC'
+import subprocess, re
+def f(pr):
+    m = re.findall(r'[A-Z]+-[0-9]+', pr.get("title") or "")
+    for gid in m:
+        subprocess.run(["chump", "gap", "ship", gid, "--closed-pr", str(pr["number"])])
+PYTC
+
+cat > "$FIX/.github/workflows/wf-title-closer.yml" <<'WFTC'
+name: test
+jobs:
+  flip:
+    steps:
+      - env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ "$PR_TITLE" =~ ^([A-Z]+-[0-9]+) ]]; then
+            chump gap ship "${BASH_REMATCH[1]}" --closed-pr 123
+          fi
+WFTC
+
 # NEGATIVE fk-ok: resolves the closed gap via the gap_prs FK reverse lookup.
 cat > "$FIX/scripts/coord/fk-ok-closer.sh" <<'FK'
 #!/usr/bin/env bash
@@ -137,6 +172,14 @@ flagged m2-closer.sh  "$OUT_PROD" && ok "prod window flags m2-closer.sh (main's 
   || ko "prod window (PROX_WINDOW=$PROD_WIN) MISSED m2-closer.sh — window too narrow (must be >= 17)"
 flagged mg2-closer.sh "$OUT_PROD" && ok "prod window flags mg2-closer.sh (regex 17 lines above ship)" \
   || ko "prod window (PROX_WINDOW=$PROD_WIN) MISSED mg2-closer.sh — window too narrow (must be >= 17)"
+grep -q "VIOLATION: scripts/coord/sqlite-like-closer.sh" <<<"$OUT_PROD" && ok "prod window flags sqlite-like-closer.sh (title LIKE)" \
+  || ko "prod window MISSED sqlite-like-closer.sh"
+grep -q "VIOLATION: scripts/ops/in-title-closer.sh" <<<"$OUT_PROD" && ok "prod window flags in-title-closer.sh (in:title + gap set --status done)" \
+  || ko "prod window MISSED in-title-closer.sh"
+grep -q "VIOLATION: scripts/ops/py-title-closer.py" <<<"$OUT_PROD" && ok "prod window flags py-title-closer.py (pr.get('title'))" \
+  || ko "prod window MISSED py-title-closer.py"
+grep -q "VIOLATION: .github/workflows/wf-title-closer.yml" <<<"$OUT_PROD" && ok "prod window flags wf-title-closer.yml (pull_request.title in .github/workflows)" \
+  || ko "prod window MISSED wf-title-closer.yml"
 flagged fk-ok-closer.sh "$OUT_PROD" && ko "prod window WRONGLY flagged fk-ok-closer.sh (FK-resolved close)" \
   || ok "prod window passes fk-ok-closer.sh (close resolved via gap_prs FK)"
 flagged display-only.sh "$OUT_PROD" && ko "prod window WRONGLY flagged display-only.sh (title far from close)" \

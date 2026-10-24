@@ -235,31 +235,15 @@ for g in json.load(sys.stdin):
     while IFS=$'\t' read -r _gid _known_pr; do
         [[ -z "$_gid" ]] && continue
 
-        if [[ -n "$_known_pr" ]]; then
-            # RESILIENT-070: closed_pr already recorded — skip the lookup entirely.
-            _pr_num="$_known_pr"
-            echo "[ghost-gap-reaper] RESILIENT-070: reconciling $_gid — closed_pr=#$_pr_num already recorded, no PR lookup needed"
-        else
-            # INFRA-1081: Cache-first lookup for merged PRs containing the gap_id
-            if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$(_cache_db_path)" ]]; then
-                _pr_json="$(sqlite3 "$(_cache_db_path)" "SELECT json_group_array(json(raw_payload_json)) FROM pr_state WHERE merged_at IS NOT NULL AND (title LIKE '%$_gid%' OR head_ref LIKE '%$_gid%') LIMIT 1")"
-            else
-                _pr_json=$(gh pr list --search "$_gid" --state merged --json number,mergedAt --limit 1 2>/dev/null || echo "[]")
-            fi
-            [[ -z "$_pr_json" || "$_pr_json" == "[]" ]] && continue
-
-            _pr_num=$(printf '%s' "$_pr_json" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-print(d[0]['number'] if d else '')
-" 2>/dev/null || true)
-            [[ -z "$_pr_num" ]] && continue
-
-            echo "[ghost-gap-reaper] INFRA-1909: reconciling $_gid — merged PR #$_pr_num found while gap still open"
-        fi
+        # CREDIBLE-1553 (Phase R R2 / R1): keep ONLY the known-closed_pr path.
+        # Drop the title LIKE and gh pr list --search fallback, and never ship
+        # with the deleted proof-of-merge bypass env var.
+        [[ -n "$_known_pr" ]] || continue
+        _pr_num="$_known_pr"
+        echo "[ghost-gap-reaper] RESILIENT-070: reconciling $_gid — closed_pr=#$_pr_num already recorded, no PR lookup needed"
 
         CHUMP_REPO="$REPO_ROOT" CHUMP_BINARY_STALENESS_CHECK=0 \
-            CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 CHUMP_BYPASS_PROOF_OF_MERGE=1 \
+            CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 \
             "$_chump" gap ship "$_gid" --closed-pr "$_pr_num" --update-yaml 2>/dev/null || {
             echo "[ghost-gap-reaper] WARNING: failed to ship $_gid"
             continue

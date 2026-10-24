@@ -247,12 +247,16 @@ writer() {
   # git log is complete (unlike the rolling github_cache) and IS the source of truth
   # for what merged. Emit (gid<TAB>pr), then awk keeps the first (newest) per gid.
   # (bash-3.2-safe: no `declare -A`; a temp file keeps the counter out of a subshell.)
+  # CREDIBLE-1553 (Phase R R2): extract the merged PR number from the merge commit
+  # trailer `(#PR)` and resolve the gap(s) via the typed gap_prs FK (`chump gap gaps-for-pr`),
+  # never from the commit subject text.
   git log origin/main --format='%s' -n 4000 2>/dev/null | while IFS= read -r subj; do
     local gid pr
-    gid="$(printf '%s' "$subj" | grep -oE '\([A-Z]+-[0-9]+\)' | head -1 | tr -d '()')"
-    [[ -n "$gid" ]] || continue
     pr="$(printf '%s' "$subj" | grep -oE '\(#[0-9]+\)' | head -1 | tr -d '(#)')"
-    printf '%s\t%s\n' "$gid" "$pr"
+    [[ -n "$pr" ]] || continue
+    while IFS= read -r gid; do
+      [[ -n "$gid" ]] && printf '%s\t%s\n' "$gid" "$pr"
+    done < <("$CHUMP" gap gaps-for-pr "$pr" 2>/dev/null || true)
   done | awk -F'\t' '!seen[$1]++' > "$tmp"
 
   while IFS=$'\t' read -r gid pr; do

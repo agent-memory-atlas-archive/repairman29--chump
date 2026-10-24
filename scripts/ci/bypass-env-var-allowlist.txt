@@ -14,7 +14,6 @@
 
 # ── Category A quality-gate bypasses — targeted deletion gaps filed ───────────
 # CHUMP_PREFLIGHT_SKIP deleted (INFRA-2422) — replaced by main-red-aware auto-skip
-CHUMP_BYPASS_PROOF_OF_MERGE        # Bypass-Justification: proof-of-merge gate bypass; deletion target  gap: INFRA-2423
 CHUMP_PREFLIGHT_SKIP_PIPEFAIL      # Bypass-Justification: pipefail-sweep gate skip; deletion target  gap: INFRA-2427
 
 # ── Category A bypasses — deletion gap TBD ───────────────────────────────────

@@ -68,28 +68,24 @@ errors=0
 
 while IFS= read -r gap; do
     [[ -z "$gap" ]] && continue
-    # gh pr list with title-anchored search; require title PREFIX match
-    # so "INFRA-30" doesn't pick up "INFRA-300", "INFRA-301", etc.
-    pr_data="$(gh pr list --state merged --search "$gap in:title" --json number,title,mergedAt \
-        -q ".[] | select(.title | startswith(\"$gap:\") or startswith(\"$gap \") or startswith(\"$gap (\")) | \"\\(.number) \\(.mergedAt[:10])\"" 2>/dev/null \
-        | head -1 || true)"
-    if [[ -z "$pr_data" ]]; then
+    # CREDIBLE-1553 (Phase R R2): resolve the closing PR strictly from the typed
+    # gap_prs FK table (never from a PR title search), and close via chump gap ship.
+    pr_num="$(sqlite3 "$DB" "SELECT pr_number FROM gap_prs WHERE gap_id = '$gap' ORDER BY pr_number DESC LIMIT 1;" 2>/dev/null || true)"
+    if [[ -z "$pr_num" ]]; then
         not_found=$((not_found + 1))
         continue
     fi
-    pr_num="${pr_data%% *}"
-    pr_date="${pr_data##* }"
     if [[ "$DRY" -eq 1 ]]; then
-        echo "  $gap  → would close (PR #$pr_num, merged $pr_date)"
+        echo "  $gap  → would close (PR #$pr_num via gap_prs FK)"
         closed=$((closed + 1))
         continue
     fi
-    if chump gap set "$gap" --status done --closed-pr "$pr_num" --closed-date "$pr_date" >/dev/null 2>&1; then
+    if chump gap ship "$gap" --closed-pr "$pr_num" --update-yaml >/dev/null 2>&1; then
         closed=$((closed + 1))
         [[ $((closed % 5)) -eq 0 ]] && echo "  ...closed $closed so far"
     else
         errors=$((errors + 1))
-        echo "  WARN $gap: chump gap set failed" >&2
+        echo "  WARN $gap: chump gap ship failed" >&2
     fi
 done <<< "$GAPS"
 

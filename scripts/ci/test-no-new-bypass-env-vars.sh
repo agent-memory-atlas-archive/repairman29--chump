@@ -132,6 +132,19 @@ _count_bypass_debt() {
 }
 
 if [[ "${1:-}" != "--self-test" ]]; then
+  # CREDIBLE-1553 (Phase R R1/R2 AC2): CHUMP_BYPASS_PROOF_OF_MERGE is permanently
+  # forbidden across all scripts, workflows, and Rust sources (excluding CI test
+  # scripts that assert its absence and registries).
+  _forbidden_pom="$(grep -rnE '(^|[^A-Za-z0-9_])CHUMP_BYPASS_PROOF_OF_MERGE=' \
+    "$REPO_ROOT/scripts/coord" "$REPO_ROOT/scripts/ops" "$REPO_ROOT/scripts/dispatch" \
+    "$REPO_ROOT/scripts/overnight" "$REPO_ROOT/scripts/lib" "$REPO_ROOT/.github/workflows" \
+    "$REPO_ROOT/src" "$REPO_ROOT/crates" 2>/dev/null | grep -vE '^[[:space:]]*#' || true)"
+  if [[ -n "$_forbidden_pom" ]]; then
+    echo "[bypass-lint] FAIL (CREDIBLE-1553 AC2): forbidden CHUMP_BYPASS_PROOF_OF_MERGE assignment found:" >&2
+    echo "$_forbidden_pom" >&2
+    exit 1
+  fi
+
   _ceiling_file="$REPO_ROOT/scripts/ci/bypass-var-ceiling.txt"
   _ceiling="$(grep -oE '^[0-9]+' "$_ceiling_file" 2>/dev/null | head -1 || true)"
   _ceiling="${_ceiling:-99999}"

@@ -248,45 +248,33 @@ def _extract_gap_ids(pr: dict) -> list[str]:
 
 
 def _extract_gap_ids_for_closure(pr: dict) -> list[str]:
-    """CREDIBLE-268 FIX 1: extract gap IDs that a merged PR is entitled to
-    CLOSE — deliberately narrower than _extract_gap_ids.
-
-    The full title+body scan over-matched: any gap merely CITED in a PR body
-    (a "why this matters" link, an AC cross-reference, a doc analyzing a past
-    incident) got flipped to done alongside the gap the PR actually shipped.
-    30 flips across 8 PRs on 2026-08-09, ~22 of them collateral.
-
-    Two signals only, both opt-in by construction:
-      1. PR TITLE — gap IDs named in the title are the PR's stated intent
-         (the convention every ship already follows: "GAP-ID: short title").
-      2. Explicit `Closes: ID[, ID2, ...]` trailer, one per line, anywhere in
-         the body — an explicit author assertion, not an incidental mention.
-
-    Body text OUTSIDE a `Closes:` trailer is never scanned. Cross-references
-    remain free-form prose (nothing to change about how authors write ACs or
-    handoff docs) — they just no longer double as a closure signal.
+    """CREDIBLE-1553 (Phase R R2): resolve gap IDs that a merged PR is entitled
+    to CLOSE strictly from the typed gap_prs FK via `chump gap gaps-for-pr <number>`,
+    NEVER from the PR title or body (`Closes:` trailer).
     """
-    import re
-
-    pattern = re.compile(r"\b([A-Z][A-Z-]+-\d+)\b")
-    closes_pattern = re.compile(r"(?im)^closes:\s*(.+)$")
-
+    pr_number = pr.get("number")
+    if not pr_number:
+        return []
+    chump_bin = os.environ.get("CHUMP_BIN", "chump")
+    try:
+        res = subprocess.run(
+            [chump_bin, "gap", "gaps-for-pr", str(pr_number)],
+            cwd=str(_repo_root()),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return []
+    if res.returncode != 0:
+        return []
     seen: set[str] = set()
     ordered: list[str] = []
-
-    title = pr.get("title") or ""
-    for match in pattern.findall(title):
-        if match not in seen:
-            seen.add(match)
-            ordered.append(match)
-
-    body = pr.get("body") or ""
-    for trailer_line in closes_pattern.findall(body):
-        for match in pattern.findall(trailer_line):
-            if match not in seen:
-                seen.add(match)
-                ordered.append(match)
-
+    for line in (res.stdout or "").splitlines():
+        gid = line.strip()
+        if gid and gid not in seen:
+            seen.add(gid)
+            ordered.append(gid)
     return ordered
 
 
