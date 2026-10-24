@@ -1,42 +1,36 @@
 #!/usr/bin/env python3
-"""ci-yml-yaml-merge.py — INFRA-1482
+"""ci-yml-yaml-merge.py — INFRA-1482 / CREDIBLE-1545 YAML-aware merge & step-retention guard.
 
-YAML-aware last-resort fallback for the ci.yml merge driver
-(scripts/git/merge-driver-ci-yml-add-row.sh). Invoked only after the
-line-diff heuristics (pure-append, patch --fuzz=3, git merge-file --union)
-have already given up.
+Modes:
+  1. 3-way merge fallback (called from merge-driver-ci-yml-add-row.sh):
+       ci-yml-yaml-merge.py <ancestor> <ours> <theirs>
+     Parses all three files as YAML, merges every shared job's `steps:` list
+     keyed by step identifier (`name:` or `uses:` fallback), attaches leading
+     comment blocks to the step they precede, merges non-step regions via
+     `git merge-file` when `theirs` also edited nearby lines outside `steps:`,
+     and verifies that EVERY step from both `ours` and `theirs` (unless deleted
+     by the opposite side vs `ancestor`) is present in the merged output.
+     Exits non-zero (refusing the merge) if ANY job cannot be merged or if any
+     step from either side would be dropped.
 
-Scope (deliberately narrow): jobs that exist in ancestor AND ours AND
-theirs, where each side may have added/kept steps but the shared/base
-steps are unmodified (or modified identically) on both sides. This is
-the reported failure mode — concurrent PRs adding steps to the SAME
-existing job, interleaved with each other's additions — not general
-3-way YAML merge (new jobs, deleted jobs, and renamed steps are left to
-the caller to fall back on).
+  2. Post-merge step-retention verification (called by merge-driver-ci-yml-add-row.sh
+     before any exit 0):
+       ci-yml-yaml-merge.py --verify-merged <ancestor> <ours_orig> <theirs> <merged>
+     Exits 0 iff <merged> is valid YAML, every job and step expected from
+     both <ours_orig> and <theirs> is retained, and every step has a run:/uses:
+     body.
 
-Algorithm per shared job:
-  1. Parse ancestor/ours/theirs with yaml.compose() to get Node trees
-     with line-accurate marks (no re-dump -> no comment/formatting loss).
-  2. Extract the job's `steps:` sequence as an ordered list of
-     (step_name, raw_text) using the marks to slice the ORIGINAL text.
-  3. Anchor every step that is new-in-ours / new-in-theirs to the
-     nearest preceding base (ancestor) step name (or "<start>").
-  4. Rebuild the steps block: walk the base order, and after emitting
-     each base step, emit any ours-anchored then theirs-anchored new
-     steps for that anchor (de-duplicated by name+raw).
-  5. If any base step's body differs between ours and theirs (both
-     sides modified it differently), refuse (exit 1) -- a real content
-     conflict, not an additive one.
-  6. Splice the rebuilt steps block back into `ours`'s raw text
-     (bottom-up across jobs, to keep earlier line offsets valid) and
-     write the result over OURS.
-
-Exit codes: 0 = merged and wrote OURS. 1 = could not resolve
-(caller should treat this as "give up", same as the existing rc=1 path).
+  3. Structural step-retention check against origin/main (CREDIBLE-1545 AC2):
+       ci-yml-yaml-merge.py --check-repo-step-retention <repo_root> [base_ref]
+     Fails (exit 1) when `.github/workflows/ci.yml` on HEAD (or working tree)
+     lacks any `(job, step_name)` present on `base_ref` (`origin/main`) that
+     the branch did not intentionally delete in its own non-merge commits.
 """
-import sys
-
+import os
 import re
+import subprocess
+import sys
+import tempfile
 
 try:
     import yaml
@@ -44,7 +38,8 @@ except ImportError:
     sys.exit(1)
 
 
-_BODY_RE = re.compile(r"(?m)^\s*(run|uses):")
+_BODY_RE = re.compile(r"(?m)^\s*(?:-\s+)?(run|uses):")
+_COMMENT_OR_BLANK_RE = re.compile(r"^\s*(#.*)?$")
 
 
 def has_body(raw_text):
@@ -70,6 +65,15 @@ def step_name(step_node):
             and isinstance(v, yaml.ScalarNode)
         ):
             return v.value
+    # CREDIBLE-1545: nameless `- uses: actions/checkout@v7` steps are valid
+    # GitHub Actions steps and appear as step 0 in fast-checks and other jobs.
+    for k, v in step_node.value:
+        if (
+            isinstance(k, yaml.ScalarNode)
+            and k.value == "uses"
+            and isinstance(v, yaml.ScalarNode)
+        ):
+            return f"uses:{v.value}"
     return None
 
 
@@ -92,19 +96,40 @@ def extract_job_steps(text):
             if not isinstance(job_val, yaml.MappingNode):
                 continue
             steps_seq = None
+            steps_key_line = None
             for jk, jv in job_val.value:
-                if isinstance(jk, yaml.ScalarNode) and jk.value == "steps" and isinstance(
-                    jv, yaml.SequenceNode
+                if (
+                    isinstance(jk, yaml.ScalarNode)
+                    and jk.value == "steps"
+                    and isinstance(jv, yaml.SequenceNode)
                 ):
                     steps_seq = jv
+                    steps_key_line = jk.start_mark.line
             if steps_seq is None or not steps_seq.value:
                 continue
             items = steps_seq.value
+            # CREDIBLE-1545: attach contiguous leading comment/blank lines
+            # directly above each `- name:` / `- uses:` step to the step they
+            # precede, rather than to the tail of the previous step.
+            step_starts = []
+            for i, item in enumerate(items):
+                min_line = (
+                    (steps_key_line + 1)
+                    if i == 0
+                    else (items[i - 1].start_mark.line + 1)
+                )
+                s_line = item.start_mark.line
+                while s_line > min_line and _COMMENT_OR_BLANK_RE.match(
+                    lines[s_line - 1]
+                ):
+                    s_line -= 1
+                step_starts.append(s_line)
+
             steps = []
             for i, item in enumerate(items):
-                start = item.start_mark.line
+                start = step_starts[i]
                 end = (
-                    items[i + 1].start_mark.line
+                    step_starts[i + 1]
                     if i + 1 < len(items)
                     else steps_seq.end_mark.line
                 )
@@ -112,7 +137,7 @@ def extract_job_steps(text):
                 steps.append((step_name(item), raw))
             jobs[job_key.value] = {
                 "steps": steps,
-                "start": items[0].start_mark.line,
+                "start": step_starts[0],
                 "end": steps_seq.end_mark.line,
             }
     return jobs
@@ -125,7 +150,7 @@ def merge_job_steps(base_steps, ours_steps, theirs_steps):
     ours_by_name = {n: r for n, r in ours_steps if n is not None}
     theirs_by_name = {n: r for n, r in theirs_steps if n is not None}
 
-    # Anything without a name (malformed step) makes this job unsafe to merge.
+    # Anything without a unique step identifier makes this job unsafe to merge.
     if len(base_by_name) != len(base_steps):
         return None
     if len(ours_by_name) != len(ours_steps) or len(theirs_by_name) != len(theirs_steps):
@@ -211,14 +236,223 @@ def merge_job_steps(base_steps, ours_steps, theirs_steps):
     return "".join(result)
 
 
+def verify_merged_steps(ancestor_text, ours_text, theirs_text, merged_text):
+    """CREDIBLE-1545 AC1: Returns True iff merged_text is valid YAML and retains
+    every step from both ours_text and theirs_text (and has no step deletions)."""
+    anc_jobs = extract_job_steps(ancestor_text)
+    ours_jobs = extract_job_steps(ours_text)
+    theirs_jobs = extract_job_steps(theirs_text)
+    merged_jobs = extract_job_steps(merged_text)
+    if (
+        anc_jobs is None
+        or ours_jobs is None
+        or theirs_jobs is None
+        or merged_jobs is None
+    ):
+        return False
+    if not merged_jobs:
+        return False
+    expected_jobs = set(ours_jobs.keys()) | set(theirs_jobs.keys())
+    if set(merged_jobs.keys()) != expected_jobs:
+        return False
+    for job in expected_jobs:
+        anc_names = [n for n, _ in anc_jobs.get(job, {}).get("steps", [])]
+        ours_list = ours_jobs.get(job, {}).get("steps", [])
+        theirs_list = theirs_jobs.get(job, {}).get("steps", [])
+        merged_list = merged_jobs.get(job, {}).get("steps", [])
+        if any(n is None for n, _ in ours_list + theirs_list + merged_list):
+            return False
+        if any(not has_body(raw) for _, raw in merged_list):
+            return False
+        ours_names = {n for n, _ in ours_list}
+        theirs_names = {n for n, _ in theirs_list}
+        merged_names = {n for n, _ in merged_list}
+        # Merge driver is add-only: any base step deleted on either side must
+        # not be auto-merged by this driver.
+        for n in anc_names:
+            if n not in ours_names or n not in theirs_names:
+                return False
+        # Every step present on ours and every step present on theirs must
+        # appear in the merged result.
+        if not ours_names.issubset(merged_names):
+            return False
+        if not theirs_names.issubset(merged_names):
+            return False
+    return True
+
+
+def _apply_splices(lines, jobs_dict, merged_by_job):
+    out = list(lines)
+    splices = [
+        (jobs_dict[job]["start"], jobs_dict[job]["end"], merged_txt)
+        for job, merged_txt in merged_by_job.items()
+    ]
+    splices.sort(key=lambda s: s[0], reverse=True)
+    for start, end, replacement in splices:
+        out[start:end] = [replacement]
+    return "".join(out)
+
+
+def extract_all_step_pairs(text):
+    jobs = extract_job_steps(text)
+    if jobs is None:
+        return None
+    pairs = set()
+    for job, info in jobs.items():
+        for name, _ in info["steps"]:
+            if name is not None:
+                pairs.add((job, name))
+    return pairs
+
+
+def _git_output(repo_root, args):
+    res = subprocess.run(
+        ["git", "-C", repo_root] + args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    if res.returncode != 0:
+        return None
+    return res.stdout
+
+
+def check_repo_step_retention(repo_root, base_ref=None):
+    """CREDIBLE-1545 AC2: Fail when .github/workflows/ci.yml on HEAD/worktree
+    lacks any (job, step_name) present on base_ref (origin/main) that the PR
+    did not intentionally delete in its own non-merge commits."""
+    if not base_ref:
+        base_ref = (
+            os.environ.get("CHUMP_CI_STEP_RETENTION_BASE_REF")
+            or os.environ.get("GITHUB_BASE_SHA")
+            or ""
+        )
+    if not base_ref:
+        if _git_output(repo_root, ["rev-parse", "--verify", "origin/main"]) is not None:
+            base_ref = "origin/main"
+        elif _git_output(repo_root, ["rev-parse", "--verify", "main"]) is not None:
+            base_ref = "main"
+        else:
+            return 0
+
+    base_ci = _git_output(repo_root, ["show", f"{base_ref}:.github/workflows/ci.yml"])
+    if base_ci is None:
+        return 0
+    base_pairs = extract_all_step_pairs(base_ci)
+    if base_pairs is None:
+        return 0
+
+    head_ref = os.environ.get("CHUMP_CI_STEP_RETENTION_HEAD_REF", "")
+    ci_disk_path = os.path.join(repo_root, ".github", "workflows", "ci.yml")
+    if head_ref:
+        curr_ci = _git_output(repo_root, ["show", f"{head_ref}:.github/workflows/ci.yml"])
+    elif os.path.isfile(ci_disk_path):
+        with open(ci_disk_path, "r", encoding="utf-8") as f:
+            curr_ci = f.read()
+    else:
+        curr_ci = _git_output(repo_root, ["show", "HEAD:.github/workflows/ci.yml"])
+
+    if curr_ci is None:
+        sys.stderr.write("[ci-step-retention] BLOCKED (CREDIBLE-1545): .github/workflows/ci.yml missing or unreadable.\n")
+        return 1
+
+    curr_pairs = extract_all_step_pairs(curr_ci)
+    if curr_pairs is None:
+        sys.stderr.write("[ci-step-retention] BLOCKED (CREDIBLE-1545): .github/workflows/ci.yml is not valid YAML.\n")
+        return 1
+
+    commit_ref = head_ref if head_ref else "HEAD"
+    committed_head_ci = _git_output(
+        repo_root, ["show", f"{commit_ref}:.github/workflows/ci.yml"]
+    )
+    if committed_head_ci is not None and not head_ref:
+        committed_pairs = extract_all_step_pairs(committed_head_ci)
+        if committed_pairs is not None:
+            wt_dropped = sorted(committed_pairs - curr_pairs)
+            if wt_dropped:
+                sys.stderr.write(
+                    "[ci-step-retention] BLOCKED (CREDIBLE-1545): working-tree .github/workflows/ci.yml drops step(s) present on HEAD:\n"
+                )
+                for job, step in wt_dropped:
+                    sys.stderr.write(f"  - {job} :: {step}\n")
+                return 1
+
+    missing = base_pairs - curr_pairs
+    if not missing:
+        return 0
+
+    # Check if the branch has not touched ci.yml since its merge-base with base_ref
+    # (e.g. a non-ci.yml branch while origin/main advanced).
+    mb_out = _git_output(repo_root, ["merge-base", commit_ref, base_ref])
+    mb_sha = mb_out.strip() if mb_out else ""
+    base_sha_out = _git_output(repo_root, ["rev-parse", base_ref])
+    base_sha = base_sha_out.strip() if base_sha_out else ""
+    if mb_sha and mb_sha != base_sha and committed_head_ci is not None:
+        mb_ci = _git_output(repo_root, ["show", f"{mb_sha}:.github/workflows/ci.yml"])
+        if mb_ci is not None and mb_ci == curr_ci:
+            # Neither HEAD nor working tree changed ci.yml relative to merge-base.
+            return 0
+
+    # Compute steps intentionally deleted by the branch's own non-merge commits.
+    intentionally_deleted = set()
+    non_merge_out = _git_output(
+        repo_root, ["rev-list", "--no-merges", f"{base_ref}..{commit_ref}"]
+    )
+    if non_merge_out:
+        for sha in non_merge_out.splitlines():
+            sha = sha.strip()
+            if not sha:
+                continue
+            parent_ci = _git_output(
+                repo_root, ["show", f"{sha}^:.github/workflows/ci.yml"]
+            )
+            child_ci = _git_output(
+                repo_root, ["show", f"{sha}:.github/workflows/ci.yml"]
+            )
+            if parent_ci is None or child_ci is None:
+                continue
+            if parent_ci == child_ci:
+                continue
+            p_pairs = extract_all_step_pairs(parent_ci)
+            c_pairs = extract_all_step_pairs(child_ci)
+            if p_pairs is not None and c_pairs is not None:
+                intentionally_deleted |= (p_pairs - c_pairs)
+
+    unexplained = sorted(missing - intentionally_deleted)
+    if unexplained:
+        sys.stderr.write(
+            f"[ci-step-retention] BLOCKED (CREDIBLE-1545): .github/workflows/ci.yml lacks {len(unexplained)} step(s) present on {base_ref} that were not deleted in the branch's own diff:\n"
+        )
+        for job, step in unexplained:
+            sys.stderr.write(f"  - {job} :: {step}\n")
+        return 1
+    return 0
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--verify-merged":
+        if len(sys.argv) != 6:
+            sys.exit(1)
+        anc_text, _ = read(sys.argv[2])
+        ours_text, _ = read(sys.argv[3])
+        theirs_text, _ = read(sys.argv[4])
+        merged_text, _ = read(sys.argv[5])
+        sys.exit(
+            0 if verify_merged_steps(anc_text, ours_text, theirs_text, merged_text) else 1
+        )
+
+    if len(sys.argv) >= 2 and sys.argv[1] == "--check-repo-step-retention":
+        repo_root = sys.argv[2] if len(sys.argv) >= 3 else os.getcwd()
+        base_ref = sys.argv[3] if len(sys.argv) >= 4 else None
+        sys.exit(check_repo_step_retention(repo_root, base_ref))
+
     if len(sys.argv) != 4:
         sys.exit(1)
     ancestor_path, ours_path, theirs_path = sys.argv[1:4]
 
-    ancestor_text, _ = read(ancestor_path)
+    ancestor_text, ancestor_lines = read(ancestor_path)
     ours_text, ours_lines = read(ours_path)
-    theirs_text, _ = read(theirs_path)
+    theirs_text, theirs_lines = read(theirs_path)
 
     ancestor_jobs = extract_job_steps(ancestor_text)
     ours_jobs = extract_job_steps(ours_text)
@@ -226,36 +460,97 @@ def main():
     if ancestor_jobs is None or ours_jobs is None or theirs_jobs is None:
         sys.exit(1)
 
-    shared_jobs = [
-        j for j in ancestor_jobs if j in ours_jobs and j in theirs_jobs
-    ]
-    if not shared_jobs:
+    if not ancestor_jobs:
+        sys.exit(1)
+    # Refuse if jobs were added, deleted, or renamed on either side.
+    if set(ancestor_jobs.keys()) != set(ours_jobs.keys()) or set(
+        ancestor_jobs.keys()
+    ) != set(theirs_jobs.keys()):
         sys.exit(1)
 
-    splices = []  # (start_line, end_line, replacement_text), computed against OURS
-    any_merged = False
-    for job in shared_jobs:
+    merged_by_job = {}
+    for job in ancestor_jobs:
         base_steps = ancestor_jobs[job]["steps"]
         ours_steps = ours_jobs[job]["steps"]
         theirs_steps = theirs_jobs[job]["steps"]
         if ours_steps == theirs_steps:
-            continue  # nothing to reconcile for this job
+            continue
         merged = merge_job_steps(base_steps, ours_steps, theirs_steps)
         if merged is None:
-            continue  # leave this job untouched; may still be an overall conflict
-        splices.append((ours_jobs[job]["start"], ours_jobs[job]["end"], merged))
-        any_merged = True
+            # CREDIBLE-1545 AC1: NEVER continue past an unmergeable job!
+            # Continuing leaves `ours` in place for this job and silently drops
+            # `theirs`'s new steps whenever another job in the file happened to
+            # merge cleanly.
+            sys.exit(1)
+        merged_by_job[job] = merged
 
-    if not any_merged:
+    ours_unified = _apply_splices(ours_lines, ours_jobs, merged_by_job)
+    anc_unified = _apply_splices(ancestor_lines, ancestor_jobs, merged_by_job)
+    theirs_unified = _apply_splices(theirs_lines, theirs_jobs, merged_by_job)
+
+    if theirs_unified != anc_unified:
+        # `theirs` also has edits outside `steps:` (e.g. a nearby comment).
+        # Refuse if non-comment YAML lines outside `steps:` were modified by
+        # theirs (INFRA-1205: path-filter / outputs: edits must not be spliced).
+        def _non_comment_lines(lines_list):
+            return [
+                ln for ln in lines_list
+                if ln.strip() and not ln.lstrip().startswith("#")
+            ]
+        anc_u_lines = anc_unified.splitlines(keepends=True)
+        ours_u_lines = ours_unified.splitlines(keepends=True)
+        theirs_u_lines = theirs_unified.splitlines(keepends=True)
+        if _non_comment_lines(theirs_u_lines) != _non_comment_lines(anc_u_lines):
+            sys.exit(1)
+        line_merged = None
+        if len(anc_u_lines) == len(ours_u_lines) == len(theirs_u_lines):
+            merged_u = []
+            conflict = False
+            for a_ln, o_ln, t_ln in zip(anc_u_lines, ours_u_lines, theirs_u_lines):
+                if o_ln == t_ln:
+                    merged_u.append(o_ln)
+                elif o_ln == a_ln:
+                    merged_u.append(t_ln)
+                elif t_ln == a_ln:
+                    merged_u.append(o_ln)
+                else:
+                    conflict = True
+                    break
+            if not conflict:
+                line_merged = "".join(merged_u)
+
+        if line_merged is not None:
+            final_text = line_merged
+        else:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                p_anc = os.path.join(tmpdir, "anc.yml")
+                p_ours = os.path.join(tmpdir, "ours.yml")
+                p_theirs = os.path.join(tmpdir, "theirs.yml")
+                with open(p_anc, "w", encoding="utf-8") as f:
+                    f.write(anc_unified)
+                with open(p_ours, "w", encoding="utf-8") as f:
+                    f.write(ours_unified)
+                with open(p_theirs, "w", encoding="utf-8") as f:
+                    f.write(theirs_unified)
+                res = subprocess.run(
+                    ["git", "merge-file", "-q", p_ours, p_anc, p_theirs],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if res.returncode != 0:
+                    sys.exit(1)
+                with open(p_ours, "r", encoding="utf-8") as f:
+                    final_text = f.read()
+    else:
+        # INFRA-1199 / validate_step_bodies: when theirs is identical to ancestor
+        # outside steps: (no-op or step-only merge), ours_unified is the complete result.
+        final_text = ours_unified
+
+    if not verify_merged_steps(ancestor_text, ours_text, theirs_text, final_text):
         sys.exit(1)
 
-    # Apply bottom-up so earlier splices' line numbers stay valid.
-    splices.sort(key=lambda s: s[0], reverse=True)
-    for start, end, replacement in splices:
-        ours_lines[start:end] = [replacement]
-
     with open(ours_path, "w", encoding="utf-8") as f:
-        f.write("".join(ours_lines))
+        f.write(final_text)
     sys.exit(0)
 
 

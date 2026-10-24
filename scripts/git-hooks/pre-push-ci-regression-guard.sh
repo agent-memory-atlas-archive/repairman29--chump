@@ -81,6 +81,16 @@ fi
 
 echo "[ci-regression-guard] ci.yml changed in this push — checking CI-Regression-Guard trailers." >&2
 
+# Phase 0 (CREDIBLE-1545 AC2, blocking): verify .github/workflows/ci.yml on HEAD/worktree
+# retains every (job, step_name) present on BASE_REF unless intentionally deleted in
+# the branch's own non-merge commits.
+if [[ -f "$REPO_ROOT/scripts/git/ci-yml-yaml-merge.py" ]] && command -v python3 &>/dev/null; then
+    if ! python3 "$REPO_ROOT/scripts/git/ci-yml-yaml-merge.py" --check-repo-step-retention "$REPO_ROOT" "$BASE_REF"; then
+        emit_ambient "ci_regression_guard_suite_failed" "ci_step_retention_failed base=$BASE_REF"
+        exit 1
+    fi
+fi
+
 # Phase 1 (blocking): CI-Regression-Guard trailers that reference missing test files.
 MISSING_TESTS=()
 while IFS= read -r sha; do

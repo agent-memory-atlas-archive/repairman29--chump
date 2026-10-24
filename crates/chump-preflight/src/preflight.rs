@@ -341,6 +341,13 @@ const STRUCTURAL_GATES: &[(&str, &str)] = &[
     // The gate reads scripts/ci/raw-gh-allowlist.txt, so this one entry covers
     // both the lint and its allowlist check.
     ("raw-gh-lint", "scripts/ci/test-no-raw-gh-in-hot-paths.sh"),
+    // CREDIBLE-1545 (Phase R R3, AC2): ci.yml merge-driver + step-retention check
+    // against origin/main so a merge commit that silently drops a CI step is caught
+    // in the pre-push structural subset.
+    (
+        "ci-yml-merge-driver",
+        "scripts/ci/test-ci-yml-merge-driver.sh",
+    ),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
