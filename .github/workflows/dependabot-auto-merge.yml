@@ -1,18 +1,9 @@
-# Auto-arm `gh pr merge --auto --squash` on PRs opened by dependabot[bot].
+# Auto-arm `gh pr merge --auto --squash` on allowlisted PRs opened by dependabot[bot].
 #
-# Why: Dependabot opens PRs with auto-merge OFF. Without an explicit arm,
-# the PR sits in BEHIND state forever — observed on 2026-04-29..05-02 with
-# PR #673 (chore(deps): bump the actions-all group) sitting 24h+ until
-# manually rebased and armed. This workflow runs once at PR-open time so
-# the queue handles the rest.
-#
-# Scope: only triggers on dependabot's PRs. Human and other-bot PRs are
-# unaffected (they go through bot-merge.sh which arms auto-merge as part
-# of the ship pipeline).
-#
-# Failure mode: if a Dependabot PR has CI failures or required reviews
-# pending, GitHub holds the auto-merge until those resolve — same
-# semantics as a human-armed auto-merge. No bypass of branch protection.
+# CREDIBLE-1564: enforces arm_policy_allows AND arm_scope_allows_dependabot before
+# enabling auto-merge — only semver-patch bumps (and semver-minor for dev-dependencies)
+# outside `.github/` may be auto-armed; major bumps and `.github/` paths require
+# review-path landing.
 
 name: Dependabot auto-merge
 
@@ -34,26 +25,38 @@ jobs:
     if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Enable auto-merge (squash)
+      - name: Checkout arm-policy guard (base branch)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          sparse-checkout: |
+            scripts/coord/lib
+
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge (squash) if allowlisted
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
+          DEPENDABOT_UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEPENDABOT_DEPENDENCY_TYPE: ${{ steps.metadata.outputs.dependency-type }}
         run: |
-          # RESILIENT-1613: one arm policy. A `no-auto-merge` label (or a legacy
-          # hold label) means a human disarmed this PR on purpose; never re-arm.
-          # (Mirrors scripts/coord/lib/arm-policy.sh for the label half; the
-          # `Auto-merge: hold` marker is checked in the body and comments too.)
-          held="$(gh pr view "$PR" --repo "${{ github.repository }}" --json labels,body,comments \
-            --jq '([.labels[].name | ascii_downcase | select(. == "no-auto-merge" or . == "hold" or . == "do-not-merge" or . == "chump_hold")] | length) + ([.body, .comments[].body] | map(select(. != null and test("(?im)^[ \\t]*auto-merge:[ \\t]*hold\\b"))) | length)' \
-            2>/dev/null || echo 0)"
-          if [ "${held:-0}" != "0" ]; then
-            echo "PR #$PR is held (no-auto-merge / Auto-merge: hold) — not arming."
+          set -euo pipefail
+          # RESILIENT-1613 + CREDIBLE-1564: enforce hold policy and dependabot scope guard.
+          # shellcheck source=/dev/null
+          source scripts/coord/lib/arm-policy.sh
+          if ! arm_policy_allows "$PR" dependabot-auto-merge "${{ github.repository }}"; then
+            echo "PR #$PR is held by arm-policy — not arming."
             exit 0
           fi
-          # Idempotent: re-running is a no-op if auto-merge is already armed.
-          # `--auto` waits for required checks; `--squash` matches the
-          # repo's default merge strategy (see .github/CODEOWNERS / branch
-          # protection).
+          if ! arm_scope_allows_dependabot "$PR" "${{ github.repository }}"; then
+            echo "PR #$PR refused by arm_scope_allows_dependabot (major bump or .github/ path) — not arming."
+            exit 0
+          fi
           gh pr merge "$PR" --auto --squash \
             --repo "${{ github.repository }}" \
             || echo "auto-merge arm failed (likely already armed or no required checks); continuing"

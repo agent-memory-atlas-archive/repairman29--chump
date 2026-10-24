@@ -221,3 +221,174 @@ arm_policy_allows() {
     _arm_policy_audit_rearm "$pr" "$armer" "$repo"
     return 0
 }
+
+
+# ── CREDIBLE-1564: non-review arm scope guards ───────────────────────────────
+# Every workflow that arms outside the review path must verify its narrow file
+# / semver scope before calling `gh pr merge --auto`.
+
+CENSUS_ALLOWED_FILES="docs/observability/CI_TEST_CENSUS.md docs/observability/ci-test-census.json"
+
+# arm_scope_allows_census <pr-number> [owner/repo]
+#   Returns 0 iff `gh pr view <pr> --json files` lists a non-empty file set
+#   consisting exclusively of docs/observability/CI_TEST_CENSUS.md and/or
+#   docs/observability/ci-test-census.json. Otherwise posts an explanatory
+#   comment on the PR and returns 1 (fail-closed).
+arm_scope_allows_census() {
+    local pr="${1:-}" repo="${2:-}"
+    if [[ ! "$pr" =~ ^[0-9]+$ ]]; then
+        echo "[arm-policy] ERROR: arm_scope_allows_census called without a valid PR number ('$pr') — refusing" >&2
+        return 1
+    fi
+    local -a _ap_repo_arg=()
+    [[ -n "$repo" ]] && _ap_repo_arg=(--repo "$repo")
+    local payload verdict
+    payload="$(CHUMP_GH_CALL_CRITICALITY=background _arm_policy_gh pr view "$pr" ${_ap_repo_arg[@]+"${_ap_repo_arg[@]}"} \
+        --json files 2>/dev/null || true)"
+    verdict="$(python3 - "$payload" <<'PYCENSUS'
+import json, sys
+
+ALLOWED = {
+    "docs/observability/CI_TEST_CENSUS.md",
+    "docs/observability/ci-test-census.json",
+}
+raw = sys.argv[1].strip()
+if not raw:
+    print("ERR:empty-payload")
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except Exception:
+    print("ERR:invalid-json")
+    sys.exit(0)
+files = data.get("files")
+if not isinstance(files, list) or len(files) == 0:
+    print("ERR:no-files")
+    sys.exit(0)
+paths = [str(f.get("path", "")) for f in files if isinstance(f, dict)]
+if not paths or any(not p for p in paths):
+    print("ERR:missing-path")
+    sys.exit(0)
+outside = [p for p in paths if p not in ALLOWED]
+if outside:
+    print("OUTSIDE:" + ",".join(outside))
+    sys.exit(0)
+print("OK")
+PYCENSUS
+    )"
+    if [[ "$verdict" == "OK" ]]; then
+        return 0
+    fi
+    local msg="[census-scope-guard] CREDIBLE-1564: refusing to arm auto-merge on PR #${pr} (${verdict}). Census auto-merge is restricted to \`docs/observability/CI_TEST_CENSUS.md\` and \`docs/observability/ci-test-census.json\`."
+    echo "$msg" >&2
+    _arm_policy_gh pr comment "$pr" ${_ap_repo_arg[@]+"${_ap_repo_arg[@]}"} --body "$msg" >/dev/null 2>&1 || true
+    return 1
+}
+
+# arm_scope_allows_dependabot <pr-number> [owner/repo]
+#   Returns 0 iff:
+#     1. `gh pr view <pr> --json files,title,body,headRefName` returns a
+#        non-empty file list where NO path starts with `.github/`; AND
+#     2. The bump is an allowlisted update-type: `version-update:semver-patch`
+#        (or patch semver bump in title), OR `version-update:semver-minor`
+#        for dev-dependencies (`direct:development` / `dev-dependencies`),
+#        and NEVER a major bump (`version-update:semver-major`, `cargo-major`,
+#        or major version jump `from X.Y.Z to M.N.P` with X != M).
+arm_scope_allows_dependabot() {
+    local pr="${1:-}" repo="${2:-}"
+    if [[ ! "$pr" =~ ^[0-9]+$ ]]; then
+        echo "[arm-policy] ERROR: arm_scope_allows_dependabot called without a valid PR number ('$pr') — refusing" >&2
+        return 1
+    fi
+    local -a _ap_repo_arg=()
+    [[ -n "$repo" ]] && _ap_repo_arg=(--repo "$repo")
+    local payload verdict
+    payload="$(CHUMP_GH_CALL_CRITICALITY=background _arm_policy_gh pr view "$pr" ${_ap_repo_arg[@]+"${_ap_repo_arg[@]}"} \
+        --json files,title,body,headRefName 2>/dev/null || true)"
+    verdict="$(DEPENDABOT_UPDATE_TYPE="${DEPENDABOT_UPDATE_TYPE:-}" \
+               DEPENDABOT_DEPENDENCY_TYPE="${DEPENDABOT_DEPENDENCY_TYPE:-}" \
+               python3 - "$payload" <<'PYDEP'
+import json, os, re, sys
+
+raw = sys.argv[1].strip()
+if not raw:
+    print("ERR:empty-payload")
+    sys.exit(0)
+try:
+    data = json.loads(raw)
+except Exception:
+    print("ERR:invalid-json")
+    sys.exit(0)
+
+files = data.get("files")
+if not isinstance(files, list) or len(files) == 0:
+    print("ERR:no-files")
+    sys.exit(0)
+paths = [str(f.get("path", "")) for f in files if isinstance(f, dict)]
+if not paths or any(not p for p in paths):
+    print("ERR:missing-path")
+    sys.exit(0)
+
+# Rule 1: never arm anything touching .github/
+gh_paths = [p for p in paths if p == ".github" or p.startswith(".github/")]
+if gh_paths:
+    print("ERR:github-path:" + ",".join(gh_paths))
+    sys.exit(0)
+
+title = str(data.get("title") or "")
+body = str(data.get("body") or "")
+head_ref = str(data.get("headRefName") or "")
+
+update_type = os.environ.get("DEPENDABOT_UPDATE_TYPE", "").strip()
+dep_type = os.environ.get("DEPENDABOT_DEPENDENCY_TYPE", "").strip()
+
+if not update_type:
+    m_ut = re.search(r'update-type:\s*([A-Za-z0-9_:.-]+)', body, re.I)
+    if m_ut:
+        update_type = m_ut.group(1).strip()
+if not dep_type:
+    m_dt = re.search(r'dependency-type:\s*([A-Za-z0-9_:.-]+)', body, re.I)
+    if m_dt:
+        dep_type = m_dt.group(1).strip()
+
+# Rule 2: never arm major bumps (by metadata, group name, or title semver jump)
+if "major" in update_type.lower() or "cargo-major" in title.lower() or "cargo-major" in head_ref.lower():
+    print("ERR:major-bump")
+    sys.exit(0)
+
+m_ver = re.search(r'\bfrom\s+v?(\d+)\.(\d+)(?:\.(\d+))?\s+to\s+v?(\d+)\.(\d+)(?:\.(\d+))?', title, re.I)
+if m_ver:
+    maj1, min1, pat1, maj2, min2, pat2 = m_ver.groups()
+    if maj1 != maj2:
+        print(f"ERR:major-version-jump:{maj1}->{maj2}")
+        sys.exit(0)
+
+ut_low = update_type.lower()
+dt_low = dep_type.lower()
+
+if ut_low in ("version-update:semver-patch", "semver-patch", "patch"):
+    print("OK")
+    sys.exit(0)
+
+if ut_low in ("version-update:semver-minor", "semver-minor", "minor"):
+    if "development" in dt_low or "dev" in dt_low:
+        print("OK")
+        sys.exit(0)
+    print(f"ERR:minor-non-dev:{dep_type or 'unspecified'}")
+    sys.exit(0)
+
+if not ut_low and m_ver:
+    maj1, min1, pat1, maj2, min2, pat2 = m_ver.groups()
+    if maj1 == maj2 and min1 == min2 and pat1 != pat2:
+        print("OK")
+        sys.exit(0)
+
+print(f"ERR:unallowlisted-update:{update_type or 'unknown'}")
+PYDEP
+    )"
+    if [[ "$verdict" == "OK" ]]; then
+        return 0
+    fi
+    echo "[dependabot-scope-guard] CREDIBLE-1564: refusing to arm auto-merge on PR #${pr} (${verdict})" >&2
+    return 1
+}

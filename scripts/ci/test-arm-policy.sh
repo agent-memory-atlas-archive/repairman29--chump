@@ -1668,6 +1668,120 @@ for lbl in review-held review-needs-mutants; do
     grep -q "$lbl" "$LIB" && ok "arm-policy: honors $lbl in ARM_POLICY_HOLD_LABELS" || bad "arm-policy: $lbl not in hold labels"
 done
 
+# ── CREDIBLE-1564: non-review arm scope guards + no workflow pushes main ──────
+echo "--- CREDIBLE-1564: census scope guard, dependabot scope guard, no direct push to main ---"
+C1564_DIR="$D/c1564"
+mkdir -p "$C1564_DIR/bin"
+C1564_COMMENTS="$C1564_DIR/comments.log"
+: > "$C1564_COMMENTS"
+
+cat > "$C1564_DIR/bin/gh" <<'STUB1564'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+    cat "${C1564_VIEW_FILE}"
+    exit 0
+fi
+if [[ "${1:-}" == "pr" && "${2:-}" == "comment" ]]; then
+    printf '%s\n' "$*" >> "${C1564_COMMENTS}"
+    exit 0
+fi
+exit 0
+STUB1564
+chmod +x "$C1564_DIR/bin/gh"
+
+run_c1564() {
+    local func="$1" json_payload="$2" ut="${3:-}" dt="${4:-}"
+    printf '%s' "$json_payload" > "$C1564_DIR/view.json"
+    PATH="$C1564_DIR/bin:$PATH" \
+    C1564_VIEW_FILE="$C1564_DIR/view.json" \
+    C1564_COMMENTS="$C1564_COMMENTS" \
+    DEPENDABOT_UPDATE_TYPE="$ut" \
+    DEPENDABOT_DEPENDENCY_TYPE="$dt" \
+    bash -c "source '$LIB'; $func 501 repairman29/chump" >/dev/null 2>&1
+}
+
+# (1a) Census guard ALLOWS exact two census files
+if run_c1564 arm_scope_allows_census '{"files":[{"path":"docs/observability/CI_TEST_CENSUS.md"},{"path":"docs/observability/ci-test-census.json"}]}'; then
+    ok "CREDIBLE-1564 census guard: allows PR touching only the 2 census files"
+else
+    bad "CREDIBLE-1564 census guard: refused valid 2-file census PR"
+fi
+
+# (1b) Census guard REFUSES when any path outside the two census files is present, and posts a comment
+: > "$C1564_COMMENTS"
+if run_c1564 arm_scope_allows_census '{"files":[{"path":"docs/observability/CI_TEST_CENSUS.md"},{"path":"src/main.rs"}]}'; then
+    bad "CREDIBLE-1564 census guard: allowed PR touching src/main.rs outside census allowlist"
+else
+    ok "CREDIBLE-1564 census guard: refuses PR touching path outside census allowlist"
+fi
+if grep -q "CREDIBLE-1564" "$C1564_COMMENTS"; then
+    ok "CREDIBLE-1564 census guard: leaves explanatory comment when refusing out-of-scope PR"
+else
+    bad "CREDIBLE-1564 census guard: did not post explanatory comment on refusal"
+fi
+
+# (1c) Census guard REFUSES empty files payload (fail-closed)
+if run_c1564 arm_scope_allows_census '{"files":[]}'; then
+    bad "CREDIBLE-1564 census guard: allowed empty file list"
+else
+    ok "CREDIBLE-1564 census guard: fails closed on empty file list"
+fi
+
+# (2a) Dependabot guard ALLOWS semver-patch outside .github/
+if run_c1564 arm_scope_allows_dependabot '{"files":[{"path":"Cargo.lock"},{"path":"Cargo.toml"}],"title":"Bump serde from 1.0.200 to 1.0.201","body":"","headRefName":"dependabot/cargo/serde-1.0.201"}' "version-update:semver-patch" "direct:production"; then
+    ok "CREDIBLE-1564 dependabot guard: allows semver-patch bump outside .github/"
+else
+    bad "CREDIBLE-1564 dependabot guard: refused valid semver-patch bump"
+fi
+
+# (2b) Dependabot guard ALLOWS semver-minor for dev-dependencies
+if run_c1564 arm_scope_allows_dependabot '{"files":[{"path":"Cargo.lock"}],"title":"Bump insta from 1.38.0 to 1.39.0","body":"","headRefName":"dependabot/cargo/insta-1.39.0"}' "version-update:semver-minor" "direct:development"; then
+    ok "CREDIBLE-1564 dependabot guard: allows semver-minor bump for dev-dependencies"
+else
+    bad "CREDIBLE-1564 dependabot guard: refused valid dev-dependency semver-minor bump"
+fi
+
+# (2c) Dependabot guard REFUSES major bumps (metadata, cargo-major group, or title semver jump)
+if run_c1564 arm_scope_allows_dependabot '{"files":[{"path":"Cargo.lock"}],"title":"Bump syn from 1.0.109 to 2.0.0","body":"","headRefName":"dependabot/cargo/syn-2.0.0"}' "version-update:semver-major" "direct:production"; then
+    bad "CREDIBLE-1564 dependabot guard: allowed semver-major bump"
+else
+    ok "CREDIBLE-1564 dependabot guard: refuses semver-major bump"
+fi
+if run_c1564 arm_scope_allows_dependabot '{"files":[{"path":"Cargo.lock"}],"title":"Bump the cargo-major group across 1 directory with 2 updates","body":"","headRefName":"dependabot/cargo/cargo-major-adab69473c"}' "version-update:semver-patch" "direct:development"; then
+    bad "CREDIBLE-1564 dependabot guard: allowed cargo-major group PR"
+else
+    ok "CREDIBLE-1564 dependabot guard: refuses cargo-major group PR"
+fi
+
+# (2d) Dependabot guard REFUSES any PR touching .github/ (even if semver-patch)
+if run_c1564 arm_scope_allows_dependabot '{"files":[{"path":".github/workflows/ci.yml"}],"title":"Bump actions/checkout from 4.1.0 to 4.1.1","body":"","headRefName":"dependabot/github_actions/actions-checkout-4.1.1"}' "version-update:semver-patch" "direct:development"; then
+    bad "CREDIBLE-1564 dependabot guard: allowed .github/ workflow path"
+else
+    ok "CREDIBLE-1564 dependabot guard: refuses PR touching .github/ paths"
+fi
+
+# (2e) Dependabot guard REFUSES semver-minor on production dependency
+if run_c1564 arm_scope_allows_dependabot '{"files":[{"path":"Cargo.lock"}],"title":"Bump tokio from 1.38.0 to 1.39.0","body":"","headRefName":"dependabot/cargo/tokio-1.39.0"}' "version-update:semver-minor" "direct:production"; then
+    bad "CREDIBLE-1564 dependabot guard: allowed semver-minor on production dependency"
+else
+    ok "CREDIBLE-1564 dependabot guard: refuses semver-minor on production dependency"
+fi
+
+# (3) Workflow wiring & no direct push to main grep gate
+grep -q 'arm_scope_allows_census' "$REPO_ROOT/.github/workflows/ci-test-census.yml" \
+    && ok "CREDIBLE-1564: ci-test-census.yml calls arm_scope_allows_census before arming" \
+    || bad "CREDIBLE-1564: ci-test-census.yml missing arm_scope_allows_census"
+grep -q 'arm_scope_allows_dependabot' "$REPO_ROOT/.github/workflows/dependabot-auto-merge.yml" \
+    && ok "CREDIBLE-1564: dependabot-auto-merge.yml calls arm_scope_allows_dependabot before arming" \
+    || bad "CREDIBLE-1564: dependabot-auto-merge.yml missing arm_scope_allows_dependabot"
+
+direct_main_pushes="$(grep -rnE 'git[[:space:]]+push[[:space:]]+[^#\n]*(origin[[:space:]]+main|origin[[:space:]]+HEAD:main)' "$REPO_ROOT/.github/workflows/" 2>/dev/null || true)"
+if [[ -z "$direct_main_pushes" ]]; then
+    ok "CREDIBLE-1564: no workflow in .github/workflows/ contains git push origin main or git push origin HEAD:main"
+else
+    bad "CREDIBLE-1564: workflows still push main directly: $direct_main_pushes"
+fi
+
 echo
 echo "=== test-arm-policy: $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]

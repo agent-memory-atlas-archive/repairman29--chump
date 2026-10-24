@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: audit-weekly
@@ -79,21 +80,29 @@ jobs:
           path: docs/audits/findings-*.md
           if-no-files-found: error
 
-      - name: Commit findings to main
+      - name: Open or update weekly findings PR (CREDIBLE-1564)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
+          set -euo pipefail
+          DATE="$(date -u +%Y-%m-%d)"
+          BRANCH="chore/audit-weekly-${DATE}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
           git add docs/audits/findings-*.md
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "chore(audit): weekly findings $(date +%Y-%m-%d) [skip ci]"
-          git push origin HEAD:main || {
-            echo "::warning::direct push to main failed; findings are available as the workflow artifact"
-            exit 0
-          }
+          git commit -m "chore(audit): weekly findings ${DATE}"
+          git push --force origin "$BRANCH"
+          PR="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number -q '.[0].number // empty')"
+          if [[ -z "$PR" ]]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$BRANCH" \
+              --title "chore(audit): weekly findings ${DATE}" \
+              --body "Automated weekly audit findings (${DATE}). Opened via PR per CREDIBLE-1564 (no direct push to main)."
+          fi
 
       - name: Fail on Critical
         if: steps.audit.outcome == 'failure'

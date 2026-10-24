@@ -183,8 +183,8 @@ jobs:
           # RESILIENT-1613: one arm policy. A hold label/marker wins.
           # shellcheck source=/dev/null
           source scripts/coord/lib/arm-policy.sh
-          if arm_policy_allows "$PR" ci-test-census "$REPO"; then
+          if arm_policy_allows "$PR" ci-test-census "$REPO" && arm_scope_allows_census "$PR" "$REPO"; then
             gh pr merge "$PR" --repo "$REPO" --auto --squash || echo "[census] arm failed (non-fatal)"
           else
-            echo "[census] PR #${PR} is held by the arm policy; not arming"
+            echo "[census] PR #${PR} is held by the arm policy or census scope guard; not arming"
           fi
