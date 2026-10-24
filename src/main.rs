@@ -14052,45 +14052,35 @@ async fn main() -> Result<()> {
                 }
             }
             "import" => {
-                let yaml_path = flag("--yaml").unwrap_or_else(|| "docs/gaps.yaml".into());
-                // INFRA-821: derive repo root from --yaml path. When the user passes
-                // an absolute path (e.g. /abs/repo/docs/gaps.yaml), strip the trailing
-                // docs/gaps.yaml or docs/gaps component to recover the repo root instead
-                // of using "/" which causes 0-inserted silently.
-                let root = {
-                    let p = std::path::Path::new(&yaml_path);
-                    if p.is_absolute() {
-                        // Strip known suffixes to recover repo root.
-                        let stripped = yaml_path
-                            .strip_suffix("/docs/gaps.yaml")
-                            .or_else(|| yaml_path.strip_suffix("/docs/gaps"))
-                            .map(std::path::PathBuf::from);
-                        if let Some(r) = stripped {
-                            r
-                        } else if p.is_dir() {
-                            // Treat the absolute path itself as the repo root.
-                            p.to_path_buf()
-                        } else {
-                            eprintln!(
-                                "chump gap import: cannot derive repo root from --yaml {:?}.\n\
-                                 Expected path ending in docs/gaps.yaml or docs/gaps/.\n\
-                                 Hint: omit --yaml to import from current repo root ({}).",
-                                yaml_path,
-                                repo_root.display()
-                            );
-                            std::process::exit(1);
-                        }
+                // RESILIENT-1651 AC2: when `--yaml <path>` is explicitly supplied,
+                // resolve and import EXACTLY that file or directory — never ignore
+                // `<path>` and silently import `repo_root/docs/gaps` instead, and
+                // refuse a missing path with a non-zero exit.
+                let explicit_yaml = flag("--yaml");
+                let target_path = if let Some(ref yaml_arg) = explicit_yaml {
+                    let p = std::path::PathBuf::from(yaml_arg);
+                    if p.exists() || p.is_absolute() {
+                        p
                     } else {
-                        repo_root.clone()
+                        let cand = repo_root.join(&p);
+                        if cand.exists() {
+                            cand
+                        } else {
+                            p
+                        }
                     }
+                } else {
+                    repo_root.clone()
                 };
-                // INFRA-1434: title-similarity guard at import time. Closes
-                // the YAML-import bypass that let INFRA-1267/1268 land as
-                // 100% identical-title duplicates. Mirrors INFRA-1149
-                // reserve-time check; same default 0.85 block threshold.
-                //
-                // Disable: CHUMP_GAP_IMPORT_NO_SIMILARITY=1 (CI / bulk imports)
-                // Tune:    CHUMP_GAP_IMPORT_SIMILARITY_BLOCK (default 0.85)
+                if explicit_yaml.is_some() && !target_path.exists() {
+                    eprintln!(
+                        "chump gap import: --yaml path '{}' does not exist",
+                        target_path.display()
+                    );
+                    std::process::exit(1);
+                }
+
+                // INFRA-1434: title-similarity guard at import time.
                 let block_threshold: Option<f64> =
                     if std::env::var("CHUMP_GAP_IMPORT_NO_SIMILARITY").as_deref() == Ok("1") {
                         None
@@ -14102,8 +14092,12 @@ async fn main() -> Result<()> {
                                 .unwrap_or(0.85),
                         )
                     };
-                match store.import_from_yaml_with_similarity(&root, block_threshold) {
-                    Ok((ins, skip, backfilled, blocked)) => {
+                match store.import_from_yaml_path_with_similarity(
+                    &target_path,
+                    &repo_root,
+                    block_threshold,
+                ) {
+                    Ok((ins, skip, backfilled, blocked, failed)) => {
                         let backfill_msg = if backfilled > 0 {
                             format!(", {backfilled} closed_pr values backfilled from YAML")
                         } else {
@@ -14117,13 +14111,18 @@ async fn main() -> Result<()> {
                         } else {
                             String::new()
                         };
+                        let failed_msg = if failed > 0 {
+                            format!(", {failed} failed")
+                        } else {
+                            String::new()
+                        };
                         eprintln!(
                             "import complete: {ins} inserted, {skip} skipped (already present)\
-                             {backfill_msg}{blocked_msg}."
+                             {failed_msg}{backfill_msg}{blocked_msg}."
                         );
-                        // Non-zero exit when any row was blocked so CI scripts
-                        // can detect partial imports. Bypass via env var above.
-                        if blocked > 0 {
+                        // Non-zero exit when any row was blocked or failed so callers
+                        // never see success after a partial or malformed import.
+                        if blocked > 0 || failed > 0 {
                             std::process::exit(1);
                         }
                         return Ok(());
@@ -14134,13 +14133,8 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            // INFRA-538: rebuild state.db from a LOCAL .chump/state.sql dump
-            // when the DB is corrupted. Backs up existing DB first, then
-            // replays YAML. INFRA-8193: the dump is no longer git-tracked; it
-            // exists only where something wrote it (`chump gap dump --out`, or
-            // backlog-sync's reader materialising the private registry copy).
-            // Retired in favour of `chump store reconcile` (INFRA-8222) in R4
-            // slice 2.
+            // INFRA-538 / RESILIENT-1651: rebuild state.db from a LOCAL
+            // .chump/state.sql dump (YAML gap dump or SQLite .dump).
             "restore" => {
                 let from_sql = args.iter().any(|a| a == "--from-sql");
                 if !from_sql {
@@ -14187,6 +14181,7 @@ async fn main() -> Result<()> {
                             sql_path.display(),
                             n
                         );
+                        return Ok(());
                     }
                     Err(e) => {
                         eprintln!("chump gap restore: restore failed: {e:#}");
@@ -14207,6 +14202,7 @@ async fn main() -> Result<()> {
                     if report.failing() {
                         std::process::exit(1);
                     }
+                    return Ok(());
                 }
                 Err(e) => {
                     eprintln!("chump gap audit-done: {e:#}");

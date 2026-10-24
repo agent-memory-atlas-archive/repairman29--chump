@@ -5109,20 +5109,113 @@ impl GapStore {
     /// The caller is responsible for backing up the existing state.db before
     /// calling this (typically rename to state.db.bak).
     pub fn restore_from_state_sql(&mut self, sql_path: &Path) -> Result<usize> {
-        let file = Self::load_state_sql(sql_path)?;
-
-        // Clear existing data so the restore is a full replacement, not a merge.
-        self.conn
-            .execute("DELETE FROM gaps", [])
-            .context("clearing gaps table before restore")?;
-
-        let mut inserted = 0usize;
-        for g in &file.gaps {
-            self.insert_or_replace_gap_row(g)
-                .with_context(|| format!("inserting gap {} during restore", g.id))?;
-            inserted += 1;
+        let text = std::fs::read_to_string(sql_path)
+            .with_context(|| format!("reading state.sql at {}", sql_path.display()))?;
+        let trimmed = text.trim_start();
+        if trimmed.is_empty() {
+            bail!("state.sql at {} is empty", sql_path.display());
         }
-        Ok(inserted)
+
+        // RESILIENT-1651: support both YAML gap dumps (`gaps:\n- id: ...` or bare
+        // `- id: ...` produced by `chump gap dump` / `backlog-sync --writer`) and
+        // raw SQLite `.dump` SQL scripts (`PRAGMA` / `BEGIN` / `CREATE TABLE` /
+        // `INSERT INTO`).
+        let looks_like_sql = {
+            let first_non_comment = trimmed
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("--"))
+                .unwrap_or("");
+            let upper = first_non_comment.to_ascii_uppercase();
+            upper.starts_with("PRAGMA ")
+                || upper.starts_with("BEGIN ")
+                || upper == "BEGIN;"
+                || upper.starts_with("CREATE ")
+                || upper.starts_with("INSERT ")
+                || upper.starts_with("DELETE ")
+        };
+
+        if looks_like_sql {
+            self.conn
+                .execute("DELETE FROM gaps", [])
+                .context("clearing gaps table before SQL restore")?;
+            let normalized: String = text
+                .lines()
+                .map(|line| {
+                    let t = line.trim_start();
+                    if t.starts_with("CREATE TABLE ")
+                        && !t.starts_with("CREATE TABLE IF NOT EXISTS ")
+                    {
+                        line.replacen("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+                    } else if t.starts_with("CREATE INDEX ")
+                        && !t.starts_with("CREATE INDEX IF NOT EXISTS ")
+                    {
+                        line.replacen("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
+                    } else if t.starts_with("CREATE UNIQUE INDEX ")
+                        && !t.starts_with("CREATE UNIQUE INDEX IF NOT EXISTS ")
+                    {
+                        line.replacen(
+                            "CREATE UNIQUE INDEX ",
+                            "CREATE UNIQUE INDEX IF NOT EXISTS ",
+                            1,
+                        )
+                    } else if t.starts_with("CREATE TRIGGER ")
+                        && !t.starts_with("CREATE TRIGGER IF NOT EXISTS ")
+                    {
+                        line.replacen("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1)
+                    } else if t.starts_with("INSERT INTO ") {
+                        line.replacen("INSERT INTO ", "INSERT OR REPLACE INTO ", 1)
+                    } else if t == "DELETE FROM sqlite_sequence;" {
+                        String::new()
+                    } else {
+                        line.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.conn
+                .execute_batch(&normalized)
+                .with_context(|| format!("executing SQL dump in {}", sql_path.display()))?;
+            let count: i64 = self
+                .conn
+                .query_row("SELECT COUNT(*) FROM gaps", [], |r| r.get(0))
+                .context("counting restored gaps")?;
+            return Ok(count as usize);
+        }
+
+        let file = Self::parse_state_sql_yaml(&text)
+            .with_context(|| format!("parsing YAML in {}", sql_path.display()))?;
+
+        // Wrap full-table replacement in a transaction so 14k+ rows restore
+        // atomically and in <100ms instead of 14k individual fsyncs.
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE;")
+            .context("starting restore transaction")?;
+        let res: Result<usize> = (|| {
+            self.conn
+                .execute("DELETE FROM gaps", [])
+                .context("clearing gaps table before restore")?;
+            let mut inserted = 0usize;
+            for g in &file.gaps {
+                self.insert_or_replace_gap_row(g)
+                    .with_context(|| format!("inserting gap {} during restore", g.id))?;
+                inserted += 1;
+            }
+            let _ = self.upsert_repos_from_skills(&file.gaps);
+            Ok(inserted)
+        })();
+        match res {
+            Ok(n) => {
+                self.conn
+                    .execute_batch("COMMIT;")
+                    .context("committing restore transaction")?;
+                Ok(n)
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
     }
 
     fn load_state_sql(sql_path: &Path) -> Result<YamlGapsFile> {
@@ -5132,13 +5225,316 @@ impl GapStore {
             .with_context(|| format!("parsing YAML in {}", sql_path.display()))
     }
 
-    /// Parse the YAML body of a `.chump/state.sql` dump (despite the `.sql`
-    /// extension it is a YAML gaps list, not SQL — see [`Self::load_state_sql`])
-    /// from an in-memory string. Split out of `load_state_sql` so
-    /// [`Self::canonical_max_id`] can parse `git show registry/main:.chump/state.sql`
-    /// output directly, without a temp-file round trip.
+    /// Parse the YAML body of a `.chump/state.sql` dump (either `gaps:\n- id: ...`
+    /// mapping or a bare `- id: ...` YAML sequence).
     fn parse_state_sql_yaml(text: &str) -> Result<YamlGapsFile> {
-        serde_yaml::from_str(text).context("parsing state.sql YAML")
+        let trimmed = text.trim_start();
+        if trimmed.starts_with('-') {
+            let wrapped = format!("gaps:\n{text}");
+            serde_yaml::from_str(&wrapped).context("parsing bare YAML gap list")
+        } else {
+            serde_yaml::from_str(text).context("parsing state.sql YAML")
+        }
+    }
+
+    /// RESILIENT-1651 AC2: load gaps from an explicit file or directory path,
+    /// returning `(YamlGapsFile, failed_count)`. Never silently falls back to
+    /// another directory when given a specific file path, and refuses a missing
+    /// path.
+    fn load_yaml_from_explicit_path(yaml_path: &Path) -> Result<(YamlGapsFile, usize)> {
+        if !yaml_path.exists() {
+            bail!("YAML path '{}' does not exist", yaml_path.display());
+        }
+        if yaml_path.is_file() {
+            let content = std::fs::read_to_string(yaml_path)
+                .with_context(|| format!("reading {}", yaml_path.display()))?;
+            if content.trim().is_empty() {
+                return Ok((YamlGapsFile { gaps: Vec::new() }, 0));
+            }
+            match Self::parse_state_sql_yaml(&content) {
+                Ok(f) => return Ok((f, 0)),
+                Err(e) => {
+                    eprintln!(
+                        "chump gap import: malformed YAML in {}: {e}",
+                        yaml_path.display()
+                    );
+                    return Ok((YamlGapsFile { gaps: Vec::new() }, 1));
+                }
+            }
+        }
+        if yaml_path.is_dir() {
+            let per_file_dir = if yaml_path.join("docs").join("gaps").is_dir() {
+                yaml_path.join("docs").join("gaps")
+            } else if yaml_path.join("docs").join("gaps.yaml").is_file() {
+                return Self::load_yaml_from_explicit_path(
+                    &yaml_path.join("docs").join("gaps.yaml"),
+                );
+            } else {
+                yaml_path.to_path_buf()
+            };
+            let mut dir_entries: Vec<_> = std::fs::read_dir(&per_file_dir)
+                .with_context(|| format!("reading {}", per_file_dir.display()))?
+                .flatten()
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s == "yaml" || s == "yml")
+                        .unwrap_or(false)
+                })
+                .collect();
+            dir_entries.sort_by_key(|e| e.file_name());
+            let mut gaps: Vec<YamlGap> = Vec::new();
+            let mut failed = 0usize;
+            for entry in &dir_entries {
+                let content = std::fs::read_to_string(entry.path())
+                    .with_context(|| format!("reading {}", entry.path().display()))?;
+                if content.trim().is_empty() {
+                    continue;
+                }
+                match Self::parse_state_sql_yaml(&content) {
+                    Ok(f) => gaps.extend(f.gaps),
+                    Err(e) => {
+                        eprintln!(
+                            "chump gap import: SKIPPING malformed {}: {e}",
+                            entry.path().display()
+                        );
+                        failed += 1;
+                    }
+                }
+            }
+            return Ok((YamlGapsFile { gaps }, failed));
+        }
+        bail!(
+            "YAML path '{}' is neither a file nor a directory",
+            yaml_path.display()
+        )
+    }
+
+    /// RESILIENT-1651 AC2: import gaps from an explicit file or directory path,
+    /// returning `(inserted, skipped, backfilled, blocked_by_similarity, failed)`.
+    pub fn import_from_yaml_path_with_similarity(
+        &self,
+        yaml_path: &Path,
+        repo_root: &Path,
+        block_threshold: Option<f64>,
+    ) -> Result<(usize, usize, usize, usize, usize)> {
+        let (file, failed) = Self::load_yaml_from_explicit_path(yaml_path)?;
+
+        let mut existing_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        {
+            let mut stmt = self.conn.prepare("SELECT id FROM gaps")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for r in rows.flatten() {
+                existing_ids.insert(r);
+            }
+        }
+
+        let mut skip_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut blocked_log: Vec<(String, String, String, f64)> = Vec::new();
+        if let Some(threshold) = block_threshold {
+            let mut accepted_in_batch: Vec<(String, String)> = Vec::new();
+            for g in &file.gaps {
+                if existing_ids.contains(&g.id) || g.title.trim().is_empty() {
+                    continue;
+                }
+                let mut top_match: Option<(String, String, f64)> = None;
+                if let Ok(cands) = self.similarity_candidates(&g.title, 1, 30) {
+                    if let Some((top_id, top_title, _status, top_score)) = cands.first() {
+                        if top_id != &g.id && *top_score >= threshold {
+                            top_match = Some((top_id.clone(), top_title.clone(), *top_score));
+                        }
+                    }
+                }
+                for (prev_id, prev_title) in &accepted_in_batch {
+                    let sc = Self::title_jaccard(&g.title, prev_title);
+                    if sc >= threshold && top_match.as_ref().map(|m| sc > m.2).unwrap_or(true) {
+                        top_match = Some((prev_id.clone(), prev_title.clone(), sc));
+                    }
+                }
+                match top_match {
+                    Some((top_id, top_title, score)) => {
+                        skip_ids.insert(g.id.clone());
+                        blocked_log.push((g.id.clone(), top_id, top_title, score));
+                    }
+                    None => {
+                        accepted_in_batch.push((g.id.clone(), g.title.clone()));
+                    }
+                }
+            }
+        }
+
+        if !blocked_log.is_empty() {
+            let ambient_path = repo_root.join(".chump-locks").join("ambient.jsonl");
+            if let Some(parent) = ambient_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let ts = unix_now();
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&ambient_path)
+            {
+                use std::io::Write;
+                for (proposed_id, top_id, top_title, score) in &blocked_log {
+                    let safe_title = top_title.replace(['"', '\\'], "");
+                    let _ = writeln!(
+                        f,
+                        r#"{{"ts":{ts},"kind":"gap_import_similarity_block","proposed_id":"{proposed_id}","top_match_id":"{top_id}","top_match_title":"{safe_title}","score":{score:.4}}}"#
+                    );
+                }
+            }
+        }
+
+        let mut inserted = 0usize;
+        let mut skipped = 0usize;
+        let mut backfilled = 0usize;
+
+        for g in &file.gaps {
+            if skip_ids.contains(&g.id) {
+                continue;
+            }
+            let ac = match &g.acceptance_criteria {
+                Some(v) => normalize_string_list(v),
+                None => String::new(),
+            };
+            let deps = match &g.depends_on {
+                Some(v) => {
+                    let json: serde_json::Value =
+                        serde_json::from_str(&v.to_string()).unwrap_or(serde_json::Value::Null);
+                    normalize_string_list(&json)
+                }
+                None => String::new(),
+            };
+            let notes = g
+                .notes
+                .as_ref()
+                .map(yaml_value_to_string)
+                .unwrap_or_default();
+            let source_doc = g
+                .source_doc
+                .as_ref()
+                .map(yaml_value_to_loose_string)
+                .unwrap_or_default();
+            let opened_date = g
+                .opened_date
+                .as_ref()
+                .map(yaml_value_to_string)
+                .unwrap_or_default();
+            let closed_date = g
+                .closed_date
+                .as_ref()
+                .map(yaml_value_to_string)
+                .unwrap_or_default();
+            let closed_pr = g.closed_pr.as_ref().and_then(yaml_value_to_i64);
+            let skills_required = g
+                .skills_required
+                .as_ref()
+                .map(yaml_value_to_string)
+                .unwrap_or_default();
+            let preferred_backend = g
+                .preferred_backend
+                .as_ref()
+                .map(yaml_value_to_string)
+                .unwrap_or_default();
+            let preferred_machine = g
+                .preferred_machine
+                .as_ref()
+                .map(yaml_value_to_string)
+                .unwrap_or_default();
+            let estimated_minutes = g
+                .estimated_minutes
+                .as_ref()
+                .map(yaml_value_to_string)
+                .unwrap_or_default();
+            let required_model = g
+                .required_model
+                .as_ref()
+                .map(yaml_value_to_string)
+                .unwrap_or_default();
+            let outcome_id: Option<String> = g
+                .outcome_id
+                .as_ref()
+                .map(yaml_value_to_string)
+                .filter(|s| !s.is_empty());
+            let evidence: Option<String> = g
+                .evidence
+                .as_ref()
+                .map(yaml_value_to_string)
+                .filter(|s| !s.is_empty());
+            let created_at = unix_now();
+
+            let changed = self.conn.execute(
+                "INSERT OR IGNORE INTO gaps(id,domain,title,description,priority,effort,status,
+                    acceptance_criteria,depends_on,notes,source_doc,created_at,
+                    opened_date,closed_date,closed_pr,skills_required,preferred_backend,
+                    preferred_machine,estimated_minutes,required_model,outcome_id,evidence)
+                 VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+                params![
+                    g.id,
+                    g.domain,
+                    g.title,
+                    g.description,
+                    g.priority,
+                    g.effort,
+                    g.status,
+                    ac,
+                    deps,
+                    notes,
+                    source_doc,
+                    created_at,
+                    opened_date,
+                    closed_date,
+                    closed_pr,
+                    skills_required,
+                    preferred_backend,
+                    preferred_machine,
+                    estimated_minutes,
+                    required_model,
+                    outcome_id,
+                    evidence,
+                ],
+            )?;
+            if changed > 0 {
+                inserted += 1;
+            } else {
+                skipped += 1;
+                if let Some(pr) = closed_pr {
+                    let bf = self.conn.execute(
+                        "UPDATE gaps SET closed_pr = ?1 WHERE id = ?2 AND closed_pr IS NULL",
+                        params![pr, g.id],
+                    )?;
+                    backfilled += bf;
+                }
+                if g.status == "done" {
+                    let receipt =
+                        chump_ship::ImportedReceipt::new(g.id.clone(), "yaml_sync".to_string());
+                    if receipt.validate().is_ok() {
+                        if let Ok(receipt_json) = serde_json::to_string(&receipt) {
+                            let transitioned = self.finalize_status_done(
+                                &g.id,
+                                closed_pr,
+                                receipt_json,
+                                LeaseCleanup::All,
+                                DoneExtras::ReceiptOnly,
+                                "yaml_backfill",
+                            )?;
+                            if transitioned {
+                                if !closed_date.is_empty() {
+                                    self.conn.execute(
+                                        "UPDATE gaps SET closed_date=?1 WHERE id=?2",
+                                        params![closed_date, g.id],
+                                    )?;
+                                }
+                                backfilled += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let _ = self.upsert_repos_from_skills(&file.gaps);
+        Ok((inserted, skipped, backfilled, blocked_log.len(), failed))
     }
 
     /// Extract the highest numeric suffix among `gaps[].id` values matching
@@ -14426,6 +14822,102 @@ mod reconcile_terminal_tests {
                 .reconcile_terminal_from(&GapStore::db_path(a.path()))
                 .unwrap(),
             0
+        );
+    }
+
+    /// RESILIENT-1651 AC1: `dump_yaml` -> `restore_from_state_sql` round-trips
+    /// wrapped (`gaps:`), bare sequence (`- id:`), and SQLite `.dump` (`INSERT INTO gaps`)
+    /// formats without losing rows or metadata.
+    #[test]
+    fn resilient1651_restore_from_state_sql_roundtrips_dump_yaml_and_sql() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GapStore::open(dir.path()).unwrap();
+        store
+            .conn_for_test()
+            .execute(
+                "INSERT INTO gaps (id, domain, title, status, priority, effort, notes, closed_pr, closed_date, acceptance_criteria)
+                 VALUES ('RESILIENT-9901', 'RESILIENT', 'Roundtrip gap alpha', 'done', 'P1', 's', 'alpha notes', 1234, '2026-10-24', '[\"ac1\",\"ac2\"]')",
+                [],
+            )
+            .unwrap();
+        store
+            .conn_for_test()
+            .execute(
+                "INSERT INTO gaps (id, domain, title, status, priority, effort, notes)
+                 VALUES ('RESILIENT-9902', 'RESILIENT', 'Roundtrip gap beta', 'open', 'P2', 'm', 'beta notes')",
+                [],
+            )
+            .unwrap();
+        let dumped = store.dump_yaml().unwrap();
+        let sql_path = dir.path().join(".chump").join("state.sql");
+        std::fs::write(&sql_path, &dumped).unwrap();
+        drop(store);
+
+        let dir2 = tempfile::tempdir().unwrap();
+        let mut restored = GapStore::open(dir2.path()).unwrap();
+        let count = restored.restore_from_state_sql(&sql_path).unwrap();
+        assert_eq!(count, 2);
+        let r1 = restored.get("RESILIENT-9901").unwrap().unwrap();
+        assert_eq!(r1.status, "done");
+        assert_eq!(r1.closed_pr, Some(1234));
+        assert_eq!(r1.closed_date, "2026-10-24");
+        assert_eq!(r1.notes.trim(), "alpha notes");
+        assert!(r1.acceptance_criteria.contains("ac1") && r1.acceptance_criteria.contains("ac2"));
+
+        // Also test SQLite .dump SQL statements
+        let sql_dump = "BEGIN TRANSACTION;\nINSERT INTO gaps (id, domain, title, status, priority, effort) VALUES ('RESILIENT-9903', 'RESILIENT', 'From SQL dump', 'open', 'P1', 'xs');\nCOMMIT;\n";
+        let sql_dump_path = dir2.path().join("dump.sql");
+        std::fs::write(&sql_dump_path, sql_dump).unwrap();
+        let count_sql = restored.restore_from_state_sql(&sql_dump_path).unwrap();
+        assert_eq!(count_sql, 1);
+        assert!(restored.get("RESILIENT-9903").unwrap().is_some());
+    }
+
+    /// RESILIENT-1651 AC2: `import_from_yaml_path_with_similarity` imports from the
+    /// caller-supplied file path (even when relative or outside `docs/gaps`) and
+    /// does not fall back to `docs/gaps/*.yaml`.
+    #[test]
+    fn resilient1651_import_from_yaml_path_honours_explicit_file_and_ignores_docs_gaps() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GapStore::open(dir.path()).unwrap();
+        let docs_gaps = dir.path().join("docs").join("gaps");
+        std::fs::create_dir_all(&docs_gaps).unwrap();
+        std::fs::write(
+            docs_gaps.join("DEC-999.yaml"),
+            "id: DEC-999\ndomain: DEC\ntitle: Decoy gap in docs/gaps that must not be read\nstatus: open\n",
+        )
+        .unwrap();
+
+        let custom_dir = dir.path().join("custom");
+        std::fs::create_dir_all(&custom_dir).unwrap();
+        let explicit_file = custom_dir.join("explicit.yaml");
+        std::fs::write(
+            &explicit_file,
+            "gaps:\n- id: EXP-001\n  domain: EXP\n  title: Explicit YAML file import target\n  status: open\n",
+        )
+        .unwrap();
+
+        let (inserted, _skipped, _backfilled, _blocked, failed) = store
+            .import_from_yaml_path_with_similarity(&explicit_file, dir.path(), None)
+            .unwrap();
+        assert_eq!(inserted, 1);
+        assert_eq!(failed, 0);
+        assert!(
+            store.get("EXP-001").unwrap().is_some(),
+            "EXP-001 from explicit file must be imported"
+        );
+        assert!(
+            store.get("DEC-999").unwrap().is_none(),
+            "DEC-999 from docs/gaps must NOT be imported when --yaml <file> is passed"
+        );
+
+        // Missing path must fail loudly
+        let missing = custom_dir.join("nonexistent.yaml");
+        assert!(
+            store
+                .import_from_yaml_path_with_similarity(&missing, dir.path(), None)
+                .is_err(),
+            "nonexistent --yaml path must return Err"
         );
     }
 }
