@@ -20,6 +20,13 @@ roles:
       - fleet-coordination
       - gap-triage
 
+  - name: fleet
+    description: >
+      The atomic fleet picker (_pick_and_claim_gap.py) delegating session-lease
+      acquisition to `chump claim --role fleet --lease-only` (INFRA-8580).
+    skills:
+      - fleet-coordination
+
   - name: fleet-worker
     description: >
       A tmux/headless worker (scripts/dispatch/worker.sh) that pulls an open

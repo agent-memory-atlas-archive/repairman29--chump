@@ -635,87 +635,81 @@ def get_lock_dir() -> Path:
     return Path(repo_root) / ".chump-locks"
 
 
+def _resolve_chump_bin() -> str:
+    """Resolve the `chump` CLI binary for `--lease-only` delegation.
+
+    Checks CHUMP_BIN first, then worktree-local target dirs, then the freshest
+    compiled binary across shared/host target dirs, then PATH (`shutil.which`).
+    """
+    import shutil
+
+    explicit = os.environ.get("CHUMP_BIN", "").strip()
+    if explicit and os.path.isfile(explicit) and os.access(explicit, os.X_OK):
+        return explicit
+
+    script_repo = Path(__file__).resolve().parents[2]
+    for local_cand in (
+        script_repo / "target" / "release" / "chump",
+        script_repo / "target" / "debug" / "chump",
+    ):
+        try:
+            if local_cand.is_file() and os.access(local_cand, os.X_OK):
+                return str(local_cand)
+        except OSError:
+            continue
+
+    home = Path.home()
+    shared_candidates = [
+        home / ".cargo" / "chump-shared-target" / "release" / "chump",
+        home / ".cargo" / "chump-shared-target" / "debug" / "chump",
+        home / "chump" / "target" / "release" / "chump",
+        home / "chump" / "target" / "debug" / "chump",
+        home / ".cargo" / "bin" / "chump",
+    ]
+    existing = []
+    for cand in shared_candidates:
+        try:
+            if cand.is_file() and os.access(cand, os.X_OK):
+                existing.append((cand.stat().st_mtime, str(cand)))
+        except OSError:
+            continue
+    if existing:
+        existing.sort(reverse=True)
+        return existing[0][1]
+
+    found = shutil.which("chump")
+    return found if found else "chump"
+
 def try_claim_gap(gap_id: str, session_id: str, lock_dir: Path) -> bool:
-    """Attempt to write a lease for gap_id atomically. Return True if successful.
+    """Attempt to claim a lease for gap_id atomically via `chump claim --lease-only`.
 
-    Uses a two-file strategy with fcntl.flock for atomicity:
-    1. gap-id.lock — canonical indicator that gap is claimed
-    2. session-id.json — metadata about the claiming session
-
-    INFRA-513: Use fcntl.flock around the check+claim pair to prevent TOCTOU race
-    where two workers both scan empty leases and try to claim the same gap.
+    INFRA-8580 (PHASE-R R6, INFRA-8195 AC2): _pick_and_claim_gap.py no longer
+    writes `.gap-<gap>.lock` or `<session>.json` directly; `crates/chump-atomic-claim`
+    is the single lease writer across the fleet. Prior INFRA-676 same-session
+    stale marker cleanup is performed inside `chump claim --lease-only`.
     """
     lock_dir.mkdir(parents=True, exist_ok=True)
-
-    now = int(time.time())
-    ttl_seconds = 4 * 3600
-    expires_at = now + ttl_seconds
-
-    # 2026-05-08 INFRA-713: speculative is now opt-in via CHUMP_SPECULATIVE=1
-    # (per CLAUDE.md original design — speculative race is intentional, not
-    # default). Hardcoded `speculative: True` caused observed collisions:
-    # CREDIBLE-003 shipped twice from agent2 cycles racing each other (#1286
-    # vs #1288), and worker 2 picked INFRA-710 immediately after I shipped
-    # it manually (because the existing lease was speculative, picker didn't
-    # treat it as exclusive). Default to exclusive; opt into race mode.
-    _speculative = os.environ.get("CHUMP_SPECULATIVE", "0") == "1"
-    lease = {
-        "session_id": session_id,
-        "gap_id": gap_id,
-        "taken_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-        "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at)),
-        "heartbeat_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-        "purpose": "fleet:pick_and_claim",
-        "speculative": _speculative,
-    }
-
-    gap_lock_file = lock_dir / f".gap-{gap_id}.lock"
-    session_lease_file = lock_dir / f"{session_id}.json"
-    temp_lease = lock_dir / f".tmp-{session_id}-{gap_id}-{now}"
-    lockfile = lock_dir / ".claim-lock"
-
+    chump_bin = _resolve_chump_bin()
+    env = os.environ.copy()
+    env["CHUMP_LOCK_DIR"] = str(lock_dir)
     try:
-        # Use fcntl.flock around the check+claim to prevent TOCTOU race.
-        # This serializes access so only one worker can claim at a time.
-        with open(lockfile, "a") as lock_f:
-            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
-            try:
-                # INFRA-676: sweep stale gap locks belonging to THIS session
-                # before creating a new one, so a previously-killed worker for
-                # the same session_id can't block the fleet indefinitely.
-                for stale in lock_dir.glob(".gap-*.lock"):
-                    try:
-                        first_token = stale.read_text().split()[0]
-                    except Exception:
-                        first_token = ""
-                    if first_token == session_id:
-                        try:
-                            stale.unlink()
-                        except Exception:
-                            pass
-
-                # Check if gap is already claimed (within the lock).
-                if gap_lock_file.exists():
-                    return False
-
-                # Create the gap lock file (still within the lock).
-                with open(gap_lock_file, "w") as f:
-                    f.write(f"{session_id} {now}\n")
-
-                # Gap lock created successfully. Now write the session lease.
-                try:
-                    with open(temp_lease, "w") as f:
-                        json.dump(lease, f, indent=2)
-                    temp_lease.rename(session_lease_file)
-                except Exception:
-                    # Lease write failed, but we already created the lock.
-                    # Return True anyway since we successfully claimed the gap.
-                    pass
-
-                return True
-            finally:
-                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
-
+        res = subprocess.run(
+            [
+                chump_bin,
+                "claim",
+                gap_id,
+                "--role",
+                "fleet",
+                "--session",
+                session_id,
+                "--lease-only",
+            ],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+        return res.returncode == 0
     except Exception:
         return False
 

@@ -87,16 +87,17 @@ else
     fail "picker did not claim INFRA-TEST-1 (got: '$pick')"
 fi
 
-lock_file="$lock_dir/.gap-INFRA-TEST-1.lock"
-if [[ -f "$lock_file" ]]; then
-    ok "lock file created after claim"
+lock_file="$lock_dir/gap-claim-INFRA-TEST-1.json"
+session_file="$lock_dir/session-pivot-test.json"
+if [[ -f "$lock_file" && -f "$session_file" ]]; then
+    ok "lock file + session lease created after claim (INFRA-8580 --lease-only)"
 else
-    fail "lock file missing after claim"
+    fail "lock file or session lease missing after claim"
 fi
 
-# Step 2: simulate pivot (preflight fails) — worker does rm -f.
-rm -f "$lock_file" 2>/dev/null || true
-if [[ ! -f "$lock_file" ]]; then
+# Step 2: simulate pivot (preflight fails) — worker does rm -f on marker + session lease.
+rm -f "$lock_dir/.gap-INFRA-TEST-1.lock" "$lock_file" "$session_file" 2>/dev/null || true
+if [[ ! -f "$lock_file" && ! -f "$session_file" ]]; then
     ok "lock file removed after pivot (simulated)"
 else
     fail "lock file still present after pivot simulation"

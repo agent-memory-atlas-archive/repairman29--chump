@@ -2325,7 +2325,7 @@ async fn main() -> Result<()> {
         // decision (re-entry vs NEW claim) lives in Rust (R6 invariant), keyed
         // on a live lease for (gap, CHUMP_SESSION_ID). Runs AFTER format
         // validation (CREDIBLE-291) so a farmer blip never masks a bad-request.
-        if !farmer_gate_bypass {
+        if !farmer_gate_bypass && !claim_args.lease_only {
             let env_session = std::env::var("CHUMP_SESSION_ID").ok();
             match farmer_status::claim_admission(
                 &repo_root,

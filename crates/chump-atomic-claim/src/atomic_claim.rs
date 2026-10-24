@@ -118,6 +118,11 @@ pub struct ClaimArgs {
     /// `<file>::<symbol>`-shaped value would otherwise be inferred (e.g.
     /// forces a plain whole-file lease). Mutually exclusive with `--region`.
     pub no_region: bool,
+    /// INFRA-8580 (PHASE-R R6, INFRA-8195 AC2): minimal lease-only claim path
+    /// used by `_pick_and_claim_gap.py`. Skips fetch/import/doctor/worktree and
+    /// performs only the atomic lease reservation + session lease + state.db
+    /// row + gap_claimed emit, honoring `CHUMP_LOCK_DIR`.
+    pub lease_only: bool,
 }
 
 impl ClaimArgs {
@@ -149,6 +154,7 @@ impl ClaimArgs {
                        --allow-duplicate-pr  Bypass open-PR-in-flight abort (INFRA-1503; rescue scenarios)\n  \
                        -h, --help       Show this help
                        --check-only  Run all preflight gates without creating worktree or lease\n  \
+                       --lease-only  Write atomic claim marker + session lease + state.db row only (skip worktree)\n  \
                        --json        Output JSON format (use with --check-only)"
                 );
                 std::process::exit(0);
@@ -200,6 +206,7 @@ impl ClaimArgs {
         let mut reason: Option<String> = None;
         let mut region: Option<String> = None;
         let mut no_region = false;
+        let mut lease_only = false;
 
         let mut i = 2;
         while i < args.len() {
@@ -307,6 +314,10 @@ impl ClaimArgs {
                     no_region = true;
                     i += 1;
                 }
+                "--lease-only" => {
+                    lease_only = true;
+                    i += 1;
+                }
                 other => bail!("unknown flag: {other}"),
             }
         }
@@ -370,6 +381,7 @@ impl ClaimArgs {
             reason,
             region,
             no_region,
+            lease_only,
         })
     }
 
@@ -794,7 +806,172 @@ pub fn run_check_only(args: ClaimArgs) -> Result<CheckReport> {
 
 /// Run the atomic claim. Each step is a separate function so the unit
 /// tests can exercise individual pieces in isolation.
+/// INFRA-8580 (INFRA-676 parity in crates/chump-atomic-claim): sweep stale
+/// `gap-claim-*.json` markers and legacy `.gap-*.lock` files in `lock_dir`
+/// owned by `this_session` for any gap other than `current_gap_id`. Also
+/// returns an error if a legacy `.gap-<current_gap_id>.lock` is held by a
+/// different session.
+fn sweep_session_stale_markers(
+    lock_dir: &Path,
+    this_session: &str,
+    current_gap_id: &str,
+) -> Result<()> {
+    let entries = match std::fs::read_dir(lock_dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(()),
+    };
+    let current_legacy_name = format!(".gap-{}.lock", current_gap_id);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(fname) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if fname.starts_with(".gap-") && fname.ends_with(".lock") {
+            let first_token = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| s.split_whitespace().next().map(str::to_string))
+                .unwrap_or_default();
+            if first_token == this_session && fname != current_legacy_name {
+                let _ = std::fs::remove_file(&path);
+            } else if fname == current_legacy_name
+                && !first_token.is_empty()
+                && first_token != this_session
+            {
+                bail!(
+                    "gap {} is already locked by session {} via {}",
+                    current_gap_id,
+                    first_token,
+                    fname
+                );
+            }
+            continue;
+        }
+        if fname.starts_with("gap-claim-") && fname.ends_with(".json") {
+            let Ok(body) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(val) = serde_json::from_str::<serde_json::Value>(&body) else {
+                continue;
+            };
+            let holder = val.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+            let gap = val.get("gap_id").and_then(|v| v.as_str()).unwrap_or("");
+            if holder == this_session && !gap.is_empty() && gap != current_gap_id {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// INFRA-8580 (PHASE-R R6, INFRA-8195 AC2): minimal lease-only claim path.
+/// Skips fetch/import/doctor/main-health/fuzzy/dedup/worktree and performs only
+/// the atomic lease write:
+///   1. sweep stale markers owned by this session (`sweep_session_stale_markers`)
+///   2. `check_gap_id_uniqueness` + `reserve_gap_claim_marker` (exclusivity)
+///   3. `write_or_merge_lease(<session>.json)`
+///   4. `write_db_claim` (best-effort/no-op when state.db absent)
+///   5. disarm marker + emit `gap_claimed`
+///
+/// Honors `CHUMP_LOCK_DIR` for test parity.
+fn run_claim_lease_only(args: ClaimArgs) -> Result<ClaimReport> {
+    let session_id = args
+        .session_id
+        .clone()
+        .unwrap_or_else(|| derive_session_id(&args.gap_id));
+    #[cfg(not(test))]
+    let explicit_lock_dir = std::env::var("CHUMP_LOCK_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from);
+    #[cfg(test)]
+    let explicit_lock_dir: Option<PathBuf> = None;
+    let lock_dir = explicit_lock_dir
+        .clone()
+        .unwrap_or_else(|| args.repo_root.join(".chump-locks"));
+    std::fs::create_dir_all(&lock_dir)
+        .with_context(|| format!("creating lock dir {}", lock_dir.display()))?;
+    let ambient_log = lock_dir.join("ambient.jsonl");
+    let effective_root: PathBuf = match &explicit_lock_dir {
+        Some(ld) => ld
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| args.repo_root.clone()),
+        None => args.repo_root.clone(),
+    };
+
+    sweep_session_stale_markers(&lock_dir, &session_id, &args.gap_id)?;
+
+    let allow_dup_gap = std::env::var("CHUMP_CLAIM_ALLOW_DUPLICATE_GAP")
+        .map(|v| !v.trim().is_empty() && v.trim() != "0")
+        .unwrap_or(false);
+    if !allow_dup_gap {
+        if let Err(e) = check_gap_id_uniqueness(&lock_dir, &args.gap_id, &session_id) {
+            emit_claim_duplicate_gap_event(&ambient_log, &args.gap_id, &session_id, &e.to_string());
+            bail!("INFRA-1970: {}", e);
+        }
+    }
+
+    let mut marker_guard: Option<GapClaimMarkerGuard> = None;
+    if !allow_dup_gap {
+        match reserve_gap_claim_marker(&lock_dir, &args.gap_id, &session_id, 14_400)? {
+            GapClaimMarkerOutcome::Won(path) => {
+                marker_guard = Some(GapClaimMarkerGuard { path: Some(path) });
+            }
+            GapClaimMarkerOutcome::Lost { winner_session } => {
+                emit_lease_overlap_event(
+                    &ambient_log,
+                    &args.gap_id,
+                    &winner_session,
+                    &session_id,
+                    args.paths.as_deref().unwrap_or(""),
+                );
+                bail!(
+                    "INFRA-1608: gap {} lost the atomic claim race to session {}",
+                    args.gap_id,
+                    winner_session
+                );
+            }
+        }
+    }
+
+    let speculative = std::env::var("CHUMP_SPECULATIVE")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+    let paths_csv_with_region = args.paths_csv_with_region();
+    let lease_file = write_or_merge_lease(
+        &lock_dir,
+        &session_id,
+        &args.gap_id,
+        paths_csv_with_region.as_deref(),
+        14_400,
+        speculative,
+    )
+    .context("writing JSON lease file (.chump-locks/)")?;
+
+    if let Some(guard) = marker_guard {
+        guard.disarm();
+    }
+
+    if let Err(e) = write_db_claim(&effective_root, &args.gap_id, &session_id, "", 14_400) {
+        let _ = std::fs::remove_file(&lease_file);
+        return Err(e.context("writing state.db leases row"));
+    }
+
+    let _ = emit_gap_claimed_event(&effective_root, &args.gap_id, &session_id);
+
+    Ok(ClaimReport {
+        gap_id: args.gap_id,
+        worktree_path: PathBuf::new(),
+        branch: String::new(),
+        session_id,
+        paths: args.paths,
+    })
+}
+
 pub fn run_claim(mut args: ClaimArgs) -> Result<ClaimReport> {
+    if args.lease_only {
+        return run_claim_lease_only(args);
+    }
     // RESILIENT-073: fleet kill switch — fail-closed autonomy level gate.
     // FIRST: must run BEFORE any state mutation OR any chump op that can
     // fail. Reads ~/.chump/AUTONOMY_LEVEL: 0 or missing/corrupt → STOP.
@@ -9256,5 +9433,50 @@ mod gap_claim_marker_tests {
 
         assert_eq!(winners, 1, "exactly one racer must win the CAS");
         assert_eq!(losers, N - 1, "every other racer must lose cleanly");
+    }
+
+    #[test]
+    fn infra_8580_lease_only_parses_and_claims_exclusively() {
+        let dir = tempdir().unwrap();
+        let lock_dir = dir.path().join(".chump-locks");
+        std::fs::create_dir_all(&lock_dir).unwrap();
+
+        let argv_a = vec![
+            "claim".to_string(),
+            "INFRA-8580".to_string(),
+            "--role".to_string(),
+            "fleet".to_string(),
+            "--session".to_string(),
+            "sess-alpha".to_string(),
+            "--lease-only".to_string(),
+        ];
+        let mut args_a = ClaimArgs::from_argv(&argv_a, dir.path().to_path_buf()).unwrap();
+        assert!(args_a.lease_only);
+        args_a.repo_root = dir.path().to_path_buf();
+
+        // First claim succeeds and writes both marker and session lease.
+        let report_a = run_claim_lease_only(args_a).unwrap();
+        assert_eq!(report_a.gap_id, "INFRA-8580");
+        assert_eq!(report_a.session_id, "sess-alpha");
+        assert!(lock_dir.join("sess-alpha.json").exists());
+        assert!(lock_dir.join("gap-claim-INFRA-8580.json").exists());
+
+        // Second claim from a different session for the same gap must fail.
+        let argv_b = vec![
+            "claim".to_string(),
+            "INFRA-8580".to_string(),
+            "--role".to_string(),
+            "fleet".to_string(),
+            "--session".to_string(),
+            "sess-beta".to_string(),
+            "--lease-only".to_string(),
+        ];
+        let mut args_b = ClaimArgs::from_argv(&argv_b, dir.path().to_path_buf()).unwrap();
+        args_b.repo_root = dir.path().to_path_buf();
+        assert!(
+            run_claim_lease_only(args_b).is_err(),
+            "competing session must be rejected by --lease-only"
+        );
+        assert!(!lock_dir.join("sess-beta.json").exists());
     }
 }

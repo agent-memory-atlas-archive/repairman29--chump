@@ -3712,3 +3712,5 @@ CHUMP_IMPROVE_REQUIRE_STORED_GAP
 CARGO_TARGET_DIR
 CHUMP_DISPATCH_RESUME
 CHUMP_DISPATCH_TIMEOUT_SECS
+# INFRA-8580: speculative lease flag read in chump claim --lease-only (crates/chump-atomic-claim/src/atomic_claim.rs, scripts/dispatch/_pick_and_claim_gap.py)
+CHUMP_SPECULATIVE

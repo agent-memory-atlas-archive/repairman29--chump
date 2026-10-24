@@ -25,10 +25,10 @@ else
     fail "INFRA-676 sweep comment missing from _pick_and_claim_gap.py"
 fi
 
-if grep -q '\.glob.*\.gap-\*\.lock' "$SCRIPT" || grep -qP '\.glob\(.*gap.*lock' "$SCRIPT"; then
-    ok "glob(.gap-*.lock) sweep present in _pick_and_claim_gap.py"
+if grep -q -- '--lease-only' "$SCRIPT"; then
+    ok "_pick_and_claim_gap.py delegates try_claim_gap to chump claim --lease-only (INFRA-8580)"
 else
-    fail "glob(.gap-*.lock) sweep missing from _pick_and_claim_gap.py"
+    fail "_pick_and_claim_gap.py missing --lease-only delegation (INFRA-8580)"
 fi
 
 # --- 2. Functional test via temp directory ---

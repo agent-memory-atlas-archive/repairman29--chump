@@ -115,6 +115,17 @@ find_lease_writers() {
             echo "$(basename "$file")"
             continue
         fi
+
+        # (L3) INFRA-8580 (INFRA-8195 AC2): a Python script that constructs a
+        # session-lease dict (taken_at + heartbeat_at) and writes it directly
+        # via json.dump/dumps instead of delegating to `chump claim --lease-only`.
+        if [[ "$file" == *.py ]] \
+           && grep -E '"taken_at"' "$file" 2>/dev/null | grep -v "^[[:space:]]*#" > /dev/null \
+           && grep -E '"heartbeat_at"' "$file" 2>/dev/null | grep -v "^[[:space:]]*#" > /dev/null \
+           && grep -E 'json\.dumps?\(' "$file" 2>/dev/null | grep -v "^[[:space:]]*#" > /dev/null; then
+            echo "$(basename "$file")"
+            continue
+        fi
     done | sort -u
 }
 
