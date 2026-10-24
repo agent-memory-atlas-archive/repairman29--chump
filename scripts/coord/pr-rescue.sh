@@ -205,7 +205,10 @@ for PR_NUM in ${PR_NUMBERS}; do
     # when stale/missing — zero API calls when cache is warm, one when cold.
     PR_META=""
     if declare -F cache_lookup_pr >/dev/null 2>&1; then
-        PR_META="$(cache_lookup_pr "${PR_NUM}" 2>/dev/null)"
+        # CREDIBLE-1539: guard with || true under set -euo pipefail because
+        # cache_lookup_pr returns exit code 2 on cold CI runners without
+        # .chump/github_cache.db, which otherwise aborts before the REST fallback.
+        PR_META="$(cache_lookup_pr "${PR_NUM}" 2>/dev/null || true)"
     fi
     if [[ -z "$PR_META" ]]; then
         # Cache lib not loaded or cache empty + REST fallback failed.
