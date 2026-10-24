@@ -38,6 +38,13 @@ const RECEIPT: &str = "INFRA-754/INFRA-1237/INFRA-1287: EVENT_REGISTRY.yaml is t
 
 const REGISTRY_REL: &str = "docs/observability/EVENT_REGISTRY.yaml";
 const RESERVED_REL: &str = "scripts/ci/event-registry-reserved.txt";
+/// RESILIENT-1618: new kinds land as per-kind fragments under this directory
+/// instead of editing the frozen monolith (new files never collide on GitHub's
+/// server-side merge). The canonical registry every consumer reads
+/// (scripts/ci/gen-registries.sh) is the monolith base PLUS these fragments, so
+/// this gate must aggregate them too — otherwise a commit that registers a kind
+/// via a fragment (the supported path) false-fails emit-without-register.
+const EVENTS_FRAGMENT_DIR_REL: &str = "docs/observability/events.d";
 
 /// Production paths audited by the CI coverage gate (INFRA-1287 set).
 /// scripts/ci/, scripts/git-hooks/, scripts/ab-harness/, scripts/auto-docs/
@@ -111,10 +118,7 @@ impl Rule for EventRegistry {
             );
         }
 
-        let registered: BTreeSet<String> = registry_body
-            .lines()
-            .filter_map(parse_registry_entry_line)
-            .collect();
+        let registered: BTreeSet<String> = load_registered(&ctx.repo_root, &registry_body);
         let reserved = load_reserved(ctx);
 
         // Direction 1: emit-without-register.
@@ -243,6 +247,31 @@ pub(crate) fn parse_registry_entry_line(line: &str) -> Option<String> {
         return None;
     }
     Some(name)
+}
+
+/// Collect every registered kind from the canonical registry view: the frozen
+/// monolith base plus each per-kind fragment under events.d/ (RESILIENT-1618).
+/// Mirrors scripts/ci/gen-registries.sh so this gate and the CI coverage gate
+/// agree on what "registered" means.
+fn load_registered(repo_root: &Path, monolith_body: &str) -> BTreeSet<String> {
+    let mut registered: BTreeSet<String> = monolith_body
+        .lines()
+        .filter_map(parse_registry_entry_line)
+        .collect();
+    if let Ok(entries) = std::fs::read_dir(repo_root.join(EVENTS_FRAGMENT_DIR_REL)) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            if let Ok(body) = std::fs::read_to_string(&path) {
+                for k in body.lines().filter_map(parse_registry_entry_line) {
+                    registered.insert(k);
+                }
+            }
+        }
+    }
+    registered
 }
 
 fn load_reserved(ctx: &VerifyContext) -> BTreeSet<String> {
@@ -405,6 +434,33 @@ mod tests {
             }
             _ => panic!("expected fail"),
         }
+    }
+
+    #[test]
+    fn fragment_registered_emit_passes() {
+        // RESILIENT-1618: a kind registered via a per-kind events.d/ fragment
+        // (not the monolith base) must still count as registered — this is the
+        // supported path for new kinds and must not false-fail the gate.
+        let root = fixture_root("fragment", &[], &[]);
+        let frag_dir = root.join("docs/observability/events.d");
+        std::fs::create_dir_all(&frag_dir).unwrap();
+        std::fs::write(
+            frag_dir.join("fixture_fragment.yaml"),
+            format!("{}\n", entry_line("fixture_fragment")),
+        )
+        .unwrap();
+        let ev = eval_with(
+            &root,
+            vec![file(
+                "scripts/dispatch/x.sh",
+                ChangeKind::Added,
+                vec![emit_line("fixture_fragment")],
+            )],
+        );
+        assert!(
+            matches!(ev, Evaluation::Pass(_)),
+            "fragment-registered emit should pass"
+        );
     }
 
     #[test]
