@@ -475,10 +475,34 @@ fn resolve_state_home(chump_home: Option<String>, home: Option<String>) -> Optio
 /// never used, so its staleness must not gate claims. Reads one env var only
 /// -- no network, keeps `farmer status` local-only and <100ms.
 fn free_tier_cascade_active() -> bool {
-    std::env::var("CHUMP_FREE_TIER_PROVIDERS")
+    if std::env::var("CHUMP_FREE_TIER_PROVIDERS")
         .ok()
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false)
+    {
+        return true;
+    }
+    // RESILIENT-1688: BYOK-primary nodes (Google AI / Mistral / OpenAI / OpenRouter)
+    // do not require a Claude OAuth token when CHUMP_BYOK_PRIMARY=1 and at least
+    // one BYOK API key is configured.
+    if std::env::var("CHUMP_BYOK_PRIMARY").as_deref() == Ok("1") {
+        for key_var in [
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "MISTRAL_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+        ] {
+            if std::env::var(key_var)
+                .ok()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// heartbeat-fresh check: `.chump/farmer-heartbeat` — vacuous pass if the

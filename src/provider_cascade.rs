@@ -233,6 +233,58 @@ pub fn resolved_openai_api_key() -> String {
     }
 }
 
+/// EFFECTIVE-1933: Resolve the API key for a specific endpoint URL.
+/// Prefers explicit `OPENAI_API_KEY` when set to a real key; otherwise falls
+/// back to `GEMINI_API_KEY` / `GOOGLE_API_KEY` for `generativelanguage.googleapis.com`
+/// and `MISTRAL_API_KEY` for `api.mistral.ai`.
+pub fn resolved_api_key_for_endpoint(base_url: &str) -> String {
+    let primary = resolved_openai_api_key();
+    if primary != "ollama" {
+        return primary;
+    }
+    if base_url.contains("generativelanguage.googleapis.com") {
+        for var in ["GEMINI_API_KEY", "GOOGLE_API_KEY"] {
+            if let Ok(v) = std::env::var(var) {
+                let t = v.trim();
+                if !t.is_empty() {
+                    return t.to_string();
+                }
+            }
+        }
+    } else if base_url.contains("api.mistral.ai") {
+        if let Ok(v) = std::env::var("MISTRAL_API_KEY") {
+            let t = v.trim();
+            if !t.is_empty() {
+                return t.to_string();
+            }
+        }
+    }
+    primary
+}
+
+/// EFFECTIVE-1933: Upgrade retired/decommissioned model slugs that return HTTP 404
+/// on Google AI (`generativelanguage.googleapis.com`) and Groq (`api.groq.com`)
+/// to their live frontier coding successors.
+pub fn upgrade_retired_provider_model(base_url: &str, model: &str) -> String {
+    let m = model.trim();
+    if base_url.contains("generativelanguage.googleapis.com") {
+        match m {
+            "gemini-2.5-pro" | "models/gemini-2.5-pro" => return "gemini-3.8-flash".to_string(),
+            "gemini-2.0-flash-lite"
+            | "models/gemini-2.0-flash-lite"
+            | "gemini-2.5-flash-lite"
+            | "models/gemini-2.5-flash-lite" => return "gemini-3.5-flash-lite".to_string(),
+            "gemini-2.0-flash" | "models/gemini-2.0-flash" => {
+                return "gemini-3.6-flash".to_string()
+            }
+            _ => {}
+        }
+    } else if base_url.contains("api.groq.com") && m == "llama-3.3-70b-versatile" {
+        return "qwen/qwen3.8-27b".to_string();
+    }
+    m.to_string()
+}
+
 fn cascade_enabled() -> bool {
     std::env::var("CHUMP_CASCADE_ENABLED")
         .map(|v| v == "1")
@@ -356,10 +408,10 @@ pub fn fetch_local_models_sync(base_url: &str) -> Vec<String> {
 /// - For non-local (cloud) endpoints with no override, fall back to
 ///   `"gpt-4o-mini"` (the cloud default; `gpt-5-mini` was incorrect).
 pub fn resolve_model_for_endpoint(base_url: &str, env_override: Option<String>) -> String {
-    // Operator explicit choice always wins.
+    // Operator explicit choice always wins (with retired-model 404 auto-upgrade).
     if let Some(ref m) = env_override {
         if !m.is_empty() {
-            return m.clone();
+            return upgrade_retired_provider_model(base_url, m);
         }
     }
 
@@ -386,6 +438,13 @@ pub fn resolve_model_for_endpoint(base_url: &str, env_override: Option<String>) 
             base_url
         );
         return "qwen2.5:7b".to_string();
+    }
+
+    if base_url.contains("generativelanguage.googleapis.com") {
+        return "gemini-3.8-flash".to_string();
+    }
+    if base_url.contains("api.mistral.ai") {
+        return "codestral-latest".to_string();
     }
 
     // Non-local cloud endpoint: gpt-4o-mini is a real model; gpt-5-mini is not.
@@ -634,7 +693,7 @@ impl ProviderCascade {
         if let Ok(base) = std::env::var("OPENAI_API_BASE") {
             let base = base.trim_end_matches('/').to_string();
             if !base.is_empty() {
-                let api_key = resolved_openai_api_key();
+                let api_key = resolved_api_key_for_endpoint(&base);
                 let model = resolve_model_for_endpoint(
                     &base,
                     std::env::var("OPENAI_MODEL").ok().filter(|m| !m.is_empty()),
@@ -677,9 +736,19 @@ impl ProviderCascade {
                 Ok(b) if !b.is_empty() => b.trim_end_matches('/').to_string(),
                 _ => continue,
             };
-            let key = std::env::var(format!("CHUMP_PROVIDER_{}_KEY", n)).unwrap_or_default();
-            let model = std::env::var(format!("CHUMP_PROVIDER_{}_MODEL", n))
+            let mut key = std::env::var(format!("CHUMP_PROVIDER_{}_KEY", n)).unwrap_or_default();
+            if key.trim().is_empty() {
+                if base.contains("generativelanguage.googleapis.com") {
+                    key = std::env::var("GEMINI_API_KEY")
+                        .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+                        .unwrap_or_default();
+                } else if base.contains("api.mistral.ai") {
+                    key = std::env::var("MISTRAL_API_KEY").unwrap_or_default();
+                }
+            }
+            let raw_model = std::env::var(format!("CHUMP_PROVIDER_{}_MODEL", n))
                 .unwrap_or_else(|_| "gpt-4".to_string());
+            let model = upgrade_retired_provider_model(&base, &raw_model);
             let name = std::env::var(format!("CHUMP_PROVIDER_{}_NAME", n))
                 .unwrap_or_else(|_| format!("slot_{}", n));
             let priority_raw = std::env::var(format!("CHUMP_PROVIDER_{}_PRIORITY", n)).ok();
@@ -706,9 +775,16 @@ impl ProviderCascade {
                     DEFAULT_RPD_WHEN_UNSET
                 }
             };
-            let privacy = std::env::var(format!("CHUMP_PROVIDER_{}_PRIVACY", n))
+            let mut privacy = std::env::var(format!("CHUMP_PROVIDER_{}_PRIVACY", n))
                 .map(|s| parse_privacy_tier(&s))
                 .unwrap_or(PrivacyTier::Safe);
+            let is_paid_slot = std::env::var("CHUMP_BYOK_PAID").as_deref() == Ok("1")
+                || std::env::var(format!("CHUMP_PROVIDER_{}_TIER", n))
+                    .map(|s| s.trim().eq_ignore_ascii_case("paid"))
+                    .unwrap_or(false);
+            if is_paid_slot && privacy == PrivacyTier::Trains {
+                privacy = PrivacyTier::Safe;
+            }
             let context_k_raw = std::env::var(format!("CHUMP_PROVIDER_{}_CONTEXT_K", n)).ok();
             let context_k = context_k_raw
                 .as_ref()
@@ -763,6 +839,103 @@ impl ProviderCascade {
                 cooldown_until: Mutex::new(None),
                 xml_tool_tags,
             });
+        }
+
+        // EFFECTIVE-1933: When CHUMP_AUTO_BYOK_SLOTS=1, auto-register Google AI
+        // (GEMINI_API_KEY / GOOGLE_API_KEY) and Mistral (MISTRAL_API_KEY) frontier
+        // coding slots if no explicit slot for that endpoint was declared.
+        if std::env::var("CHUMP_AUTO_BYOK_SLOTS").as_deref() == Ok("1") {
+            let gemini_key = std::env::var("GEMINI_API_KEY")
+                .or_else(|_| std::env::var("GOOGLE_API_KEY"))
+                .unwrap_or_default();
+            let has_gemini_slot = slots
+                .iter()
+                .any(|s| s.base_url.contains("generativelanguage.googleapis.com"));
+            if !gemini_key.trim().is_empty() && !has_gemini_slot {
+                let base = "https://generativelanguage.googleapis.com/v1beta/openai".to_string();
+                let auto_gemini = [
+                    (
+                        "gemini-pro",
+                        "gemini-3.8-flash",
+                        "opus",
+                        15u32,
+                        60u32,
+                        5000u32,
+                    ),
+                    (
+                        "gemini-flash",
+                        "gemini-3.6-flash",
+                        "sonnet",
+                        25u32,
+                        60u32,
+                        5000u32,
+                    ),
+                    (
+                        "gemini-flash-lite",
+                        "gemini-3.5-flash-lite",
+                        "haiku",
+                        35u32,
+                        120u32,
+                        10000u32,
+                    ),
+                ];
+                for (name, model, class, prio, rpm, rpd) in auto_gemini {
+                    let provider = LocalOpenAIProvider::with_fallback(
+                        base.clone(),
+                        None,
+                        gemini_key.trim().to_string(),
+                        model.to_string(),
+                    );
+                    slots.push(ProviderSlot {
+                        name: name.to_string(),
+                        base_url: base.clone(),
+                        provider,
+                        priority: prio,
+                        tier: ProviderTier::Cloud,
+                        privacy: PrivacyTier::Safe,
+                        context_k: Some(1000),
+                        model_class: Some(class.to_string()),
+                        rpm_limit: rpm,
+                        calls_this_minute: AtomicU32::new(0),
+                        minute_start: Mutex::new(Instant::now()),
+                        rpd_limit: rpd,
+                        calls_today: AtomicU32::new(0),
+                        day_start: Mutex::new(Instant::now()),
+                        cooldown_until: Mutex::new(None),
+                        xml_tool_tags: false,
+                    });
+                }
+            }
+
+            let mistral_key = std::env::var("MISTRAL_API_KEY").unwrap_or_default();
+            let has_mistral_slot = slots.iter().any(|s| s.base_url.contains("api.mistral.ai"));
+            if !mistral_key.trim().is_empty() && !has_mistral_slot {
+                let base = "https://api.mistral.ai/v1".to_string();
+                let provider = LocalOpenAIProvider::with_fallback(
+                    base.clone(),
+                    None,
+                    mistral_key.trim().to_string(),
+                    "codestral-latest".to_string(),
+                );
+                slots.push(ProviderSlot {
+                    name: "mistral-codestral".to_string(),
+                    base_url: base,
+                    provider,
+                    priority: 20,
+                    tier: ProviderTier::Cloud,
+                    privacy: PrivacyTier::Safe,
+                    context_k: Some(256),
+                    model_class: Some("opus".to_string()),
+                    rpm_limit: 60,
+                    calls_this_minute: AtomicU32::new(0),
+                    minute_start: Mutex::new(Instant::now()),
+                    rpd_limit: 5000,
+                    calls_today: AtomicU32::new(0),
+                    day_start: Mutex::new(Instant::now()),
+                    cooldown_until: Mutex::new(None),
+                    xml_tool_tags: false,
+                });
+            }
         }
 
         slots.sort_by_key(|s| s.priority);
@@ -2204,6 +2377,7 @@ fn build_provider_single() -> Box<dyn Provider + Send + Sync> {
     if let Ok(base) = std::env::var("OPENAI_API_BASE") {
         let base = base.trim();
         if !base.is_empty() {
+            let endpoint_key = resolved_api_key_for_endpoint(base);
             let model = resolve_model_for_endpoint(base, env_model);
             let fallback = std::env::var("CHUMP_FALLBACK_API_BASE")
                 .ok()
@@ -2211,7 +2385,7 @@ fn build_provider_single() -> Box<dyn Provider + Send + Sync> {
             return Box::new(LocalOpenAIProvider::with_fallback(
                 base.to_string(),
                 fallback,
-                api_key,
+                endpoint_key,
                 model,
             ));
         }
@@ -3993,5 +4167,56 @@ mod tests {
 
         assert!(out.tool_calls.is_empty());
         assert!(out.text.as_deref().unwrap_or("").contains("<tool_call>"));
+    }
+
+    #[test]
+    fn effective1933_upgrade_retired_provider_models() {
+        let gbase = "https://generativelanguage.googleapis.com/v1beta/openai";
+        assert_eq!(
+            upgrade_retired_provider_model(gbase, "gemini-2.5-pro"),
+            "gemini-3.8-flash"
+        );
+        assert_eq!(
+            upgrade_retired_provider_model(gbase, "gemini-2.0-flash-lite"),
+            "gemini-3.5-flash-lite"
+        );
+        assert_eq!(
+            upgrade_retired_provider_model(gbase, "gemini-2.5-flash-lite"),
+            "gemini-3.5-flash-lite"
+        );
+        assert_eq!(
+            upgrade_retired_provider_model(gbase, "gemini-3.8-flash"),
+            "gemini-3.8-flash"
+        );
+        assert_eq!(
+            upgrade_retired_provider_model(
+                "https://api.groq.com/openai/v1",
+                "llama-3.3-70b-versatile"
+            ),
+            "qwen/qwen3.8-27b"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(openai_env)]
+    fn effective1933_resolved_api_key_for_gemini_endpoint() {
+        let prev_oai = std::env::var("OPENAI_API_KEY").ok();
+        let prev_gem = std::env::var("GEMINI_API_KEY").ok();
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::set_var("GEMINI_API_KEY", "AIzaTestKey123");
+        assert_eq!(
+            resolved_api_key_for_endpoint(
+                "https://generativelanguage.googleapis.com/v1beta/openai"
+            ),
+            "AIzaTestKey123"
+        );
+        match prev_oai {
+            Some(v) => std::env::set_var("OPENAI_API_KEY", v),
+            None => std::env::remove_var("OPENAI_API_KEY"),
+        }
+        match prev_gem {
+            Some(v) => std::env::set_var("GEMINI_API_KEY", v),
+            None => std::env::remove_var("GEMINI_API_KEY"),
+        }
     }
 }

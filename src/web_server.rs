@@ -2925,7 +2925,16 @@ fn seed_starter_gaps(repo_root: &std::path::Path) -> Vec<String> {
 //   - Storage: ~/.chump/config.toml [api] section (chmod 600), shared with auth.rs
 //   - Logging: presence-only (`forwarding explicit X` pattern), never the value
 
-const SECRET_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"];
+const SECRET_KEYS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "GH_TOKEN",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "MISTRAL_API_KEY",
+];
 
 /// Map a public key name to the [api]-section field name in
 /// ~/.chump/config.toml. Mirrors src/auth.rs detect_credentials reader.
@@ -2934,6 +2943,11 @@ fn secret_config_location(key: &str) -> Option<&'static str> {
         "ANTHROPIC_API_KEY" => Some("anthropic_api_key"),
         "CLAUDE_CODE_OAUTH_TOKEN" => Some("claude_code_oauth_token"),
         "GH_TOKEN" => Some("gh_token"),
+        "GEMINI_API_KEY" => Some("gemini_api_key"),
+        "GOOGLE_API_KEY" => Some("google_api_key"),
+        "OPENAI_API_KEY" => Some("openai_api_key"),
+        "OPENROUTER_API_KEY" => Some("openrouter_api_key"),
+        "MISTRAL_API_KEY" => Some("mistral_api_key"),
         _ => None,
     }
 }
@@ -3106,6 +3120,50 @@ async fn probe_secret(key: &str, value: &str) -> bool {
                 .get("https://api.github.com/user")
                 .header("authorization", format!("Bearer {}", value))
                 .header("user-agent", "chump-pwa")
+                .send()
+                .await;
+            match resp {
+                Ok(r) => r.status().is_success(),
+                Err(_) => false,
+            }
+        }
+        "GEMINI_API_KEY" | "GOOGLE_API_KEY" => {
+            let resp = client
+                .get("https://generativelanguage.googleapis.com/v1beta/openai/models")
+                .header("authorization", format!("Bearer {}", value))
+                .send()
+                .await;
+            match resp {
+                Ok(r) => r.status().is_success(),
+                Err(_) => false,
+            }
+        }
+        "OPENAI_API_KEY" => {
+            let resp = client
+                .get("https://api.openai.com/v1/models")
+                .header("authorization", format!("Bearer {}", value))
+                .send()
+                .await;
+            match resp {
+                Ok(r) => r.status().is_success(),
+                Err(_) => false,
+            }
+        }
+        "OPENROUTER_API_KEY" => {
+            let resp = client
+                .get("https://openrouter.ai/api/v1/models")
+                .header("authorization", format!("Bearer {}", value))
+                .send()
+                .await;
+            match resp {
+                Ok(r) => r.status().is_success(),
+                Err(_) => false,
+            }
+        }
+        "MISTRAL_API_KEY" => {
+            let resp = client
+                .get("https://api.mistral.ai/v1/models")
+                .header("authorization", format!("Bearer {}", value))
                 .send()
                 .await;
             match resp {

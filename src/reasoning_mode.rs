@@ -78,7 +78,14 @@ pub fn build_reasoning_params(model_id: &str) -> Option<Value> {
         Some(build_claude_reasoning_params())
     } else if m.contains("o1") || m.contains("o3") || m.contains("o4") {
         Some(build_openai_reasoning_params())
-    } else if m.contains("gemini") && m.contains("think") {
+    } else if m.contains("gemini")
+        && (m.contains("think")
+            || m.contains("2.5-pro")
+            || m.contains("3-pro")
+            || m.contains("3.1-pro")
+            || m.contains("3.8-flash")
+            || m.contains("gemini-4"))
+    {
         Some(build_gemini_reasoning_params())
     } else if m.contains("deepseek-r") || m.contains("deepseek-reasoner") {
         // DeepSeek-R1 and descendants: just set temperature to 0.6 (their docs recommend ≤ 1.0).
@@ -131,6 +138,10 @@ const REASONING_MODELS: &[&str] = &[
     "gemini-2.0-flash-thinking",
     "gemini-2.5-flash-thinking",
     "gemini-2.5-pro",
+    "gemini-3-pro",
+    "gemini-3.1-pro",
+    "gemini-3.8-flash",
+    "gemini-4",
     // DeepSeek reasoning models
     "deepseek-r1",
     "deepseek-r2",

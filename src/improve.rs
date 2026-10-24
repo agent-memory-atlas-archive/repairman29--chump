@@ -2243,8 +2243,17 @@ fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<Str
     // giving the next-stronger model a shot at fixing it.
     let landed_no_edit = !work_dir_has_real_edits(&work_dir);
     let landed_broken_edit = !landed_no_edit && working_tree_edit_is_broken(&work_dir);
+    // EFFECTIVE-1934: on BYOK-primary nodes without Claude credentials (and no test
+    // CHUMP_IMPROVE_CLAUDE_BIN injection), skip the `claude -p` final rung so the
+    // cascade result isn't overwritten by an unauthenticated CLI invocation.
+    let byok_no_claude_auth = std::env::var("CHUMP_BYOK_PRIMARY").as_deref() == Ok("1")
+        && std::env::var_os("CHUMP_IMPROVE_CLAUDE_BIN").is_none()
+        && std::env::var_os("CLAUDE_CODE_OAUTH_TOKEN").is_none()
+        && std::env::var_os("ANTHROPIC_API_KEY").is_none()
+        && read_oauth_token_file().is_none();
     if backend != "claude"
         && std::env::var("CHUMP_IMPLEMENT_ESCALATE_CLAUDE").as_deref() != Ok("0")
+        && !byok_no_claude_auth
         && (landed_no_edit || landed_broken_edit)
     {
         let why = if landed_broken_edit {

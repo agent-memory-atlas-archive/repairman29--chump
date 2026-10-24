@@ -3692,3 +3692,11 @@ CHUMP_ARCHITECT_TICK_MODEL
 # Replace the AUTO marker with a real description on the next commit.
 # detected in: (standard input)
 CHUMP_LESSONS_MIN_TIER
+
+# ── EFFECTIVE-1933 / RESILIENT-1688: Google AI & Paid BYOK cascade wiring ──
+CHUMP_AUTO_BYOK_SLOTS
+CHUMP_BYOK_PAID
+CHUMP_BYOK_PRIMARY
+CHUMP_PAID_TIER
+GOOGLE_API_KEY
+MISTRAL_API_KEY

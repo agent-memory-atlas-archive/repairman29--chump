@@ -99,6 +99,21 @@ OPENAI_MODEL=Qwen/Qwen3-4B`,
     notes: 'Requires full Xcode (xcrun metal --version must succeed).',
     hasBitsPicker: true,
   },
+  {
+    id: 'cloud-byok-gemini',
+    name: 'Google AI (Gemini 3.8 Flash) — Frontier BYOK',
+    icon: '✨',
+    tiers: ['8gb', '16gb', '24gb'],
+    whenToUse: 'Zero local VRAM. Uses Google AI frontier coding models (1M context) via GEMINI_API_KEY.',
+    model: 'gemini-3.8-flash',
+    envFn: () => `OPENAI_API_BASE=https://generativelanguage.googleapis.com/v1beta/openai
+OPENAI_MODEL=gemini-3.8-flash
+CHUMP_BYOK_PRIMARY=1
+CHUMP_BYOK_PAID=1
+CHUMP_AUTO_BYOK_SLOTS=1`,
+    startCmd: 'chump llm-complete --model opus <<< "Reply with OK"',
+    notes: 'Set GEMINI_API_KEY in Settings → API Secrets or .env.',
+  },
 ];
 
 // ── <chump-view-models> ───────────────────────────────────────────────────────

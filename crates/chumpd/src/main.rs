@@ -286,6 +286,11 @@ fn spawn_worker(cfg: &Config, agent_id: usize) -> std::io::Result<Child> {
     let build_jobs = cargo_build_jobs();
     eprintln!("chumpd: worker {agent_id} CARGO_BUILD_JOBS={build_jobs} (derived from RAM/cpus)");
 
+    let agent_harness = std::env::var("CHUMP_AGENT_HARNESS")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "claude".to_string());
+
     command
         .current_dir(&cfg.repo)
         .env("PATH", path_env)
@@ -301,7 +306,7 @@ fn spawn_worker(cfg: &Config, agent_id: usize) -> std::io::Result<Child> {
         .env("FLEET_MODEL", fleet_model)
         .env("FLEET_SESSION", "chumpd")
         .env("FLEET_INLINE_BRIEFING", "1")
-        .env("CHUMP_AGENT_HARNESS", "claude")
+        .env("CHUMP_AGENT_HARNESS", &agent_harness)
         .env("CARGO_TARGET_DIR", cfg.repo.join("target"))
         .env("CARGO_BUILD_JOBS", build_jobs.to_string())
         .env(

@@ -121,15 +121,13 @@ Output a refreshed THE_PATH.md ONLY. Preserve the 5-track structure. Demote ship
 echo "[oracle-refresh] dispatching Opus burst (wall_budget=${WALL_BUDGET_S}s token_budget=${TOKEN_BUDGET})"
 
 # Cost gate: if disabled or no LLM available, exit 0 cleanly
-if ! command -v claude >/dev/null 2>&1; then
-    echo "[oracle-refresh] claude CLI not available; skipping refresh"
+if ! command -v claude >/dev/null 2>&1 && ! command -v chump >/dev/null 2>&1; then
+    echo "[oracle-refresh] claude and chump CLIs not available; skipping refresh"
     emit "oracle_refresh_skipped" "\"reason\":\"claude_cli_missing\""
     exit 0
 fi
 
-# Use claude -p --bare with hard timeout. gtimeout (homebrew coreutils) is
-# the macOS path; fall back to bare invocation if neither timeout binary
-# exists (bounded only by claude's own internal timeouts).
+# Use claude -p --bare with hard timeout (or chump llm-complete on BYOK nodes).
 _to=""
 if command -v timeout >/dev/null 2>&1; then _to="timeout ${WALL_BUDGET_S}s";
 elif command -v gtimeout >/dev/null 2>&1; then _to="gtimeout ${WALL_BUDGET_S}s";
@@ -141,8 +139,20 @@ STDERR_TMP="$(mktemp)"
 START_TS="$(date +%s)"
 # scanner-anchor: "kind":"oracle_refresh_failed"
 # scanner-anchor: "kind":"oracle_refresh_empty"
-new_body="$(printf '%s\n' "$PROMPT" | $_to claude -p --bare 2>"$STDERR_TMP" | head -c 6000)"
-LLM_EXIT=$?
+if [[ "${CHUMP_BYOK_PRIMARY:-0}" == "1" ]] && command -v chump >/dev/null 2>&1; then
+    new_body="$(printf '%s\n' "$PROMPT" | $_to chump llm-complete --model opus --max-tokens "${TOKEN_BUDGET}" 2>"$STDERR_TMP" | head -c 6000)"
+    LLM_EXIT=$?
+elif command -v claude >/dev/null 2>&1; then
+    new_body="$(printf '%s\n' "$PROMPT" | $_to claude -p --bare 2>"$STDERR_TMP" | head -c 6000)"
+    LLM_EXIT=$?
+    if [[ $LLM_EXIT -ne 0 ]] && command -v chump >/dev/null 2>&1; then
+        new_body="$(printf '%s\n' "$PROMPT" | $_to chump llm-complete --model opus --max-tokens "${TOKEN_BUDGET}" 2>"$STDERR_TMP" | head -c 6000)"
+        LLM_EXIT=$?
+    fi
+else
+    new_body="$(printf '%s\n' "$PROMPT" | $_to chump llm-complete --model opus --max-tokens "${TOKEN_BUDGET}" 2>"$STDERR_TMP" | head -c 6000)"
+    LLM_EXIT=$?
+fi
 ELAPSED_S=$(( $(date +%s) - START_TS ))
 
 if [[ $LLM_EXIT -ne 0 ]]; then

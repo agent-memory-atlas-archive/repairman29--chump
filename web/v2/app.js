@@ -3601,6 +3601,10 @@ class ChumpViewSettings extends HTMLElement {
     const secrets = [
       { key: 'ANTHROPIC_API_KEY', label: 'Anthropic API key' },
       { key: 'CLAUDE_CODE_OAUTH_TOKEN', label: 'Claude Code OAuth token' },
+      { key: 'GEMINI_API_KEY', label: 'Google AI (Gemini) API key' },
+      { key: 'MISTRAL_API_KEY', label: 'Mistral / Codestral API key' },
+      { key: 'OPENAI_API_KEY', label: 'OpenAI API key' },
+      { key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' },
       { key: 'GH_TOKEN', label: 'GitHub token' },
     ];
     Promise.all(secrets.map(s =>

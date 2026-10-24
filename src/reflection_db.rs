@@ -186,6 +186,14 @@ pub fn model_tier(model_id: &str) -> ModelTier {
         "o3",
         "gemini-1.5-pro",
         "gemini-2",
+        "gemini-3-pro",
+        "gemini-3.1-pro",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-4",
+        "codestral",
+        "mistral-code",
+        "deepseek-v4",
         "llama-3.3-70b",
         "llama-3.1-70b",
         "llama-3.1-405b",
@@ -196,7 +204,7 @@ pub fn model_tier(model_id: &str) -> ModelTier {
         return ModelTier::Frontier;
     }
 
-    // Capable: 14B-32B local mid-tier
+    // Capable: 14B-32B local mid-tier + fast Gemini Flash / Qwen 3.8
     let capable_markers: &[&str] = &[
         "qwen2.5:14b",
         "qwen2.5-14b",
@@ -206,10 +214,16 @@ pub fn model_tier(model_id: &str) -> ModelTier {
         "qwen3-32b",
         "qwen2.5:32b",
         "qwen2.5-32b",
+        "qwen3.8",
+        "qwen-3.8",
         "llama-3.1-8b",
         "gpt-oss:20b",
         "gpt-oss-20b",
         "gemini-1.5-flash",
+        "gemini-2.5-flash",
+        "gemini-3-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash",
     ];
     if capable_markers.iter().any(|s| m.contains(s)) {
         return ModelTier::Capable;

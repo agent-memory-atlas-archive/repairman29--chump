@@ -283,9 +283,18 @@ _generate_rca_evidence() {
     cnt="$2"
     id_list="$3"
 
-    if [ "${CHUMP_RCA_REFLEX_LLM_DISABLED:-0}" != "1" ] && command -v claude >/dev/null 2>&1; then
+    if [ "${CHUMP_RCA_REFLEX_LLM_DISABLED:-0}" != "1" ]; then
         prompt="Recurring-gap-pattern detector found $cnt gaps opened in the last ${DAYS}d that share the title keyword \"$keyword\": $id_list. Produce a root-cause hypothesis for a fleet gap-tracking system in EXACTLY this 4-line format, one line each, no extra commentary: COMMAND: <the diagnostic command/grep an operator would run to confirm> / OUTPUT: <what that command would show, generically> / THEORY: <the suspected structural root cause explaining why this keyword keeps recurring> / ALT: <the rejected alternative (usually 'keep filing symptom gaps individually') and why it's rejected>."
-        resp="$(timeout 60 claude -p "$prompt" --model claude-sonnet-4-6 2>/dev/null || true)"
+        resp=""
+        if [ "${CHUMP_BYOK_PRIMARY:-0}" = "1" ] && command -v chump >/dev/null 2>&1; then
+            resp="$(printf '%s\n' "$prompt" | timeout 60 chump llm-complete --model sonnet --max-tokens 500 2>/dev/null || true)"
+        fi
+        if [ -z "$resp" ] && command -v claude >/dev/null 2>&1; then
+            resp="$(timeout 60 claude -p "$prompt" --model claude-sonnet-4-6 2>/dev/null || true)"
+        fi
+        if [ -z "$resp" ] && command -v chump >/dev/null 2>&1; then
+            resp="$(printf '%s\n' "$prompt" | timeout 60 chump llm-complete --model sonnet --max-tokens 500 2>/dev/null || true)"
+        fi
         resp="$(printf '%s' "$resp" | grep -E '^(COMMAND|OUTPUT|THEORY|ALT):' || true)"
         if [ -n "$resp" ]; then
             printf '%s\n' "$resp"

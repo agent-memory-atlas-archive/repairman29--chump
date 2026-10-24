@@ -4,6 +4,17 @@
 # Wins over ~/.chump/providers.env and launcher-set ladder values, which are
 # deprecated for ladder shape. providers.env supplies secret VALUES only.
 _fc_root="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# RESILIENT-1688: When CHUMP_BYOK_PRIMARY=1, preserve the node's explicit BYOK
+# provider/model/ladder env instead of overwriting with floor-config.json's
+# DeepSeek defaults.
+if [[ "${CHUMP_BYOK_PRIMARY:-0}" == "1" ]]; then
+    if [[ -f "$HOME/.chump/providers.env" ]]; then
+        # shellcheck disable=SC1091
+        { set -a; source "$HOME/.chump/providers.env" 2>/dev/null; set +a; }
+    fi
+    unset _fc_root
+    return 0 2>/dev/null || exit 0
+fi
 CHUMP_FLOOR_CONFIG="${CHUMP_FLOOR_CONFIG:-$_fc_root/scripts/setup/floor-config.json}"
 if [[ -f "$CHUMP_FLOOR_CONFIG" ]] && command -v jq >/dev/null 2>&1; then
     _fc_model="$(jq -r '.floor_model // empty' "$CHUMP_FLOOR_CONFIG")"

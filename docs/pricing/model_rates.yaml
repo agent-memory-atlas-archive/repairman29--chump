@@ -189,3 +189,53 @@ models:
     free_tier: true
     rpd: 20
     context_k: 1000
+
+  - model_id: gemini-3.8-flash
+    input_per_mtk: 0.30
+    output_per_mtk: 2.50
+    cache_read_per_mtk: 0.075
+    last_verified: "2026-10-23"
+    notes: "Google AI frontier coding model (Opus-class BYOK). 1M context."
+    free_tier: false
+    rpd: 5000
+    context_k: 1000
+
+  - model_id: gemini-3.6-flash
+    input_per_mtk: 0.15
+    output_per_mtk: 1.25
+    cache_read_per_mtk: 0.0375
+    last_verified: "2026-10-23"
+    notes: "Google AI balanced coding model (Sonnet-class BYOK). 1M context."
+    free_tier: false
+    rpd: 5000
+    context_k: 1000
+
+  - model_id: gemini-3.5-flash-lite
+    input_per_mtk: 0.075
+    output_per_mtk: 0.30
+    cache_read_per_mtk: 0.01875
+    last_verified: "2026-10-23"
+    notes: "Google AI high-throughput coding/triage model (Haiku-class BYOK). 1M context."
+    free_tier: false
+    rpd: 10000
+    context_k: 1000
+
+  - model_id: gemini-2.5-flash
+    input_per_mtk: 0.15
+    output_per_mtk: 0.60
+    cache_read_per_mtk: 0.0375
+    last_verified: "2026-10-23"
+    notes: "Google AI fast coding model (Sonnet-class BYOK). 1M context."
+    free_tier: false
+    rpd: 5000
+    context_k: 1000
+
+  - model_id: codestral-latest
+    input_per_mtk: 0.30
+    output_per_mtk: 0.90
+    cache_read_per_mtk: 0.30
+    last_verified: "2026-10-23"
+    notes: "Mistral Codestral frontier coding BYOK model. 256k context."
+    free_tier: false
+    rpd: 5000
+    context_k: 256

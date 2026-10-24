@@ -531,7 +531,13 @@ Each criterion must be ONE concrete deliverable:
 Output ONLY the pipe-separated criteria. No 'Acceptance Criteria:' header,
 no bullets, no quotes, no preamble. ≤ 600 characters total.")
 
-        _ac=$(printf '%s\n' "$_prompt" | claude -p --bare 2>/dev/null | head -c 1500 | tr -d '\n' | tr -s ' ')
+        _ac=""
+        if command -v chump >/dev/null 2>&1; then
+          _ac=$(printf '%s\n' "$_prompt" | chump llm-complete --model opus --max-tokens 600 2>/dev/null | head -c 1500 | tr -d '\n' | tr -s ' ')
+        fi
+        if [[ -z "$_ac" || "${#_ac}" -le 100 || "$_ac" != *"|"* ]] && command -v claude >/dev/null 2>&1; then
+          _ac=$(printf '%s\n' "$_prompt" | claude -p --bare 2>/dev/null | head -c 1500 | tr -d '\n' | tr -s ' ')
+        fi
 
         if [[ -n "$_ac" && "${#_ac}" -gt 100 && "$_ac" == *"|"* ]]; then
           if chump gap set "$_target_id" --acceptance-criteria "$_ac" >/dev/null 2>&1; then

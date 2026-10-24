@@ -215,6 +215,9 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" \
     # degrading the ship path to free.
     if [[ -n "${FLEET_BACKEND:-}" || -n "${CHUMP_WORK_BACKEND:-}" ]]; then
         FLEET_BACKEND="${FLEET_BACKEND:-${CHUMP_WORK_BACKEND}}"
+    elif [[ "${CHUMP_BYOK_PRIMARY:-0}" == "1" && -n "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}${MISTRAL_API_KEY:-}${OPENAI_API_KEY:-}${OPENROUTER_API_KEY:-}" ]]; then
+        # RESILIENT-1688: Paid/frontier BYOK-primary node (e.g. Google AI Ultra / Mistral Codestral).
+        FLEET_BACKEND="chump-local"
     else
         _nofree_amb="${CHUMP_AMBIENT_LOG:-${REPO_ROOT:-.}/.chump-locks/ambient.jsonl}"
         printf '{"ts":"%s","kind":"worker_refused_free_ship","reason":"no_sub_auth_no_explicit_backend","note":"operator rule: we don'"'"'t ship with free — refusing to default to chump-local"}\n' \
@@ -2733,6 +2736,7 @@ Operator or sibling worker can rescue this branch via:
         if [[ "$_orig_backend" == "chump-local" ]] \
            && [[ "$rc" -ne 124 ]] \
            && [[ "${CHUMP_P0_FALLBACK:-1}" != "0" ]] \
+           && [[ "${CHUMP_BYOK_PRIMARY:-0}" != "1" || -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -n "${ANTHROPIC_API_KEY:-}" || -s "${HOME}/.chump/oauth-token.json" ]] \
            && [[ "$_decomposed_this_cycle" -eq 0 ]] \
            && command -v claude >/dev/null 2>&1; then
             # INFRA-502: priority lookup via 'chump gap show' (state.db

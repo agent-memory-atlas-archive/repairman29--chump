@@ -443,8 +443,11 @@ fn activate_free_tier_provider(spec: &FreeTierProviderSpec) {
     if let Ok(key) = std::env::var(&spec.api_key_env) {
         std::env::set_var("OPENAI_API_KEY", key);
     }
-    // Re-evaluate free-tier detection so is_free_tier_model() stays consistent.
-    std::env::set_var("CHUMP_FREE_TIER_MODE", "1");
+    // EFFECTIVE-1933: only force CHUMP_FREE_TIER_MODE=1 (which injects a 5,000ms
+    // inter-turn sleep) when CHUMP_PAID_TIER is not set to "1".
+    if std::env::var("CHUMP_PAID_TIER").as_deref() != Ok("1") {
+        std::env::set_var("CHUMP_FREE_TIER_MODE", "1");
+    }
 }
 
 /// INFRA-3459: does this gap touch the repo's wiring/architecture (adds or
@@ -1107,8 +1110,10 @@ pub async fn execute_gap(gap_id: &str) -> Result<String> {
         // don't exhaust the provider's RPM quota on multi-step dispatches.
         // CHUMP_FREE_TIER_DELAY_MS takes precedence if set; this is the fallback
         // that triggers the default 5 000 ms delay when neither flag was set
-        // explicitly by the operator.
-        std::env::set_var("CHUMP_FREE_TIER_MODE", "1");
+        // explicitly by the operator. EFFECTIVE-1933: skip for paid BYOK tiers.
+        if std::env::var("CHUMP_PAID_TIER").as_deref() != Ok("1") {
+            std::env::set_var("CHUMP_FREE_TIER_MODE", "1");
+        }
     }
 
     // INFRA-060 (M2): plan-mode gate. Skip for free-tier — saves latency

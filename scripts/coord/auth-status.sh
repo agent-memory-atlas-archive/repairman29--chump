@@ -95,6 +95,11 @@ fi
 # satisfies the gate even when another entry's base (e.g. Gemini's
 # generativelanguage) won't answer a Bearer /models probe.
 _ft_providers="${CHUMP_FREE_TIER_PROVIDERS:-}"
+if [[ -z "${_ft_providers//[[:space:]]/}" && "${CHUMP_BYOK_PRIMARY:-0}" == "1" ]]; then
+    # RESILIENT-1688: Synthesize probe targets on BYOK-primary nodes when
+    # CHUMP_FREE_TIER_PROVIDERS was not explicitly set.
+    _ft_providers="gemini-3.8-flash@https://generativelanguage.googleapis.com/v1beta/openai:GEMINI_API_KEY,gemini-3.8-flash@https://generativelanguage.googleapis.com/v1beta/openai:GOOGLE_API_KEY,codestral-latest@https://api.mistral.ai/v1:MISTRAL_API_KEY,gpt-4o@https://api.openai.com/v1:OPENAI_API_KEY,qwen/qwen3-coder@https://openrouter.ai/api/v1:OPENROUTER_API_KEY"
+fi
 if [[ -n "${_ft_providers//[[:space:]]/}" ]]; then
     _ft_ok=0; _ft_model=""; _ft_host=""
     _ft_oldifs="$IFS"; IFS=','
