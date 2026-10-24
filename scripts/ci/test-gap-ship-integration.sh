@@ -1,19 +1,9 @@
 #!/usr/bin/env bash
-# test-gap-ship-integration.sh — CREDIBLE-060
+# test-gap-ship-integration.sh — CREDIBLE-060 + CREDIBLE-1571
 #
 # Verifies that `chump gap ship` correctly flips status and emits ambient
-# event.
-#
-# AC:
-#   1. Status flips from open to done in state.db
-#   2. (ZERO-WASTE-056, 2026-07-19: `--update-yaml` is now the default —
-#      every `chump gap ship` writes docs/gaps/<ID>.yaml atomically via
-#      dump_per_file_single. Assertions below verify both state.db AND the
-#      on-disk YAML file.)
-#   3. .chump-plans/<ID>/ directory created with SHIPPED_AT marker
-#   4. kind=gap_shipped ambient event emitted
-#   5. kind=chump_plans_gc not yet emitted (within 7d grace period)
-#   6. Script is idempotent (second run reports already done)
+# event inside an isolated temp sandbox (scripts/coord/lib/test-sandbox.sh)
+# so the live checkout's .chump/state.db is never touched.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -22,83 +12,89 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 pass() { printf '[PASS] %s\n' "$*"; }
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 
-# Resolve chump binary
-CHUMP_BIN="${CHUMP_BIN:-chump}"
-command -v "$CHUMP_BIN" >/dev/null 2>&1 || fail "Cannot find chump binary"
+CHUMP_BIN="${CHUMP_BIN:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}/debug/chump}"
+if ! command -v "$CHUMP_BIN" >/dev/null 2>&1 && [[ ! -x "$CHUMP_BIN" ]]; then
+  CHUMP_BIN="chump"
+fi
+command -v "$CHUMP_BIN" >/dev/null 2>&1 || [[ -x "$CHUMP_BIN" ]] || fail "Cannot find chump binary"
+
+# shellcheck source=../coord/lib/test-sandbox.sh
+source "$REPO_ROOT/scripts/coord/lib/test-sandbox.sh"
 
 TMP="$(mktemp -d -t test-credible-060.XXXXXX)"
+SANDBOX="$TMP/sandbox"
 cleanup() {
+  chump_test_sandbox_cleanup "$SANDBOX"
   rm -rf "$TMP"
 }
 trap cleanup EXIT
 
-cd "$REPO_ROOT" || fail "Cannot cd to $REPO_ROOT"
+git init -q --bare "$TMP/origin.git"
+git clone -q "$TMP/origin.git" "$SANDBOX" 2>/dev/null
+git -C "$SANDBOX" config user.email "test@chump.bot"
+git -C "$SANDBOX" config user.name "Test"
+git -C "$SANDBOX" config commit.gpgsign false
+git -C "$SANDBOX" checkout -q -B main
+git -C "$SANDBOX" commit -q --allow-empty -m "feat(CREDIBLE-001): landed (#9999)"
+git -C "$SANDBOX" push -q origin main
 
-# ─ Create a test gap ───────────────────────────────────────────────────────────
-TEST_GAP=$($CHUMP_BIN gap reserve --domain CREDIBLE --title "CREDIBLE: test integration smoke test" --priority P3 2>&1 | grep '^CREDIBLE-' | tail -1)
+chump_test_sandbox_setup "$SANDBOX"
+cd "$SANDBOX" || fail "Cannot cd to $SANDBOX"
+
+# ─ Create a test gap in the sandbox store ──────────────────────────────────────
+TEST_GAP=$(CHUMP_RESERVE_SCAN_OPEN_PRS=0 "$CHUMP_BIN" gap reserve --domain CREDIBLE --title "CREDIBLE: test integration smoke test" --priority P3 --force 2>&1 | grep '^CREDIBLE-' | tail -1)
 [ -n "$TEST_GAP" ] || fail "Cannot reserve test gap"
-pass "Created test gap: $TEST_GAP"
+pass "Created test gap in sandbox: $TEST_GAP"
 
-# ─ Verify gap is open (ZERO-WASTE-020: read state.db via `gap show`, not
-#   the retired docs/gaps/<ID>.yaml mirror) ──────────────────────────────────
-status_before=$($CHUMP_BIN gap show "$TEST_GAP" | grep '^  status: ' | awk '{print $2}' || echo "error")
+status_before=$("$CHUMP_BIN" gap show "$TEST_GAP" | grep '^  status: ' | awk '{print $2}' || echo "error")
 [ "$status_before" = "open" ] || fail "Gap not open before ship: $status_before"
 pass "Gap is open before ship"
 
-# ─ Run gap ship with test inputs ───────────────────────────────────────────────
-# CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 bypasses the "branch behind main" gate that
-# would otherwise fail in CI where the checked-out commit is thousands of commits
-# behind the live origin/main HEAD.
-CHUMP_SKIP_SUPERSEDED_CLOSE=1 \
-CHUMP_SHIP_NO_AUTOSTAGE=1 \
-CHUMP_ALLOW_STALE_DESTRUCTIVE=1 \
-CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 \
-$CHUMP_BIN gap ship "$TEST_GAP" --update-yaml --closed-pr 9999 \
+# Commit any reserve artifacts so the sandbox worktree is clean for gap ship.
+git -C "$SANDBOX" add -A >/dev/null 2>&1 || true
+git -C "$SANDBOX" commit -q --allow-empty -m "chore: reserve $TEST_GAP (#9999)" >/dev/null 2>&1 || true
+git -C "$SANDBOX" push -q origin main >/dev/null 2>&1 || true
+"$CHUMP_BIN" gap link-pr "$TEST_GAP" 9999 --sha "$(git -C "$SANDBOX" rev-parse HEAD)" >/dev/null
+
+# ─ Run gap ship against the sandbox store ──────────────────────────────────────
+CHUMP_BINARY_STALENESS_CHECK=0 \
+"$CHUMP_BIN" gap ship "$TEST_GAP" --update-yaml --closed-pr 9999 \
   || fail "gap ship failed"
 pass "gap ship succeeded"
 
-# ─ Assert status flipped to done (state.db, via `gap show`) ───────────────────
-status_after=$($CHUMP_BIN gap show "$TEST_GAP" | grep '^  status: ' | awk '{print $2}' || echo "error")
+status_after=$("$CHUMP_BIN" gap show "$TEST_GAP" | grep '^  status: ' | awk '{print $2}' || echo "error")
 [ "$status_after" = "done" ] || fail "Status not done after ship: $status_after"
-pass "Status flipped to done in state.db"
+pass "Status flipped to done in sandbox state.db"
 
-# ─ Assert closed_pr in state.db ────────────────────────────────────────────────
-# NOTE: capture to a variable before grepping — `cmd | grep -q` races: grep -q
-# exits the instant it finds a match, which can SIGPIPE the still-writing
-# producer and make `pipefail` report the pipeline as failed even though the
-# match was found (observed intermittently, ~1-in-5, while authoring this).
-show_out=$($CHUMP_BIN gap show "$TEST_GAP")
+show_out=$("$CHUMP_BIN" gap show "$TEST_GAP")
 echo "$show_out" | grep -q "^  closed_pr: 9999" || \
-  fail "closed_pr: 9999 not in state.db"
-pass "state.db updated with closed_pr"
+  fail "closed_pr: 9999 not in sandbox state.db"
+pass "sandbox state.db updated with closed_pr"
 
-# ─ Assert docs/gaps/<ID>.yaml written with status=done (ZERO-WASTE-056) ────────
-YAML_FILE="$REPO_ROOT/docs/gaps/$TEST_GAP.yaml"
+YAML_FILE="$SANDBOX/docs/gaps/$TEST_GAP.yaml"
 if [ -f "$YAML_FILE" ]; then
-  grep -q "^status: done" "$YAML_FILE" || \
+  grep -Eq "^[[:space:]]*status: done" "$YAML_FILE" || \
     fail "docs/gaps/$TEST_GAP.yaml does not have status: done"
-  grep -q "^closed_pr: 9999" "$YAML_FILE" || \
+  grep -Eq "^[[:space:]]*closed_pr: 9999" "$YAML_FILE" || \
     fail "docs/gaps/$TEST_GAP.yaml does not have closed_pr: 9999"
-  pass "docs/gaps/<ID>.yaml written with status=done and closed_pr"
+  pass "docs/gaps/<ID>.yaml written with status=done and closed_pr in sandbox"
 else
-  fail "docs/gaps/$TEST_GAP.yaml not found after ship"
+  fail "docs/gaps/$TEST_GAP.yaml not found after ship in sandbox"
 fi
 
-# ─ Assert .chump-plans marker created (optional in current implementation) ──────
-if [ -d "$REPO_ROOT/.chump-plans/$TEST_GAP" ]; then
-  [ -f "$REPO_ROOT/.chump-plans/$TEST_GAP/SHIPPED_AT" ] || \
+if [ -d "$SANDBOX/.chump-plans/$TEST_GAP" ]; then
+  [ -f "$SANDBOX/.chump-plans/$TEST_GAP/SHIPPED_AT" ] || \
     fail "SHIPPED_AT marker not created in .chump-plans"
   pass ".chump-plans marker created"
 else
   pass ".chump-plans marker (deferred feature, not yet implemented)"
 fi
 
-# ─ Assert ambient event emitted (deferred feature) ──────────────────────────────
-if [ -f "$REPO_ROOT/.chump-locks/ambient.jsonl" ]; then
-  if grep -q '"kind":"gap_shipped"' "$REPO_ROOT/.chump-locks/ambient.jsonl"; then
-    grep -q "\"gap_id\":\"$TEST_GAP\"" "$REPO_ROOT/.chump-locks/ambient.jsonl" || \
-      fail "gap_id not in gap_shipped event"
-    pass "gap_shipped ambient event emitted"
+if [ -f "$SANDBOX/.chump-locks/ambient.jsonl" ]; then
+  if grep -q '"kind":"gap_shipped"\|"kind":"ship_landed"' "$SANDBOX/.chump-locks/ambient.jsonl"; then
+    grep -q "\"gap_id\":\"$TEST_GAP\"" "$SANDBOX/.chump-locks/ambient.jsonl" || \
+      fail "gap_id not in ship ambient event"
+    pass "ship ambient event emitted in sandbox"
   else
     pass "gap_shipped event (deferred feature, not yet emitted)"
   fi
@@ -106,13 +102,11 @@ else
   pass "ambient.jsonl event check skipped (not available in CI)"
 fi
 
-# ─ Test idempotence: run ship again ────────────────────────────────────────────
-output=$(CHUMP_ALLOW_STALE_DESTRUCTIVE=1 CHUMP_GAP_SHIP_SKIP_STALE_CHECK=1 $CHUMP_BIN gap ship "$TEST_GAP" --update-yaml --closed-pr 9999 2>&1 || true)
+output=$(CHUMP_BINARY_STALENESS_CHECK=0 "$CHUMP_BIN" gap ship "$TEST_GAP" --update-yaml --closed-pr 9999 2>&1 || true)
 if echo "$output" | grep -q "already done"; then
   pass "gap ship is idempotent (second run reports already done)"
 else
-  # In CI, just verify the gap is still done (state.db, via `gap show`)
-  status_final=$($CHUMP_BIN gap show "$TEST_GAP" | grep '^  status: ' | awk '{print $2}' || echo "error")
+  status_final=$("$CHUMP_BIN" gap show "$TEST_GAP" | grep '^  status: ' | awk '{print $2}' || echo "error")
   [ "$status_final" = "done" ] || fail "Gap status changed on idempotent run"
   pass "gap ship is idempotent (status unchanged on second run)"
 fi

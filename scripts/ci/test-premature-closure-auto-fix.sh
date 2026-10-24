@@ -20,7 +20,7 @@ fail() { echo "  FAIL: $*"; FAIL=$((FAIL+1)); FAILS+=("$*"); }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CHECK_SCRIPT="$REPO_ROOT/scripts/ci/test-gap-closure-consistency.sh"
+CHECK_SCRIPT="$REPO_ROOT/scripts/ops/premature-closure-watch.sh"
 
 tmpdir="$(mktemp -d /tmp/test-premature-closure-auto-fix-XXXXXX)"
 trap 'rm -rf "$tmpdir"' EXIT
@@ -65,7 +65,7 @@ touch "$AMBIENT"
 # For the --auto-fix test, we need a PR that gh can query. Since 9999999 doesn't
 # exist, gh returns ERROR and the script skips it. So this test validates
 # graceful handling rather than actual auto-fix.
-output=$(DB_PATH="$DB" CHUMP_AMBIENT_LOG="$AMBIENT" \
+output=$(CHUMP_STATE_DB="$DB" DB_PATH="$DB" CHUMP_AMBIENT_LOG="$AMBIENT" \
     bash "$CHECK_SCRIPT" --strict --auto-fix 2>&1 || true)
 
 # At minimum, the script should run and produce output.
@@ -92,9 +92,9 @@ sqlite3 "$DB" "
     INSERT OR IGNORE INTO gaps (id, title, status, closed_pr, created_at)
         VALUES ('EVAL-TEST-FIX-002', 'test gap for reverse mode', 'open', 2147483647, $(date +%s));
 "
-reverse_output=$(CHUMP_AMBIENT_LOG="$AMBIENT" \
+reverse_output=$(CHUMP_STATE_DB="$DB" CHUMP_AMBIENT_LOG="$AMBIENT" \
     bash "$CHECK_SCRIPT" --strict --reverse 2>&1 || true)
-if echo "$reverse_output" | grep -q "reverse check\|No open gaps\|skipping"; then
+if echo "$reverse_output" | grep -qi "reverse.*check\|No open gaps\|skipping"; then
     ok "Test 3: reverse mode runs cleanly"
 else
     fail "Test 3: reverse mode produced unexpected output: $reverse_output"

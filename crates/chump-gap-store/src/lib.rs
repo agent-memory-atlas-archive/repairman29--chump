@@ -1747,11 +1747,31 @@ impl GapStore {
             )
             .ok();
 
+        // CREDIBLE-1571 (Phase R R1): a done row in a git repo whose closed_pr > 0
+        // does NOT resolve to a landing receipt on origin/main is a premature
+        // closure (not a landed ship). Route its reopen through the receipt-gated
+        // writer without requiring CHUMP_ALLOW_RECYCLE and retract its stale
+        // closed_pr / closed_date fields.
+        let premature_closure_reopen = cur_meta
+            .as_ref()
+            .is_some_and(|(cur_status, _, _)| cur_status == "done")
+            && matches!(fields.status.as_deref(), Some("open" | "in_progress"))
+            && self
+                .conn
+                .query_row("SELECT closed_pr FROM gaps WHERE id=?", [gap_id], |row| {
+                    row.get::<_, Option<i64>>(0)
+                })
+                .ok()
+                .flatten()
+                .filter(|&pr| pr > 0)
+                .is_some_and(|pr| !self.landing_receipt_resolves(gap_id, pr));
+
         if let Some((cur_status, cur_title, cur_description)) = cur_meta.as_ref() {
             // Guard (1) — recycled-ID
             if cur_status == "done" {
                 if let Some(new_status) = fields.status.as_deref() {
                     if new_status != "done"
+                        && !premature_closure_reopen
                         && std::env::var("CHUMP_ALLOW_RECYCLE").as_deref() != Ok("1")
                     {
                         bail!(
@@ -1811,8 +1831,9 @@ impl GapStore {
         // (so this can't quietly rewrite shipping history without operator
         // authorization) and only when the caller didn't explicitly supply a
         // new closed_pr/closed_date in the same call.
-        let auto_clear_closure = fields.status.as_deref() == Some("open")
-            && std::env::var("CHUMP_ALLOW_RECYCLE").as_deref() == Ok("1")
+        let auto_clear_closure = (premature_closure_reopen
+            || (fields.status.as_deref() == Some("open")
+                && std::env::var("CHUMP_ALLOW_RECYCLE").as_deref() == Ok("1")))
             && fields.closed_pr.is_none()
             && fields.closed_date.is_none();
 
@@ -13028,6 +13049,119 @@ meta:
         assert!(
             msg.contains("recycled-ID") || msg.contains("already done") || msg.contains("terminal"),
             "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(recycle_bypass_env)]
+    fn credible1571_reopen_premature_closure_without_allow_recycle() {
+        std::env::remove_var("CHUMP_ALLOW_RECYCLE");
+        let dir = tempfile::tempdir().unwrap();
+        let origin = dir.path().join("origin.git");
+        let repo = dir.path().join("repo");
+        std::process::Command::new("git")
+            .args(["init", "--bare", "-q", origin.to_str().unwrap()])
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                repo.to_str().unwrap(),
+            ])
+            .status()
+            .unwrap();
+        for (k, v) in [("user.email", "t@t.t"), ("user.name", "t")] {
+            std::process::Command::new("git")
+                .args(["config", k, v])
+                .current_dir(&repo)
+                .status()
+                .unwrap();
+        }
+        std::process::Command::new("git")
+            .args(["checkout", "-q", "-B", "main"])
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "feat: landed (#4242)",
+            ])
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["push", "-q", "origin", "main"])
+            .current_dir(&repo)
+            .status()
+            .unwrap();
+
+        let store = GapStore::open(&repo).unwrap();
+        let premature_id = store
+            .reserve("CREDIBLE", "prematurely closed gap", "P2", "s")
+            .unwrap();
+        // Force a premature done state in SQLite (simulating unmerged closed_pr=99999).
+        store
+            .conn
+            .execute(
+                "UPDATE gaps SET status='done', closed_pr=99999, closed_date='2026-10-24' WHERE id=?1",
+                [&premature_id],
+            )
+            .unwrap();
+
+        // Reopen to in_progress WITHOUT CHUMP_ALLOW_RECYCLE must succeed and clear closed_pr.
+        store
+            .set_fields(
+                &premature_id,
+                GapFieldUpdate {
+                    status: Some("in_progress".into()),
+                    ..Default::default()
+                },
+            )
+            .expect(
+                "premature closure (unmerged closed_pr) must reopen without CHUMP_ALLOW_RECYCLE",
+            );
+        let (st, cpr, cdate): (String, Option<i64>, String) = store
+            .conn
+            .query_row(
+                "SELECT status, closed_pr, closed_date FROM gaps WHERE id=?1",
+                [&premature_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(st, "in_progress");
+        assert_eq!(cpr, None);
+        assert_eq!(cdate, "");
+
+        // Conversely, a gap whose closed_pr (4242) DID land on origin/main must STILL be refused without CHUMP_ALLOW_RECYCLE.
+        let landed_id = store.reserve("CREDIBLE", "landed gap", "P2", "s").unwrap();
+        store
+            .set_fields(
+                &landed_id,
+                GapFieldUpdate {
+                    status: Some("done".into()),
+                    closed_pr: Some(4242),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let err = store
+            .set_fields(
+                &landed_id,
+                GapFieldUpdate {
+                    status: Some("in_progress".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("INFRA-456 recycled-ID"),
+            "landed gap must still require CHUMP_ALLOW_RECYCLE, got: {err}"
         );
     }
 

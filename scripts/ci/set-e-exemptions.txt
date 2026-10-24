@@ -43,7 +43,6 @@ scripts/ci/check-mass-deletion.sh
 scripts/ci/precommit-strict-replay.sh
 scripts/ci/test-acp-real-clients.sh
 scripts/ci/test-broad-canary-coverage.sh
-scripts/ci/test-gap-closure-consistency.sh
 scripts/ci/test-markdown-intra-doc-links.sh
 scripts/ci/test-no-claude-leak.sh
 scripts/ci/test-no-inline-ambient-printf.sh

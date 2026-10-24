@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# test-gap-closure-consistency.sh — CREDIBLE-028 + CREDIBLE-039 + CREDIBLE-031
+# premature-closure-watch.sh (moved from scripts/ci/test-gap-closure-consistency.sh in CREDIBLE-1571)
+# Rust-Twin: crates/chump-gap-store/src/lib.rs
+# CREDIBLE-028 + CREDIBLE-039 + CREDIBLE-031
 # + CREDIBLE-268: detect premature gap closure, stale-post-merge gaps, AND
 # gaps closed by a PR that never touched the files their ACs name.
 #
@@ -51,8 +53,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# shellcheck source=lib/gate-emit.sh
-source "$SCRIPT_DIR/lib/gate-emit.sh" 2>/dev/null || true
+# shellcheck source=../ci/lib/gate-emit.sh
+source "$REPO_ROOT/scripts/ci/lib/gate-emit.sh" 2>/dev/null || true
+if ! declare -F gate_emit_start >/dev/null 2>&1; then
+    gate_emit_start()  { :; }
+    gate_emit_result() { :; }
+fi
 gate_emit_start "CREDIBLE-028" "$*"
 
 pass() { printf '[PASS] %s\n' "$*"; }
@@ -255,7 +261,7 @@ run_forward_check() {
                 mergeable="$(gh pr view "$pr_num" --json mergeable --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
                 if [[ "$mergeable" == "BLOCKED" || "$mergeable" == "DIRTY" ]]; then
                     info "$gap_id: auto-fix — flipping status from done to in_progress (PR #$pr_num is $mergeable)"
-                    CHUMP_ALLOW_RECYCLE=1 chump gap set "$gap_id" --status in_progress 2>/dev/null || \
+                    "${CHUMP_BIN:-chump}" gap set "$gap_id" --status in_progress 2>/dev/null || \
                         warn "$gap_id: auto-fix failed — chump gap set returned non-zero"
                     emit_alert "premature_closure_auto_fixed" \
                         '"gap_id":"'"$gap_id"'","pr":'"$pr_num"',"old_status":"done","new_status":"in_progress","mergeable":"'"$mergeable"'"'
@@ -274,6 +280,8 @@ run_forward_check() {
         if [[ "$EMIT_ALERT" -eq 1 ]]; then
             local ids_json="$(printf '"%s",' "${drift_ids[@]}" | sed 's/,$//')"
             local note="${#drift_ids[@]} done gap(s) have closed_pr set but PR not merged"
+            # scanner-anchor (CREDIBLE-1571): "kind":"gap_drift_premature_close"
+            # scanner-anchor (CREDIBLE-1571): "kind":"gap_closure_check_gh_unavailable"
             emit_alert "gap_drift_premature_close" '"ids":['"$ids_json"'],"note":"'"$note"'"'
             info "Emitted gap_drift_premature_close ALERT"
         fi

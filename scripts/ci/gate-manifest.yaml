@@ -39,7 +39,7 @@ gates:
     motivating_incident_pr: 1441
 
   - id: CREDIBLE-028-premature-closure
-    check_script: scripts/ci/test-gap-closure-consistency.sh
+    check_script: scripts/ops/premature-closure-watch.sh
     closing_pr: 1458
     failure_class: premature-gap-closure
     description: |

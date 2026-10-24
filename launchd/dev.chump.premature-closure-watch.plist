@@ -5,7 +5,7 @@
   dev.chump.premature-closure-watch — CREDIBLE-039: LaunchAgent for
   monitoring gap closure consistency.
 
-  Runs scripts/ci/test-gap-closure-consistency.sh --strict --emit-alert
+  Runs scripts/ops/premature-closure-watch.sh --strict --emit-alert
   every 15 minutes. Detects:
     - done gaps whose closed_pr PR is not merged (premature closure)
     - open gaps whose closed_pr PR is already merged (stale post-merge)
@@ -23,7 +23,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>__REPO_ROOT__/scripts/ci/test-gap-closure-consistency.sh --strict --emit-alert</string>
+    <string>__REPO_ROOT__/scripts/ops/premature-closure-watch.sh --strict --emit-alert</string>
   </array>
 
   <key>WorkingDirectory</key>

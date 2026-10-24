@@ -5028,10 +5028,10 @@ events:
     consumers: [fleet-brief]
     fields_required: [ts, session, harness, hint]
 
-  # ── CREDIBLE-039: closure consistency ─────────────────────────────────────
+  # ── CREDIBLE-039 / CREDIBLE-1571: closure consistency ─────────────────────
   - kind: stale_post_merge_gap
     effect_metric: self
-    emitter: scripts/ci/test-gap-closure-consistency.sh (CREDIBLE-039 reverse mode)
+    emitter: scripts/ops/premature-closure-watch.sh (CREDIBLE-039 reverse mode)
     trigger: state.db has status=open + closed_pr set, but the referenced PR is
       already merged on GitHub — gap should have been flipped to done
     consumers: [fleet-brief, operator-recall]
@@ -5039,11 +5039,25 @@ events:
 
   - kind: premature_closure_auto_fixed
     effect_metric: self
-    emitter: scripts/ci/test-gap-closure-consistency.sh --auto-fix (CREDIBLE-039)
+    emitter: scripts/ops/premature-closure-watch.sh --auto-fix (CREDIBLE-039)
     trigger: gap with status=done + closed_pr points to BLOCKED/DIRTY PR;
       auto-fix flipped status back to in_progress
     consumers: [fleet-brief]
     fields_required: [ts, gap_id, pr, old_status, new_status, mergeable]
+
+  - kind: gap_drift_premature_close
+    effect_metric: self
+    emitter: scripts/ops/premature-closure-watch.sh (CREDIBLE-028/CREDIBLE-1571)
+    trigger: gap with status=done in state.db references an open or unmerged PR
+    consumers: [fleet-brief, operator-recall]
+    fields_required: [ts, ids, note]
+
+  - kind: gap_closure_check_gh_unavailable
+    effect_metric: self
+    emitter: scripts/ops/premature-closure-watch.sh (CREDIBLE-028/CREDIBLE-1571)
+    trigger: GitHub API lookup failed while auditing gap closure consistency
+    consumers: [fleet-brief]
+    fields_required: [ts, gaps, note]
 
   # ── META-033: system-invariants monitor ─────────────────────────────────
   - kind: invariant_violation

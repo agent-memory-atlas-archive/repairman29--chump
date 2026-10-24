@@ -325,7 +325,7 @@ plist_path = "launchd/com.chump.bounced-pr-detector.plist"
 
 [[daemon]]
 name = "dev.chump.premature-closure-watch"
-purpose = "Runs scripts/ci/test-gap-closure-consistency.sh --strict --emit-alert every 15 minutes (CREDIBLE-039). Detects done gaps whose closed_pr PR is not merged (premature closure) and open gaps whose closed_pr PR is already merged."
+purpose = "Runs scripts/ops/premature-closure-watch.sh --strict --emit-alert every 15 minutes (CREDIBLE-039). Detects done gaps whose closed_pr PR is not merged (premature closure) and open gaps whose closed_pr PR is already merged."
 cadence = 900
 emits_kinds = ["premature_closure_auto_fixed", "gap_closure_check_gh_unavailable"]
 log_path = "logs/premature-closure-watch.out.log"
