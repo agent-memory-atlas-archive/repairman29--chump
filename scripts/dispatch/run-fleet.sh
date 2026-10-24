@@ -1066,12 +1066,10 @@ worker_env=(
     # re-read from the file (which the background refresher keeps current).
     ${_oauth_token_file:+"CHUMP_OAUTH_TOKEN_FILE=$_oauth_token_file"}
     ${_oauth_token_file:+"CLAUDE_CODE_OAUTH_TOKEN="}
-    # INFRA-2310: consensus merge gate SHADOW mode — passed to every worker that
-    # calls bot-merge.sh.  =1 means log-only (kind=consensus_gate_would_block);
-    # it NEVER blocks a merge.  Operator sets =enforce after ~7-day observation.
-    # Operator's personal shell rc is NOT modified by this change; add
-    # CHUMP_CONSENSUS_MERGE_GATE=1 there manually to cover interactive invocations.
-    "CHUMP_CONSENSUS_MERGE_GATE=${CHUMP_CONSENSUS_MERGE_GATE:-1}"
+    # INFRA-2310 / CREDIBLE-1547: consensus merge gate ENFORCE mode — passed to
+    # every worker that calls bot-merge.sh after the shadow observation window
+    # completed with zero false refusals.
+    "CHUMP_CONSENSUS_MERGE_GATE=${CHUMP_CONSENSUS_MERGE_GATE:-enforce}"
 )
 env_prefix="$(printf '%s ' "${worker_env[@]}")"
 

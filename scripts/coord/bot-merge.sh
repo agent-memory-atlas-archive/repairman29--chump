@@ -4448,7 +4448,7 @@ _bm_step_start "pr_merge_arm"
 # CREDIBLE-1524 AC3: log the consensus merge gate mode on every bot-merge run
 # (even when disabled / not arming auto-merge), so the enforce/shadow posture
 # is always visible in the run log and auditable.
-info "bot-merge: consensus merge gate mode=${CHUMP_CONSENSUS_MERGE_GATE:-0} (CHUMP_CONSENSUS_MERGE_GATE; shadow-first per CREDIBLE-1524)"
+info "bot-merge: consensus merge gate mode=${CHUMP_CONSENSUS_MERGE_GATE:-0} gate=${CHUMP_CONSENSUS_MERGE_GATE:-0} (CHUMP_CONSENSUS_MERGE_GATE; enforce per CREDIBLE-1547)"
 if [[ $AUTO_MERGE -eq 1 ]]; then
     # CREDIBLE-1576: refuse to self-arm a gate-file PR. Reached only after the
     # branch is pushed and the PR is open, so the PR survives — only the arm is

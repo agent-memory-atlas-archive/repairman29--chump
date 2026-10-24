@@ -215,6 +215,67 @@ run_site_fixture "recovery"      1002 '"$MERGE" pr merge "$PR" --squash --admin'
 run_site_fixture "admin-cycle"   1003 '"$MERGE" pr merge "$PR" --squash --admin'
 run_site_fixture "break-trunk"   1004 '"$MERGE" pr merge "$PR" --admin --squash'
 
+# ── Part D: CREDIBLE-1547 installer enforce flip + shadow→enforce upgrade ─────
+echo "── Part D: CREDIBLE-1547 installer enforce default + shadow upgrade ──"
+INSTALLER="$REPO_ROOT/scripts/setup/chump-node-install.sh"
+RUN_FLEET="$REPO_ROOT/scripts/dispatch/run-fleet.sh"
+BOT_MERGE="$REPO_ROOT/scripts/coord/bot-merge.sh"
+
+if grep -q "CHUMP_CONSENSUS_MERGE_GATE=enforce" "$INSTALLER" && ! grep -q "printf 'CHUMP_CONSENSUS_MERGE_GATE=shadow" "$INSTALLER"; then
+  ok "Part D: chump-node-install.sh writes CHUMP_CONSENSUS_MERGE_GATE=enforce by default"
+else
+  bad "Part D: chump-node-install.sh does not write CHUMP_CONSENSUS_MERGE_GATE=enforce by default"
+fi
+
+# Extract and run the installer consensus-gate carry/upgrade logic against
+# (1) fresh node.env, (2) existing shadow node.env, (3) existing export 1 node.env, (4) explicit 0 node.env.
+run_installer_gate_slice() {
+  local pre_line="$1"
+  local env_file="$TMP/node_env_test"
+  rm -f "$env_file"
+  if [[ -n "$pre_line" ]]; then
+    printf '%s\n' "$pre_line" > "$env_file"
+  fi
+  (
+    node_env="$env_file"
+    eval "$(awk '/_consensus_gate_line=""/{flag=1} /# INFRA-8588: node\.env is written ONLY/{flag=0} flag{print}' "$INSTALLER" | sed 's/^[[:space:]]*local / /')"
+    if [ -n "${_consensus_gate_line:-}" ]; then
+      printf '%s\n' "$_consensus_gate_line"
+    else
+      eval "$(grep "printf 'CHUMP_CONSENSUS_MERGE_GATE=" "$INSTALLER" | head -1)"
+    fi
+  )
+}
+
+[[ "$(run_installer_gate_slice "")" == "CHUMP_CONSENSUS_MERGE_GATE=enforce" ]] \
+  && ok "Part D: fresh node.env → CHUMP_CONSENSUS_MERGE_GATE=enforce" \
+  || bad "Part D: fresh node.env did not produce CHUMP_CONSENSUS_MERGE_GATE=enforce"
+
+[[ "$(run_installer_gate_slice "CHUMP_CONSENSUS_MERGE_GATE=shadow")" == "CHUMP_CONSENSUS_MERGE_GATE=enforce" ]] \
+  && ok "Part D: existing shadow node.env → upgraded to CHUMP_CONSENSUS_MERGE_GATE=enforce" \
+  || bad "Part D: existing shadow node.env was NOT upgraded to enforce"
+
+[[ "$(run_installer_gate_slice "export CHUMP_CONSENSUS_MERGE_GATE=1")" == "CHUMP_CONSENSUS_MERGE_GATE=enforce" ]] \
+  && ok "Part D: existing export=1 node.env → upgraded to CHUMP_CONSENSUS_MERGE_GATE=enforce" \
+  || bad "Part D: existing export=1 node.env was NOT upgraded to enforce"
+
+[[ "$(run_installer_gate_slice "CHUMP_CONSENSUS_MERGE_GATE=0")" == "CHUMP_CONSENSUS_MERGE_GATE=0" ]] \
+  && ok "Part D: explicit CHUMP_CONSENSUS_MERGE_GATE=0 preserved" \
+  || bad "Part D: explicit CHUMP_CONSENSUS_MERGE_GATE=0 was not preserved"
+
+if grep -q 'CHUMP_CONSENSUS_MERGE_GATE=${CHUMP_CONSENSUS_MERGE_GATE:-enforce}' "$RUN_FLEET"; then
+  ok "Part D: run-fleet.sh defaults CHUMP_CONSENSUS_MERGE_GATE to enforce"
+else
+  bad "Part D: run-fleet.sh does not default CHUMP_CONSENSUS_MERGE_GATE to enforce"
+fi
+
+_bm_log_line="$(CHUMP_CONSENSUS_MERGE_GATE=enforce bash -c 'info() { echo "$*"; }; eval "$(grep "info .*bot-merge: consensus merge gate" "'"$BOT_MERGE"'")"')"
+if [[ "$_bm_log_line" == *"mode=enforce"* && "$_bm_log_line" == *"gate=enforce"* ]]; then
+  ok "Part D: bot-merge.sh logs mode=enforce gate=enforce"
+else
+  bad "Part D: bot-merge.sh log line missing gate=enforce (got: $_bm_log_line)"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo "────────────────────────────────────────────"
 echo "test-admin-merge-consensus-gate: PASS=$PASS FAIL=$FAIL"

@@ -654,14 +654,19 @@ write_node_env() {
     # the existing file still has an `export ` prefix (strip it on the way in).
     _ceiling_lines="$(grep -E '^(export )?(CHUMP_MAX_CONCURRENT_CLAUDE|CHUMP_MAX_CONCURRENT_CARGO_JOBS)=' "$node_env" 2>/dev/null | sed -E 's/^export //' || true)"
   fi
-  # CREDIBLE-1524: the admin-merge consensus gate ships SHADOW-FIRST on every
-  # node. Preserve an operator-set value (e.g. enforce) across the whole-file
-  # rewrite; default to shadow when absent so a fresh node observes before it
-  # enforces.
+  # CREDIBLE-1524 / CREDIBLE-1547: the admin-merge consensus gate flips from
+  # shadow to ENFORCE on every node after the 3-day shadow observation window
+  # passed with zero false refusals. Upgrade any prior shadow/1 line to enforce;
+  # preserve an explicit operator-disabled value (0/off).
   local _consensus_gate_line=""
   if [ -f "$node_env" ]; then
     # INFRA-8588: carry in the bare form (strip any `export ` prefix).
     _consensus_gate_line="$(grep -E '^(export )?CHUMP_CONSENSUS_MERGE_GATE=' "$node_env" 2>/dev/null | sed -E 's/^export //' || true)"
+    case "$_consensus_gate_line" in
+      CHUMP_CONSENSUS_MERGE_GATE=shadow|CHUMP_CONSENSUS_MERGE_GATE=1)
+        _consensus_gate_line="CHUMP_CONSENSUS_MERGE_GATE=enforce"
+        ;;
+    esac
   fi
   # INFRA-8588: node.env is written ONLY as bare KEY=VALUE (no `export`).
   # systemd's EnvironmentFile parser rejects `export` lines (logs "Ignoring
@@ -708,12 +713,12 @@ write_node_env() {
       printf 'CHUMP_NODE_WORK_ENABLED=%s\n' "$work_enabled"
       printf 'CHUMP_NODE_MODE=%s\n' "$node_mode"
       if [ -n "$_ceiling_lines" ]; then printf '%s\n' "$_ceiling_lines"; fi
-      # CREDIBLE-1524: admin-merge consensus gate, shadow-first (preserve
-      # operator value across rewrite; default shadow on fresh nodes).
+      # CREDIBLE-1524 / CREDIBLE-1547: admin-merge consensus gate, enforce by
+      # default after 3-day shadow observation window with zero false refusals.
       if [ -n "$_consensus_gate_line" ]; then
         printf '%s\n' "$_consensus_gate_line"
       else
-        printf 'CHUMP_CONSENSUS_MERGE_GATE=shadow\n'
+        printf 'CHUMP_CONSENSUS_MERGE_GATE=enforce\n'
       fi
     } > "$node_env"
   )
