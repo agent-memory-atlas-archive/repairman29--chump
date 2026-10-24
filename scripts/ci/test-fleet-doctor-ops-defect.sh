@@ -108,10 +108,10 @@ else
     else
         fail "expected auto-filed in detail, got status=$(last_status) detail=$(last_detail)"
     fi
-    if [[ -f "$FAKE_REPO/docs/gaps/VOA-TEST257.yaml" && -f "$FAKE_REPO/docs/voice/VOA-TEST257-FULL.yaml" ]]; then
-        pass "chump voice wrote docs/gaps/VOA-TEST257.yaml and docs/voice/VOA-TEST257-FULL.yaml"
+    if [[ ! -f "$FAKE_REPO/docs/gaps/VOA-TEST257.yaml" && -f "$FAKE_REPO/docs/voice/VOA-TEST257-FULL.yaml" ]] && [[ "$(sqlite3 "$FAKE_REPO/.chump/state.db" "SELECT COUNT(*) FROM gaps WHERE id='VOA-TEST257'" 2>/dev/null || echo 0)" == "1" ]]; then
+        pass "chump voice recorded VOA-TEST257 in state.db and wrote docs/voice/VOA-TEST257-FULL.yaml (export-only)"
     else
-        fail "expected VOA-TEST257 yaml files under $FAKE_REPO, not found"
+        fail "expected VOA-TEST257 in state.db and docs/voice/VOA-TEST257-FULL.yaml under $FAKE_REPO"
     fi
     if grep -q '"kind":"voice_of_agent_filed"' "$AMB_ISOLATED" 2>/dev/null; then
         pass "voice_of_agent_filed emitted to isolated ambient log"

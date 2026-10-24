@@ -14,7 +14,7 @@
 //!   --dry-run                        With --ship: print the PR body without opening
 //!
 //! Writes:
-//!   docs/gaps/VOA-NNNN.yaml           — lightweight gap registry entry
+//!   .chump/state.db (gaps table)      — canonical VOA gap row (CREDIBLE-1544)
 //!   docs/voice/VOA-NNNN-FULL.yaml     — full friction report
 //!
 //! Emits kind=voice_of_agent_filed to ambient.jsonl (anonymized fields only).
@@ -24,7 +24,7 @@
 //!
 //! Acceptance criteria:
 //!   AC1 — implements all required flags
-//!   AC2 — writes docs/gaps/VOA-NNNN.yaml + docs/voice/VOA-NNNN-FULL.yaml with correct schema
+//!   AC2 — records VOA row in state.db + writes docs/voice/VOA-NNNN-FULL.yaml (never overwrites)
 //!   AC3 — reads ~/.chump/voice-opt-in.toml; honors per-VOA --target-repo override
 //!   AC4 — --ship flag opens PR; --ship --dry-run prints PR body only
 //!   AC5 — emits kind=voice_of_agent_filed (anonymized)
@@ -164,17 +164,38 @@ fn repo_root() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Auto-increment the next VOA number by scanning docs/gaps/VOA-*.yaml.
+/// Parse a numeric VOA suffix from an ID or filename stem (`VOA-010`, `VOA-010-FULL`, etc.).
+fn parse_voa_num(s: &str) -> Option<u32> {
+    let rest = s.strip_prefix("VOA-")?;
+    let num_str = rest.strip_suffix("-FULL").unwrap_or(rest);
+    num_str.parse::<u32>().ok()
+}
+
+/// Auto-increment the next VOA number across state.db, docs/gaps/VOA-*.yaml,
+/// and docs/voice/VOA-*-FULL.yaml so an existing VOA ID is never reused (CREDIBLE-1544 AC1).
 fn next_voa_id(repo_root: &Path) -> String {
-    let gaps_dir = repo_root.join("docs/gaps");
     let mut max_num: u32 = 0;
-    if let Ok(entries) = std::fs::read_dir(&gaps_dir) {
-        for entry in entries.flatten() {
-            let fname = entry.file_name();
-            let s = fname.to_string_lossy();
-            if let Some(rest) = s.strip_prefix("VOA-") {
-                if let Some(num_str) = rest.strip_suffix(".yaml") {
-                    if let Ok(n) = num_str.parse::<u32>() {
+
+    if let Ok(store) = crate::gap_store::GapStore::open(repo_root) {
+        if let Ok(rows) = store.list(None) {
+            for row in rows {
+                if let Some(n) = parse_voa_num(&row.id) {
+                    if n > max_num {
+                        max_num = n;
+                    }
+                }
+            }
+        }
+    }
+
+    for rel_dir in ["docs/gaps", "docs/voice"] {
+        let dir = repo_root.join(rel_dir);
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let fname = entry.file_name();
+                let s = fname.to_string_lossy();
+                if let Some(stem) = s.strip_suffix(".yaml") {
+                    if let Some(n) = parse_voa_num(stem) {
                         if n > max_num {
                             max_num = n;
                         }
@@ -183,6 +204,7 @@ fn next_voa_id(repo_root: &Path) -> String {
             }
         }
     }
+
     format!("VOA-{:03}", max_num + 1)
 }
 
@@ -201,7 +223,8 @@ fn json_escape(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
-/// Write the lightweight gap entry at docs/gaps/VOA-NNNN.yaml.
+/// Record the VOA gap entry in canonical state.db via GapStore without writing
+/// docs/gaps/*.yaml directly (CREDIBLE-1544 AC1/AC3, Phase R R4 export-only).
 fn write_gap_entry(
     repo_root: &Path,
     voa_id: &str,
@@ -211,8 +234,25 @@ fn write_gap_entry(
     fix: &str,
     evidence: &[String],
 ) -> anyhow::Result<()> {
-    let path = repo_root.join("docs/gaps").join(format!("{voa_id}.yaml"));
-    let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let store = crate::gap_store::GapStore::open(repo_root)?;
+    if store.get(voa_id)?.is_some() {
+        anyhow::bail!("refusing to overwrite existing VOA gap {voa_id} in state.db");
+    }
+
+    let now = chrono::Utc::now();
+    let ts = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let opened_date = now.format("%Y-%m-%d").to_string();
+    let title = format!(
+        "VOICE-OF-AGENT {voa_id}: {wedge_class} — {minutes_lost} min lost; fix-shape: {fix_shape}"
+    );
+    let ac_items = vec![
+        format!(
+            "Full friction report at docs/voice/{voa_id}-FULL.yaml with wedge_class={wedge_class}, minutes_lost={minutes_lost}"
+        ),
+        format!("Proposed fix ({fix_shape}): \"{}\"", yaml_escape(fix)),
+        "Evidence references documented in FULL report".to_string(),
+    ];
+    let ac_json = serde_json::to_string(&ac_items)?;
 
     let evidence_yaml = if evidence.is_empty() {
         "    - (none provided)".to_string()
@@ -223,39 +263,32 @@ fn write_gap_entry(
             .collect::<Vec<_>>()
             .join("\n")
     };
-
-    let content = format!(
-        r#"- id: {voa_id}
-  domain: VOA
-  title: "VOICE-OF-AGENT {voa_id}: {wedge_class} — {minutes_lost} min lost; fix-shape: {fix_shape}"
-  status: open
-  priority: P1
-  effort: xs
-  acceptance_criteria:
-    - Full friction report at docs/voice/{voa_id}-FULL.yaml with wedge_class={wedge_class}, minutes_lost={minutes_lost}
-    - Proposed fix ({fix_shape}): "{fix}"
-    - Evidence references documented in FULL report
-  notes: |
-    [{ts}] Auto-filed by `chump voice` (INFRA-2258).
-    Wedge class: {wedge_class}
-    Minutes lost: {minutes_lost}
-    Evidence:
-{evidence_yaml}
-    See docs/voice/{voa_id}-FULL.yaml for full report.
-"#,
-        voa_id = voa_id,
-        wedge_class = wedge_class,
-        minutes_lost = minutes_lost,
-        fix_shape = fix_shape,
-        fix = yaml_escape(fix),
-        ts = ts,
-        evidence_yaml = evidence_yaml,
+    let notes = format!(
+        "[{ts}] Auto-filed by `chump voice` (INFRA-2258).\nWedge class: {wedge_class}\nMinutes lost: {minutes_lost}\nEvidence:\n{evidence_yaml}\nSee docs/voice/{voa_id}-FULL.yaml for full report."
     );
+    let evidence_joined = if evidence.is_empty() {
+        None
+    } else {
+        Some(evidence.join(", "))
+    };
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    {
+        let db_path = crate::gap_store::GapStore::db_path(repo_root);
+        let conn = rusqlite::Connection::open(db_path)?;
+        conn.execute(
+            "INSERT INTO gaps(id, domain, title, priority, effort, status, created_at, opened_date)
+             VALUES(?1, 'VOA', ?2, 'P1', 'xs', 'open', ?3, ?4)",
+            rusqlite::params![voa_id, title, now.timestamp(), opened_date],
+        )?;
     }
-    std::fs::write(&path, content)?;
+
+    let update = crate::gap_store::GapFieldUpdate {
+        acceptance_criteria: Some(ac_json),
+        notes: Some(notes),
+        evidence: evidence_joined,
+        ..Default::default()
+    };
+    store.set_fields(voa_id, update)?;
     Ok(())
 }
 
@@ -278,6 +311,12 @@ fn write_full_report(
     let dir = repo_root.join("docs/voice");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{voa_id}-FULL.yaml"));
+    if path.exists() {
+        anyhow::bail!(
+            "refusing to overwrite existing VOA report at {}",
+            path.display()
+        );
+    }
     let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
     let target_repo_val = disclosure.target_repo_yaml();
@@ -464,11 +503,7 @@ fn ship_pr(
     }
 
     let add_result = Command::new("git")
-        .args([
-            "add",
-            &format!("docs/gaps/{voa_id}.yaml"),
-            &format!("docs/voice/{voa_id}-FULL.yaml"),
-        ])
+        .args(["add", &format!("docs/voice/{voa_id}-FULL.yaml")])
         .current_dir(repo_root)
         .status();
     if let Err(e) = add_result {
@@ -682,22 +717,7 @@ pub fn run(args: &[String]) -> i32 {
     // Auto-increment VOA ID.
     let voa_id = std::env::var("CHUMP_VOICE_TEST_ID").unwrap_or_else(|_| next_voa_id(&root));
 
-    // Write gap entry.
-    if let Err(e) = write_gap_entry(
-        &root,
-        &voa_id,
-        &wedge_class,
-        minutes_lost,
-        &fix_shape,
-        &fix,
-        &evidence,
-    ) {
-        eprintln!("error: failed to write docs/gaps/{voa_id}.yaml: {e}");
-        return 1;
-    }
-    println!("[voice] wrote docs/gaps/{voa_id}.yaml");
-
-    // Write full report.
+    // Write full report first (refuses if docs/voice/{voa_id}-FULL.yaml already exists, CREDIBLE-1544 AC2).
     if let Err(e) = write_full_report(
         &root,
         &voa_id,
@@ -716,6 +736,21 @@ pub fn run(args: &[String]) -> i32 {
         return 1;
     }
     println!("[voice] wrote docs/voice/{voa_id}-FULL.yaml");
+
+    // Record gap entry in canonical state.db (CREDIBLE-1544 AC1/AC3).
+    if let Err(e) = write_gap_entry(
+        &root,
+        &voa_id,
+        &wedge_class,
+        minutes_lost,
+        &fix_shape,
+        &fix,
+        &evidence,
+    ) {
+        eprintln!("error: failed to record {voa_id} in state.db: {e}");
+        return 1;
+    }
+    println!("[voice] recorded {voa_id} in state.db");
 
     // Emit ambient event (always anonymized).
     let ambient_path = std::env::var("CHUMP_AMBIENT_LOG")
@@ -763,4 +798,118 @@ pub fn run(args: &[String]) -> i32 {
 
     println!("[voice] {voa_id} filed successfully.");
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credible1544_next_voa_id_takes_max_across_store_gaps_and_voice_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/gaps")).unwrap();
+        std::fs::create_dir_all(root.join("docs/voice")).unwrap();
+
+        assert_eq!(next_voa_id(root), "VOA-001");
+
+        // 1) docs/voice/VOA-010-FULL.yaml exists (even when docs/gaps/VOA-010.yaml does not)
+        std::fs::write(root.join("docs/voice/VOA-010-FULL.yaml"), "id: VOA-010\n").unwrap();
+        assert_eq!(next_voa_id(root), "VOA-011");
+
+        // 2) docs/gaps/VOA-014.yaml exists
+        let legacy_gap_file = root.join("docs").join("gaps").join("VOA-014.yaml");
+        std::fs::write(&legacy_gap_file, "- id: VOA-014\n").unwrap();
+        assert_eq!(next_voa_id(root), "VOA-015");
+
+        // 3) state.db has VOA-019
+        write_gap_entry(root, "VOA-019", "test-wedge", 15, "tooling", "fix it", &[]).unwrap();
+        assert_eq!(next_voa_id(root), "VOA-020");
+    }
+
+    #[test]
+    fn credible1544_write_full_report_refuses_to_overwrite_existing_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        write_full_report(
+            root,
+            "VOA-010",
+            "original-wedge",
+            20,
+            "workaround-1",
+            "gate",
+            "fix-1",
+            &DisclosureMode::Anonymous,
+            &[],
+            "worker",
+            "0.2.0",
+            "sess-12345678",
+        )
+        .unwrap();
+
+        let full_path = root.join("docs/voice/VOA-010-FULL.yaml");
+        let original = std::fs::read_to_string(&full_path).unwrap();
+
+        let err = write_full_report(
+            root,
+            "VOA-010",
+            "clobber-wedge",
+            99,
+            "workaround-2",
+            "doc",
+            "fix-2",
+            &DisclosureMode::Anonymous,
+            &[],
+            "worker",
+            "0.2.0",
+            "sess-87654321",
+        )
+        .expect_err("second write_full_report for same VOA ID must refuse to overwrite");
+        assert!(
+            err.to_string().contains("refusing to overwrite"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&full_path).unwrap(),
+            original,
+            "existing docs/voice/VOA-010-FULL.yaml must remain byte-identical"
+        );
+    }
+
+    #[test]
+    fn credible1544_write_gap_entry_inserts_into_store_and_never_writes_docs_gaps_yaml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/gaps")).unwrap();
+
+        write_gap_entry(
+            root,
+            "VOA-020",
+            "fmt-drift-queue-wide",
+            30,
+            "gate",
+            "chump preflight mirrors CI parity",
+            &["PR #2769".to_string()],
+        )
+        .unwrap();
+
+        assert!(
+            !root.join("docs/gaps/VOA-020.yaml").exists(),
+            "write_gap_entry must not write docs/gaps/VOA-020.yaml directly (R4 export-only)"
+        );
+
+        let store = crate::gap_store::GapStore::open(root).unwrap();
+        let row = store
+            .get("VOA-020")
+            .unwrap()
+            .expect("VOA-020 row must exist in state.db");
+        assert_eq!(row.domain, "VOA");
+        assert_eq!(row.status, "open");
+        assert_eq!(row.priority, "P1");
+        assert_eq!(row.effort, "xs");
+        assert!(row.title.contains("VOA-020") && row.title.contains("fmt-drift-queue-wide"));
+        assert!(row.acceptance_criteria.contains("minutes_lost=30"));
+        assert!(row.notes.contains("PR #2769"));
+    }
 }

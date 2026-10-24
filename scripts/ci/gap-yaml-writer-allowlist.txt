@@ -15,4 +15,3 @@
 scripts/ci/lib/gate-fixtures.sh            # CI fixture: writes TEST-000/TEST-001 into a scratch repo
 scripts/coord/gap-doctor.py                # bucket1 rewrites per-file YAML status=done from DB; retire in slice 2 (archive)
 scripts/dispatch/free-tier-e2e-test.sh     # e2e fixture: plants a test gap YAML in a throwaway worktree
-src/commands/voice.rs                      # chump voice files VOA-N straight to docs/gaps/; should reserve in state.db then export
