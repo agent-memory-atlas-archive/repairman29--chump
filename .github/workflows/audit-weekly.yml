@@ -70,8 +70,12 @@ jobs:
         id: audit
         continue-on-error: true
         run: |
+          set +e
           bash scripts/audit/run-all.sh
-          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          rc=$?
+          set -e
+          echo "exit=$rc" >> "$GITHUB_OUTPUT"
+          exit "$rc"
 
       - name: Upload findings as artifact
         uses: actions/upload-artifact@v4

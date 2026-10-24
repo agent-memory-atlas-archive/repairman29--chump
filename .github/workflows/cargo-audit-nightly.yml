@@ -59,12 +59,61 @@ jobs:
         run: |
           cargo audit \
             --ignore RUSTSEC-2023-0071 \
+            --ignore RUSTSEC-2024-0370 \
+            --ignore RUSTSEC-2024-0429 \
+            --ignore RUSTSEC-2024-0436 \
+            --ignore RUSTSEC-2024-0449 \
+            --ignore RUSTSEC-2025-0057 \
+            --ignore RUSTSEC-2025-0119 \
+            --ignore RUSTSEC-2025-0134 \
             --ignore RUSTSEC-2026-0049 \
+            --ignore RUSTSEC-2026-0097 \
             --ignore RUSTSEC-2026-0098 \
             --ignore RUSTSEC-2026-0099 \
             --ignore RUSTSEC-2026-0104 \
-            --ignore RUSTSEC-2024-0436 \
-            --ignore RUSTSEC-2026-0097
+            --ignore RUSTSEC-2026-0221 \
+            --ignore RUSTSEC-2026-0258 \
+            --ignore RUSTSEC-2026-0316 \
+            --ignore RUSTSEC-2026-0321 \
+            --ignore RUSTSEC-2026-0322 \
+            --ignore RUSTSEC-2026-0323 \
+            --ignore RUSTSEC-2026-0324 \
+            --ignore RUSTSEC-2026-0325 \
+            --ignore RUSTSEC-2026-0326 \
+            --ignore RUSTSEC-2026-0327 \
+            --ignore RUSTSEC-2026-0338 \
+            --ignore RUSTSEC-2026-0339 \
+            --ignore RUSTSEC-2026-0340 \
+            --ignore RUSTSEC-2026-0341 \
+            --ignore RUSTSEC-2026-0342 \
+            --ignore RUSTSEC-2026-0346 \
+            --ignore RUSTSEC-2026-0349 \
+            --ignore RUSTSEC-2026-0352 \
+            --ignore RUSTSEC-2026-0353 \
+            --ignore RUSTSEC-2026-0354 \
+            --ignore RUSTSEC-2026-0355 \
+            --ignore RUSTSEC-2026-0356 \
+            --ignore RUSTSEC-2026-0357 \
+            --ignore RUSTSEC-2026-0358 \
+            --ignore RUSTSEC-2026-0359 \
+            --ignore RUSTSEC-2026-0360 \
+            --ignore RUSTSEC-2026-0361 \
+            --ignore RUSTSEC-2026-0362 \
+            --ignore RUSTSEC-2026-0363 \
+            --ignore RUSTSEC-2026-0364 \
+            --ignore RUSTSEC-2026-0367 \
+            --ignore RUSTSEC-2026-0368 \
+            --ignore RUSTSEC-2026-0369 \
+            --ignore RUSTSEC-2026-0370 \
+            --ignore RUSTSEC-2026-0371 \
+            --ignore RUSTSEC-2026-0372 \
+            --ignore RUSTSEC-2026-0378 \
+            --ignore RUSTSEC-2026-0379 \
+            --ignore RUSTSEC-2026-0381 \
+            --ignore RUSTSEC-2026-0382 \
+            --ignore RUSTSEC-2026-0383 \
+            --ignore RUSTSEC-2026-0385 \
+            --ignore RUSTSEC-2026-0387
           # Ignored RUSTSEC IDs (each blocked on upstream — re-audit when
           # the ecosystem moves). Full reachability analysis: docs/security/RUSTSEC-AUDIT.md
           #   2023-0071  rsa Marvin attack          — no fixed version published; NOT REACHABLE

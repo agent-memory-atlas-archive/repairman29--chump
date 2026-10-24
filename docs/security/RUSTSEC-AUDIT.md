@@ -97,3 +97,28 @@ this documentation as the justification record.
 The blocking `cargo audit` step in `cargo-audit-nightly.yml` passes with `--ignore` flags
 for all four advisories. No new HIGH/CRITICAL advisories on the `rustls*` tree are
 unaccounted for as of the date above.
+
+---
+
+## 2026-10-24 Triage Update (CREDIBLE-1536 / CREDIBLE-1540)
+
+Canonical ignore lists are now synchronized across `.cargo/audit.toml`, `deny.toml`, and
+`.github/workflows/cargo-audit-nightly.yml` so both `cargo audit` (nightly + weekly) and
+`cargo deny --format human check advisories bans` evaluate the same triaged baseline:
+
+- **`crypto-bigint` (`RUSTSEC-2026-0387`) & `ctutils` (`RUSTSEC-2026-0385`):** pulled in
+  transitively through `web-push -> jwt-simple -> superboring -> rsa`. Not reachable because
+  Chump uses EC/P-256 VAPID keys exclusively.
+- **`rustls 0.21` (`RUSTSEC-2026-0346`, `RUSTSEC-2026-0349`), `rustls-webpki`
+  (`RUSTSEC-2026-0382`), `webpki-roots` (`RUSTSEC-2026-0381`), `webpki-root-certs`
+  (`RUSTSEC-2026-0383`):** transitive TLS dependencies blocked on upstream `serenity` /
+  `tokio-rustls` semver boundaries.
+- **`h2` (`RUSTSEC-2026-0258`) & `quinn-proto` (`RUSTSEC-2026-0338`..`0342`):** client-only
+  HTTP/2 and optional QUIC transport dependencies; Chump does not expose a public-facing H2
+  or QUIC server to untrusted internet peers.
+- **`wasmtime` / `wasmtime-wasi` (`RUSTSEC-2026-0316`, `0321`..`0327`, `0352`..`0364`,
+  `0378`, `0379`):** Component Model, Wasm GC, Wasm exceptions, and WASI preview0/preview3
+  guest-escape advisories; Chump only executes operator-built tool modules and does not
+  enable untrusted multi-tenant Component Model async lifting, Wasm GC, or host-dir mounts.
+- **`zip 7.2.0` (`RUSTSEC-2026-0367`..`0369`):** transitive archive dependency blocked on
+  upstream migration to `zip >= 9.0.0`.

@@ -58,12 +58,14 @@ fn durable_name_alphanumeric_preserved() {
 }
 
 #[test]
+#[serial]
 fn max_ack_pending_default_is_512() {
     std::env::remove_var("CHUMP_A2A_MAX_ACK_PENDING");
     assert_eq!(max_ack_pending(), 512);
 }
 
 #[test]
+#[serial]
 fn max_ack_pending_reads_env() {
     std::env::set_var("CHUMP_A2A_MAX_ACK_PENDING", "32");
     assert_eq!(max_ack_pending(), 32);
@@ -87,6 +89,7 @@ fn layer_enabled_with_layer_1() {
 
 /// AC#6: CHUMP_A2A_LAYER=0 must return a stream without any NATS dependency.
 #[tokio::test]
+#[serial]
 async fn layer0_subscribe_requires_no_nats() {
     std::env::remove_var("CHUMP_A2A_LAYER");
     let result = subscribe_events_with_session(
@@ -104,6 +107,7 @@ async fn layer0_subscribe_requires_no_nats() {
 /// AC#2 (partial): CHUMP_A2A_LAYER=1 with no NATS must still return Ok
 /// (file fallback kicks in asynchronously, not as an Err).
 #[tokio::test]
+#[serial]
 async fn layer1_returns_ok_when_nats_unreachable() {
     std::env::set_var("CHUMP_A2A_LAYER", "1");
     std::env::set_var("CHUMP_NATS_TIMEOUT_MS", "150");
@@ -129,6 +133,7 @@ async fn layer1_returns_ok_when_nats_unreachable() {
 /// Subscribes on a per-test durable consumer, publishes 20 events through
 /// JetStream, measures end-to-end latency. All 20 must arrive; p99 < 50ms.
 #[tokio::test]
+#[serial]
 async fn nats_roundtrip_p99_under_50ms() {
     let Some(nats_url) = nats_available().await else {
         eprintln!("skip — no NATS available for nats_roundtrip_p99_under_50ms");
@@ -210,6 +215,7 @@ async fn nats_roundtrip_p99_under_50ms() {
 /// Sets max_ack_pending=8, publishes 10 events without draining, asserts
 /// fleet_a2a_backpressure appears in the ambient log.
 #[tokio::test]
+#[serial]
 async fn nats_backpressure_emitted_on_slow_consumer() {
     let Some(nats_url) = nats_available().await else {
         eprintln!("skip — no NATS available for nats_backpressure_emitted_on_slow_consumer");
@@ -273,6 +279,7 @@ async fn nats_backpressure_emitted_on_slow_consumer() {
 /// AC#2 (file-fallback): write an event to ambient.jsonl, subscribe with filter,
 /// assert receipt. Tests the file-fallback path when NATS is unavailable.
 #[tokio::test]
+#[serial]
 async fn file_fallback_delivers_event_within_500ms() {
     use std::io::Write;
 
@@ -358,4 +365,64 @@ fn coord_event_round_trip_via_nats_primary() {
     let j = serde_json::to_string(&e).expect("serialize");
     let back: CoordEvent = serde_json::from_str(&j).expect("deserialize");
     assert_eq!(e, back, "CoordEvent round-trip lossless");
+}
+
+/// CREDIBLE-1532: writing to ambient.jsonl immediately after
+/// subscribe_events_with_session().await returns (with zero sleep before write,
+/// before the spawned tail task has even been polled) must still deliver the
+/// event because the initial EOF offset is captured synchronously at subscribe time.
+#[tokio::test]
+#[serial]
+async fn credible1532_file_fallback_delivers_immediate_write_without_pre_sleep() {
+    use std::io::Write;
+
+    let tmp = tempfile::NamedTempFile::new().expect("tempfile");
+    let tmp_path = tmp.path().to_str().unwrap().to_string();
+
+    // Seed pre-subscribe history that must NOT be replayed
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&tmp_path)
+            .expect("open tmp log for history write");
+        writeln!(
+            f,
+            r#"{{"ts":"2026-10-24T00:00:00Z","kind":"gap_claimed","session_id":"old-history","payload":{{}}}}"#
+        )
+        .expect("write history line");
+    }
+
+    std::env::remove_var("CHUMP_A2A_LAYER");
+    std::env::set_var("CHUMP_AMBIENT_LOG", &tmp_path);
+
+    let mut stream = subscribe_events_with_session(
+        EventFilter::Kind("gap_claimed".to_string()),
+        Some("test-credible1532".to_string()),
+    )
+    .await
+    .expect("subscribe must succeed in layer-0 mode");
+
+    // Write immediately with NO sleep before write — on a current_thread tokio
+    // runtime the spawned tail task has not yet been polled here!
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&tmp_path)
+            .expect("open tmp log for post-subscribe write");
+        writeln!(
+            f,
+            r#"{{"ts":"2026-10-24T00:00:01Z","kind":"gap_claimed","session_id":"new-post-subscribe","payload":{{}}}}"#
+        )
+        .expect("write post-subscribe line");
+    }
+
+    let received = tokio::time::timeout(Duration::from_millis(2000), stream.next())
+        .await
+        .expect("immediate post-subscribe event must be delivered")
+        .expect("stream ended unexpectedly");
+
+    assert_eq!(received.session_id.as_deref(), Some("new-post-subscribe"));
+    std::env::remove_var("CHUMP_AMBIENT_LOG");
 }

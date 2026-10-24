@@ -244,7 +244,7 @@ const FALLBACK_TIMEOUT_SECS: u64 = 5;
 const RECONNECT_POLL_SECS: u64 = 10;
 
 /// File fallback poll interval for tailing ambient.jsonl.
-const FILE_POLL_INTERVAL_MS: u64 = 500;
+const FILE_POLL_INTERVAL_MS: u64 = 100;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -297,9 +297,16 @@ pub async fn subscribe_events_with_session(
             run_subscriber(filter_clone, session_id, tx_clone).await;
         });
     } else {
-        // File-only path (CHUMP_A2A_LAYER=0 default) — tail ambient.jsonl
+        // File-only path (CHUMP_A2A_LAYER=0 default) — tail ambient.jsonl.
+        // CREDIBLE-1532: capture CHUMP_AMBIENT_LOG and its current byte length
+        // synchronously before spawning the tail task so events written
+        // immediately after subscribe_events_with_session().await returns are
+        // never skipped when the OS scheduler delays initial task polling.
+        let log_path = std::env::var("CHUMP_AMBIENT_LOG")
+            .unwrap_or_else(|_| ".chump-locks/ambient.jsonl".to_string());
+        let initial_offset = std::fs::metadata(&log_path).map(|m| m.len()).ok();
         tokio::spawn(async move {
-            run_file_subscriber(filter, tx).await;
+            run_file_subscriber_with_start(filter, tx, log_path, initial_offset).await;
         });
     }
 
@@ -592,7 +599,17 @@ async fn run_nats_consumer(
 async fn run_file_subscriber(filter: EventFilter, tx: mpsc::Sender<CoordEvent>) {
     let log_path = std::env::var("CHUMP_AMBIENT_LOG")
         .unwrap_or_else(|_| ".chump-locks/ambient.jsonl".to_string());
+    run_file_subscriber_with_start(filter, tx, log_path, None).await;
+}
 
+/// Tail `log_path` starting at `initial_offset` (when captured at subscribe
+/// time) or `SeekFrom::End(0)` (when entering degraded mode mid-stream).
+async fn run_file_subscriber_with_start(
+    filter: EventFilter,
+    tx: mpsc::Sender<CoordEvent>,
+    log_path: String,
+    initial_offset: Option<u64>,
+) {
     // Wait up to FILE_POLL_INTERVAL_MS * 10 for the file to appear
     let file = loop {
         match std::fs::OpenOptions::new().read(true).open(&log_path) {
@@ -608,8 +625,13 @@ async fn run_file_subscriber(filter: EventFilter, tx: mpsc::Sender<CoordEvent>) 
 
     use std::io::{BufRead, BufReader, Seek, SeekFrom};
     let mut reader = BufReader::new(file);
-    // Seek to end so we only tail new lines (not replay history)
-    let _ = reader.seek(SeekFrom::End(0));
+    // Seek to the subscribe-time EOF offset (or current end if unspecified) so
+    // we only tail new lines without racing immediate post-subscribe writes.
+    let seek_pos = match initial_offset {
+        Some(offset) => SeekFrom::Start(offset),
+        None => SeekFrom::End(0),
+    };
+    let _ = reader.seek(seek_pos);
 
     loop {
         if tx.is_closed() {

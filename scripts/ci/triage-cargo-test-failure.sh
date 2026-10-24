@@ -66,7 +66,10 @@ fi
 # We produce a deduplicated set: one test path per line, stored in FAILED_TESTS.
 
 _extract_failed_tests() {
-  local raw="$1"
+  local raw
+  # CREDIBLE-1532: strip ANSI SGR escape sequences before matching so colorized
+  # nextest / cargo test logs parse identically to plain text.
+  raw="$(printf '%s\n' "$1" | sed -E 's/\x1b\[[0-9;]*[mGKH]//g')"
   {
     # Format 1: "test foo::bar ... FAILED"
     printf '%s\n' "$raw" \
@@ -79,21 +82,26 @@ _extract_failed_tests() {
       | sed -E 's/^---- ([a-zA-Z0-9_:]+) stdout ----.*$/\1/'
 
     # Format 3: "failures:" block — lines after "failures:" that look like paths
-    # until a blank line or "test result:" line
+    # until a blank line or "test result:" line (includes top-level integration
+    # tests without a `::` module prefix).
     printf '%s\n' "$raw" \
-      | awk '/^failures:/{in_block=1; next}
+      | awk '/^failures:[[:space:]]*$/{in_block=1; next}
              in_block && /^[[:space:]]*$/{in_block=0; next}
              in_block && /^test result:/{in_block=0; next}
              in_block{
                sub(/^[[:space:]]+/, "")
-               if ($0 ~ /^[a-zA-Z0-9_]+(::[a-zA-Z0-9_]+)+/) print $0
+               sub(/[[:space:]]+$/, "")
+               if ($0 ~ /^[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z0-9_]+)*$/) print $0
              }'
 
-    # Format 4: nextest output "FAIL [  xxx ms] module::test_name"
+    # Format 4: nextest output "FAIL [  xxx s] (N/M) crate::bin test_name"
+    # Capture the LAST identifier/path token on each FAIL [...] line so
+    # progress columns, hyphenated crate names, and top-level integration test
+    # names (without `::`) are all extracted accurately.
     printf '%s\n' "$raw" \
-      | grep -E '^[[:space:]]*FAIL[[:space:]]' \
-      | grep -oE '[a-zA-Z0-9_]+(::[a-zA-Z0-9_]+)+'
-  } | sort -u
+      | grep -E '(^|[[:space:]])FAIL \[[^]]*\]' \
+      | sed -E 's/.*[[:space:]]([a-zA-Z_][a-zA-Z0-9_:]*)[[:space:]]*$/\1/'
+  } | grep -E '^[a-zA-Z_][a-zA-Z0-9_:]*$' | sort -u
 }
 
 FAILED_TESTS="$(_extract_failed_tests "$RAW_INPUT")"

@@ -152,6 +152,11 @@ No test names at all.'
 
 assert_verdict "fixture-5 malformed" "TRIAGE: unknown" "$MALFORMED_INPUT"
 
+# ── Fixture 6 (CREDIBLE-1532): ANSI-colored nextest + top-level integration test ─
+NEXTEST_TOPLEVEL_INPUT="$(printf '\x1b[31m        FAIL\x1b[0m [   0.553s] (15/15) chump-coord::a2a_layer1a_nats \x1b[1mfile_fallback_delivers_event_within_500ms\x1b[0m\n')"
+assert_verdict "fixture-6 nextest-ansi-toplevel" "TRIAGE: real" "$NEXTEST_TOPLEVEL_INPUT"
+
+
 # ── Ambient emit check ────────────────────────────────────────────────────────
 # Verify that the ambient.jsonl received at least one ci_triage_verdict event.
 if grep -q '"kind":"ci_triage_verdict"' "$SYNTHETIC_AMBIENT" 2>/dev/null; then

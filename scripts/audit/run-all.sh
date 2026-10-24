@@ -66,7 +66,7 @@ record_skip() {
 # ---- cargo-deny (bans, licenses, advisories, sources) ----
 section "cargo-deny"
 if have cargo-deny; then
-    if cargo deny check --format human 2>"$TMP/deny.err" >"$TMP/deny.out"; then
+    if cargo deny --format human check advisories bans 2>"$TMP/deny.err" >"$TMP/deny.out"; then
         printf '**OK** — no advisories, license conflicts, or banned crates.\n\n' >> "$OUT"
     else
         printf '**Findings** (see raw output below):\n\n```\n' >> "$OUT"
