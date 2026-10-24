@@ -571,8 +571,39 @@ echo "Fixtures: $FIXTURE_BASE"
 echo "Gate mode: $GATE"
 echo ""
 
-# Run per-client suites.
-for client in zed-stable zed-preview jetbrains; do
+# ── CREDIBLE-1535: verify integrations.yml matrix excludes zed-preview cell ──
+check_integrations_matrix_credible_1535() {
+  local wf="$ROOT/.github/workflows/integrations.yml"
+  if [[ ! -f "$wf" ]]; then
+    fail_check "CREDIBLE-1535: integrations.yml exists" "Missing $wf"
+    return
+  fi
+  if grep -v '^[[:space:]]*#' "$wf" | grep -qE 'name:[[:space:]]*zed-preview|fixture_dir:[[:space:]]*zed-preview|0\.170\.x-pre'; then
+    fail_check "CREDIBLE-1535: zed-preview (0.170.x-pre) pre-release cell removed from integrations.yml"       "Found active zed-preview / 0.170.x-pre entry in $wf"
+  else
+    pass_check "CREDIBLE-1535: zed-preview (0.170.x-pre) pre-release cell removed from integrations.yml"
+  fi
+  if grep -v '^[[:space:]]*#' "$wf" | grep -q 'name:[[:space:]]*zed-stable' &&      grep -v '^[[:space:]]*#' "$wf" | grep -q 'name:[[:space:]]*jetbrains-community'; then
+    pass_check "CREDIBLE-1535: stable ACP real-client matrix cells (zed-stable, jetbrains) retained"
+  else
+    fail_check "CREDIBLE-1535: stable ACP real-client matrix cells retained"       "Missing zed-stable or jetbrains-community in $wf"
+  fi
+}
+
+check_integrations_matrix_credible_1535
+if [[ "${1:-}" == "--check-matrix-only" ]]; then
+  echo "=== Results: $PASS passed, $FAIL failed ==="
+  [[ $FAIL -eq 0 ]]
+  exit $?
+fi
+
+# Run per-client suites (CREDIBLE-1535: honor CHUMP_ACP_CLIENT_FIXTURE; default to stable clients).
+if [[ -n "${CHUMP_ACP_CLIENT_FIXTURE:-}" ]]; then
+  ACP_CLIENTS=("$CHUMP_ACP_CLIENT_FIXTURE")
+else
+  ACP_CLIENTS=(zed-stable jetbrains)
+fi
+for client in "${ACP_CLIENTS[@]}"; do
   run_client_suite "$client"
 done
 

@@ -248,9 +248,8 @@ jobs:
           - name: zed-stable
             fixture_dir: zed-stable
             display: Zed stable (0.169.x)
-          - name: zed-preview
-            fixture_dir: zed-preview
-            display: Zed preview (0.170.x-pre)
+          # CREDIBLE-1535: Zed preview (0.170.x-pre) pre-release cell deleted per
+          # CREDIBLE-1492 / CI_GATES_INVENTORY.md row 5.
           - name: jetbrains-community
             fixture_dir: jetbrains
             display: JetBrains IDEA Community 2025.1
