@@ -1431,6 +1431,9 @@ fn discover_test_scripts(repo_root: &std::path::Path) -> Vec<std::path::PathBuf>
         // (INFRA-1867) matcher only scans this file's string literals — the
         // corresponding ci.yml fast-checks step must resolve to a mirror here.
         "scripts/ci/test-event-registry-yaml-parse.sh",
+        // RESILIENT-1681: shared-target-cache-reaper regression gate (RESILIENT-1680).
+        // Pure sandbox-HOME + stubbed du/df/ps fixture test, no network, ~3s.
+        "scripts/ci/test-shared-target-cache-reaper.sh",
         // RESILIENT-1544: do NOT append new test scripts to this array — it is a
         // hot file that collides when parallel PRs each add a gate (the 2026-10-06
         // burst DIRTY-treadmill). Add new scripts to the union-merged overflow file
@@ -2908,6 +2911,14 @@ pub fn run(argv: &[String]) -> i32 {
             ],
             GateKind::Scripts,
         ));
+        // RESILIENT-1681: shared-target-cache-reaper (RESILIENT-1680) — reaps
+        // incremental/ dirs under the shared target when disk floor or size
+        // budget triggers, guarded by lane locks + cargo admit + build check.
+        steps.push(step(
+            "shared-target-cache-reaper",
+            &["bash", "scripts/ci/test-shared-target-cache-reaper.sh"],
+            GateKind::Scripts,
+        ));
         steps.push(step(
             "bot-merge-recovery-in-progress-smoke",
             &["bash", "scripts/ci/test-bot-merge-recovery-in-progress.sh"],
@@ -4336,6 +4347,32 @@ mod tests {
     // but was never in the discover_test_scripts allowlist, so a regression
     // in the detector's core cluster math (threshold/window/cooldown) could
     // ship without preflight or CI ever running it. Guard the wiring.
+    #[test]
+    fn resilient1681_shared_target_cache_reaper_test_is_wired_in_ci_and_preflight() {
+        let repo_root = find_repo_root().expect("repo root");
+        let scripts = discover_test_scripts(&repo_root);
+        assert!(
+            scripts
+                .iter()
+                .any(|p| p.ends_with("scripts/ci/test-shared-target-cache-reaper.sh")),
+            "test-shared-target-cache-reaper.sh must be wired into preflight's \
+             discover_test_scripts allowlist (RESILIENT-1681)"
+        );
+        let pf_src =
+            std::fs::read_to_string(repo_root.join("crates/chump-preflight/src/preflight.rs"))
+                .expect("read crates/chump-preflight/src/preflight.rs");
+        assert!(
+            pf_src.contains("\"shared-target-cache-reaper\""),
+            "shared-target-cache-reaper step must be wired in preflight.rs run() (RESILIENT-1681)"
+        );
+        let ci_yml = std::fs::read_to_string(repo_root.join(".github/workflows/ci.yml"))
+            .expect("read .github/workflows/ci.yml");
+        assert!(
+            ci_yml.contains("bash scripts/ci/test-shared-target-cache-reaper.sh"),
+            "test-shared-target-cache-reaper.sh must be wired as a required step in .github/workflows/ci.yml (RESILIENT-1681)"
+        );
+    }
+
     #[test]
     fn infra3352_pr_stuck_cluster_detection_test_is_wired() {
         let repo_root = find_repo_root().expect("repo root");
