@@ -441,12 +441,144 @@ _ensure_pr_book_timer() {
     return 0
 }
 
+# RESILIENT-1655: inspect systemd unit files and user crontab for any chump/coo
+# organ entry executing scripts outside the canonical repo ($REPO_ROOT/scripts/,
+# ~/.chumpnode/repo/scripts/, or ~/chump/scripts/) or under an untracked peer/
+# or /coo/ directory, and remove untracked $REPO_ROOT/peer/ if present.
+# Returns 0 when clean, 1 when one or more out-of-repo organ violations were
+# detected (and remediated).
+_check_no_out_of_repo_organs() {
+    local unit_dir="${1:-${CHUMP_SYSTEMD_USER_DIR:-}}"
+    local cron_file="${2:-${CHUMP_CRONTAB_FILE:-}}"
+    local repo_root="${3:-${REPO_ROOT:-}}"
+    local home_dir="${HOME:-/root}"
+    local violations=0
+
+    # 1. Remove untracked peer/ directory in the canonical checkout if present.
+    if [[ -n "$repo_root" && -d "$repo_root/peer" ]]; then
+        local tracked_peer=""
+        if [[ -e "$repo_root/.git" ]]; then
+            tracked_peer="$(git -C "$repo_root" ls-files -- "peer" 2>/dev/null || true)"
+        fi
+        if [[ -z "$tracked_peer" ]]; then
+            rm -rf "$repo_root/peer"
+            log "RESILIENT-1655: removed untracked out-of-repo organ directory $repo_root/peer"
+            violations=$((violations + 1))
+        fi
+    fi
+
+    # Helper: return 0 if a script/command line references an out-of-repo organ path.
+    _is_out_of_repo_line() {
+        local line="$1"
+        # Explicit out-of-repo organ signatures (/coo/ or /peer/)
+        if [[ "$line" == *"/coo/"* || "$line" == *"~/coo/"* || "$line" == *"/peer/"* || "$line" == *"~/chump/peer/"* ]]; then
+            return 0
+        fi
+        # Extract any .sh or .py token from the line (splitting on whitespace
+        # without glob expansion so crontab `*` fields never glob CWD).
+        local -a toks=()
+        read -r -a toks <<< "$line"
+        local tok clean_tok
+        for tok in "${toks[@]}"; do
+            clean_tok="${tok#\'}"; clean_tok="${clean_tok%\'}"
+            clean_tok="${clean_tok#\"}"; clean_tok="${clean_tok%\"}"
+            clean_tok="${clean_tok#*=}"
+            case "$clean_tok" in
+                *.sh|*.py)
+                    case "$clean_tok" in
+                        "$repo_root"/scripts/*|\
+                        "$home_dir"/.chumpnode/repo/scripts/*|\
+                        "$home_dir"/chump/scripts/*|\
+                        "~/.chumpnode/repo/scripts/"*|\
+                        "~/chump/scripts/"*|\
+                        "__REPO_ROOT__/scripts/"*|\
+                        "scripts/"*)
+                            ;;
+                        *)
+                            return 0
+                            ;;
+                    esac
+                    ;;
+            esac
+        done
+        return 1
+    }
+
+    # 2. Inspect systemd unit files (chump*.service, coo*.service).
+    local dirs=()
+    if [[ -n "$unit_dir" ]]; then
+        dirs+=("$unit_dir")
+    else
+        [[ -d "${XDG_CONFIG_HOME:-$home_dir/.config}/systemd/user" ]] && dirs+=("${XDG_CONFIG_HOME:-$home_dir/.config}/systemd/user")
+        [[ -n "${CHUMP_SYSTEMD_SYSTEM_DIR:-}" && -d "${CHUMP_SYSTEMD_SYSTEM_DIR}" ]] && dirs+=("${CHUMP_SYSTEMD_SYSTEM_DIR}")
+    fi
+
+    local d uf ubase exec_lines eline bad_unit tmpl
+    for d in "${dirs[@]}"; do
+        [[ -d "$d" ]] || continue
+        for uf in "$d"/chump*.service "$d"/coo*.service; do
+            [[ -f "$uf" ]] || continue
+            ubase="$(basename "$uf")"
+            bad_unit=0
+            exec_lines="$(grep -E '^ExecStart=' "$uf" 2>/dev/null || true)"
+            while IFS= read -r eline; do
+                [[ -z "$eline" ]] && continue
+                if _is_out_of_repo_line "$eline"; then
+                    bad_unit=1
+                    log "RESILIENT-1655: out-of-repo organ in unit $uf: $eline"
+                fi
+            done <<< "$exec_lines"
+            if [[ "$bad_unit" -eq 1 ]]; then
+                violations=$((violations + 1))
+                tmpl=""
+                if [[ -n "$repo_root" && -f "$repo_root/scripts/dispatch/$ubase" ]]; then
+                    tmpl="$repo_root/scripts/dispatch/$ubase"
+                elif [[ -n "$repo_root" && -f "$repo_root/scripts/ops/$ubase" ]]; then
+                    tmpl="$repo_root/scripts/ops/$ubase"
+                fi
+                if [[ -n "$tmpl" ]]; then
+                    sed -e "s|__REPO_ROOT__|$repo_root|g" -e "s|__HOME__|$home_dir|g" "$tmpl" > "$uf"
+                    log "RESILIENT-1655: re-rendered $uf from tracked template $tmpl"
+                else
+                    rm -f "$uf"
+                    log "RESILIENT-1655: removed untracked out-of-repo unit $uf"
+                fi
+            fi
+        done
+    done
+
+    # 3. Inspect user crontab (via $cron_file if provided, else `crontab -l` when running convergence).
+    if [[ -n "$cron_file" && -f "$cron_file" ]]; then
+        local ctmp bad_cron=0 cline
+        ctmp="$(mktemp "${cron_file}.XXXXXX")"
+        while IFS= read -r cline || [[ -n "$cline" ]]; do
+            if [[ ! "$cline" =~ ^[[:space:]]*# ]] && [[ "$cline" == *chump* || "$cline" == *coo* || "$cline" == *peer/* ]]; then
+                if _is_out_of_repo_line "$cline"; then
+                    log "RESILIENT-1655: scrubbed out-of-repo crontab organ entry: $cline"
+                    bad_cron=1
+                    violations=$((violations + 1))
+                    continue
+                fi
+            fi
+            printf '%s\n' "$cline" >> "$ctmp"
+        done < "$cron_file"
+        if [[ "$bad_cron" -eq 1 ]]; then
+            mv -f "$ctmp" "$cron_file"
+        else
+            rm -f "$ctmp"
+        fi
+    fi
+
+    [[ "$violations" -eq 0 ]]
+}
+
 _reconcile_role_organs() {
     _sanitize_node_env
     _dedupe_single_scope_organs
     _converge_worker_launchers
     _converge_git_noreply_identity
     _ensure_pr_book_timer
+    _check_no_out_of_repo_organs || true
     local installer="$REPO_ROOT/scripts/setup/chump-node-install.sh"
     if [[ ! -f "$installer" ]]; then
         log "WARN: $installer not found; skipping role-organ reconcile"
@@ -489,6 +621,7 @@ _reconcile_role_organs() {
     _converge_worker_launchers
     _converge_git_noreply_identity
     _ensure_pr_book_timer
+    _check_no_out_of_repo_organs || true
 }
 
 emit() {
@@ -671,8 +804,8 @@ fi
 _clear_stale_index_lock() {
     local lock; lock="$(git rev-parse --git-path index.lock 2>/dev/null)"
     [[ -n "$lock" && -e "$lock" ]] || return 1
-    pgrep -x git >/dev/null 2>&1 && return 1
     local min_age="${CHUMP_NODE_CONVERGE_LOCK_MIN_AGE_S:-120}" mtime age
+    (( min_age > 0 )) && pgrep -x git >/dev/null 2>&1 && return 1
     mtime="$(stat -c %Y "$lock" 2>/dev/null || echo 0)"
     age=$(( $(date +%s) - mtime ))
     (( age >= min_age )) || return 1

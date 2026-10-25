@@ -7954,15 +7954,28 @@ async fn main() -> Result<()> {
                 let alerts: usize = events
                     .iter()
                     .filter(|e| {
+                        let kind = e.get("kind").and_then(|v| v.as_str()).unwrap_or("");
                         let is_alert = e.get("event").and_then(|v| v.as_str()) == Some("ALERT")
-                            || e.get("event").and_then(|v| v.as_str()) == Some("alert");
+                            || e.get("event").and_then(|v| v.as_str()) == Some("alert")
+                            || matches!(
+                                kind,
+                                "alert"
+                                    | "ALERT"
+                                    | "pr_stuck"
+                                    | "silent_agent"
+                                    | "fleet_stalled"
+                                    | "silent_fleet_death"
+                                    | "slo_breach"
+                            );
                         if !is_alert {
                             return false;
                         }
                         e.get("ts")
                             .and_then(|v| v.as_str())
                             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                            .map(|dt| dt.timestamp() >= alert_cutoff)
+                            .map(|dt| {
+                                dt.timestamp() >= alert_cutoff && dt.timestamp() <= now_ts + 60
+                            })
                             .unwrap_or(false)
                     })
                     .count();
@@ -8103,6 +8116,49 @@ async fn main() -> Result<()> {
                         "⚠  ship-count unavailable (git log origin/main failed) — measurement failed, not a fleet-health verdict; re-run or check for a stale ref/index lock".to_string(),
                     );
                 }
+                // CREDIBLE-120: check SLO breach count before printing "fleet looks healthy".
+                let slo_breaches: usize = if let Ok(v) =
+                    std::env::var("CHUMP_SLO_BREACH_COUNT_OVERRIDE")
+                {
+                    v.trim().parse::<usize>().unwrap_or(0)
+                } else if let Ok(p) = std::env::var("CHUMP_SLO_STATE_FILE") {
+                    std::fs::read_to_string(&p)
+                        .ok()
+                        .and_then(|raw| {
+                            if let Ok(n) = raw.trim().parse::<usize>() {
+                                return Some(n);
+                            }
+                            serde_json::from_str::<serde_json::Value>(&raw)
+                                .ok()
+                                .and_then(|j| j.get("slo_breaches").and_then(|x| x.as_u64()))
+                                .map(|n| n as usize)
+                        })
+                        .unwrap_or(0)
+                } else if std::env::var("CHUMP_FLEET_BRIEF_IN_SLO_PROBE").as_deref() != Ok("1") {
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|exe| {
+                            std::process::Command::new(exe)
+                                .args(["health", "--slo-check", "--json"])
+                                .env("CHUMP_FLEET_BRIEF_IN_SLO_PROBE", "1")
+                                .output()
+                                .ok()
+                        })
+                        .and_then(|out| {
+                            serde_json::from_slice::<serde_json::Value>(&out.stdout)
+                                .ok()
+                                .and_then(|j| j.get("slo_breaches").and_then(|x| x.as_u64()))
+                                .map(|n| n as usize)
+                        })
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+                if slo_breaches > 0 {
+                    suggestions.push(format!(
+                        "⚠ SLO BREACH: {slo_breaches} breached — chump health --slo-check for detail"
+                    ));
+                }
                 if suggestions.is_empty() {
                     suggestions.push("✓  No urgent actions — fleet looks healthy".to_string());
                 }
@@ -8181,9 +8237,7 @@ async fn main() -> Result<()> {
                     );
                     println!("Auto-fixed: {auto_fixed}  flake-rerun+lint");
                     println!("Manual rescues: {manual_rescues}");
-                    if alerts > 0 {
-                        println!("Alerts(30m): {alerts}");
-                    }
+                    println!("Alerts(30m): {alerts}");
                     if !suggestions.iter().all(|s| s.starts_with('✓')) {
                         println!("\nActions:");
                         for s in &suggestions {
@@ -14611,15 +14665,58 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                // RESEARCH-001: scan docs/process/RESEARCH_INTEGRITY.md for gap ID
-                // references that have no corresponding docs/gaps/<ID>.yaml.
+                // RESEARCH-001 / CREDIBLE-095: scan docs/process/RESEARCH_INTEGRITY.md for gap ID
+                // references that have no corresponding docs/gaps/<ID>.yaml, honoring
+                // `phantom_ref_allowlist: [...]` in YAML frontmatter for historical/synthetic IDs.
                 let phantom_doc_refs: Vec<(String, String)> = {
                     let repo_root = repo_path::repo_root();
                     let ri_path = repo_root.join("docs/process/RESEARCH_INTEGRITY.md");
                     if let Ok(content) = std::fs::read_to_string(&ri_path) {
+                        // CREDIBLE-095: parse phantom_ref_allowlist from YAML frontmatter.
+                        let mut allowlist_prefixes: Vec<String> = Vec::new();
+                        let mut allowlist_exact: std::collections::HashSet<String> =
+                            std::collections::HashSet::new();
+                        if let Some(rest) = content.strip_prefix("---\n") {
+                            if let Some(end_idx) = rest.find("\n---") {
+                                let fm = &rest[..end_idx];
+                                for line in fm.lines() {
+                                    let trimmed = line.trim();
+                                    if let Some(val) =
+                                        trimmed.strip_prefix("phantom_ref_allowlist:")
+                                    {
+                                        let inner = val
+                                            .trim()
+                                            .trim_start_matches('[')
+                                            .trim_end_matches(']');
+                                        for item in inner.split(',') {
+                                            let pat =
+                                                item.trim().trim_matches('"').trim_matches('\'');
+                                            if pat.is_empty() {
+                                                continue;
+                                            }
+                                            if let Some(prefix) = pat.strip_suffix('*') {
+                                                allowlist_prefixes.push(prefix.to_string());
+                                            } else {
+                                                allowlist_exact.insert(pat.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Strip YAML frontmatter before scanning body for gap IDs.
+                        let body = if let Some(rest) = content.strip_prefix("---\n") {
+                            if let Some(end_idx) = rest.find("\n---") {
+                                &rest[end_idx + 4..]
+                            } else {
+                                content.as_str()
+                            }
+                        } else {
+                            content.as_str()
+                        };
                         // Strip fenced code blocks before scanning.
                         let re_fence = regex::Regex::new(r"(?s)```.*?```").unwrap();
-                        let stripped = re_fence.replace_all(&content, "");
+                        let stripped = re_fence.replace_all(body, "");
                         // Strip inline backtick spans.
                         let re_tick = regex::Regex::new(r"`[^`]+`").unwrap();
                         let stripped = re_tick.replace_all(&stripped, "");
@@ -14636,6 +14733,11 @@ async fn main() -> Result<()> {
                                 continue;
                             }
                             seen.insert(id.clone());
+                            if allowlist_exact.contains(&id)
+                                || allowlist_prefixes.iter().any(|p| id.starts_with(p))
+                            {
+                                continue;
+                            }
                             if !all_ids.contains(id.as_str()) {
                                 // Also check filesystem in case the YAML exists but isn't
                                 // imported into state.db yet.
@@ -20747,6 +20849,7 @@ async fn main() -> Result<()> {
             worktree: String::new(),
             gap_id: None,
             pending_new_gap: None,
+            branch: None,
         };
         // Resolve gap_id for the ambient event before release
         let release_gap_id = active

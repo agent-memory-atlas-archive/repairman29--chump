@@ -41,6 +41,40 @@ if [ ! -f "$MSG_FILE" ]; then
     exit 0
 fi
 
+# ── CREDIBLE-1566: refuse bypass env vars and bypass trailers inside dispatch / agent sessions ──
+if [ -n "${CHUMP_DISPATCH_GAP:-}${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CHUMP_WORKER_TICK:-}" ]; then
+    _c1566_pfx="CHUMP"
+    _c1566_pf="${_c1566_pfx}_PREFLIGHT_SKIP"
+    _c1566_or="${_c1566_pfx}_OFF_RAILS_CHECK"
+    _c1566_dd="${_c1566_pfx}_DOCS_DELTA_CHECK"
+    _c1566_hit=""
+    if [ "${CHUMP_TEST_GATE:-1}" = "0" ]; then
+        _c1566_hit="CHUMP_TEST_GATE=0"
+    elif [ "${!_c1566_pf:-0}" = "1" ]; then
+        _c1566_hit="${_c1566_pf}=1"
+    elif [ "${!_c1566_or:-1}" = "0" ]; then
+        _c1566_hit="${_c1566_or}=0"
+    elif [ "${!_c1566_dd:-1}" = "0" ]; then
+        _c1566_hit="${_c1566_dd}=0"
+    else
+        _c1566_trailer="$(grep -E '^(Test-Gate-Bypass|Off-Rails-Bypass|Lint-Gate-Bypass|Bot-Merge-Bypass|Rust-First-Bypass|Shared-Service-Bypass|Verify-Bypass|Bypass-Tier):' "$MSG_FILE" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+        if [ -n "$_c1566_trailer" ]; then
+            _c1566_hit="${_c1566_trailer}:"
+        fi
+    fi
+    if [ -n "$_c1566_hit" ]; then
+        _c1566_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+        _c1566_ambient="${CHUMP_AMBIENT_LOG:-$_c1566_root/.chump-locks/ambient.jsonl}"
+        mkdir -p "$(dirname "$_c1566_ambient")" 2>/dev/null || true
+        printf '{"ts":"%s","kind":"agent_bypass_refused","hook":"commit-msg","gap_id":"%s","bypass":"%s"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${CHUMP_DISPATCH_GAP:-${CHUMP_FLEET_SESSION:-agent}}" "$_c1566_hit" \
+            >> "$_c1566_ambient" 2>/dev/null || true
+        echo "[commit-msg] ERROR (CREDIBLE-1566): bypass ($_c1566_hit) is forbidden in fleet agent / dispatch sessions" >&2
+        exit 1
+    fi
+    unset _c1566_pfx _c1566_pf _c1566_or _c1566_dd _c1566_hit _c1566_trailer _c1566_root _c1566_ambient
+fi
+
 # ── CREDIBLE-172 / COTG-3.2: zero-touch provenance stamp ──────────────────────
 # The `Chump-Agent:` trailer is the ONLY signal that reliably tells an OS commit
 # from a human one on main (it is what survives squash-merge under the repo's

@@ -101,28 +101,55 @@ REMOTE="$1"
 # $2 is the remote URL; unused here.
 
 # -----------------------------------------------------------------------
-# CREDIBLE-1610: forbid all bypass env vars inside fleet agent sessions.
-# When any fleet session marker (CHUMP_FLEET_SESSION, FLEET_AGENT_ID,
-# CHUMP_WORKER_TICK) is present, setting CHUMP_TEST_GATE=0,
+# CREDIBLE-1610 / CREDIBLE-1566: forbid all bypass env vars and bypass
+# commit-message trailers inside fleet agent / dispatch sessions.
+# When any fleet/dispatch marker (CHUMP_DISPATCH_GAP, CHUMP_FLEET_SESSION,
+# FLEET_AGENT_ID, CHUMP_WORKER_TICK) is present, setting CHUMP_TEST_GATE=0,
 # CHUMP_BYPASS_BOT_MERGE=1, CHUMP_PREFLIGHT_SKIP=1, CHUMP_CLIPPY_SKIP=1,
-# CHUMP_CLIPPY_GATE=0, or CHUMP_OPERATOR_RECOVERY=1 is a hard error.
+# CHUMP_CLIPPY_GATE=0, CHUMP_OPERATOR_RECOVERY=1, CHUMP_OFF_RAILS_CHECK=0,
+# or carrying a Test-Gate-Bypass: / Off-Rails-Bypass: / Verify-Bypass: trailer
+# on HEAD is refused with kind=agent_bypass_refused and a non-zero exit.
 # -----------------------------------------------------------------------
 _c1610_pfx="CHUMP"
 _c1610_bm="${_c1610_pfx}_BYPASS_BOT_MERGE"
 _c1610_pf="${_c1610_pfx}_PREFLIGHT_SKIP"
 _c1610_cs="${_c1610_pfx}_CLIPPY_SKIP"
-if [[ -n "${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CHUMP_WORKER_TICK:-}" ]]; then
-    if [[ "${CHUMP_TEST_GATE:-1}" == "0" ]] \
-       || [[ "${!_c1610_bm:-0}" == "1" ]] \
-       || [[ "${!_c1610_pf:-0}" == "1" ]] \
-       || [[ "${!_c1610_cs:-0}" == "1" ]] \
-       || [[ "${CHUMP_CLIPPY_GATE:-1}" == "0" ]] \
-       || [[ "${CHUMP_OPERATOR_RECOVERY:-0}" == "1" ]]; then
-        echo "[pre-push] ERROR (CREDIBLE-1610): bypass env vars are forbidden in fleet agent sessions" >&2
+_c1610_or="${_c1610_pfx}_OFF_RAILS_CHECK"
+if [[ -n "${CHUMP_DISPATCH_GAP:-}${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CHUMP_WORKER_TICK:-}" ]]; then
+    _c1566_hit=""
+    if [[ "${CHUMP_TEST_GATE:-1}" == "0" ]]; then
+        _c1566_hit="CHUMP_TEST_GATE=0"
+    elif [[ "${!_c1610_bm:-0}" == "1" ]]; then
+        _c1566_hit="${_c1610_bm}=1"
+    elif [[ "${!_c1610_pf:-0}" == "1" ]]; then
+        _c1566_hit="${_c1610_pf}=1"
+    elif [[ "${!_c1610_cs:-0}" == "1" ]]; then
+        _c1566_hit="${_c1610_cs}=1"
+    elif [[ "${CHUMP_CLIPPY_GATE:-1}" == "0" ]]; then
+        _c1566_hit="CHUMP_CLIPPY_GATE=0"
+    elif [[ "${CHUMP_OPERATOR_RECOVERY:-0}" == "1" ]]; then
+        _c1566_hit="CHUMP_OPERATOR_RECOVERY=1"
+    elif [[ "${!_c1610_or:-1}" == "0" ]]; then
+        _c1566_hit="${_c1610_or}=0"
+    else
+        _c1566_head_msg="$(git log -1 --pretty=%B 2>/dev/null || true)"
+        _c1566_trailer="$(grep -E '^(Test-Gate-Bypass|Off-Rails-Bypass|Lint-Gate-Bypass|Bot-Merge-Bypass|Rust-First-Bypass|Shared-Service-Bypass|Verify-Bypass|Bypass-Tier):' <<<"$_c1566_head_msg" | head -1 | cut -d: -f1 || true)"
+        if [[ -n "$_c1566_trailer" ]]; then
+            _c1566_hit="${_c1566_trailer}:"
+        fi
+    fi
+    if [[ -n "$_c1566_hit" ]]; then
+        _c1566_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+        _c1566_ambient="${CHUMP_AMBIENT_LOG:-$_c1566_root/.chump-locks/ambient.jsonl}"
+        mkdir -p "$(dirname "$_c1566_ambient")" 2>/dev/null || true
+        printf '{"ts":"%s","kind":"agent_bypass_refused","hook":"pre-push","gap_id":"%s","bypass":"%s"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${CHUMP_DISPATCH_GAP:-${CHUMP_FLEET_SESSION:-agent}}" "$_c1566_hit" \
+            >> "$_c1566_ambient" 2>/dev/null || true
+        echo "[pre-push] ERROR (CREDIBLE-1610/CREDIBLE-1566): bypass env vars / trailers ($_c1566_hit) are forbidden in fleet agent sessions" >&2
         exit 1
     fi
 fi
-unset _c1610_pfx _c1610_bm _c1610_pf _c1610_cs
+unset _c1610_pfx _c1610_bm _c1610_pf _c1610_cs _c1610_or _c1566_hit _c1566_head_msg _c1566_trailer _c1566_root _c1566_ambient
 
 # -----------------------------------------------------------------------
 # INFRA-1028: operator-recovery umbrella
@@ -2156,26 +2183,30 @@ if [[ "${CHUMP_OFF_RAILS_CHECK:-1}" != "0" ]]; then
     done < <(find "$REPO_ROOT/.chump-locks" -maxdepth 1 -name 'claim-*.json' 2>/dev/null | sort || true)
 
     if [[ "${#_pp_all_claims[@]}" -gt 0 && -n "$_pp_current_branch" ]]; then
-        # Find the claim file whose gap_id matches the current branch.
-        # Expected branch form: chump/<gap-id>-claim (gap-id lowercased).
+        # Find the claim file whose gap_id or explicit .branch matches the current branch.
+        # Expected branch form: chump/<gap-id>-claim (gap-id lowercased), or .branch on a repair lease (CREDIBLE-1566).
         _pp_claim_file=""
         _pp_claimed_gap=""
+        _pp_claimed_branch=""
         _pp_available_gap_ids=""
         for _f in "${_pp_all_claims[@]}"; do
             _gap="$(jq -r '.gap_id // empty' "$_f" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+            _lbranch="$(jq -r '.branch // empty' "$_f" 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
             _pp_available_gap_ids="${_pp_available_gap_ids:+$_pp_available_gap_ids,}${_gap}"
-            if [[ -n "$_gap" && "$_pp_current_branch" == "chump/${_gap}-claim" ]]; then
+            if [[ -n "$_gap" && ( "$_pp_current_branch" == "chump/${_gap}-claim" || ( -n "$_lbranch" && "$_pp_current_branch" == "$_lbranch" ) ) ]]; then
                 # Branch matches. Prefer session_id match when CHUMP_SESSION_ID is set.
                 _sid="$(jq -r '.session_id // empty' "$_f" 2>/dev/null || true)"
                 if [[ -n "${CHUMP_SESSION_ID:-}" && "$_sid" == "${CHUMP_SESSION_ID}" ]]; then
                     # Exact session match — use this file and stop searching.
                     _pp_claim_file="$_f"
                     _pp_claimed_gap="$_gap"
+                    _pp_claimed_branch="$_lbranch"
                     break
                 elif [[ -z "$_pp_claim_file" ]]; then
                     # First branch match — record it; keep looking for a session match.
                     _pp_claim_file="$_f"
                     _pp_claimed_gap="$_gap"
+                    _pp_claimed_branch="$_lbranch"
                 fi
             fi
         done
@@ -2192,7 +2223,7 @@ if [[ "${CHUMP_OFF_RAILS_CHECK:-1}" != "0" ]]; then
             echo "[pre-push] WARN (RESILIENT-026): ${#_pp_all_claims[@]} claim file(s) present but none match branch '$_pp_current_branch' — skipping branch check (peer leases present)." >&2
         else
             # Found the matching claim file. Validate current branch equals expected.
-            _pp_expected="chump/${_pp_claimed_gap}-claim"
+            _pp_expected="${_pp_claimed_branch:-chump/${_pp_claimed_gap}-claim}"
             if [[ "$_pp_current_branch" != "$_pp_expected" ]]; then
                 # Check for bypass trailer on HEAD commit
                 _pp_head_msg="$(git -C "$REPO_ROOT" log -1 --pretty=%B 2>/dev/null || true)"

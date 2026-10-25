@@ -351,6 +351,50 @@ stalls_str=""
 echo "Stalls > 4h: ${#stalls_4h[@]}${stalls_str}"
 echo "Auto-fixed: lint=$auto_lint_fixes flake-rerun=$auto_flake_reruns"
 echo "Manual rescues: $manual_rescues"
+# CREDIBLE-121: derive Alerts(30m) honestly from live $AMBIENT_LOG events
+# whose timestamp falls within the last 30 minutes (never a rotated snapshot
+# count mislabeled as 30m).
+alerts_30m=0
+if [[ -f "$AMBIENT_LOG" ]]; then
+    alerts_30m="$(python3 - "$AMBIENT_LOG" "$now_epoch" <<'PYEOF'
+import datetime, json, sys
+path, now_s = sys.argv[1], int(sys.argv[2])
+cutoff = now_s - 1800
+alert_kinds = {"alert", "ALERT", "pr_stuck", "silent_agent", "fleet_stalled", "silent_fleet_death", "slo_breach"}
+count = 0
+try:
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            ev = str(d.get("event", ""))
+            kind = str(d.get("kind", ""))
+            if ev not in ("ALERT", "alert") and kind not in alert_kinds:
+                continue
+            ts = str(d.get("ts", ""))
+            if not ts:
+                continue
+            try:
+                if ts.endswith("Z"):
+                    ts = ts[:-1] + "+00:00"
+                epoch = int(datetime.datetime.fromisoformat(ts).timestamp())
+            except Exception:
+                continue
+            if cutoff <= epoch <= now_s + 60:
+                count += 1
+except Exception:
+    pass
+print(count)
+PYEOF
+)"
+    alerts_30m="${alerts_30m:-0}"
+fi
+echo "Alerts(30m): $alerts_30m"
 # RESILIENT-1012: ribbon-acceptance gauge — last node_install_verified
 # pass/fail + organ delta per node, so ribbon done-ness lives on the board.
 if [ "$ribbon_nodes" -gt 0 ]; then
@@ -401,18 +445,43 @@ if [[ -x "$_model_rate_script" ]]; then
         echo "$_msr_out"
     fi
 fi
+_chump="${CHUMP_BIN:-$(command -v chump 2>/dev/null || echo "$REPO_ROOT/target/debug/chump")}"
+
+# CREDIBLE-120: check SLO breach state BEFORE printing Suggested actions / healthy verdict.
+_slo_json=""
+_slo_breaches=0
+if [[ -n "${CHUMP_SLO_BREACH_COUNT_OVERRIDE:-}" ]]; then
+    _slo_breaches="${CHUMP_SLO_BREACH_COUNT_OVERRIDE}"
+elif [[ -n "${CHUMP_SLO_STATE_FILE:-}" && -f "${CHUMP_SLO_STATE_FILE}" ]]; then
+    _slo_json="$(cat "${CHUMP_SLO_STATE_FILE}" 2>/dev/null || true)"
+    if [[ "$_slo_json" =~ ^[0-9]+$ ]]; then
+        _slo_breaches="$_slo_json"
+    else
+        _slo_breaches=$(echo "$_slo_json" | grep -o '"slo_breaches":[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$' || echo 0)
+    fi
+elif [[ -x "$_chump" ]]; then
+    _slo_json="$("$_chump" health --slo-check --json 2>/dev/null || true)"
+    _slo_breaches=$(echo "$_slo_json" | grep -o '"slo_breaches":[[:space:]]*[0-9]*' | head -1 | grep -o '[0-9]*$' || echo 0)
+fi
+_slo_breaches="${_slo_breaches:-0}"
+if [[ "$_slo_breaches" =~ ^[0-9]+$ ]] && [[ "$_slo_breaches" -gt 0 ]]; then
+    suggestions+=("⚠ SLO BREACH: ${_slo_breaches} breached — chump health --slo-check for detail")
+fi
+
 if [ "${#suggestions[@]}" -gt "0" ]; then
     echo ""
     echo "Suggested actions:"
     for s in "${suggestions[@]}"; do
         echo "  • $s"
     done
+elif [[ "$_silent_fleet_dead" -eq 0 && "$_fleet_stalled" -eq 0 ]]; then
+    echo ""
+    echo "✓ No urgent actions — fleet looks healthy"
 fi
 
 # CREDIBLE-034: per-pillar pickable gap table.
 # Shows how many P1 xs|s|m gaps are available per pillar — zero means the
 # pillar needs refilling before the next pick (CLAUDE.md §Mission Driver).
-_chump="${CHUMP_BIN:-$(command -v chump 2>/dev/null || echo "$REPO_ROOT/target/debug/chump")}"
 if [[ -x "$_chump" ]]; then
     _open_gaps="$("$_chump" gap list --status open 2>/dev/null || true)"
     # INFRA-1355: in a fresh worktree state.db is empty and the first call

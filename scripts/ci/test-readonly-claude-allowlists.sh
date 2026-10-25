@@ -138,6 +138,8 @@ LIVE_SITES=(
     "scripts/coord/duty-officer-loop.sh"
     "scripts/dispatch/architect-tick.sh"
     "scripts/dispatch/review-ro-claude.sh"
+    "scripts/dispatch/coo-reply.sh"
+    "scripts/dispatch/coo-tick.sh"
 )
 for site in "${LIVE_SITES[@]}"; do
     if lint_shell_allowlist_file "$REPO_ROOT/$site"; then

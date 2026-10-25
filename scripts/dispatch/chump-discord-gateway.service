@@ -26,7 +26,9 @@ WorkingDirectory=__REPO_ROOT__
 # Source providers.env (export-format) for DISCORD_TOKEN + CHUMP_READY_DM_USER_ID
 # — the SAME creds notify-operator.sh uses for the outbound half. The beat
 # re-resolves and degrades gracefully (idles, never crash-loops) if absent.
-ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec __REPO_ROOT__/scripts/dispatch/discord-gateway-beat.sh'
+# RESILIENT-1655: canonical portable template using __REPO_ROOT__ and __HOME__,
+# launching __REPO_ROOT__/scripts/ops/discord-gateway.py via discord-gateway-beat.sh.
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec __REPO_ROOT__/scripts/dispatch/discord-gateway-beat.sh __REPO_ROOT__/scripts/ops/discord-gateway.py'
 Restart=always
 RestartSec=10
 

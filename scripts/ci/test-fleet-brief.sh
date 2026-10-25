@@ -142,5 +142,37 @@ else
     exit 1
 fi
 
+# ── Test 7 (CREDIBLE-120): SLO breach suppresses 'healthy' and prints breach warning ──
+echo "Test 7 (CREDIBLE-120): SLO breach suppresses healthy verdict"
+SLO_OUT="$(CHUMP_REPO="$TMP/repo" CHUMP_SLO_BREACH_COUNT_OVERRIDE=2 "$CHUMP_BIN" fleet brief 2>/dev/null)"
+if echo "$SLO_OUT" | grep -q "⚠ SLO BREACH: 2 breached — chump health --slo-check for detail" \
+   && ! echo "$SLO_OUT" | grep -q "fleet looks healthy"; then
+    echo "  PASS (SLO breach banner shown and 'fleet looks healthy' suppressed)"
+else
+    echo "  FAIL: expected SLO BREACH warning without 'fleet looks healthy'"
+    echo "$SLO_OUT" | sed 's/^/  /'
+    exit 1
+fi
+
+# ── Test 8 (CREDIBLE-121): Alerts(30m) counts only live ambient events within last 30m ──
+echo "Test 8 (CREDIBLE-121): Alerts(30m) counts only live 30m alert events"
+NOW_RECENT="$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+OLD_ALERT="$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+cat > "$TMP/repo/.chump-locks/ambient.jsonl" <<EOF
+{"ts":"$NOW_RECENT","event":"ALERT","kind":"pr_stuck","pr":101}
+{"ts":"$OLD_ALERT","event":"ALERT","kind":"pr_stuck","pr":102}
+EOF
+ALERT_OUT="$(CHUMP_REPO="$TMP/repo" "$CHUMP_BIN" fleet brief 2>/dev/null)"
+SHELL_ALERT_OUT="$(CHUMP_REPO_ROOT="$TMP/repo" CHUMP_AMBIENT_LOG="$TMP/repo/.chump-locks/ambient.jsonl" bash "$REPO_ROOT/scripts/dispatch/fleet-brief.sh" 2>/dev/null)"
+if echo "$ALERT_OUT" | grep -qE "Alerts\(30m\): 1" \
+   && echo "$SHELL_ALERT_OUT" | grep -qE "Alerts\(30m\): 1"; then
+    echo "  PASS (Alerts(30m): 1 — counted 10m-old alert, excluded 3h-old alert in both Rust and shell)"
+else
+    echo "  FAIL: expected 'Alerts(30m): 1' in output"
+    echo "$ALERT_OUT" | grep -i "alert" | sed 's/^/  /'
+    echo "$SHELL_ALERT_OUT" | grep -i "alert" | sed 's/^/  /'
+    exit 1
+fi
+
 echo ""
-echo "All fleet-brief tests passed (6/6)."
+echo "All fleet-brief tests passed (8/8)."

@@ -64,25 +64,41 @@ fail() { echo "[FAIL] $*" >&2; FAIL=$((FAIL+1)); }
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
+# CREDIBLE-1573: snapshot the real checkout's coordination/runtime surfaces
+# BEFORE the test runs so we can assert at the end that .chump, .chump-locks,
+# bin/, and sessions/ in the real checkout are 100% untouched.
+_snapshot_real_checkout() {
+    python3 - "$REPO_ROOT" <<'PYEOF'
+import hashlib, os, sys
+root = sys.argv[1]
+for rel in (".chump", ".chump-locks", "bin", "sessions"):
+    base = os.path.join(root, rel)
+    if not os.path.exists(base):
+        print(f"{rel}:ABSENT")
+        continue
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames.sort()
+        filenames.sort()
+        rdir = os.path.relpath(dirpath, root)
+        print(f"DIR:{rdir}")
+        for fn in filenames:
+            fp = os.path.join(dirpath, fn)
+            relf = os.path.relpath(fp, root)
+            try:
+                st = os.lstat(fp)
+                h = hashlib.sha256(open(fp, "rb").read()).hexdigest() if os.path.isfile(fp) else "nonfile"
+                print(f"FILE:{relf}:{st.st_size}:{h}")
+            except OSError:
+                print(f"FILE:{relf}:vanished")
+PYEOF
+}
+REAL_SNAPSHOT_BEFORE="$(_snapshot_real_checkout)"
+
 # Synthetic HOME so every test gets an isolated ~/.chump/AUTONOMY_LEVEL.
 FAKE_HOME="$(mktemp -d)"
 trap 'rm -rf "$FAKE_HOME"' EXIT
 mkdir -p "$FAKE_HOME/.chump"
 
-# RESILIENT-1652: `chump claim` runs the RESILIENT-069 farmer readiness gate
-# BEFORE the AUTONOMY_LEVEL kill switch (src/main.rs claim arm). On a fresh Linux
-# runner the gate reds (no oauth token under HOME=$FAKE_HOME) and the claim prints
-# "farmer status RED" before the kill-switch message Tests 1-4 assert on — so lay
-# down a healthy-node fixture under $FAKE_HOME (the HOME every claim below runs
-# with). repair 6: the fixture function now requires the lib's sandbox marker, so
-# go through chump_test_sandbox_setup "$FAKE_HOME" to create the marker + pin
-# CHUMP_HOME/CHUMP_STATE_DIR, write the fixture while those hold, THEN unset the
-# sandbox env: Test 7 runs bot-merge's `chump gap preflight`, which resolves
-# repo_root from CHUMP_HOME, so CHUMP_HOME must stay unset there (the claims below
-# already pass HOME=$FAKE_HOME inline, giving chump_state_home = $FAKE_HOME for
-# the oauth + node.env reads). We unset by hand rather than chump_test_sandbox_
-# cleanup because cleanup would rm -rf $FAKE_HOME, which Tests 1-9 still need. No
-# gate loosening, no skip env var: an absent/expired token on a real node still reds.
 # shellcheck source=../coord/lib/test-sandbox.sh
 source "$REPO_ROOT/scripts/coord/lib/test-sandbox.sh"
 # shellcheck source=scripts/ci/lib/sandbox-healthy-node.sh
@@ -90,6 +106,25 @@ source "$REPO_ROOT/scripts/ci/lib/sandbox-healthy-node.sh"
 chump_test_sandbox_setup "$FAKE_HOME"
 write_sandbox_healthy_node "$FAKE_HOME"
 unset CHUMP_HOME CHUMP_REPO CHUMP_REPO_ROOT CHUMP_STATE_DB CHUMP_LOCK_DIR CHUMP_STATE_DIR CHUMP_TEST_SANDBOX_MARKER
+
+# CREDIBLE-1573 / CREDIBLE-1584: isolated temp git repo + temp bin/chump copy
+# inside $FAKE_HOME so `chump claim` and `bot-merge.sh` never touch the real
+# checkout's .chump, .chump-locks, or bin/ (no bin/chump.wedged-inode-* leak).
+BM_KS_REPO="$FAKE_HOME/bm-ks-repo"
+mkdir -p "$BM_KS_REPO/.chump" "$BM_KS_REPO/.chump-locks" "$BM_KS_REPO/bin" "$BM_KS_REPO/sessions"
+git -C "$BM_KS_REPO" init -q -b main
+git -C "$BM_KS_REPO" config user.email "t@chump.local"
+git -C "$BM_KS_REPO" config user.name "t"
+git -C "$BM_KS_REPO" commit -q --allow-empty -m "init" --no-verify
+cp "$REPO_ROOT/bin/chump" "$BM_KS_REPO/bin/chump" 2>/dev/null || true
+export CHUMP_REPO="$BM_KS_REPO"
+export CHUMP_REPO_ROOT="$BM_KS_REPO"
+export CHUMP_STATE_DB="$BM_KS_REPO/.chump/state.db"
+export CHUMP_LOCK_DIR="$BM_KS_REPO/.chump-locks"
+export CHUMP_SESSION_DIR="$BM_KS_REPO/sessions"
+export CHUMP_INTERNAL_DOCTOR=0
+export PATH="$BM_KS_REPO/bin:$PATH"
+cd "$BM_KS_REPO"
 
 AL_FILE="$FAKE_HOME/.chump/AUTONOMY_LEVEL"
 
@@ -154,14 +189,6 @@ if echo "$_out" | grep -q "fleet stopped"; then
 else
     ok "Test 4: AUTONOMY_LEVEL=5 → kill-switch gate passed"
 fi
-
-# CREDIBLE-1584: isolated temp git repo for bot-merge kill-switch tests
-BM_KS_REPO="$FAKE_HOME/bm-ks-repo"
-mkdir -p "$BM_KS_REPO"
-git -C "$BM_KS_REPO" init -q -b main
-git -C "$BM_KS_REPO" config user.email "t@chump.local"
-git -C "$BM_KS_REPO" config user.name "t"
-git -C "$BM_KS_REPO" commit -q --allow-empty -m "init" --no-verify
 
 # ── Test 5: bot-merge AUTONOMY_LEVEL=0 → exit 10 ────────────────────────────
 echo "0" > "$AL_FILE"
@@ -393,6 +420,15 @@ if [[ "$rc" -eq 2 && "$M2_B_BEFORE" == "$M2_B_AFTER" ]]; then
     ok "Test 10g (M2): refuses a stale marker from a different sandbox (exit 2, B unchanged)"
 else
     fail "Test 10g (M2): expected exit 2 + B unchanged (rc=$rc)"
+fi
+
+# ── Test 11 (CREDIBLE-1573): real checkout .chump, .chump-locks, bin/, sessions/ untouched ──
+REAL_SNAPSHOT_AFTER="$(_snapshot_real_checkout)"
+if [[ "$REAL_SNAPSHOT_BEFORE" == "$REAL_SNAPSHOT_AFTER" ]]; then
+    ok "Test 11 (CREDIBLE-1573): real checkout (.chump, .chump-locks, bin/, sessions/) untouched"
+else
+    fail "Test 11 (CREDIBLE-1573): real checkout was mutated during test-fleet-kill-switch.sh"
+    diff -u <(printf '%s\n' "$REAL_SNAPSHOT_BEFORE") <(printf '%s\n' "$REAL_SNAPSHOT_AFTER") >&2 || true
 fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────

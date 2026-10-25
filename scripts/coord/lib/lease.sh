@@ -17,8 +17,20 @@ get_active_claim_file() {
     # commit for a DIFFERENT gap ("must mention claimed gap RESILIENT-355" while
     # committing RESILIENT-361) — a recurring barnacle that turned every ship into a
     # fight. Branch names are chump/<domain>-<num>-...; match that gap's claim first.
-    local branch gap_slug match
+    local branch gap_slug match f fbranch
     branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    # CREDIBLE-1566: check if any lease in $dir explicitly binds .branch == $branch
+    # (used by `chump dispatch --repair <PR>` so repair branches match their lease).
+    if [ -n "$branch" ]; then
+        for f in "$dir"/*.json; do
+            [ -f "$f" ] || continue
+            fbranch="$(jq -r '.branch // empty' "$f" 2>/dev/null || true)"
+            if [ -n "$fbranch" ] && [ "$fbranch" = "$branch" ]; then
+                printf '%s\n' "$f"
+                return 0
+            fi
+        done
+    fi
     gap_slug="$(printf '%s' "$branch" | sed -nE 's#^chump/([a-z]+-[0-9]+).*#\1#p')"
     if [ -n "$gap_slug" ]; then
         match="$(find "$dir" -maxdepth 1 -name "claim-${gap_slug}-*.json" 2>/dev/null | head -1)"

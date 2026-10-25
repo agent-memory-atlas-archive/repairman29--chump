@@ -603,4 +603,64 @@ printf 'CHUMP_ORCH_WORKER_UNIT=chump-missing-worker@\n' > "$T16_STATE_MISS/node.
     || fail "RESILIENT-1708: second tick must not loop or re-log SCALE 0->1 when worker unit is missing, got: $(cat "$TMP/t16-miss-tick2.out")"
 ok "RESILIENT-1708: node-orchestrator scales configured CHUMP_ORCH_WORKER_UNIT and emits orchestrator_worker_unit_missing once without looping"
 
+# ── Test 17 (RESILIENT-1655): _check_no_out_of_repo_organs flags/remediates out-of-repo units, crontab, and untracked peer/ ──
+echo "=== 17. RESILIENT-1655: _check_no_out_of_repo_organs flags/remediates out-of-repo units, crontab, and untracked peer/ ==="
+OOR_TMP="$TMP/t17-oor"
+OOR_UNITS="$OOR_TMP/units"
+OOR_CRON="$OOR_TMP/crontab"
+OOR_REPO="$OOR_TMP/repo"
+mkdir -p "$OOR_UNITS" "$OOR_REPO/scripts/dispatch" "$OOR_REPO/scripts/ops" "$OOR_REPO/peer"
+git -C "$OOR_REPO" init -q
+cp "$REPO_ROOT/scripts/dispatch/chump-discord-gateway.service" "$OOR_REPO/scripts/dispatch/chump-discord-gateway.service"
+cp "$REPO_ROOT/scripts/dispatch/coo-tick.sh" "$OOR_REPO/scripts/dispatch/coo-tick.sh"
+cp "$REPO_ROOT/scripts/ops/discord-gateway.py" "$OOR_REPO/scripts/ops/discord-gateway.py"
+cat > "$OOR_REPO/peer/coo-tick.sh" <<'EOF'
+#!/usr/bin/env bash
+claude -p "rogue peer organ"
+EOF
+cat > "$OOR_UNITS/chump-discord-gateway.service" <<'EOF'
+[Service]
+ExecStart=/bin/bash /home/ubuntu/coo/run.sh
+EOF
+cat > "$OOR_CRON" <<EOF
+*/15 * * * * /bin/bash ~/chump/peer/coo-tick.sh
+*/30 * * * * /bin/bash $OOR_REPO/scripts/dispatch/coo-tick.sh
+EOF
+
+set +e
+(
+    export HOME="$OOR_TMP"
+    export REPO_ROOT="$OOR_REPO"
+    export LOG="$OOR_TMP/converge.log"
+    export NODE_AMBIENT="$OOR_TMP/ambient.jsonl"
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _check_no_out_of_repo_organs "$OOR_UNITS" "$OOR_CRON" "$OOR_REPO"
+)
+oor_first_rc=$?
+(
+    export HOME="$OOR_TMP"
+    export REPO_ROOT="$OOR_REPO"
+    export LOG="$OOR_TMP/converge.log"
+    export NODE_AMBIENT="$OOR_TMP/ambient.jsonl"
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _check_no_out_of_repo_organs "$OOR_UNITS" "$OOR_CRON" "$OOR_REPO"
+)
+oor_second_rc=$?
+set -e
+
+[[ "$oor_first_rc" -ne 0 ]] || fail "RESILIENT-1655: expected first _check_no_out_of_repo_organs run to return non-zero on out-of-repo fixtures"
+[[ "$oor_second_rc" -eq 0 ]] || fail "RESILIENT-1655: expected second _check_no_out_of_repo_organs run to return 0 after remediation (got $oor_second_rc)"
+[[ ! -d "$OOR_REPO/peer" ]] || fail "RESILIENT-1655: untracked peer/ directory was not removed"
+! grep -q '/home/ubuntu/coo/run.sh' "$OOR_UNITS/chump-discord-gateway.service" \
+    || fail "RESILIENT-1655: /home/ubuntu/coo/run.sh still present in unit after remediation"
+grep -q "$OOR_REPO/scripts/ops/discord-gateway.py" "$OOR_UNITS/chump-discord-gateway.service" \
+    || fail "RESILIENT-1655: remediated unit does not point to tracked discord-gateway.py"
+! grep -q 'peer/coo-tick.sh' "$OOR_CRON" \
+    || fail "RESILIENT-1655: ~/chump/peer/coo-tick.sh was not scrubbed from crontab"
+grep -q "$OOR_REPO/scripts/dispatch/coo-tick.sh" "$OOR_CRON" \
+    || fail "RESILIENT-1655: valid tracked crontab entry was not preserved"
+ok "RESILIENT-1655: _check_no_out_of_repo_organs flags/remediates /home/ubuntu/coo/run.sh, ~/chump/peer/coo-tick.sh, and untracked peer/, and accepts tracked \$REPO_ROOT/scripts/... paths"
+
 printf '\033[0;32mALL PASS\033[0m scripts/ci/test-node-converge.sh\n'

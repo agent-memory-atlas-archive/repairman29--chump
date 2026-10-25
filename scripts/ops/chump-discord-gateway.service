@@ -19,7 +19,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/bin/bash -lc 'cd /root/Projects/chump && source scripts/dispatch/lib/load-provider-auth.env /root/.chump/providers.env 2>/dev/null && export CHUMP_REPO=/root/Projects/chump && exec /usr/bin/python3 scripts/ops/discord-gateway.py'
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO=__REPO_ROOT__
+WorkingDirectory=__REPO_ROOT__
+ExecStart=/bin/bash -lc 'cd __REPO_ROOT__ && source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null && export CHUMP_REPO=__REPO_ROOT__ && exec /usr/bin/python3 __REPO_ROOT__/scripts/ops/discord-gateway.py'
 Restart=always
 RestartSec=5
 

@@ -37,6 +37,27 @@ fi
 # 1c. Off-rails guard (RESILIENT-025): commit subject must mention claimed gap
 # ------------------------------------------------------------------
 
+# CREDIBLE-1566: refuse CHUMP_OFF_RAILS_CHECK=0 or Off-Rails-Bypass: inside agent dispatch sessions
+if [ -n "${CHUMP_DISPATCH_GAP:-}${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CHUMP_WORKER_TICK:-}" ]; then
+    _OR_GIT_DIR=$(git rev-parse --git-dir 2>/dev/null || true)
+    _OR_EDITMSG="${_OR_GIT_DIR}/COMMIT_EDITMSG"
+    _OR_BYPASS_HIT=""
+    if [ "${CHUMP_OFF_RAILS_CHECK:-1}" = "0" ]; then
+        _OR_BYPASS_HIT="CHUMP_OFF_RAILS_CHECK=0"
+    elif [ -n "$_OR_GIT_DIR" ] && [ -f "$_OR_EDITMSG" ] && grep -qE '^Off-Rails-Bypass:' "$_OR_EDITMSG"; then
+        _OR_BYPASS_HIT="Off-Rails-Bypass:"
+    fi
+    if [ -n "$_OR_BYPASS_HIT" ]; then
+        _OR_AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+        mkdir -p "$(dirname "$_OR_AMBIENT")" 2>/dev/null || true
+        printf '{"ts":"%s","kind":"agent_bypass_refused","hook":"pre-commit","gap_id":"%s","bypass":"%s"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${CHUMP_DISPATCH_GAP:-${CHUMP_FLEET_SESSION:-agent}}" "$_OR_BYPASS_HIT" \
+            >> "$_OR_AMBIENT" 2>/dev/null || true
+        echo "[pre-commit] ERROR (CREDIBLE-1566): $_OR_BYPASS_HIT is forbidden in fleet agent / dispatch sessions" >&2
+        exit 1
+    fi
+fi
+
 if [ "${CHUMP_OFF_RAILS_CHECK:-1}" != "0" ]; then
     _CLAIM_FILE=$(get_active_claim_file "$REPO_ROOT")
     if [ -n "$_CLAIM_FILE" ] && [ -f "$_CLAIM_FILE" ]; then

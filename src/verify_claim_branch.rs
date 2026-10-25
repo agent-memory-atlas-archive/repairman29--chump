@@ -131,7 +131,14 @@ pub fn verify(current_branch: &str, session_id: &str, leases: &[Lease]) -> Verdi
     let branch_match = leases
         .iter()
         .filter_map(|l| l.gap_id.as_ref().map(|g| (l, g)))
-        .find(|(_, gap_id)| expected_branch(gap_id) == current_branch);
+        .find(|(lease, gap_id)| {
+            expected_branch(gap_id) == current_branch
+                || lease
+                    .branch
+                    .as_deref()
+                    .map(|b| b.eq_ignore_ascii_case(current_branch))
+                    .unwrap_or(false)
+        });
 
     if let Some((lease, gap_id)) = branch_match {
         let _ = lease; // branch already matches expected — OK regardless of session_id
@@ -148,7 +155,10 @@ pub fn verify(current_branch: &str, session_id: &str, leases: &[Lease]) -> Verdi
         .find(|l| l.session_id == session_id && l.gap_id.is_some())
     {
         let gap_id = mine.gap_id.clone().unwrap();
-        let expected = expected_branch(&gap_id);
+        let expected = mine
+            .branch
+            .clone()
+            .unwrap_or_else(|| expected_branch(&gap_id));
         return Verdict::Mismatch {
             gap_id,
             current: current_branch.to_string(),
@@ -316,6 +326,7 @@ mod tests {
             worktree: "".to_string(),
             gap_id: gap_id.map(|s| s.to_string()),
             pending_new_gap: None,
+            branch: None,
         }
     }
 

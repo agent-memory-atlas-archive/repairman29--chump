@@ -2,6 +2,7 @@
 doc_tag: canonical
 owner_gap:
 last_audited: 2026-04-25
+phantom_ref_allowlist: [EVAL-*, RESEARCH-*]
 ---
 
 # Research Integrity Directive

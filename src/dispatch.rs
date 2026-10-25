@@ -1186,6 +1186,7 @@ impl<'a> Workspace<'a> {
                 // or fails outright (INFRA-8204).
                 let session_id = resolve_dispatch_session_id(opts.gap_id);
                 std::env::set_var("CHUMP_SESSION_ID", &session_id);
+                std::env::set_var("CHUMP_DISPATCH_GAP", opts.gap_id);
                 write_wt_session_id_file(&working_dir, &session_id);
 
                 (working_dir, session_id)
@@ -1654,6 +1655,7 @@ fn spawn_opencode(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    cmd.env("CHUMP_DISPATCH_GAP", opts.gap_id);
     // INFRA-8198: tie the child's lifetime to this dispatch process.
     configure_child_lifetime(&mut cmd);
     let child = cmd
@@ -1692,6 +1694,7 @@ fn spawn_aider(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    cmd.env("CHUMP_DISPATCH_GAP", opts.gap_id);
     // INFRA-8198: tie the child's lifetime to this dispatch process.
     configure_child_lifetime(&mut cmd);
     let child = cmd
@@ -1740,6 +1743,7 @@ fn spawn_local(ws: &Workspace, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    cmd.env("CHUMP_DISPATCH_GAP", opts.gap_id);
     // INFRA-8198: tie the child's lifetime to this dispatch process.
     configure_child_lifetime(&mut cmd);
     let child = cmd
@@ -1934,6 +1938,9 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    // CREDIBLE-1566: export CHUMP_DISPATCH_GAP so git hooks refuse bypasses inside dispatch.
+    // scanner-anchor: "kind":"agent_bypass_refused" (CREDIBLE-1566, emitted by scripts/git-hooks/{pre-push,commit-msg})
+    cmd.env("CHUMP_DISPATCH_GAP", opts.gap_id);
     // ZERO-WASTE-133: bound every agent tool call. Background tasks off so a
     // call that hits its timeout is killed (not auto-backgrounded) and the
     // agent reads the error and continues; see dispatch_tool_watch.rs.
@@ -2004,6 +2011,7 @@ fn spawn_exec_gap(ws: &Workspace) -> Result<()> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    cmd.env("CHUMP_DISPATCH_GAP", opts.gap_id);
     // INFRA-8198: tie the child's lifetime to this dispatch process.
     configure_child_lifetime(&mut cmd);
     let child = cmd
@@ -3039,9 +3047,21 @@ fn claim(ws: &Workspace) -> Result<()> {
     // The lease must land in THIS worktree's `.chump-locks/` (as gap-claim.sh did via
     // cwd=working_dir). `agent_lease::locks_dir()` resolves via CHUMP_REPO; point it at
     // the worktree for the duration of the claim (same pattern as execute_gap.rs:999).
+    // CREDIBLE-1566: record the PR's head branch on the lease during a --repair dispatch
+    // so off-rails branch guards pass without needing an Off-Rails-Bypass trailer.
+    let lease_branch = match &opts.mode {
+        DispatchMode::Repair { head_branch } => Some(head_branch.as_str()),
+        _ => None,
+    };
     let prev_repo = std::env::var("CHUMP_REPO").ok();
     std::env::set_var("CHUMP_REPO", ws.working_dir());
-    let result = crate::agent_lease::claim_gap(opts.gap_id, &paths_vec, ttl_secs, "dispatch");
+    let result = crate::agent_lease::claim_gap_with_branch(
+        opts.gap_id,
+        &paths_vec,
+        ttl_secs,
+        "dispatch",
+        lease_branch,
+    );
     match prev_repo {
         Some(p) => std::env::set_var("CHUMP_REPO", p),
         None => std::env::remove_var("CHUMP_REPO"),
@@ -3082,6 +3102,7 @@ fn ship(ws: &Workspace) -> Result<ShipResult> {
     if !ws.session_id.is_empty() {
         cmd.env("CHUMP_SESSION_ID", &ws.session_id);
     }
+    cmd.env("CHUMP_DISPATCH_GAP", opts.gap_id);
     // INFRA-302 blocker (3): bot-merge.sh derives the branch via
     // `git rev-parse --abbrev-ref HEAD` — it MUST run inside the
     // dispatch's fresh worktree, not the main checkout, or it pushes
@@ -5489,5 +5510,60 @@ mod tests {
             enforce_routing_floor("haiku", "P2", "rust", "routine cleanup"),
             "haiku"
         );
+    }
+
+    /// CREDIBLE-1566: repair dispatch lease records the PR's head branch so
+    /// verify-claim-branch and off-rails guards pass without Off-Rails-Bypass:,
+    /// and CHUMP_DISPATCH_GAP is allowlisted for headless child spawns.
+    #[test]
+    #[serial_test::serial(ambient_env)]
+    fn credible_1566_repair_lease_records_branch_and_allowlists_dispatch_gap() {
+        assert!(is_allowlisted_headless_env_key("CHUMP_DISPATCH_GAP"));
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prev_repo = std::env::var("CHUMP_REPO").ok();
+        let prev_sid = std::env::var("CHUMP_SESSION_ID").ok();
+        std::env::set_var("CHUMP_REPO", tmp.path());
+        std::env::set_var("CHUMP_SESSION_ID", "dispatch-credible-1566-test");
+
+        let lease = crate::agent_lease::claim_gap_with_branch(
+            "CREDIBLE-1566",
+            &["src/dispatch.rs"],
+            3600,
+            "dispatch",
+            Some("claude/repair-pr-5555"),
+        )
+        .expect("claim_gap_with_branch");
+        assert_eq!(lease.branch.as_deref(), Some("claude/repair-pr-5555"));
+
+        let lease_file = tmp
+            .path()
+            .join(".chump-locks")
+            .join("dispatch-credible-1566-test.json");
+        let on_disk: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&lease_file).expect("read lease"))
+                .expect("parse lease json");
+        assert_eq!(
+            on_disk.get("branch").and_then(|v| v.as_str()),
+            Some("claude/repair-pr-5555")
+        );
+
+        let verdict = crate::verify_claim_branch::verify(
+            "claude/repair-pr-5555",
+            "dispatch-credible-1566-test",
+            &[lease],
+        );
+        assert!(matches!(
+            verdict,
+            crate::verify_claim_branch::Verdict::Ok { ref gap_id } if gap_id == "CREDIBLE-1566"
+        ));
+
+        match prev_repo {
+            Some(v) => std::env::set_var("CHUMP_REPO", v),
+            None => std::env::remove_var("CHUMP_REPO"),
+        }
+        match prev_sid {
+            Some(v) => std::env::set_var("CHUMP_SESSION_ID", v),
+            None => std::env::remove_var("CHUMP_SESSION_ID"),
+        }
     }
 }

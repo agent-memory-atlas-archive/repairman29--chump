@@ -230,7 +230,7 @@ fi
 
 rm -f .chump-locks/ambient.jsonl
 OUT=$(
-    unset CHUMP_FLEET_SESSION FLEET_AGENT_ID CHUMP_WORKER_TICK
+    unset CHUMP_DISPATCH_GAP CHUMP_FLEET_SESSION FLEET_AGENT_ID CHUMP_WORKER_TICK
     CHUMP_TEST_GATE=0 CHUMP_TEST_GATE_FAKE_RC=101 run_hook
 )
 RC=$?
@@ -548,6 +548,80 @@ if grep -q '"kind":"prepush_budget"' .chump-locks/ambient.jsonl 2>/dev/null \
     ok "RESILIENT-1693: prepush_budget event emitted with clippy_s, test_s, total_s"
 else
     fail "RESILIENT-1693: prepush_budget event missing or incomplete: $(cat .chump-locks/ambient.jsonl 2>/dev/null)"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════
+# CREDIBLE-1566: CHUMP_DISPATCH_GAP refuses bypass env vars & bypass trailers
+# in pre-push and commit-msg, emits kind=agent_bypass_refused, and repair
+# lease .branch allows repair branch without Off-Rails-Bypass:
+# ══════════════════════════════════════════════════════════════════════════
+echo "--- Test 16 (CREDIBLE-1566): dispatch bypass refusal + repair lease branch ---"
+rm -f .chump-locks/ambient.jsonl
+OUT_1566_ENV=$(CHUMP_DISPATCH_GAP=INFRA-9999 CHUMP_TEST_GATE=0 CHUMP_TEST_GATE_FAKE_RC=101 run_hook)
+RC_1566_ENV=$?
+if [[ "$RC_1566_ENV" -ne 0 ]] \
+   && grep -q '"kind":"agent_bypass_refused"' .chump-locks/ambient.jsonl 2>/dev/null \
+   && grep -q '"bypass":"CHUMP_TEST_GATE=0"' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "CREDIBLE-1566: pre-push refuses CHUMP_TEST_GATE=0 under CHUMP_DISPATCH_GAP and emits agent_bypass_refused"
+else
+    fail "CREDIBLE-1566: pre-push did not refuse CHUMP_TEST_GATE=0 under CHUMP_DISPATCH_GAP (rc=$RC_1566_ENV, out=$OUT_1566_ENV)"
+fi
+
+rm -f .chump-locks/ambient.jsonl
+git commit --amend -qm "$(printf 'rs change for CREDIBLE-1566\n\nOff-Rails-Bypass: attempted agent trailer bypass\n')"
+OUT_1566_TR=$(CHUMP_DISPATCH_GAP=INFRA-9999 CHUMP_TEST_GATE_FAKE_RC=0 run_hook)
+RC_1566_TR=$?
+if [[ "$RC_1566_TR" -ne 0 ]] \
+   && grep -q '"kind":"agent_bypass_refused"' .chump-locks/ambient.jsonl 2>/dev/null \
+   && grep -q '"bypass":"Off-Rails-Bypass:"' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "CREDIBLE-1566: pre-push refuses Off-Rails-Bypass: trailer on HEAD under CHUMP_DISPATCH_GAP and emits agent_bypass_refused"
+else
+    fail "CREDIBLE-1566: pre-push did not refuse Off-Rails-Bypass: trailer under CHUMP_DISPATCH_GAP (rc=$RC_1566_TR, out=$OUT_1566_TR)"
+fi
+git commit --amend -qm "rs change for CREDIBLE-1566"
+
+# Test commit-msg hook under CHUMP_DISPATCH_GAP
+COMMIT_MSG_HOOK="$REPO_ROOT/scripts/git-hooks/commit-msg"
+MSG_1566="$TMP/msg-1566.txt"
+printf 'fix(INFRA-9999): test commit\n\nTest-Gate-Bypass: agent trying to skip tests\n' > "$MSG_1566"
+rm -f .chump-locks/ambient.jsonl
+OUT_CM_1566="$(CHUMP_DISPATCH_GAP=INFRA-9999 bash "$COMMIT_MSG_HOOK" "$MSG_1566" 2>&1)"
+RC_CM_1566=$?
+if [[ "$RC_CM_1566" -ne 0 ]] \
+   && grep -q '"kind":"agent_bypass_refused"' .chump-locks/ambient.jsonl 2>/dev/null \
+   && grep -q '"hook":"commit-msg"' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "CREDIBLE-1566: commit-msg refuses Test-Gate-Bypass: under CHUMP_DISPATCH_GAP and emits agent_bypass_refused"
+else
+    fail "CREDIBLE-1566: commit-msg did not refuse bypass trailer under CHUMP_DISPATCH_GAP (rc=$RC_CM_1566, out=$OUT_CM_1566)"
+fi
+
+# Verify repair lease .branch is honored by lease.sh::get_active_claim_file
+REPAIR_BRANCH_ORIG="$(git rev-parse --abbrev-ref HEAD)"
+git checkout -qb claude/repair-pr-9999
+cat > .chump-locks/dispatch-infra-9999.json <<'EOF'
+{
+  "session_id": "dispatch-infra-9999",
+  "paths": ["src/"],
+  "taken_at": "2026-10-25T00:00:00Z",
+  "expires_at": "2099-10-25T00:00:00Z",
+  "heartbeat_at": "2099-10-25T00:00:00Z",
+  "purpose": "dispatch",
+  "worktree": "",
+  "gap_id": "INFRA-9999",
+  "branch": "claude/repair-pr-9999"
+}
+EOF
+RESOLVED_CLAIM="$(
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/scripts/coord/lib/lease.sh"
+    get_active_claim_file "$TMP/clone"
+)"
+rm -f .chump-locks/dispatch-infra-9999.json
+git checkout -q "$REPAIR_BRANCH_ORIG"
+if [[ "$RESOLVED_CLAIM" == *"dispatch-infra-9999.json" ]]; then
+    ok "CREDIBLE-1566: lease.sh resolves repair lease by .branch without needing chump/<gap>-claim naming or Off-Rails-Bypass:"
+else
+    fail "CREDIBLE-1566: lease.sh failed to resolve repair lease by .branch (got '$RESOLVED_CLAIM')"
 fi
 
 # ── Summary ─────────────────────────────────────────────────────────────────

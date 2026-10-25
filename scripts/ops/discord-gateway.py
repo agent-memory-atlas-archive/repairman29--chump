@@ -363,14 +363,24 @@ async def _fast_complete_groq(user: str) -> "str | None":
     return None
 
 
+COO_REPLY_SCRIPT = Path(REPO) / "scripts" / "dispatch" / "coo-reply.sh"
+
+
 async def _fast_complete_claude(user: str) -> "str | None":
-    """Fallback: one claude completion with NO tools (single-shot, not agentic)
-    via the CLI's OAuth token. Slower than Groq (~3-5s) but reliable."""
+    """Fallback: one read-only claude completion via scripts/dispatch/coo-reply.sh
+    (RESILIENT-1655: strict Read,Grep,Glob allowlist, no write/edit/bash tools)."""
     prompt = FAST_ADVISOR_SYSTEM + "\n\n" + user
     try:
+        if COO_REPLY_SCRIPT.exists():
+            cmd = ["bash", str(COO_REPLY_SCRIPT), "--prompt", prompt]
+        else:
+            cmd = [
+                "claude", "-p", prompt, "--model", "sonnet",
+                "--allowedTools", "Read,Grep,Glob",
+                "--disallowedTools", "Bash,Edit,Write,NotebookEdit",
+            ]
         proc = await asyncio.create_subprocess_exec(
-            "claude", "-p", prompt, "--model", "sonnet",
-            "--disallowedTools", "Bash,Edit,Write,Read,Grep,Glob,NotebookEdit",
+            *cmd,
             cwd=REPO,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,

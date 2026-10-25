@@ -14972,3 +14972,17 @@ events:
     fields_required: [ts, kind, gap_id]
 
   # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──
+  - kind: agent_bypass_refused
+    status: active
+    effect_metric: credible
+    emitter: scripts/git-hooks/pre-push + scripts/git-hooks/commit-msg + scripts/git-hooks/lib/off-rails-guard.sh (CREDIBLE-1566)
+    emitter_paths: [scripts/git-hooks/pre-push, scripts/git-hooks/commit-msg, scripts/git-hooks/lib/off-rails-guard.sh]
+    trigger: >
+      Emitted when a git hook (pre-push, commit-msg, or pre-commit off-rails-guard)
+      runs inside an agent dispatch or fleet worker session (CHUMP_DISPATCH_GAP,
+      CHUMP_FLEET_SESSION, FLEET_AGENT_ID, or CHUMP_WORKER_TICK set) and refuses an
+      attempted bypass env var or bypass commit-message trailer.
+    consumers: [ambient, fleet-brief, ops-audit]
+    fields_required: [ts, kind, hook, gap_id, bypass]
+
+  # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──

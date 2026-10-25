@@ -92,7 +92,7 @@ fi
 # AC unless --skip-obs-acs is passed — without it this fixture no longer
 # produces a vague gap and the test below silently stopped testing anything.
 "$BIN" gap reserve --domain INFRA --priority P1 --effort xs \
-    --title "audit-prio-fixture-vague" --skip-obs-acs --quiet 2>/dev/null
+    --title "audit-prio-fixture-vague" --skip-obs-acs --no-ac-required --force --quiet 2>/dev/null
 if ! "$BIN" gap audit-priorities >/dev/null 2>&1; then
     ok "exit 1 on vague pickable gap"
 else
@@ -115,7 +115,7 @@ fi
 
 # 4c. race-* title pollution check.
 "$BIN" gap reserve --domain INFRA --priority P2 --effort xs \
-    --title "race-fixture-test" --quiet 2>/dev/null
+    --title "race-fixture-test" --force --quiet 2>/dev/null
 RACE_COUNT=$({ "$BIN" gap audit-priorities --json 2>/dev/null || true; } \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('race_test_pollution',0))" 2>/dev/null || echo 0)
 if [[ "$RACE_COUNT" -ge 1 ]]; then
@@ -126,13 +126,43 @@ fi
 
 # 4d. placeholder-title pollution check (CREDIBLE-225).
 "$BIN" gap reserve --domain CREDIBLE --priority P2 --effort xs \
-    --title "tmp" --quiet 2>/dev/null
+    --title "tmp" --force --quiet 2>/dev/null
 PLACEHOLDER_COUNT=$({ "$BIN" gap audit-priorities --json 2>/dev/null || true; } \
     | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('placeholder_title_pollution',0))" 2>/dev/null || echo 0)
 if [[ "$PLACEHOLDER_COUNT" -ge 1 ]]; then
     ok "placeholder_title_pollution count >= 1 (got $PLACEHOLDER_COUNT)"
 else
     fail "placeholder_title_pollution count should be >=1 (got $PLACEHOLDER_COUNT)"
+fi
+
+# 4e. phantom_ref_allowlist in docs/process/RESEARCH_INTEGRITY.md (CREDIBLE-095):
+#     - allowlisted prefixes (EVAL-*, RESEARCH-*) are skipped (0 phantoms)
+#     - non-allowlisted nonexistent gap ID (INFRA-999999) is flagged as phantom
+mkdir -p "$TMP/docs/process" "$TMP/docs/gaps"
+cat > "$TMP/docs/process/RESEARCH_INTEGRITY.md" <<'EOF'
+---
+doc_tag: canonical
+phantom_ref_allowlist: [EVAL-*, RESEARCH-*]
+---
+Historical references EVAL-001 and RESEARCH-004 are allowlisted.
+EOF
+PHANTOM_HIT=$({ "$BIN" gap audit-priorities --json 2>/dev/null || true; } \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('phantom_doc_refs',99))" 2>/dev/null || echo 99)
+if [[ "$PHANTOM_HIT" -eq 0 ]]; then
+    ok "CREDIBLE-095: phantom_ref_allowlist skips allowlisted EVAL-* and RESEARCH-* IDs (phantom_doc_refs=0)"
+else
+    fail "CREDIBLE-095: expected phantom_doc_refs=0 for allowlisted IDs, got $PHANTOM_HIT"
+fi
+
+cat >> "$TMP/docs/process/RESEARCH_INTEGRITY.md" <<'EOF'
+Unregistered reference INFRA-999999 must still be caught.
+EOF
+PHANTOM_MISS=$({ "$BIN" gap audit-priorities --json 2>/dev/null || true; } \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('phantom_doc_refs',0))" 2>/dev/null || echo 0)
+if [[ "$PHANTOM_MISS" -eq 1 ]]; then
+    ok "CREDIBLE-095: non-allowlisted phantom ref INFRA-999999 is caught (phantom_doc_refs=1)"
+else
+    fail "CREDIBLE-095: expected phantom_doc_refs=1 for non-allowlisted INFRA-999999, got $PHANTOM_MISS"
 fi
 
 echo
