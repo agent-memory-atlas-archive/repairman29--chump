@@ -73,34 +73,58 @@ calibration_settle() {
     return 0
   fi
 
+  # INFRA-8105: support both current (.p_merge) and pre-INFRA-3850 (.price)
+  # probability keys via (.[$pk] // .p_merge // .price) so legacy ledger rows
+  # never resolve to predicted=null and crash brier_score.
   local joined
-  joined="$(jq -cn --slurpfile L "$ledger" --argjson O "$outcomes_json" --arg ts "$ts" \
+  if ! joined="$(jq -cn --slurpfile L "$ledger" --argjson O "$outcomes_json" --arg ts "$ts" \
     --arg idk "$id_key" --arg pk "$price_key" --arg pkind "$pred_kind" '
     ($L | reduce .[] as $r ({}; .[($r[$idk]|tostring)] = $r)) as $latest
     | [ $latest[] | (.[$idk]|tostring) as $kk
         | select($O[$kk] != null)
+        | (.[$pk] // .p_merge // .price) as $pred
+        | select($pred != null and ($pred | type) == "number")
         | {ts:$ts, kind:$pkind}
           + {($idk): .[$idk]}
-          + {predicted:.[$pk], outcome:$O[$kk]} ]
+          + {predicted:$pred, outcome:$O[$kk]} ]
       as $rows
     | { rows: $rows,
         predictions: ($latest|length),
         resolved: ($rows|length),
         matched:   ([ $rows[] | select(.outcome==1) ] | length),
-        unmatched: ([ $rows[] | select(.outcome==0) ] | length) }')"
+        unmatched: ([ $rows[] | select(.outcome==0) ] | length) }')" || [[ -z "$joined" ]]; then
+    return 1
+  fi
 
   local predicted_arr outcomes_arr brier res
-  predicted_arr="$(echo "$joined" | jq -c '[.rows[].predicted]')"
-  outcomes_arr="$(echo "$joined" | jq -c '[.rows[].outcome]')"
-  brier="$(brier_score "$predicted_arr" "$outcomes_arr")"
-  res="$(echo "$joined" | jq -c --argjson brier "$brier" '. + {brier: $brier}')"
+  if ! predicted_arr="$(printf '%s\n' "$joined" | jq -c '[.rows[].predicted]')" || [[ -z "$predicted_arr" ]]; then
+    return 1
+  fi
+  if ! outcomes_arr="$(printf '%s\n' "$joined" | jq -c '[.rows[].outcome]')" || [[ -z "$outcomes_arr" ]]; then
+    return 1
+  fi
+  if ! brier="$(brier_score "$predicted_arr" "$outcomes_arr")" || [[ -z "$brier" ]]; then
+    return 1
+  fi
+  if ! res="$(printf '%s\n' "$joined" | jq -c --argjson brier "$brier" '. + {brier: $brier}')" || [[ -z "$res" ]]; then
+    return 1
+  fi
 
   local tmp_cal
   tmp_cal="$(mktemp "${TMPDIR:-/tmp}/calib.XXXXXX" 2>/dev/null)" || tmp_cal="$calib_out.tmp.$$"
-  echo "$res" | jq -c '.rows[]' > "$tmp_cal"
-  echo "$res" | jq -c --arg ts "$ts" --arg kind "$summary_kind" \
-    '{ts:$ts, kind:$kind, brier:.brier, n:.resolved, matched:.matched, unmatched:.unmatched}' >> "$tmp_cal"
+  if ! { printf '%s\n' "$res" | jq -c '.rows[]' > "$tmp_cal" && \
+         printf '%s\n' "$res" | jq -c --arg ts "$ts" --arg kind "$summary_kind" \
+           '{ts:$ts, kind:$kind, brier:.brier, n:.resolved, matched:.matched, unmatched:.unmatched}' >> "$tmp_cal"; }; then
+    rm -f "$tmp_cal"
+    return 1
+  fi
+  # INFRA-8105: never overwrite an existing calibration log with a 0-byte or
+  # summary-less temp file when jq fails or produces invalid output.
+  if [[ ! -s "$tmp_cal" ]] || ! tail -n1 "$tmp_cal" | jq -e --arg k "$summary_kind" 'select(.kind == $k)' >/dev/null 2>&1; then
+    rm -f "$tmp_cal"
+    return 1
+  fi
   mv -f "$tmp_cal" "$calib_out"
 
-  echo "$res"
+  printf '%s\n' "$res"
 }

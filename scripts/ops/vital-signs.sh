@@ -389,10 +389,39 @@ fi
 #     number is exactly the drift this gap closes (see faculty-collector.sh
 #     which already reads the same trailing row the same way).
 # ════════════════════════════════════════════════════════════════════════════
+PR_BOOK_LEDGER_FILE="${PR_BOOK_LEDGER:-$(dirname "$PR_BOOK_CALIB")/pr-book-ledger.jsonl}"
 brier=""
-if [[ -s "$PR_BOOK_CALIB" ]]; then
-  brier="$(tail -n1 "$PR_BOOK_CALIB" 2>/dev/null | \
-    jq -r 'select(.kind=="pr_book_calibration") | .brier // empty' 2>/dev/null)"
+brier_null_basis=""
+cal_summary=""
+cal_ts=""
+cal_n=""
+led_ts=""
+if [[ -s "$PR_BOOK_LEDGER_FILE" ]]; then
+  led_ts="$(tail -n1 "$PR_BOOK_LEDGER_FILE" 2>/dev/null | jq -r '.ts // empty' 2>/dev/null)"
+fi
+if [[ ! -e "$PR_BOOK_CALIB" ]]; then
+  brier_null_basis="missing_log: no calibration log at $PR_BOOK_CALIB"
+elif [[ ! -s "$PR_BOOK_CALIB" ]]; then
+  brier_null_basis="empty_crashed_log: calibration log at $PR_BOOK_CALIB is 0 bytes (settler crashed)"
+else
+  cal_summary="$(tail -n1 "$PR_BOOK_CALIB" 2>/dev/null | \
+    jq -c 'select(.kind=="pr_book_calibration")' 2>/dev/null)"
+  if [[ -z "$cal_summary" ]]; then
+    brier_null_basis="empty_crashed_log: $PR_BOOK_CALIB lacks a trailing pr_book_calibration summary row"
+  else
+    cal_ts="$(printf '%s' "$cal_summary" | jq -r '.ts // empty' 2>/dev/null)"
+    cal_n="$(printf '%s' "$cal_summary" | jq -r '.n // 0' 2>/dev/null)"
+    brier="$(printf '%s' "$cal_summary" | jq -r '.brier // empty' 2>/dev/null)"
+    if [[ -n "$led_ts" && "$led_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T && "$led_ts" < "$CUT_24H" ]]; then
+      brier=""
+      brier_null_basis="stale_ledger: latest prediction in $PR_BOOK_LEDGER_FILE is at $led_ts (< $CUT_24H; pr-book pricing organ not running)"
+    elif [[ -n "$cal_ts" && "$cal_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T && "$cal_ts" < "$CUT_24H" ]]; then
+      brier=""
+      brier_null_basis="stale_summary: trailing pr_book_calibration summary in $PR_BOOK_CALIB is at $cal_ts (< $CUT_24H)"
+    elif [[ ! "$brier" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      brier_null_basis="n=0_unresolved: pr_book_calibration summary in $PR_BOOK_CALIB has n=${cal_n:-0} resolved predictions (brier=null)"
+    fi
+  fi
 fi
 if [[ "$brier" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
   brier_r="$(awk -v b="$brier" 'BEGIN{printf "%.4f", b}')"
@@ -406,7 +435,7 @@ else
   SIGNS+=("$(mksign calibration_brier "Calibration (Brier)" trust meta \
     null "brier-score" "unknown" \
     "audit pricing model — the board may be lying" \
-    "uninstrumented: no scored-outcome log at $PR_BOOK_CALIB (pr-book-ledger.jsonl records predictions but not realized merge outcomes — a settler that joins price->did-it-merge would light this)" \
+    "${brier_null_basis:-missing_log: no scored-outcome log at $PR_BOOK_CALIB}" \
     "{\"green\":\"<$CFG_BRIER_GREEN\",\"amber\":\"$CFG_BRIER_GREEN-$CFG_BRIER_AMBER\",\"red_desc\":\">$CFG_BRIER_AMBER\"}")")
 fi
 

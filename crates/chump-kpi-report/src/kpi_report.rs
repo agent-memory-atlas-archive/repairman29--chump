@@ -73,6 +73,7 @@ pub struct TokensPerShipReport {
     pub p90_cost_usd: Option<f64>,
     pub max_cost_usd: Option<f64>,
     pub top5: Vec<ShipTokens>,
+    pub staleness_warning: Option<String>,
 }
 
 impl TokensPerShipReport {
@@ -83,6 +84,9 @@ impl TokensPerShipReport {
             self.window_days
         ));
         out.push_str(&format!("  Ships analysed: {}\n", self.ship_count));
+        if let Some(w) = &self.staleness_warning {
+            out.push_str(&format!("  WARNING: {}\n", w));
+        }
         if self.ship_count == 0 {
             out.push_str("  No shipped gaps with token data in window.\n");
             return out;
@@ -151,8 +155,13 @@ impl TokensPerShipReport {
             v.map(|d| format!("{:.6}", d))
                 .unwrap_or_else(|| "null".to_string())
         };
+        let warn_json = self
+            .staleness_warning
+            .as_ref()
+            .map(|w| format!(r#""{}""#, json_escape(w)))
+            .unwrap_or_else(|| "null".to_string());
         format!(
-            r#"{{"window_days":{},"ship_count":{},"p50_tokens":{},"p90_tokens":{},"max_tokens":{},"p50_cost_usd":{},"p90_cost_usd":{},"max_cost_usd":{},"top5":[{}]}}"#,
+            r#"{{"window_days":{},"ship_count":{},"p50_tokens":{},"p90_tokens":{},"max_tokens":{},"p50_cost_usd":{},"p90_cost_usd":{},"max_cost_usd":{},"top5":[{}],"staleness_warning":{}}}"#,
             self.window_days,
             self.ship_count,
             opt_u64(self.p50_tokens),
@@ -161,7 +170,8 @@ impl TokensPerShipReport {
             opt_f64(self.p50_cost_usd),
             opt_f64(self.p90_cost_usd),
             opt_f64(self.max_cost_usd),
-            top5_json.join(",")
+            top5_json.join(","),
+            warn_json
         )
     }
 }
@@ -2765,6 +2775,42 @@ fn build_cost_savings_section(repo_root: &Path, window_days: u64) -> CostSavings
     }
 }
 
+/// INFRA-8109: parse a `depends_on` column (which may hold a JSON array string
+/// like `["EFFECTIVE-449"]`, `["META-229", "META-230"]`, `[]`, or a
+/// comma-separated string) into deduplicated clean gap IDs, filtering out empty
+/// / placeholder tokens (`""`, `"[]"`, `"null"`, `"none"`, `"n/a"`).
+fn parse_depends_on_gap_ids(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "[]" {
+        return Vec::new();
+    }
+    let raw_items: Vec<String> = match serde_json::from_str::<Vec<String>>(trimmed) {
+        Ok(arr) => arr
+            .into_iter()
+            .flat_map(|s| s.split(',').map(str::to_string).collect::<Vec<_>>())
+            .collect(),
+        Err(_) => trimmed.split(',').map(str::to_string).collect(),
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for item in raw_items {
+        let clean = item
+            .trim_matches(|c: char| c.is_whitespace() || matches!(c, '[' | ']' | '"' | '\''))
+            .trim();
+        if clean.is_empty() {
+            continue;
+        }
+        let lower = clean.to_ascii_lowercase();
+        if matches!(lower.as_str(), "[]" | "null" | "none" | "n/a" | "-") {
+            continue;
+        }
+        if seen.insert(clean.to_string()) {
+            out.push(clean.to_string());
+        }
+    }
+    out
+}
+
 fn build_leverage_section(repo_root: &Path) -> LeverageSection {
     let store = match chump_gap_store::GapStore::open(repo_root) {
         Ok(s) => s,
@@ -2777,19 +2823,13 @@ fn build_leverage_section(repo_root: &Path) -> LeverageSection {
 
     let mut dep_count: BTreeMap<String, usize> = BTreeMap::new();
     for g in &all_gaps {
-        if g.depends_on.is_empty() {
-            continue;
-        }
-        for dep in g.depends_on.split(',') {
-            let dep = dep.trim();
-            if !dep.is_empty() {
-                *dep_count.entry(dep.to_string()).or_insert(0) += 1;
-            }
+        for dep in parse_depends_on_gap_ids(&g.depends_on) {
+            *dep_count.entry(dep).or_insert(0) += 1;
         }
     }
 
     // Also count how many gaps have a `depends_on` referencing another gap.
-    // We already counted above. Now sort by count descending.
+    // We already counted above. Now sort by count descending, then gap_id ascending.
     let mut entries: Vec<LeverageEntry> = dep_count
         .into_iter()
         .map(|(gap_id, count)| LeverageEntry {
@@ -2797,23 +2837,56 @@ fn build_leverage_section(repo_root: &Path) -> LeverageSection {
             depended_by_count: count,
         })
         .collect();
-    entries.sort_by_key(|b| std::cmp::Reverse(b.depended_by_count));
+    entries.sort_by(|a, b| {
+        b.depended_by_count
+            .cmp(&a.depended_by_count)
+            .then_with(|| a.gap_id.cmp(&b.gap_id))
+    });
     entries.truncate(10);
 
     LeverageSection { entries }
 }
 
-/// Build the tokens-per-ship report by scanning `ambient.jsonl`.
+fn count_recent_main_merges(repo_root: &Path, cutoff_unix: u64) -> u64 {
+    if !repo_root.join(".git").exists() {
+        return 0;
+    }
+    let since_arg = format!("--since=@{cutoff_unix}");
+    for git_ref in ["origin/main", "main"] {
+        let out = std::process::Command::new("git")
+            .args(["rev-list", "--count", &since_arg, git_ref])
+            .current_dir(repo_root)
+            .stderr(std::process::Stdio::null())
+            .output();
+        if let Ok(o) = out {
+            if o.status.success() {
+                if let Ok(n) = String::from_utf8_lossy(&o.stdout).trim().parse::<u64>() {
+                    return n;
+                }
+            }
+        }
+    }
+    0
+}
+
+/// Build the tokens-per-ship report by scanning `ambient.jsonl` AND
+/// `.chump/state.db` (`gaps WHERE status='done'` + `gap_prs`, INFRA-8108).
 pub fn build_report(repo_root: &Path, window_days: u64) -> TokensPerShipReport {
     let ambient = repo_root.join(".chump-locks/ambient.jsonl");
     let contents = std::fs::read_to_string(&ambient).unwrap_or_default();
+    let db_facts = collect_db_ship_facts(repo_root);
 
-    let window_secs = window_days * 86_400;
+    let window_secs = window_days.saturating_mul(86_400);
     let now_unix = current_unix();
-    let cutoff = now_unix.saturating_sub(window_secs);
+    let cutoff = if window_days == 0 {
+        0
+    } else {
+        now_unix.saturating_sub(window_secs)
+    };
 
     let mut per_gap: BTreeMap<String, (u64, u64, u64)> = BTreeMap::new();
     let mut shipped_gaps: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut gap_shipped_events_in_window: u64 = 0;
 
     for line in contents.lines() {
         let kind = extract_field(line, "kind").unwrap_or_default();
@@ -2827,8 +2900,8 @@ pub fn build_report(repo_root: &Path, window_days: u64) -> TokensPerShipReport {
         match kind.as_str() {
             "session_end" => {
                 let gap_id = match extract_field(line, "gap_id") {
-                    Some(g) => g,
-                    None => continue,
+                    Some(g) if !g.is_empty() => g,
+                    _ => continue,
                 };
                 let outcome = extract_field(line, "outcome").unwrap_or_default();
                 let input = extract_int_field(line, "input_tokens").unwrap_or(0);
@@ -2846,8 +2919,8 @@ pub fn build_report(repo_root: &Path, window_days: u64) -> TokensPerShipReport {
             }
             "token_usage_partial" => {
                 let gap_id = match extract_field(line, "gap_id") {
-                    Some(g) => g,
-                    None => continue,
+                    Some(g) if !g.is_empty() => g,
+                    _ => continue,
                 };
                 let input = extract_int_field(line, "input_tokens").unwrap_or(0);
                 let output = extract_int_field(line, "output_tokens").unwrap_or(0);
@@ -2857,9 +2930,62 @@ pub fn build_report(repo_root: &Path, window_days: u64) -> TokensPerShipReport {
                 entry.1 += output;
                 entry.2 += cache;
             }
+            "gap_shipped"
+            | "ship_landed"
+            | "pr_merged"
+            | "gap_done"
+            | "gap_status_done_written" => {
+                if kind == "gap_shipped" {
+                    gap_shipped_events_in_window += 1;
+                }
+                if let Some(g) = extract_field(line, "gap_id").filter(|s| !s.is_empty()) {
+                    shipped_gaps.insert(g);
+                }
+                if let Some(pr) = extract_pr_from_line(line) {
+                    if let Some(gs) = db_facts.pr_to_gaps.get(&pr) {
+                        for g in gs {
+                            shipped_gaps.insert(g.clone());
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
+
+    // INFRA-8108: also count ships from state.db (gaps WHERE status='done' and
+    // merged gap_prs within the window, matching CREDIBLE-1582 Landings & Repair Rounds).
+    for (gap_id, &close_opt) in &db_facts.done_gaps {
+        if let Some(ts) = close_opt {
+            if ts >= cutoff {
+                shipped_gaps.insert(gap_id.clone());
+            }
+        }
+    }
+    for (&pr, &close_opt) in &db_facts.merged_prs {
+        if let Some(ts) = close_opt {
+            if ts >= cutoff {
+                if let Some(gs) = db_facts.pr_to_gaps.get(&pr) {
+                    for g in gs {
+                        shipped_gaps.insert(g.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    for gap_id in &shipped_gaps {
+        per_gap.entry(gap_id.clone()).or_insert((0, 0, 0));
+    }
+
+    let recent_merges = count_recent_main_merges(repo_root, cutoff);
+    let staleness_warning = if recent_merges > 0 && gap_shipped_events_in_window == 0 {
+        Some(format!(
+            "scoreboard_stale: origin/main has {recent_merges} merge(s) in the last {window_days}d window while gap_shipped events = 0 (INFRA-8108)"
+        ))
+    } else {
+        None
+    };
 
     let mut ships: Vec<ShipTokens> = per_gap
         .into_iter()
@@ -2889,6 +3015,7 @@ pub fn build_report(repo_root: &Path, window_days: u64) -> TokensPerShipReport {
             p90_cost_usd: None,
             max_cost_usd: None,
             top5: vec![],
+            staleness_warning,
         };
     }
 
@@ -2924,6 +3051,7 @@ pub fn build_report(repo_root: &Path, window_days: u64) -> TokensPerShipReport {
         b.cost_usd
             .partial_cmp(&a.cost_usd)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.gap_id.cmp(&b.gap_id))
     });
     let top5 = ships.into_iter().take(5).collect();
 
@@ -2937,6 +3065,7 @@ pub fn build_report(repo_root: &Path, window_days: u64) -> TokensPerShipReport {
         p90_cost_usd,
         max_cost_usd,
         top5,
+        staleness_warning,
     }
 }
 
@@ -5344,6 +5473,154 @@ mod tests {
         assert_eq!(ttl.p50_seconds, Some(7200));
         assert_eq!(ttl.max_seconds, Some(10800));
         assert!(!ttl.render_text().contains("No claim→ship pairs found"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn infra8109_leverage_decodes_json_arrays_and_strips_brackets_and_ignores_empty() {
+        let tmp = tempdir();
+        std::fs::create_dir_all(tmp.join(".chump")).unwrap();
+        let store = chump_gap_store::GapStore::open(&tmp).unwrap();
+
+        for (id, deps) in [
+            ("INFRA-8109-1", r#"["EFFECTIVE-449"]"#),
+            ("INFRA-8109-2", r#"["META-229", "META-230"]"#),
+            ("INFRA-8109-3", r#"["EFFECTIVE-449"]"#),
+            ("INFRA-8109-4", "[]"),
+            ("INFRA-8109-5", ""),
+        ] {
+            store
+                .conn_for_test()
+                .execute(
+                    "INSERT INTO gaps (id, domain, title, priority, status, depends_on)
+                     VALUES (?1, 'INFRA', 'dep test', 'P1', 'open', ?2)",
+                    rusqlite::params![id, deps],
+                )
+                .unwrap();
+        }
+
+        let section = build_leverage_section(&tmp);
+        let ids: Vec<&str> = section.entries.iter().map(|e| e.gap_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["EFFECTIVE-449", "META-229", "META-230"],
+            "expected only clean gap IDs, got {:?}",
+            section.entries
+        );
+        assert_eq!(section.entries[0].depended_by_count, 2);
+        assert_eq!(section.entries[1].depended_by_count, 1);
+        assert_eq!(section.entries[2].depended_by_count, 1);
+
+        let text = section.render_text();
+        assert!(text.contains("EFFECTIVE-449"));
+        assert!(text.contains("META-229"));
+        assert!(text.contains("META-230"));
+        assert!(!text.contains("[]"));
+        assert!(!text.contains('['));
+        assert!(!text.contains(']'));
+        assert!(!text.contains('"'));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn infra8108_ships_analysed_counts_done_gaps_and_gap_shipped_and_warns_when_stale() {
+        ensure_pricing();
+        let tmp = tempdir();
+        std::fs::create_dir_all(tmp.join(".chump")).unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&tmp)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.email", "test@users.noreply.github.com"])
+            .current_dir(&tmp)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&tmp)
+            .output();
+        std::fs::write(tmp.join("README.md"), "landed\n").unwrap();
+        let _ = std::process::Command::new("git")
+            .args(["add", "README.md"])
+            .current_dir(&tmp)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["commit", "-m", "INFRA-8108: merge (#5800)"])
+            .current_dir(&tmp)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["update-ref", "refs/remotes/origin/main", "HEAD"])
+            .current_dir(&tmp)
+            .output();
+
+        let now = current_unix() as i64;
+        let store = chump_gap_store::GapStore::open(&tmp).unwrap();
+        store
+            .conn_for_test()
+            .execute(
+                "INSERT INTO gaps (id, domain, title, priority, status, created_at, closed_at, closed_date, closed_pr)
+                 VALUES ('INFRA-8108-DB', 'INFRA', 'DB done ship', 'P1', 'done', ?1, ?2, '2026-10-25', 5800)",
+                rusqlite::params![now - 3600, now - 60],
+            )
+            .unwrap();
+        store
+            .conn_for_test()
+            .execute(
+                "INSERT INTO gap_prs (gap_id, pr_number, head_sha, opened_at, state, multi_ok)
+                 VALUES ('INFRA-8108-DB', 5800, 'deadbeef', ?1, 'merged', 0)",
+                rusqlite::params![now - 3600],
+            )
+            .unwrap();
+
+        let ts = fixture_ts();
+        // Case 1: DB done gap + token_usage_partial, but NO gap_shipped event yet ->
+        // Ships analysed == 1 AND staleness warning is raised because origin/main has a merge.
+        write_ambient(
+            &tmp,
+            &[&format!(
+                r#"{{"kind":"token_usage_partial","ts":"{ts}","session_id":"s1","gap_id":"INFRA-8108-DB","input_tokens":4000,"output_tokens":1000,"cache_read_tokens":0}}"#
+            )],
+        );
+        let r1 = build_report(&tmp, 7);
+        assert_eq!(
+            r1.ship_count, 1,
+            "DB status='done' gap must count in Ships analysed"
+        );
+        assert_eq!(r1.top5[0].gap_id, "INFRA-8108-DB");
+        assert_eq!(r1.top5[0].total_tokens, 5000);
+        assert!(
+            r1.staleness_warning.is_some(),
+            "expected staleness_warning when origin/main has merges and gap_shipped=0"
+        );
+        assert!(r1.render_text().contains("WARNING: scoreboard_stale"));
+
+        // Case 2: Add a gap_shipped event for a second gap ->
+        // Ships analysed == 2 AND staleness warning clears.
+        write_ambient(
+            &tmp,
+            &[
+                &format!(
+                    r#"{{"kind":"token_usage_partial","ts":"{ts}","session_id":"s1","gap_id":"INFRA-8108-DB","input_tokens":4000,"output_tokens":1000,"cache_read_tokens":0}}"#
+                ),
+                &format!(
+                    r#"{{"kind":"token_usage_partial","ts":"{ts}","session_id":"s2","gap_id":"INFRA-8108-AMB","input_tokens":2000,"output_tokens":500,"cache_read_tokens":0}}"#
+                ),
+                &format!(
+                    r#"{{"kind":"gap_shipped","ts":"{ts}","session":"s2","gap_id":"INFRA-8108-AMB","closed_pr":5801}}"#
+                ),
+            ],
+        );
+        let r2 = build_report(&tmp, 7);
+        assert_eq!(
+            r2.ship_count, 2,
+            "both DB done gap and gap_shipped event must count"
+        );
+        assert!(
+            r2.staleness_warning.is_none(),
+            "staleness_warning must clear once gap_shipped > 0"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

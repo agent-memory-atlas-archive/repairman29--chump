@@ -428,4 +428,58 @@ printf '%s\n' "$T12_CHILD_ENV" | grep -qx 'GH_TOKEN=fake-gh-tok' \
     || fail "CREDIBLE-1585: allowlisted GH_TOKEN missing in headless claude child env"
 ok "CREDIBLE-1585: SUPABASE_SERVICE_ROLE_KEY and POSTGRES_PASSWORD are scrubbed from headless claude spawns and no unit sources providers.env with set -a"
 
+# ── Test 13: INFRA-8089: _converge_git_noreply_identity sets global noreply and resets local non-noreply overrides ──
+T13_HOME="$TMP/t13-home"
+T13_REPO="$TMP/t13-repo"
+T13_AMBIENT="$TMP/t13-ambient.jsonl"
+mkdir -p "$T13_HOME" "$T13_REPO"
+git init -q "$T13_REPO"
+git -C "$T13_REPO" config --local user.email "private-leak@gmail.com"
+mkdir -p "$T13_REPO/.git/worktrees/wt1"
+git config --file "$T13_REPO/.git/worktrees/wt1/config.worktree" user.email "t@t.t"
+
+(
+    export HOME="$T13_HOME"
+    export CHUMP_NODE_REPO="$T13_REPO"
+    export CHUMP_NODE_CONVERGE_LOGDIR="$TMP/logs"
+    export NODE_AMBIENT="$T13_AMBIENT"
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _converge_git_noreply_identity "$T13_REPO"
+) > "$TMP/t13.out" 2>&1 || fail "INFRA-8089: _converge_git_noreply_identity failed"
+
+EXPECT_NOREPLY="204632470+repairman29@users.noreply.github.com"
+[[ "$(HOME="$T13_HOME" git config --global user.email)" == "$EXPECT_NOREPLY" ]] \
+    || fail "INFRA-8089: global user.email not set to $EXPECT_NOREPLY"
+[[ "$(git -C "$T13_REPO" config --local user.email)" == "$EXPECT_NOREPLY" ]] \
+    || fail "INFRA-8089: local user.email override in $T13_REPO was not reset to $EXPECT_NOREPLY"
+[[ "$(git config --file "$T13_REPO/.git/worktrees/wt1/config.worktree" user.email)" == "$EXPECT_NOREPLY" ]] \
+    || fail "INFRA-8089: worktree config user.email override was not reset to $EXPECT_NOREPLY"
+grep -q 'INFRA-8089: reset non-noreply local user.email' "$TMP/t13.out" \
+    || fail "INFRA-8089: expected report of non-noreply local user.email reset: $(cat "$TMP/t13.out")"
+grep -q '"kind":"identity_residue_swept"' "$T13_AMBIENT" \
+    || fail "INFRA-8089: expected identity_residue_swept ambient event"
+ok "INFRA-8089: _converge_git_noreply_identity sets global noreply and resets/reports local non-noreply overrides"
+
+# ── Test 14: INFRA-8106: _ensure_pr_book_timer installs chump-pr-book.{service,timer} alongside settle timer ──
+T14_UNITS="$TMP/t14-units"
+mkdir -p "$T14_UNITS"
+touch "$T14_UNITS/chump-pr-book-settle.timer"
+cp "$REPO_ROOT/scripts/dispatch/chump-pr-book.service" "$CHECKOUT/scripts/dispatch/chump-pr-book.service"
+cp "$REPO_ROOT/scripts/dispatch/chump-pr-book.timer" "$CHECKOUT/scripts/dispatch/chump-pr-book.timer"
+(
+    export HOME="$RERENDER_HOME"
+    export USER="ubuntu"
+    export CHUMP_NODE_REPO="$CHECKOUT"
+    export CHUMP_NODE_CONVERGE_LOGDIR="$TMP/logs"
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _ensure_pr_book_timer "$T14_UNITS"
+) || fail "INFRA-8106: _ensure_pr_book_timer failed"
+[[ -f "$T14_UNITS/chump-pr-book.service" && -f "$T14_UNITS/chump-pr-book.timer" ]] \
+    || fail "INFRA-8106: chump-pr-book.{service,timer} not installed into $T14_UNITS"
+grep -qF "$CHECKOUT_REAL/scripts/coord/pr-book.sh" "$T14_UNITS/chump-pr-book.service" \
+    || fail "INFRA-8106: rendered chump-pr-book.service missing host-rewritten pr-book.sh ExecStart"
+ok "INFRA-8106: _ensure_pr_book_timer renders and installs chump-pr-book.{service,timer} alongside settle timer"
+
 printf '\033[0;32mALL PASS\033[0m scripts/ci/test-node-converge.sh\n'

@@ -71,16 +71,22 @@ if [[ "$MODE" == "settle" ]]; then
     done
     OUTJSON+="]"
   fi
-  OMAP="$(echo "$OUTJSON" | jq -c 'reduce .[] as $p ({};
+  if ! OMAP="$(echo "$OUTJSON" | jq -c 'reduce .[] as $p ({};
             if   $p.state=="MERGED" then .[($p.number|tostring)]=1
             elif $p.state=="CLOSED" then .[($p.number|tostring)]=0
-            else . end)' 2>/dev/null)"
-  [[ -z "$OMAP" ]] && OMAP='{}'
-  # Join the LATEST prediction per PR to its realized outcome, score via the
+            else . end)' 2>/dev/null)" || [[ -z "$OMAP" ]]; then
+    echo "ERROR: pr-book.sh --settle: failed to parse outcomes JSON; preserving $CALIB" >&2
+    exit 1
+  fi
+  # Join the LATEST prediction per PR to its realized outcome (reading
+  # (.p_merge // .price) for legacy compatibility, INFRA-8105), score via the
   # generic calibration component (RESILIENT-974), and rewrite the calibration
   # log — same shape as before this refactor: one {predicted,outcome} row per
   # resolved PR plus a trailing {kind:pr_book_calibration,brier} summary row.
-  RES="$(calibration_settle "$LEDGER" "$OMAP" "$CALIB" pr p_merge pr_book_prediction pr_book_calibration)"
+  if ! RES="$(calibration_settle "$LEDGER" "$OMAP" "$CALIB" pr p_merge pr_book_prediction pr_book_calibration)" || [[ -z "$RES" ]]; then
+    echo "ERROR: pr-book.sh --settle: calibration_settle failed; preserving $CALIB" >&2
+    exit 1
+  fi
   BRIER="$(echo "$RES" | jq -r '.brier // "n/a"')"
   RESOLVED="$(echo "$RES" | jq -r '.resolved')"
   PREDS="$(echo "$RES" | jq -r '.predictions')"

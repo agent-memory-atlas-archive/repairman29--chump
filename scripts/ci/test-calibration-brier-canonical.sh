@@ -142,6 +142,106 @@ diverge_eq="$(awk -v a="$diverge_vital_val" 'BEGIN{print (a+0==0.5)?1:0}')"
   && _ok "vital-signs cites the authoritative summary row (0.5), not a naive recompute (got $diverge_vital_val)" \
   || _fail "vital-signs did NOT cite the authoritative summary row — recompute drift detected (expected 0.5, got '$diverge_vital_val')"
 
+# ── 6. INFRA-8105: legacy `price`-keyed ledger rows score cleanly alongside `p_merge` ──
+echo "[test-calibration-brier-canonical] legacy price-keyed ledger fixture (INFRA-8105)"
+LEGACY_LEDGER="$TMP/legacy-led.jsonl"
+LEGACY_CALIB="$TMP/legacy-cal.log"
+cat > "$LEGACY_LEDGER" <<'J'
+{"ts":"t","pr":1,"sha":"x","price":0.9,"state":"CLEAN"}
+{"ts":"t","pr":2,"sha":"y","p_merge":0.2,"state":"DIRTY"}
+J
+legacy_out="$(PR_BOOK_LEDGER="$LEGACY_LEDGER" PR_BOOK_CALIB="$LEGACY_CALIB" \
+  PR_BOOK_OUTCOMES_FIXTURE="$TMP/outcomes.json" bash "$PRBOOK" --settle 2>&1)"
+legacy_rc=$?
+if [[ "$legacy_rc" -eq 0 ]] && echo "$legacy_out" | grep -qE 'running Brier: 0\.025($| )'; then
+  _ok "legacy price-keyed ledger + p_merge ledger settled cleanly to Brier=0.025"
+else
+  echo "$legacy_out"
+  _fail "legacy price-keyed ledger failed to settle (rc=$legacy_rc)"
+fi
+
+# ── 7. INFRA-8105: jq failure / invalid ledger exits non-zero and preserves existing calibration log ──
+echo "[test-calibration-brier-canonical] settle preserves calibration log on jq failure (INFRA-8105)"
+PRESERVE_CALIB="$TMP/preserve-cal.log"
+cp "$LEGACY_CALIB" "$PRESERVE_CALIB"
+BEFORE_CONTENT="$(cat "$PRESERVE_CALIB")"
+BAD_LEDGER="$TMP/bad-led.jsonl"
+printf '{not-valid-json\n' > "$BAD_LEDGER"
+PR_BOOK_LEDGER="$BAD_LEDGER" PR_BOOK_CALIB="$PRESERVE_CALIB" \
+  PR_BOOK_OUTCOMES_FIXTURE="$TMP/outcomes.json" bash "$PRBOOK" --settle >/dev/null 2>&1
+bad_rc=$?
+AFTER_CONTENT="$(cat "$PRESERVE_CALIB" 2>/dev/null)"
+if [[ "$bad_rc" -ne 0 && -s "$PRESERVE_CALIB" && "$AFTER_CONTENT" == "$BEFORE_CONTENT" ]]; then
+  _ok "settle exited non-zero ($bad_rc) on jq failure and preserved existing calibration log"
+else
+  _fail "settle failed to preserve calibration log on jq error (rc=$bad_rc, size=$(wc -c < "$PRESERVE_CALIB" 2>/dev/null))"
+fi
+
+# ── 8. INFRA-8105: vital-signs.sh splits null basis into specific causes ─────
+echo "[test-calibration-brier-canonical] vital-signs null-basis classification (INFRA-8105)"
+_vs_basis() {
+  local cal="$1" led="${2:-$TMP/no-such-ledger.jsonl}"
+  CHUMP_REPO_ROOT="$DATA_ROOT" REPO_ROOT="$DATA_ROOT" \
+    CHUMP_VITALS_OUT="$TMP/vitals-basis.json" \
+    CHUMP_AMBIENT_LOG="$DATA_ROOT/.chump-locks/ambient.jsonl" \
+    CHUMP_PR_BOOK_CALIB="$cal" \
+    PR_BOOK_LEDGER="$led" \
+    timeout 90 bash "$VITAL" --dry-run 2>/dev/null \
+    | jq -r '.signs[] | select(.key=="calibration_brier") | "\(.value)|\(.basis)"'
+}
+
+# 8a. missing_log
+b_missing="$(_vs_basis "$TMP/does-not-exist.log")"
+[[ "$b_missing" == null\|missing_log:* ]] \
+  && _ok "vital-signs classifies missing calibration log as missing_log" \
+  || _fail "expected null|missing_log:*, got '$b_missing'"
+
+# 8b. empty_crashed_log
+EMPTY_CAL="$TMP/empty-cal.log"
+: > "$EMPTY_CAL"
+b_empty="$(_vs_basis "$EMPTY_CAL")"
+[[ "$b_empty" == null\|empty_crashed_log:* ]] \
+  && _ok "vital-signs classifies 0-byte calibration log as empty_crashed_log" \
+  || _fail "expected null|empty_crashed_log:*, got '$b_empty'"
+
+# 8c. n=0_unresolved
+N0_CAL="$TMP/n0-cal.log"
+NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf '{"ts":"%s","kind":"pr_book_calibration","brier":null,"n":0,"matched":0,"unmatched":0}\n' "$NOW_ISO" > "$N0_CAL"
+b_n0="$(_vs_basis "$N0_CAL")"
+[[ "$b_n0" == null\|n=0_unresolved:* ]] \
+  && _ok "vital-signs classifies n=0 null Brier as n=0_unresolved" \
+  || _fail "expected null|n=0_unresolved:*, got '$b_n0'"
+
+# 8d. stale_summary
+STALE_SUM_CAL="$TMP/stale-sum-cal.log"
+printf '{"ts":"2020-01-01T00:00:00Z","kind":"pr_book_calibration","brier":0.025,"n":2,"matched":1,"unmatched":1}\n' > "$STALE_SUM_CAL"
+b_stale_sum="$(_vs_basis "$STALE_SUM_CAL")"
+[[ "$b_stale_sum" == null\|stale_summary:* ]] \
+  && _ok "vital-signs classifies >24h summary timestamp as stale_summary" \
+  || _fail "expected null|stale_summary:*, got '$b_stale_sum'"
+
+# 8e. stale_ledger
+FRESH_CAL="$TMP/fresh-cal.log"
+printf '{"ts":"%s","kind":"pr_book_calibration","brier":0.025,"n":2,"matched":1,"unmatched":1}\n' "$NOW_ISO" > "$FRESH_CAL"
+STALE_LED="$TMP/stale-ledger.jsonl"
+printf '{"ts":"2020-01-01T00:00:00Z","pr":1,"sha":"x","p_merge":0.9,"state":"CLEAN"}\n' > "$STALE_LED"
+b_stale_led="$(_vs_basis "$FRESH_CAL" "$STALE_LED")"
+[[ "$b_stale_led" == null\|stale_ledger:* ]] \
+  && _ok "vital-signs classifies >24h ledger timestamp as stale_ledger" \
+  || _fail "expected null|stale_ledger:*, got '$b_stale_led'"
+
+# ── 9. INFRA-8106: chump-pr-book.service + .timer templates exist and run pr-book.sh pricing mode ──
+echo "[test-calibration-brier-canonical] chump-pr-book.service + .timer templates (INFRA-8106)"
+if [[ -f "$REPO_ROOT/scripts/dispatch/chump-pr-book.service" && -f "$REPO_ROOT/scripts/dispatch/chump-pr-book.timer" ]] \
+   && grep -q 'scripts/coord/pr-book.sh' "$REPO_ROOT/scripts/dispatch/chump-pr-book.service" \
+   && ! grep -q -- '--settle' "$REPO_ROOT/scripts/dispatch/chump-pr-book.service" \
+   && grep -q 'OnUnitActiveSec=15min' "$REPO_ROOT/scripts/dispatch/chump-pr-book.timer"; then
+  _ok "chump-pr-book.service + .timer run pr-book.sh pricing mode every 15m"
+else
+  _fail "chump-pr-book.service / .timer missing or misconfigured"
+fi
+
 echo
 echo "[test-calibration-brier-canonical] $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

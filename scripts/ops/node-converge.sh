@@ -362,10 +362,91 @@ _converge_worker_launchers() {
     return 0
 }
 
+# INFRA-8089: ensure global git user.email is the GitHub noreply address and
+# scan git checkouts ($REPO_ROOT, linked worktrees, and any explicitly passed
+# checkout paths) for local user.email overrides that are not a noreply address,
+# reporting and resetting them so GitHub email-privacy blocks never reject pushes.
+_converge_git_noreply_identity() {
+    local noreply="${CHUMP_GIT_NOREPLY_EMAIL:-204632470+repairman29@users.noreply.github.com}"
+    git config --global user.email "$noreply" 2>/dev/null || true
+
+    local checkouts=()
+    if [[ "$#" -gt 0 ]]; then
+        checkouts+=("$@")
+    fi
+    [[ -n "${REPO_ROOT:-}" && -e "$REPO_ROOT/.git" ]] && checkouts+=("$REPO_ROOT")
+    if [[ -n "${REPO_ROOT:-}" && -d "$REPO_ROOT/.claude/worktrees" ]]; then
+        local wt
+        for wt in "$REPO_ROOT"/.claude/worktrees/*; do
+            [[ -e "$wt/.git" ]] && checkouts+=("$wt")
+        done
+    fi
+
+    local dir local_email
+    for dir in "${checkouts[@]}"; do
+        [[ -d "$dir" && -e "$dir/.git" ]] || continue
+        local_email="$(git -C "$dir" config --local user.email 2>/dev/null || true)"
+        if [[ -n "$local_email" && "$local_email" != *@users.noreply.github.com && "$local_email" != *.chump.fleet ]]; then
+            git -C "$dir" config --local user.email "$noreply" 2>/dev/null || true
+            log "INFRA-8089: reset non-noreply local user.email '$local_email' -> '$noreply' in $dir"
+            emit identity_residue_swept "\"repo\":\"$dir\",\"removed_email\":\"$local_email\",\"new_email\":\"$noreply\""
+        fi
+    done
+
+    if [[ -n "${REPO_ROOT:-}" && -d "$REPO_ROOT/.git/worktrees" ]]; then
+        local cf wt_email
+        for cf in "$REPO_ROOT"/.git/worktrees/*/config.worktree; do
+            [[ -f "$cf" ]] || continue
+            wt_email="$(git config --file "$cf" user.email 2>/dev/null || true)"
+            if [[ -n "$wt_email" && "$wt_email" != *@users.noreply.github.com && "$wt_email" != *.chump.fleet ]]; then
+                git config --file "$cf" user.email "$noreply" 2>/dev/null || true
+                log "INFRA-8089: reset non-noreply worktree user.email '$wt_email' -> '$noreply' in $cf"
+                emit identity_residue_swept "\"worktree\":\"$cf\",\"removed_email\":\"$wt_email\",\"new_email\":\"$noreply\""
+            fi
+        done
+    fi
+    return 0
+}
+
+# INFRA-8106: ensure chump-pr-book.{service,timer} (pricing mode) is installed
+# alongside chump-pr-book-settle.{service,timer} on hub/control nodes so open-PR
+# predictions keep flowing into ~/.chump/pr-book-ledger.jsonl every 15 minutes.
+_ensure_pr_book_timer() {
+    local unit_dir="${1:-}"
+    if [[ -z "$unit_dir" ]]; then
+        if [[ "${EUID:-$(id -u)}" -eq 0 && "${HOME:-}" == "/root" ]]; then
+            unit_dir="/etc/systemd/system"
+        else
+            unit_dir="${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/systemd/user"
+        fi
+    fi
+    [[ -d "$unit_dir" ]] || return 0
+    if [[ ! -f "$unit_dir/chump-pr-book-settle.timer" && "${NODE_ROLE:-}" != "hub" && "${NODE_ROLE:-}" != "control" ]]; then
+        return 0
+    fi
+    local rewrite_lib="$REPO_ROOT/scripts/ops/lib/organ-unit-install-lib.sh"
+    [[ -f "$rewrite_lib" ]] || return 0
+    # shellcheck disable=SC1090
+    source "$rewrite_lib"
+    local scope="user"
+    [[ "$unit_dir" == "/etc/systemd/system" ]] && scope="system"
+    local run_user="${USER:-$(id -un 2>/dev/null || echo ubuntu)}"
+    local run_home="${HOME:-/home/$run_user}"
+    local ext tmpl
+    for ext in service timer; do
+        tmpl="$REPO_ROOT/scripts/dispatch/chump-pr-book.$ext"
+        [[ -f "$tmpl" ]] || continue
+        organ_unit_host_rewrite "$tmpl" "$unit_dir/chump-pr-book.$ext" "$run_user" "$run_home" 0 "$REPO_ROOT" "$scope" >>"$LOG" 2>&1 || true
+    done
+    return 0
+}
+
 _reconcile_role_organs() {
     _sanitize_node_env
     _dedupe_single_scope_organs
     _converge_worker_launchers
+    _converge_git_noreply_identity
+    _ensure_pr_book_timer
     local installer="$REPO_ROOT/scripts/setup/chump-node-install.sh"
     if [[ ! -f "$installer" ]]; then
         log "WARN: $installer not found; skipping role-organ reconcile"
@@ -406,6 +487,8 @@ _reconcile_role_organs() {
     _sanitize_node_env
     _dedupe_single_scope_organs
     _converge_worker_launchers
+    _converge_git_noreply_identity
+    _ensure_pr_book_timer
 }
 
 emit() {
@@ -687,7 +770,9 @@ if [[ "$HEAD_SHA" == "$TARGET_SHA" && "$BEHIND" -eq 0 && "$TARGET_SHA" != "unkno
         _sanitize_node_env
         _dedupe_single_scope_organs
         _converge_worker_launchers
+        _ensure_pr_book_timer
     fi
+    _converge_git_noreply_identity
     _maybe_restart_stale_workers ""
     # Prune old logs (keep last 24) even on the fast path.
     ls -t "$LOG_DIR"/converge-*.log 2>/dev/null | tail -n +25 | xargs -r rm -f 2>/dev/null || true

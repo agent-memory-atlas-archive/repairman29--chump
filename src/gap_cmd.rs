@@ -45,6 +45,52 @@ pub fn link_pr_into_store(
     store.link_pr_opts(gap_id, pr_number, head_sha, multi, move_link)
 }
 
+/// INFRA-8108: emit a `kind=gap_shipped` event to `.chump-locks/ambient.jsonl`
+/// whenever `chump gap ship` transitions a gap to `done`.
+/// # scanner-anchor: "kind":"gap_shipped"
+pub fn emit_gap_shipped(
+    repo_root: &Path,
+    gap_id: &str,
+    session_id: &str,
+    closed_pr: Option<i64>,
+) -> Result<()> {
+    use std::io::Write as _;
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let pr_str = closed_pr
+        .map(|pr| format!(",\"closed_pr\":{pr},\"pr_number\":{pr}"))
+        .unwrap_or_default();
+    let line = format!(
+        "{{\"ts\":\"{ts}\",\"kind\":\"gap_shipped\",\"gap_id\":\"{gap_id}\",\"session\":\"{session_id}\"{pr_str}}}\n"
+    );
+    let locks = repo_root.join(".chump-locks");
+    std::fs::create_dir_all(&locks)?;
+    let amb = locks.join("ambient.jsonl");
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&amb)?;
+    f.write_all(line.as_bytes())?;
+    Ok(())
+}
+
+/// INFRA-8108: execute `GapStore::ship_with_external_repo` and emit
+/// `kind=gap_shipped` on the first transition to `done` (idempotent on re-ship).
+pub fn ship_gap(
+    store: &chump_gap_store::GapStore,
+    repo_root: &Path,
+    gap_id: &str,
+    session_id: &str,
+    closed_pr: Option<i64>,
+    external_repo: Option<&str>,
+) -> Result<()> {
+    let was_terminal = store.already_terminal(gap_id)?.is_some();
+    store.ship_with_external_repo(gap_id, session_id, closed_pr, external_repo)?;
+    if !was_terminal {
+        let _ = emit_gap_shipped(repo_root, gap_id, session_id, closed_pr);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
