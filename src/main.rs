@@ -6614,13 +6614,18 @@ async fn main() -> Result<()> {
             Some(g) if !g.starts_with('-') => g.clone(),
             _ => {
                 eprintln!(
-                    "Usage: chump dispatch <GAP-ID> [--auto-merge] [--skip-tests] [--paths X,Y] [--backend BACKEND] [--model M] [--prompt P] [--print-prompt]"
+                    "Usage: chump dispatch <GAP-ID> [--auto-merge] [--skip-tests] [--paths X,Y] [--backend BACKEND] [--model M] [--prompt P] [--repair] [--print-prompt]"
                 );
                 std::process::exit(2);
             }
         };
         let auto_merge = args.iter().any(|a| a == "--auto-merge");
         let skip_tests = args.iter().any(|a| a == "--skip-tests");
+        // CREDIBLE-1589: explicit opt-in to repair an already-open PR. When a PR
+        // is open for the gap, this flag (not the ambient
+        // CHUMP_CLAIM_ALLOW_DUPLICATE_PR env default) is what admits the dispatch
+        // as a REPAIR onto the PR head branch via the gate below.
+        let repair_flag = args.iter().any(|a| a == "--repair");
         let paths = args
             .iter()
             .position(|a| a == "--paths")
@@ -6672,7 +6677,7 @@ async fn main() -> Result<()> {
         let print_prompt = args.iter().any(|a| a == "--print-prompt");
         let spawns_work = backend != "interactive" && backend != "claude";
         let open_pr = if spawns_work {
-            match dispatch_repair::open_pr_gate(&repo_root, &gap_id) {
+            match dispatch_repair::open_pr_gate(&repo_root, &gap_id, repair_flag) {
                 Ok(pr) => pr,
                 Err(refusal) => {
                     eprintln!("{refusal}");
@@ -6684,11 +6689,16 @@ async fn main() -> Result<()> {
         };
         let mut mode = match &open_pr {
             Some(pr) => {
+                // CREDIBLE-1589: report the actual trigger — the explicit
+                // --repair flag is the documented path; the env bypass is legacy.
+                let via = if repair_flag {
+                    "--repair".to_string()
+                } else {
+                    format!("{}=1", dispatch_repair::ALLOW_DUP_ENV)
+                };
                 eprintln!(
-                    "[dispatch] {}=1 and open PR #{} exists: repairing on {}",
-                    dispatch_repair::ALLOW_DUP_ENV,
-                    pr.number,
-                    pr.head_branch
+                    "[dispatch] {via} and open PR #{} exists: repairing on {}",
+                    pr.number, pr.head_branch
                 );
                 dispatch::DispatchMode::Repair {
                     head_branch: pr.head_branch.clone(),

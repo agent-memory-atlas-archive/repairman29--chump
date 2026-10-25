@@ -163,13 +163,19 @@ pub fn allow_duplicate_pr_from_env() -> bool {
         .unwrap_or(false)
 }
 
-/// The refusal printed when a dispatch hits an open PR without the override.
+/// The refusal printed when a dispatch hits an open PR and repair was not
+/// requested. CREDIBLE-1589: the documented way in is the explicit `--repair`
+/// CLI flag (DispatchMode::Repair onto the PR head branch). The legacy
+/// `CHUMP_CLAIM_ALLOW_DUPLICATE_PR=1` env bypass (INFRA-1982, shared with
+/// `chump claim`) is still honored but is NOT the path a caller should reach
+/// for — a safety input belongs on an explicit arg, not an ambient env default.
 pub fn refusal_message(gap_id: &str, pr: &OpenPr) -> String {
     format!(
         "[dispatch] INFRA-1982/INFRA-8199: open PR #{n} already covers {gap} \
          (head branch: {branch}). Refusing to spawn a work backend that would \
-         start over from origin/main.\n  Repair it there, or set {env}=1 to \
-         dispatch a REPAIR brief onto {branch}.",
+         start over from origin/main.\n  Pass --repair to dispatch a REPAIR \
+         brief onto {branch} instead, or repair it there by hand. (Legacy \
+         bypass: {env}=1.)",
         n = pr.number,
         gap = gap_id,
         branch = pr.head_branch,
@@ -178,26 +184,42 @@ pub fn refusal_message(gap_id: &str, pr: &OpenPr) -> String {
 }
 
 /// Pure decision for the gate: `Ok(None)` = no PR, proceed normally;
-/// `Ok(Some(pr))` = PR open and override set, dispatch a repair;
-/// `Err(msg)` = PR open, no override, refuse.
+/// `Ok(Some(pr))` = PR open and repair authorized, dispatch a repair;
+/// `Err(msg)` = PR open, repair not authorized, refuse.
+///
+/// CREDIBLE-1589: `repair_authorized` is TRUE when the caller passed the
+/// explicit `--repair` CLI flag OR the legacy `CHUMP_CLAIM_ALLOW_DUPLICATE_PR`
+/// env bypass is set. The combining lives in [`open_pr_gate`]; this function
+/// stays a pure decision over a single boolean.
 pub fn decide_gate(
     gap_id: &str,
     open: Option<OpenPr>,
-    allow_dup: bool,
+    repair_authorized: bool,
 ) -> Result<Option<OpenPr>, String> {
     match open {
         None => Ok(None),
-        Some(pr) if allow_dup => Ok(Some(pr)),
+        Some(pr) if repair_authorized => Ok(Some(pr)),
         Some(pr) => Err(refusal_message(gap_id, &pr)),
     }
 }
 
 /// The gate `chump dispatch` runs before spawning any work backend.
-pub fn open_pr_gate(repo_root: &Path, gap_id: &str) -> Result<Option<OpenPr>, String> {
+///
+/// CREDIBLE-1589: repair is admitted by the explicit `--repair` flag
+/// (`repair_requested`), which is the documented path and the one a systemd
+/// unit/timer never passes. The legacy `CHUMP_CLAIM_ALLOW_DUPLICATE_PR` env
+/// bypass is still honored for back-compat, but a safety input (enter the
+/// repair path onto an existing PR head branch) belongs on an explicit CLI
+/// arg, not an ambient env default.
+pub fn open_pr_gate(
+    repo_root: &Path,
+    gap_id: &str,
+    repair_requested: bool,
+) -> Result<Option<OpenPr>, String> {
     decide_gate(
         gap_id,
         find_open_pr_for_gap(repo_root, gap_id),
-        allow_duplicate_pr_from_env(),
+        repair_requested || allow_duplicate_pr_from_env(),
     )
 }
 

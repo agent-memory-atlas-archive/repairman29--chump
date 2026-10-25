@@ -67,16 +67,22 @@ CLAUDE_BIN="claude"
 CHECKOUT="$HOME/chump"
 SELF_LOGIN=""          # own-lane skip: a PR authored by this login is not reviewed
 REPO=""                # owner/repo; empty = current checkout's repo
+# CREDIBLE-1589 (AC3): the CHANGES-REQUIRED repair dispatch path is OFF by
+# default (a constant switch, below). --enable-repair is the test seam that
+# flips it on; the systemd unit never passes it, so production stays OFF until
+# the lane-1 Rust slice teaches `chump dispatch` the explicit --repair flag.
+ENABLE_REPAIR=0
 declare -a ONLY_PRS=()
 while (( $# )); do
     case "$1" in
-        --claude-bin) CLAUDE_BIN="${2:-}"; shift 2 ;;
-        --checkout)   CHECKOUT="${2:-}"; shift 2 ;;
-        --self-login) SELF_LOGIN="${2:-}"; shift 2 ;;
-        --repo)       REPO="${2:-}"; shift 2 ;;
-        --pr)         ONLY_PRS+=("${2:-}"); shift 2 ;;
-        -h|--help)    sed -n '2,45p' "$0"; exit 0 ;;
-        *)            echo "[review-organ] unknown argument '$1'" >&2; exit 2 ;;
+        --claude-bin)    CLAUDE_BIN="${2:-}"; shift 2 ;;
+        --checkout)      CHECKOUT="${2:-}"; shift 2 ;;
+        --self-login)    SELF_LOGIN="${2:-}"; shift 2 ;;
+        --repo)          REPO="${2:-}"; shift 2 ;;
+        --pr)            ONLY_PRS+=("${2:-}"); shift 2 ;;
+        --enable-repair) ENABLE_REPAIR=1; shift ;;
+        -h|--help)       sed -n '2,45p' "$0"; exit 0 ;;
+        *)               echo "[review-organ] unknown argument '$1'" >&2; exit 2 ;;
     esac
 done
 
@@ -101,6 +107,17 @@ GATE_LIST_VERSION="$(chump_ship_gate_list_version)"
 # held for a mutant-capable reviewer (repair item 8). This is a CONSTANT, not an
 # env read — flipping it on without a real runner would defeat the mutation rule.
 REVIEW_MUTANT_RUNNER_AVAILABLE=0
+
+# CREDIBLE-1589 (AC3): until the lane-1 Rust slice teaches `chump dispatch` an
+# explicit --repair flag (DispatchMode::Repair without the banned
+# CHUMP_CLAIM_ALLOW_DUPLICATE_PR env default), a plain repair dispatch onto a
+# gap that already has an open PR is refused by claim gate 7 (open-pr-for-gap).
+# Dispatching today only burns a guaranteed-refused cycle, so the repair path is
+# a CONSTANT switch, OFF by default. --enable-repair (the test seam; the systemd
+# unit never passes it) flips it on to exercise the wiring. NEVER read this from
+# an env var (Chief 2026-10-20): a safety input stays a constant or an explicit
+# CLI arg the unit never passes.
+REPAIR_DISPATCH_ENABLED="$ENABLE_REPAIR"
 
 BUDGET_USD="2.00"
 MODEL="opus"
@@ -353,16 +370,28 @@ derive_gap_from_branch() {
 
 # --auto-merge (AC4 / repair item 9). Derives the gap from the head branch name
 # and dispatches it; if no gap can be derived, logs and skips.
+#
+# CREDIBLE-1589 (AC1): the dispatch carries the explicit --repair flag so the
+# work lands on the EXISTING PR head branch (DispatchMode::Repair) instead of
+# starting over from origin/main — and so claim gate 7 (open-pr-for-gap) admits
+# it WITHOUT the banned CHUMP_CLAIM_ALLOW_DUPLICATE_PR env default. (AC3): the
+# whole path is behind REPAIR_DISPATCH_ENABLED, a constant OFF until the lane-1
+# Rust slice teaches `chump dispatch` to parse --repair; today a repair dispatch
+# would only hit a guaranteed-refused cycle, so the organ does not run it.
 dispatch_repair() {
     local pr="$1" head="$2" branch gap
+    if [[ "$REPAIR_DISPATCH_ENABLED" != 1 ]]; then
+        log "PR #$pr: CHANGES REQUIRED — repair dispatch path OFF (constant switch; awaiting lane-1 'chump dispatch --repair'); no repair dispatched"
+        return 0
+    fi
     branch="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json headRefName --jq '.headRefName' 2>/dev/null || true)"
     gap="$(derive_gap_from_branch "$branch")"
     if [[ -z "$gap" ]]; then
         log "PR #$pr: CHANGES REQUIRED but no gap id in branch '$branch' — no repair dispatched"
         return 0
     fi
-    log "PR #$pr: CHANGES REQUIRED → dispatching one repair for $gap (no auto-merge)"
-    chump dispatch "$gap" --backend headless >/dev/null 2>&1 || log "WARN: repair dispatch for $gap failed"
+    log "PR #$pr: CHANGES REQUIRED → dispatching one repair for $gap onto the PR head branch (--repair, no auto-merge)"
+    chump dispatch "$gap" --backend headless --repair >/dev/null 2>&1 || log "WARN: repair dispatch for $gap failed"
     DISPATCHED=$((DISPATCHED + 1))
 }
 
