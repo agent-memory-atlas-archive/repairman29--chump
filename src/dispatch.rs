@@ -1471,6 +1471,66 @@ fn set_dispatch_branch_upstream(worktree: &Path, branch: &str) {
 
 // ── Internals (each one independently portable in Phase 3) ───────────────────
 
+/// INFRA-8177: Returns `true` when a gap's priority (`P0` / `critical`) or
+/// tags/skills/title (`keystone` / `unwedge`) require a minimum `sonnet`
+/// routing floor regardless of `xs`/`s` effort size.
+pub fn is_keystone_or_p0_floor(priority: &str, tags_or_skills: &str, title: &str) -> bool {
+    let p = priority.trim();
+    if p.eq_ignore_ascii_case("P0") || p.eq_ignore_ascii_case("critical") {
+        return true;
+    }
+    let tags_lower = tags_or_skills.to_ascii_lowercase();
+    let title_lower = title.to_ascii_lowercase();
+    for marker in ["keystone", "unwedge"] {
+        if tags_lower.contains(marker) || title_lower.contains(marker) {
+            return true;
+        }
+    }
+    false
+}
+
+/// INFRA-8177: Select model class (`haiku` | `sonnet` | `opus`) for a gap
+/// given `(priority, effort, tags_or_skills, title)`.
+///
+/// Effort tiers default to `xs`/`s` -> `haiku`, `m`/`l` -> `sonnet`,
+/// `xl` -> `opus`, but any `P0`/`critical` or `keystone`/`unwedge` gap has a
+/// hard floor of `sonnet` (never `haiku`).
+pub fn select_model_for_gap(
+    priority: &str,
+    effort: &str,
+    tags_or_skills: &str,
+    title: &str,
+) -> &'static str {
+    let base = match effort.trim().to_ascii_lowercase().as_str() {
+        "xl" => "opus",
+        "m" | "l" => "sonnet",
+        _ => "haiku",
+    };
+    if base == "haiku" && is_keystone_or_p0_floor(priority, tags_or_skills, title) {
+        "sonnet"
+    } else {
+        base
+    }
+}
+
+/// INFRA-8177: Upgrade `model` to `"sonnet"` if it is below the `sonnet` floor
+/// (`haiku` / `flash`) on a `P0`/`critical` or `keystone`/`unwedge` gap.
+pub fn enforce_routing_floor(
+    model: &str,
+    priority: &str,
+    tags_or_skills: &str,
+    title: &str,
+) -> String {
+    let trimmed = model.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let is_below_sonnet = lower == "haiku" || lower == "flash" || lower.contains("haiku");
+    if is_below_sonnet && is_keystone_or_p0_floor(priority, tags_or_skills, title) {
+        "sonnet".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Execute the user-provided work for a dispatch cycle. Variant-dispatched
 /// per [`WorkBackend`].
 fn do_work(ws: &Workspace) -> Result<()> {
@@ -1840,7 +1900,12 @@ fn spawn_headless(ws: &Workspace, model: &str, prompt: &str) -> Result<()> {
             opts.gap_id
         );
     }
-    let mut cmd = headless_command_skeleton(model);
+    let effective_model = chump_gap_store::GapStore::open(&opts.repo_root)
+        .ok()
+        .and_then(|s| s.get(opts.gap_id).ok().flatten())
+        .map(|g| enforce_routing_floor(model, &g.priority, &g.skills_required, &g.title))
+        .unwrap_or_else(|| model.to_string());
+    let mut cmd = headless_command_skeleton(&effective_model);
     // RESILIENT-362: the claude CLI refuses `--dangerously-skip-permissions`
     // under root ("cannot be used with root/sudo privileges") unless IS_SANDBOX=1
     // marks an intentional sandboxed root env. Fleet root nodes (helsinki runs as
@@ -5358,6 +5423,71 @@ mod tests {
         assert!(
             dead,
             "grandchild pid {gpid} must be terminated by kill_child_process_group"
+        );
+    }
+
+    #[test]
+    fn infra_8177_p0_small_or_xs_routes_to_at_least_sonnet_never_haiku() {
+        assert_eq!(
+            select_model_for_gap("P0", "s", "", "normal title"),
+            "sonnet"
+        );
+        assert_eq!(
+            select_model_for_gap("P0", "xs", "", "normal title"),
+            "sonnet"
+        );
+        assert_eq!(
+            select_model_for_gap("critical", "xs", "", "urgent fix"),
+            "sonnet"
+        );
+        assert_eq!(select_model_for_gap("P0", "xl", "", "large P0"), "opus");
+        assert_eq!(
+            enforce_routing_floor("haiku", "P0", "", "small P0"),
+            "sonnet"
+        );
+        assert_eq!(
+            enforce_routing_floor("claude-haiku-4-5", "P0", "", "small P0"),
+            "sonnet"
+        );
+    }
+
+    #[test]
+    fn infra_8177_p2_keystone_or_unwedge_with_xs_routes_to_at_least_sonnet() {
+        assert_eq!(
+            select_model_for_gap("P2", "xs", "rust,keystone", "foundation piece"),
+            "sonnet"
+        );
+        assert_eq!(
+            select_model_for_gap("P2", "s", "unwedge", "fix stuck queue"),
+            "sonnet"
+        );
+        assert_eq!(
+            select_model_for_gap("P2", "xs", "", "Keystone: wire planner rank"),
+            "sonnet"
+        );
+        assert_eq!(
+            enforce_routing_floor("haiku", "P2", "keystone", "tagged gap"),
+            "sonnet"
+        );
+    }
+
+    #[test]
+    fn infra_8177_normal_p2_or_p3_small_routes_to_haiku() {
+        assert_eq!(
+            select_model_for_gap("P2", "s", "rust,docs", "routine cleanup"),
+            "haiku"
+        );
+        assert_eq!(
+            select_model_for_gap("P3", "xs", "", "minor doc typo"),
+            "haiku"
+        );
+        assert_eq!(
+            select_model_for_gap("P2", "m", "", "medium feature"),
+            "sonnet"
+        );
+        assert_eq!(
+            enforce_routing_floor("haiku", "P2", "rust", "routine cleanup"),
+            "haiku"
         );
     }
 }

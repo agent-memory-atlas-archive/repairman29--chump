@@ -2160,9 +2160,248 @@ fn uncommit_agent_commits_onto_base(work_dir: &Path, base_branch: &str) {
     }
 }
 
+// ── Almanac mine-before-build check (META-1053) ────────────────────────────
+
+/// Outcome of probing Almanac prior art for a gap before entering the
+/// implementation stage (`META-1053`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AlmanacMineProbe {
+    /// Almanac binary missing, timed out, or exited non-zero.
+    Unreachable { reason: String },
+    /// Almanac responded but reported degraded/fallback mode (`fallback_reason`
+    /// or trust-defect marker present).
+    Degraded { fallback_reason: String },
+    /// Almanac responded cleanly with zero prior-art hits.
+    Miss,
+    /// Almanac returned a prior-art hit with a `repo:file:line` citation.
+    Hit {
+        citation: String,
+        confidence: f64,
+        fallback_reason: Option<String>,
+        degraded: bool,
+    },
+}
+
+/// Recorded decision from [`evaluate_mine_before_build`] (`META-1053`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MineBeforeBuildVerdict {
+    /// Almanac was unreachable, degraded, or returned no high-confidence hit;
+    /// implementation proceeds without blocking.
+    ProceedDegradedOrMiss { reason: String },
+    /// Almanac returned a high-confidence hit and the gap context cites or
+    /// justifies building alongside that prior art.
+    ProceedJustified { citation: String },
+}
+
+/// Check whether `context_text` (gap description/notes/AC) cites `hit_citation`
+/// or carries an explicit reuse/justification marker (`Reuse-Justified:`,
+/// `almanac:`, or a `repo:path:line` reference).
+pub fn gap_has_prior_art_justification(context_text: &str, hit_citation: &str) -> bool {
+    let ctx = context_text.trim();
+    if ctx.is_empty() {
+        return false;
+    }
+    let lower = ctx.to_ascii_lowercase();
+    if lower.contains("reuse-justified:")
+        || lower.contains("prior-art:")
+        || lower.contains("almanac:")
+    {
+        return true;
+    }
+    let cite_trimmed = hit_citation.trim();
+    if !cite_trimmed.is_empty() && ctx.contains(cite_trimmed) {
+        return true;
+    }
+    // Also match the `repo:path` prefix if line numbers shifted.
+    if let Some((repo_and_path, _line)) = cite_trimmed.rsplit_once(':') {
+        if repo_and_path.contains(':') && ctx.contains(repo_and_path) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Parse JSON output from `almanac mine <query> --json` into an [`AlmanacMineProbe`].
+pub fn parse_almanac_mine_json(raw: &str) -> AlmanacMineProbe {
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return AlmanacMineProbe::Unreachable {
+            reason: "invalid_json".to_string(),
+        };
+    };
+    if val
+        .get("degraded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || val
+            .get("trust_defect")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    {
+        let reason = val
+            .get("fallback_reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("degraded_flag")
+            .to_string();
+        return AlmanacMineProbe::Degraded {
+            fallback_reason: reason,
+        };
+    }
+    if let Some(fb) = val
+        .get("fallback_reason")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return AlmanacMineProbe::Degraded {
+            fallback_reason: fb.to_string(),
+        };
+    }
+
+    let items = val
+        .get("hits")
+        .or_else(|| val.get("results"))
+        .or_else(|| val.get("items"))
+        .and_then(|v| v.as_array());
+    let Some(list) = items else {
+        return AlmanacMineProbe::Miss;
+    };
+    let Some(first) = list.first() else {
+        return AlmanacMineProbe::Miss;
+    };
+
+    let citation = first
+        .get("citation")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            let repo = first.get("repo").and_then(|v| v.as_str()).unwrap_or("repo");
+            let file = first
+                .get("file")
+                .or_else(|| first.get("path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let line = first.get("line").and_then(|v| v.as_u64()).unwrap_or(1);
+            format!("{repo}:{file}:{line}")
+        });
+    let confidence = first
+        .get("confidence")
+        .or_else(|| first.get("score"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let item_fb = first
+        .get("fallback_reason")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let item_degraded = first
+        .get("degraded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    AlmanacMineProbe::Hit {
+        citation,
+        confidence,
+        fallback_reason: item_fb,
+        degraded: item_degraded,
+    }
+}
+
+/// Evaluate the `META-1053` mine-before-build gate against an [`AlmanacMineProbe`].
+///
+/// - **Never blocks** when Almanac is unreachable, times out, returns 0 hits,
+///   or carries a `fallback_reason` / `degraded` marker.
+/// - **Fails closed ONLY** when Almanac is reachable, healthy, and returns a
+///   high-confidence hit (`confidence >= 0.85`) while `context_text` lacks a
+///   citation or `Reuse-Justified:` explanation.
+pub fn evaluate_mine_before_build(
+    title: &str,
+    context_text: &str,
+    probe: &AlmanacMineProbe,
+) -> Result<MineBeforeBuildVerdict> {
+    match probe {
+        AlmanacMineProbe::Unreachable { reason } => {
+            Ok(MineBeforeBuildVerdict::ProceedDegradedOrMiss {
+                reason: format!("unreachable:{reason}"),
+            })
+        }
+        AlmanacMineProbe::Degraded { fallback_reason } => {
+            Ok(MineBeforeBuildVerdict::ProceedDegradedOrMiss {
+                reason: format!("degraded:{fallback_reason}"),
+            })
+        }
+        AlmanacMineProbe::Miss => Ok(MineBeforeBuildVerdict::ProceedDegradedOrMiss {
+            reason: "no_hits".to_string(),
+        }),
+        AlmanacMineProbe::Hit {
+            citation,
+            confidence,
+            fallback_reason,
+            degraded,
+        } => {
+            if *degraded
+                || fallback_reason
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|s| !s.is_empty())
+                || *confidence < 0.85
+            {
+                return Ok(MineBeforeBuildVerdict::ProceedDegradedOrMiss {
+                    reason: "low_confidence_or_fallback".to_string(),
+                });
+            }
+            if gap_has_prior_art_justification(context_text, citation) {
+                Ok(MineBeforeBuildVerdict::ProceedJustified {
+                    citation: citation.clone(),
+                })
+            } else {
+                bail!(
+                    "mine_before_build (META-1053): Almanac returned high-confidence prior-art hit \
+                     '{citation}' (confidence={confidence:.2}) for '{title}'. Reuse or cite \
+                     '{citation}' (or add 'Reuse-Justified: <reason>') in the gap description/notes."
+                )
+            }
+        }
+    }
+}
+
+/// Run the Almanac prior-art check for `title` and evaluate [`evaluate_mine_before_build`].
+pub fn mine_before_build_check(title: &str, context_text: &str) -> Result<MineBeforeBuildVerdict> {
+    #[cfg(test)]
+    let probe = AlmanacMineProbe::Unreachable {
+        reason: "test_mode_default_offline".to_string(),
+    };
+    #[cfg(not(test))]
+    let probe = {
+        let mut cmd = Command::new("almanac");
+        cmd.args(["mine", title, "--json"]);
+        match run_cmd_bounded(&mut cmd, 3, "almanac-mine") {
+            Ok(out) if out.status.success() => {
+                parse_almanac_mine_json(&String::from_utf8_lossy(&out.stdout))
+            }
+            Ok(out) => AlmanacMineProbe::Unreachable {
+                reason: format!("exit_{}", out.status.code().unwrap_or(-1)),
+            },
+            Err(e) => AlmanacMineProbe::Unreachable {
+                reason: e.to_string(),
+            },
+        }
+    };
+    evaluate_mine_before_build(title, context_text, &probe)
+}
+
 fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<String> {
     use chump_handoff::contracts::{ExternalRepoContract, ExternalRepoInput};
     use chump_handoff::HandoffContract;
+
+    // META-1053: run and record the Almanac mine-before-build check before
+    // spawning the implementation agent. Fails closed ONLY when Almanac is
+    // reachable and returns an uncited high-confidence prior-art hit.
+    let gap_context = build_gap_description(gap);
+    let mine_verdict = mine_before_build_check(&gap.title, &gap_context)?;
+    tracing::info!(
+        gap_title = %gap.title,
+        mine_verdict = ?mine_verdict,
+        "META-1053 mine-before-build check recorded"
+    );
 
     // INFRA-3478: run the agent in a per-agent LINKED WORKTREE off the shared
     // clone (unless CHUMP_IMPROVE_SHARED_CLONE_DIRECT=1), so concurrent agents on
@@ -6937,6 +7176,113 @@ Some prose from the agent.
         assert!(
             msg.contains("external_repo:remediation_backend_timeout"),
             "expected timeout reason, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn meta1053_mine_before_build_unreachable_or_timeout_proceeds() {
+        let probe = AlmanacMineProbe::Unreachable {
+            reason: "connection_refused_or_timeout".to_string(),
+        };
+        let verdict = evaluate_mine_before_build("Add retry backoff helper", "", &probe)
+            .expect("unreachable Almanac must never block ship");
+        assert_eq!(
+            verdict,
+            MineBeforeBuildVerdict::ProceedDegradedOrMiss {
+                reason: "unreachable:connection_refused_or_timeout".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn meta1053_mine_before_build_degraded_or_fallback_reason_proceeds() {
+        let raw = r#"{
+            "degraded": true,
+            "fallback_reason": "embedding_index_stale",
+            "hits": [
+                {"citation": "bulwark:src/retry.rs:42", "confidence": 0.96}
+            ]
+        }"#;
+        let probe = parse_almanac_mine_json(raw);
+        let verdict = evaluate_mine_before_build("Add retry backoff helper", "", &probe)
+            .expect("degraded Almanac with fallback_reason must never block ship");
+        assert_eq!(
+            verdict,
+            MineBeforeBuildVerdict::ProceedDegradedOrMiss {
+                reason: "degraded:embedding_index_stale".to_string()
+            }
+        );
+
+        let item_fallback_probe = AlmanacMineProbe::Hit {
+            citation: "bulwark:src/retry.rs:42".to_string(),
+            confidence: 0.95,
+            fallback_reason: Some("lexical_fallback".to_string()),
+            degraded: false,
+        };
+        let verdict2 =
+            evaluate_mine_before_build("Add retry backoff helper", "", &item_fallback_probe)
+                .expect("item-level fallback_reason must proceed without blocking");
+        assert_eq!(
+            verdict2,
+            MineBeforeBuildVerdict::ProceedDegradedOrMiss {
+                reason: "low_confidence_or_fallback".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn meta1053_mine_before_build_high_confidence_hit_without_citation_fails_closed() {
+        let raw = r#"{
+            "hits": [
+                {"citation": "wherewithal:src/backoff.rs:19", "confidence": 0.92}
+            ]
+        }"#;
+        let probe = parse_almanac_mine_json(raw);
+        let err = evaluate_mine_before_build(
+            "Implement exponential backoff",
+            "no prior art cited here",
+            &probe,
+        )
+        .expect_err("reachable high-confidence Almanac hit without citation must fail closed");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("wherewithal:src/backoff.rs:19"),
+            "error must name the prior-art hit to reuse/cite, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn meta1053_mine_before_build_high_confidence_hit_with_citation_proceeds() {
+        let probe = AlmanacMineProbe::Hit {
+            citation: "wherewithal:src/backoff.rs:19".to_string(),
+            confidence: 0.92,
+            fallback_reason: None,
+            degraded: false,
+        };
+        let verdict = evaluate_mine_before_build(
+            "Implement exponential backoff",
+            "Adapts prior art from wherewithal:src/backoff.rs:19 for async tokio.",
+            &probe,
+        )
+        .expect("high-confidence hit with citation in context must succeed");
+        assert_eq!(
+            verdict,
+            MineBeforeBuildVerdict::ProceedJustified {
+                citation: "wherewithal:src/backoff.rs:19".to_string()
+            }
+        );
+
+        let verdict_justified = evaluate_mine_before_build(
+            "Implement exponential backoff",
+            "Reuse-Justified: crate requires no-std synchronous timer",
+            &probe,
+        )
+        .expect("high-confidence hit with Reuse-Justified marker must succeed");
+        assert_eq!(
+            verdict_justified,
+            MineBeforeBuildVerdict::ProceedJustified {
+                citation: "wherewithal:src/backoff.rs:19".to_string()
+            }
         );
     }
 }

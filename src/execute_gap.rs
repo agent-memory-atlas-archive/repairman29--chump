@@ -652,6 +652,15 @@ fn build_free_tier_prompt(gap_id: &str, repo_root: &std::path::Path) -> String {
         })
         .unwrap_or_else(|| format!("(gap spec not found — work on gap {gap_id})"));
 
+    // META-1053: run and record the Almanac mine-before-build check on the
+    // execute-gap implementation path.
+    let mine_verdict = crate::improve::mine_before_build_check(gap_id, &gap_yaml);
+    tracing::info!(
+        gap_id = %gap_id,
+        mine_verdict = ?mine_verdict,
+        "META-1053 mine-before-build check recorded in execute_gap"
+    );
+
     // INFRA-3459: for wiring gaps, embed the comprehend summary inline. The
     // free-tier agent CAN'T call comprehend_repo (not in its slim tool set) and
     // is too weak to reliably call tools anyway, so grounding must be in the

@@ -111,13 +111,41 @@ def _parse_routing_yaml_fallback(path: str) -> dict:
     return {"routes": routes}
 
 
-def resolve_model(gap_id: str, effort: str, domain: str, repo_root: str, fallback: str) -> str:
+def _is_floor_gap(priority: str, skills_or_tags: str, title: str) -> bool:
+    """INFRA-8177: P0/critical or keystone/unwedge gaps must route to >= sonnet."""
+    p = (priority or "").strip().upper()
+    if p in ("P0", "CRITICAL"):
+        return True
+    hay = f"{skills_or_tags or ''} {title or ''}".lower()
+    for kw in ("keystone", "unwedge"):
+        if kw in hay:
+            return True
+    return False
+
+
+def _enforce_floor(model_class: str, priority: str, skills_or_tags: str, title: str) -> str:
+    if _is_floor_gap(priority, skills_or_tags, title) and model_class in ("haiku", "flash", ""):
+        return "sonnet"
+    return model_class
+
+
+def resolve_model(
+    gap_id: str,
+    effort: str,
+    domain: str,
+    repo_root: str,
+    fallback: str,
+    priority: str = "",
+    skills_or_tags: str = "",
+    title: str = "",
+) -> str:
     routing_path = os.path.join(repo_root, "docs", "dispatch", "routing.yaml")
     if not os.path.exists(routing_path):
-        return fallback
+        return _enforce_floor(fallback, priority, skills_or_tags, title)
 
     config = load_routing_yaml(routing_path)
     task_class = task_class_for_gap_id(gap_id)
+    prio_upper = (priority or "").strip().upper()
 
     for route in config.get("routes", []):
         match = route.get("match", {})
@@ -136,12 +164,16 @@ def resolve_model(gap_id: str, effort: str, domain: str, repo_root: str, fallbac
             if effort not in allowed:
                 continue
         if "priority" in match:
-            # priority matching not needed for model resolution, skip
-            pass
+            allowed_p = match["priority"]
+            if isinstance(allowed_p, str):
+                allowed_p = [allowed_p]
+            allowed_p_upper = [str(x).strip().upper() for x in allowed_p]
+            if not prio_upper or prio_upper not in allowed_p_upper:
+                continue
 
-        return model_class
+        return _enforce_floor(model_class, priority, skills_or_tags, title)
 
-    return fallback
+    return _enforce_floor(fallback, priority, skills_or_tags, title)
 
 
 def main() -> int:
@@ -149,9 +181,12 @@ def main() -> int:
     repo_root = os.environ.get("REPO_ROOT", ".")
     fallback = os.environ.get("FLEET_MODEL", "sonnet")
 
-    # Read gap JSON from stdin to extract effort/domain for the picked gap.
+    # Read gap JSON from stdin to extract effort/domain/priority/tags for the picked gap.
     effort = ""
     domain = ""
+    priority = ""
+    skills_or_tags = ""
+    title = ""
     try:
         raw = sys.stdin.read()
         if raw.strip():
@@ -160,11 +195,27 @@ def main() -> int:
                 if g.get("id") == gap_id:
                     effort = (g.get("effort") or "").lower()
                     domain = (g.get("domain") or "").lower()
+                    priority = (g.get("priority") or "").upper()
+                    skills_raw = g.get("skills_required") or g.get("tags") or ""
+                    if isinstance(skills_raw, list):
+                        skills_or_tags = ",".join(str(x) for x in skills_raw)
+                    else:
+                        skills_or_tags = str(skills_raw)
+                    title = str(g.get("title") or "")
                     break
     except Exception:
         pass
 
-    model = resolve_model(gap_id, effort, domain, repo_root, fallback)
+    model = resolve_model(
+        gap_id,
+        effort,
+        domain,
+        repo_root,
+        fallback,
+        priority=priority,
+        skills_or_tags=skills_or_tags,
+        title=title,
+    )
     print(model)
     return 0
 

@@ -67,6 +67,7 @@ pub fn render_json<W: Write>(
 ) -> std::io::Result<()> {
     let now = chrono::Utc::now();
     writer.write_all(b"{\n")?;
+    writeln!(writer, "  \"version\": \"0.2\",")?;
     writeln!(
         writer,
         "  \"generated_at\": \"{}\",",
@@ -114,6 +115,7 @@ pub fn render_json<W: Write>(
             "      \"title\": \"{}\",",
             json_escape(&item.gap.title)
         )?;
+        writeln!(writer, "      \"unblocks\": {},", item.score.unblocks_count)?;
         writeln!(
             writer,
             "      \"unblocks_count\": {},",
@@ -171,8 +173,56 @@ mod tests {
         let mut buf = Vec::new();
         render_json(&[], &weights, &mut buf).unwrap();
         let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("\"version\": \"0.2\""));
         assert!(s.contains("\"items\": [\n"));
         assert!(s.contains("\"weights_identity\""));
         let _ = parses_as_json(s.as_bytes());
+    }
+
+    #[test]
+    fn render_json_v02_schema_and_high_unblock_ranking() {
+        use crate::{
+            build_plan, gap::load_str, score::TelemetryInputs, DependencyGraph, Gap, PlanRequest,
+        };
+        let high_unblk: Gap = load_str(
+            "- id: INFRA-HIGH\n  domain: INFRA\n  title: foundation unblock\n  status: open\n  priority: P1\n  effort: s\n",
+        )
+        .unwrap();
+        let low_unblk: Gap = load_str(
+            "- id: INFRA-LOW\n  domain: INFRA\n  title: standalone item\n  status: open\n  priority: P1\n  effort: s\n",
+        )
+        .unwrap();
+        let dep1: Gap = load_str(
+            "- id: INFRA-D1\n  domain: INFRA\n  title: dep 1\n  status: open\n  priority: P1\n  effort: s\n  depends_on: [INFRA-HIGH]\n",
+        )
+        .unwrap();
+        let dep2: Gap = load_str(
+            "- id: INFRA-D2\n  domain: INFRA\n  title: dep 2\n  status: open\n  priority: P1\n  effort: s\n  depends_on: [INFRA-HIGH]\n",
+        )
+        .unwrap();
+        let gaps = vec![low_unblk, high_unblk, dep1, dep2];
+        let graph = DependencyGraph::build(&gaps);
+        let weights = Weights::default();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 5, 14).unwrap();
+        let plan = build_plan(
+            &gaps,
+            &graph,
+            &PlanRequest::default(),
+            &TelemetryInputs::default(),
+            today,
+            &weights,
+        );
+        let mut buf = Vec::new();
+        render_json(&plan, &weights, &mut buf).unwrap();
+        let val = parses_as_json(&buf);
+        assert_eq!(val["version"].as_str(), Some("0.2"));
+        assert!(val["generated_at"].as_str().is_some());
+        let items = val["items"].as_sequence().expect("items sequence");
+        assert!(!items.is_empty());
+        assert_eq!(items[0]["gap_id"].as_str(), Some("INFRA-HIGH"));
+        assert_eq!(items[0]["rank"].as_u64(), Some(1));
+        assert_eq!(items[0]["unblocks"].as_u64(), Some(2));
+        assert_eq!(items[0]["priority"].as_str(), Some("P1"));
+        assert_eq!(items[0]["effort"].as_str(), Some("s"));
     }
 }

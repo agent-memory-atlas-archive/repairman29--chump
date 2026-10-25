@@ -54,11 +54,9 @@
     <string>__HOME__</string>
     <key>PATH</key>
     <string>/usr/local/bin:__BREW_PREFIX__/bin:__BREW_PREFIX__/sbin:__BIN_DIR__:/usr/bin:/bin</string>
-    <!-- INFRA-2310: consensus merge gate SHADOW mode (log-only, never blocks).
-         Observe kind=consensus_gate_would_block in ambient for ~7 days,
-         then operator sets =enforce (per INFRA-2274 / META-195). -->
+    <!-- META-195: consensus merge gate ENFORCE mode (promoted from INFRA-2310 shadow). -->
     <key>CHUMP_CONSENSUS_MERGE_GATE</key>
-    <string>1</string>
+    <string>enforce</string>
   </dict>
 
   <key>ThrottleInterval</key>

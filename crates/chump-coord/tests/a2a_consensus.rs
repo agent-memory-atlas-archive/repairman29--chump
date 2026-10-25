@@ -40,14 +40,15 @@ fn vote_committed_semantics() {
 
 #[test]
 fn decision_type_variants_cover_chump_use_cases() {
-    // If new variants are added, expand this assertion. Today we have 4.
+    // If new variants are added, expand this assertion. Today we have 5 (META-195 adds AdminMergeProposal).
     let variants = [
         DecisionType::EscalationRequired,
         DecisionType::ResourceCritical,
         DecisionType::NetworkPartitionRecovery,
         DecisionType::FleetScaleChange,
+        DecisionType::AdminMergeProposal,
     ];
-    assert_eq!(variants.len(), 4);
+    assert_eq!(variants.len(), 5);
     // Ensure JSON round-trip works on every variant (so the wire format
     // is stable for ambient-emit + NATS publish).
     for v in variants {

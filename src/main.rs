@@ -1167,13 +1167,13 @@ fn print_help() {
     println!("  scripts/README.md  script taxonomy and entry points");
 }
 
-/// `chump plan` subcommand (INFRA-1021).
+/// `chump plan` subcommand (INFRA-1021 / INFRA-8143).
 ///
 /// Thin wrapper around chump-planner library — keeps main.rs free of the
 /// scoring/graph internals so the planner can evolve independently. Errors
 /// bubble up via Result; reconciliation-gate breach maps to exit code 2.
 fn run_plan_subcommand(args: &[String]) -> Result<()> {
-    use chump_planner::output::table;
+    use chump_planner::output::{json as out_json, table, Format};
     use chump_planner::score::TelemetryInputs;
     use chump_planner::{
         build_plan, collect_reconcile, load_gaps_dir, DependencyGraph, PlanRequest, Weights,
@@ -1183,16 +1183,22 @@ fn run_plan_subcommand(args: &[String]) -> Result<()> {
         println!("Usage: chump plan [OPTIONS]");
         println!();
         println!("Rank the open gap backlog and recommend the next N to dispatch.");
-        println!("v0.1: structured depends_on hard edges only, table output,");
-        println!("reconciliation gate. --explain / --graph / --json arrive in v0.2.");
+        println!("v0.2: supports --format table|json, --top N, --output PATH, and --write-lock.");
         println!();
         println!("OPTIONS:");
         println!("  --gaps PATH             Gaps directory (default: docs/gaps)");
         println!("  --agents N              Plan for N concurrent agents (default: 5)");
+        println!("  --top N                 Limit output to top N items (overrides --agents)");
         println!("  --pillar DOMAIN         Filter to a single domain");
         println!("  --max-effort SIZE       Skip gaps larger than this (xs/s/m/l/xl)");
         println!("  --no-pillar-cap         Disable the running pillar-share cap");
         println!("  --include-blocked       Include gaps with open prerequisites");
+        println!("  --format FORMAT         Output format: table | json (default: table)");
+        println!("  --json                  Shorthand for --format json");
+        println!("  --output PATH           Write output to PATH instead of stdout");
+        println!(
+            "  --write-lock            Atomically write JSON to .chump-locks/gap-priority.json"
+        );
         println!("  --reconcile-threshold N Exit non-zero when status:open+closed_pr backlog > N");
         println!("                          (default 10)");
         return Ok(());
@@ -1200,11 +1206,15 @@ fn run_plan_subcommand(args: &[String]) -> Result<()> {
 
     let mut gaps_path = std::path::PathBuf::from("docs/gaps");
     let mut agents: usize = 5;
+    let mut top: Option<usize> = None;
     let mut pillar: Option<String> = None;
     let mut max_effort: Option<String> = None;
     let mut no_pillar_cap = false;
     let mut include_blocked = false;
     let mut reconcile_threshold: usize = 10;
+    let mut format = Format::Table;
+    let mut output_path: Option<std::path::PathBuf> = None;
+    let mut write_lock = false;
 
     let mut it = args.iter().skip(2);
     while let Some(arg) = it.next() {
@@ -1220,6 +1230,13 @@ fn run_plan_subcommand(args: &[String]) -> Result<()> {
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("--agents needs a value"))?
                     .parse()?;
+            }
+            "--top" => {
+                top = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow::anyhow!("--top needs a value"))?
+                        .parse()?,
+                );
             }
             "--pillar" => {
                 pillar = Some(
@@ -1244,14 +1261,24 @@ fn run_plan_subcommand(args: &[String]) -> Result<()> {
                     .parse()?;
             }
             "--format" => {
-                // v0.1 supports only table; accept it explicitly so the v0.2
-                // wiring (--format json|mermaid|markdown) lands as a small diff.
                 let v = it
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("--format needs a value"))?;
-                if v != "table" {
-                    anyhow::bail!("v0.1 only supports --format table; got {v}");
-                }
+                format = v.parse()?;
+            }
+            "--json" => {
+                format = Format::Json;
+            }
+            "--output" => {
+                output_path = Some(
+                    it.next()
+                        .ok_or_else(|| anyhow::anyhow!("--output needs a value"))?
+                        .into(),
+                );
+            }
+            "--write-lock" => {
+                write_lock = true;
+                format = Format::Json;
             }
             other => anyhow::bail!("unknown arg {other} (see chump plan --help)"),
         }
@@ -1280,7 +1307,7 @@ fn run_plan_subcommand(args: &[String]) -> Result<()> {
     };
 
     let req = PlanRequest {
-        agents,
+        agents: top.unwrap_or(agents),
         pillar_filter,
         max_effort: max_effort_val,
         respect_pillar_cap: !no_pillar_cap,
@@ -1294,7 +1321,48 @@ fn run_plan_subcommand(args: &[String]) -> Result<()> {
     let plan = build_plan(&gaps, &graph, &req, &telemetry, today, &weights);
     let reconcile = collect_reconcile(&gaps);
 
-    print!("{}", table::render(&plan, &reconcile));
+    let target_file = if let Some(out) = output_path {
+        Some(out)
+    } else if write_lock {
+        Some(std::path::PathBuf::from(".chump-locks/gap-priority.json"))
+    } else {
+        None
+    };
+
+    let atomic_write = |target: &std::path::Path, bytes: &[u8]| -> Result<()> {
+        if let Some(parent) = target.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let tmp = target.with_extension(format!("json.tmp.{}", std::process::id()));
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(&tmp, target)?;
+        Ok(())
+    };
+
+    match format {
+        Format::Table => {
+            let rendered = table::render(&plan, &reconcile);
+            if let Some(target) = target_file {
+                atomic_write(&target, rendered.as_bytes())?;
+            } else {
+                print!("{rendered}");
+            }
+        }
+        Format::Json => {
+            let mut buf = Vec::new();
+            out_json::render_json(&plan, &weights, &mut buf)?;
+            if let Some(target) = target_file {
+                atomic_write(&target, &buf)?;
+            } else {
+                use std::io::Write;
+                let stdout = std::io::stdout();
+                let mut handle = stdout.lock();
+                handle.write_all(&buf)?;
+            }
+        }
+    }
 
     if reconcile.breaches(reconcile_threshold) {
         eprintln!(
@@ -24512,5 +24580,54 @@ mod tests {
             std::slice::from_ref(&parent),
         );
         assert_eq!(unclamped, None);
+    }
+
+    #[test]
+    fn plan_infra_8143_format_json_v02_ranks_high_unblocks_first() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let gaps_dir = tmp.path().join("gaps");
+        std::fs::create_dir_all(&gaps_dir).unwrap();
+        std::fs::write(
+            gaps_dir.join("INFRA-LOW.yaml"),
+            "- id: INFRA-LOW\n  domain: INFRA\n  title: standalone P1\n  status: open\n  priority: P1\n  effort: s\n",
+        )
+        .unwrap();
+        std::fs::write(
+            gaps_dir.join("INFRA-UNBLK.yaml"),
+            "- id: INFRA-UNBLK\n  domain: INFRA\n  title: high-unblock P1\n  status: open\n  priority: P1\n  effort: s\n",
+        )
+        .unwrap();
+        for idx in 1..=3 {
+            std::fs::write(
+                gaps_dir.join(format!("INFRA-DEP{idx}.yaml")),
+                format!(
+                    "- id: INFRA-DEP{idx}\n  domain: INFRA\n  title: dependent {idx}\n  status: open\n  priority: P1\n  effort: s\n  depends_on: [INFRA-UNBLK]\n"
+                ),
+            )
+            .unwrap();
+        }
+        let out_file = tmp.path().join(".chump-locks/gap-priority.json");
+        let args = vec![
+            "chump".to_string(),
+            "plan".to_string(),
+            "--gaps".to_string(),
+            gaps_dir.display().to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+            "--top".to_string(),
+            "5".to_string(),
+            "--output".to_string(),
+            out_file.display().to_string(),
+        ];
+        super::run_plan_subcommand(&args).expect("chump plan --format json must succeed");
+        let raw = std::fs::read_to_string(&out_file).expect("output json file written");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("valid json");
+        assert_eq!(parsed["version"], "0.2");
+        assert!(parsed["generated_at"].is_string());
+        let items = parsed["items"].as_array().expect("items array");
+        assert!(!items.is_empty());
+        assert_eq!(items[0]["gap_id"], "INFRA-UNBLK");
+        assert_eq!(items[0]["rank"], 1);
+        assert_eq!(items[0]["unblocks"], 3);
     }
 }

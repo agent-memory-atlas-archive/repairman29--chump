@@ -177,6 +177,23 @@ else
     fail "mixed pool: sonnet should pick xs/s/m/l, got: '$sonnet_pool'"
 fi
 
+# ── 6. INFRA-8177: P0 and keystone/unwedge floor (>= sonnet, never haiku/flash) ─
+m_p0_xs="$(printf '[{"id":"TEST-P0-XS","domain":"INFRA","priority":"P0","effort":"xs","status":"open"}]' | \
+    GAP_ID="TEST-P0-XS" REPO_ROOT="$REPO_ROOT" FLEET_MODEL="haiku" python3 "$RESOLVE_SCRIPT" 2>/dev/null || true)"
+if [[ "$m_p0_xs" == "sonnet" ]]; then
+    ok "INFRA-8177: P0 + effort=xs routes to sonnet floor"
+else
+    fail "INFRA-8177: P0 + effort=xs should route to sonnet, got: '$m_p0_xs'"
+fi
+
+m_keystone_xs="$(printf '[{"id":"TEST-KS-XS","domain":"INFRA","priority":"P2","effort":"xs","skills_required":"rust,keystone","status":"open"}]' | \
+    GAP_ID="TEST-KS-XS" REPO_ROOT="$REPO_ROOT" FLEET_MODEL="haiku" python3 "$RESOLVE_SCRIPT" 2>/dev/null || true)"
+if [[ "$m_keystone_xs" == "sonnet" ]]; then
+    ok "INFRA-8177: P2 + keystone + effort=xs routes to sonnet floor"
+else
+    fail "INFRA-8177: P2 + keystone + effort=xs should route to sonnet, got: '$m_keystone_xs'"
+fi
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

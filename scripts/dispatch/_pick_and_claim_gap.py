@@ -1228,21 +1228,20 @@ def main() -> int:
     # Canonical logic mirrors _pick_gap.py (_load_active_mission / _is_mission_linked).
     active_mission = _load_active_mission()
 
-    # INFRA-1258 (ported, INFRA-8224): planner-betweenness tiebreak — curator_mode
-    # ONLY (the --dry-run / --list preview the _pick_gap.py shim + curator-jit
-    # use). Loaded from .chump-locks/gap-priority.json; on absent/stale/invalid we
-    # fall back to legacy ordering and emit kind=picker_priority_stale once.
-    planner_ranks: dict = {}
-    planner_status = "absent"
-    if curator_mode:
-        planner_repo_root = os.environ.get("CHUMP_REPO", os.getcwd())
-        planner_ranks, planner_status = _load_planner_priority(planner_repo_root)
-        if planner_status != "ok":
-            _emit_picker_event(
-                "picker_priority_stale",
-                reason=planner_status,
-                worker_id=os.environ.get("WORKER_ID", ""),
-            )
+    # INFRA-1258 / INFRA-8143: planner-betweenness tiebreak.
+    # Loaded from .chump-locks/gap-priority.json; on absent/stale/invalid we
+    # fall back to legacy ordering and emit kind=picker_priority_stale once in
+    # curator_mode.
+    planner_repo_root = (
+        os.environ.get("CHUMP_REPO") or os.environ.get("REPO_ROOT") or os.getcwd()
+    )
+    planner_ranks, planner_status = _load_planner_priority(planner_repo_root)
+    if curator_mode and planner_status != "ok":
+        _emit_picker_event(
+            "picker_priority_stale",
+            reason=planner_status,
+            worker_id=os.environ.get("WORKER_ID", ""),
+        )
 
     # RESILIENT-1509: per-exclusion-reason counters. An empty cycle used to
     # log a bare "no pickable gap" with no way to tell "467 gaps all
@@ -1462,7 +1461,7 @@ def main() -> int:
         if curator_mode:
             third_rank = planner_ranks.get(gid, 10_000)
         else:
-            third_rank = -(affinity_score + rebalance_boost)
+            wedge_rank = -(affinity_score + rebalance_boost)
             # INFRA-8176: soft skill filter. A skill-mismatched gap gets a penalty
             # larger than any affinity+rebalance score, so within its priority
             # band it sorts after every matching gap, but it never drops below a
@@ -1470,7 +1469,11 @@ def main() -> int:
             # the tuple layout is unchanged). Claim modes only: the curator
             # path's planner_rank is not a skill surface.
             if gid in soft_demoted:
-                third_rank += SOFT_SKILL_PENALTY
+                wedge_rank += SOFT_SKILL_PENALTY
+            # INFRA-8143: within equal (prio_rank, mission_rank, wedge_rank),
+            # break ties by planner_rank before age so high-UNBLK gaps beat
+            # older low-leverage gaps in claim mode too.
+            third_rank = (wedge_rank, planner_ranks.get(gid, 10_000))
 
         # Sort order: (prio_rank, mission_rank, third_rank, age, effort_rank, id)
         candidates.append(

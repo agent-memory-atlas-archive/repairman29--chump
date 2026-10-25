@@ -65,6 +65,15 @@ routes:
       - { backend: chump-local, model: openai/gpt-oss-120b, provider_pfx: GROQ, why: groq-medium-fallback }
       - { backend: chump-local, model: meta-llama/Llama-3.3-70B-Instruct-Turbo-Free, provider_pfx: TOGETHER, why: together-medium-fallback }
 
+  # INFRA-8177: P0 / critical priority floor — P0 gaps route to >= sonnet
+  # model_class even when effort is xs or s (never haiku/flash).
+  - match: { priority: [P0], effort: [xs, s] }
+    model_class: sonnet
+    why: "INFRA-8177: P0/keystone gaps route to >= sonnet floor, never haiku"
+    candidates:
+      - { backend: chump-local, model: openai/gpt-oss-120b, provider_pfx: GROQ, why: groq-p0-floor }
+      - { backend: chump-local, model: meta-llama/Llama-3.3-70B-Instruct-Turbo-Free, provider_pfx: TOGETHER, why: together-p0-fallback }
+
   - match: { effort: xs }
     model_class: flash
     why: RESILIENT-1138 — xs/s go to deepseek (flash); haiku/sonnet gate retired.

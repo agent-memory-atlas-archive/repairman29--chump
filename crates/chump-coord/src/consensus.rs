@@ -38,21 +38,85 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
+/// Default mode for the consensus admin-merge gate (META-195 flips INFRA-2274
+/// from `"shadow"` to `"enforce"`).
+pub const DEFAULT_CONSENSUS_MERGE_GATE_MODE: &str = "enforce";
+
+/// Returns the default consensus admin-merge gate mode (`"enforce"`, META-195).
+pub fn default_consensus_merge_gate_mode() -> &'static str {
+    DEFAULT_CONSENSUS_MERGE_GATE_MODE
+}
+
 /// Types of decisions the fleet must make collectively.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DecisionType {
     /// Encountered ambiguous case (e.g. unknown gap priority); seek
     /// fleet-wide authorization before proceeding.
+    #[serde(alias = "escalation_required", alias = "escalation-required")]
     EscalationRequired,
     /// Critical resource depletion (token budget, GraphQL bucket); abort
     /// or push forward?
+    #[serde(alias = "resource_critical", alias = "resource-critical")]
     ResourceCritical,
     /// Network partition detected; should affected sessions fall back to
     /// local autonomy?
+    #[serde(
+        alias = "network_partition_recovery",
+        alias = "network-partition-recovery"
+    )]
     NetworkPartitionRecovery,
     /// Should the fleet scale up/down? Triggered when INFRA-518 gates
     /// suggest a change but operator hasn't explicitly approved.
+    #[serde(alias = "fleet_scale_change", alias = "fleet-scale-change")]
     FleetScaleChange,
+    /// META-195: Proposal to execute a `gh pr merge --admin` override by
+    /// multi-agent consensus (`decision_type=admin_merge_proposal`).
+    #[serde(alias = "admin_merge_proposal", alias = "admin-merge-proposal")]
+    AdminMergeProposal,
+}
+
+impl DecisionType {
+    /// Canonical snake_case identifier used by CLI flags and shell bridges.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DecisionType::EscalationRequired => "escalation_required",
+            DecisionType::ResourceCritical => "resource_critical",
+            DecisionType::NetworkPartitionRecovery => "network_partition_recovery",
+            DecisionType::FleetScaleChange => "fleet_scale_change",
+            DecisionType::AdminMergeProposal => "admin_merge_proposal",
+        }
+    }
+}
+
+impl std::fmt::Display for DecisionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for DecisionType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            "EscalationRequired" | "escalation_required" | "escalation-required" => {
+                Ok(DecisionType::EscalationRequired)
+            }
+            "ResourceCritical" | "resource_critical" | "resource-critical" => {
+                Ok(DecisionType::ResourceCritical)
+            }
+            "NetworkPartitionRecovery"
+            | "network_partition_recovery"
+            | "network-partition-recovery" => Ok(DecisionType::NetworkPartitionRecovery),
+            "FleetScaleChange" | "fleet_scale_change" | "fleet-scale-change" => {
+                Ok(DecisionType::FleetScaleChange)
+            }
+            "AdminMergeProposal" | "admin_merge_proposal" | "admin-merge-proposal" => {
+                Ok(DecisionType::AdminMergeProposal)
+            }
+            other => Err(format!("unknown DecisionType: {other}")),
+        }
+    }
 }
 
 /// A single session's vote on a fleet decision.
@@ -343,5 +407,55 @@ mod tests {
         c.finalize_vote("vote-1", votes);
         assert_eq!(c.should_proceed("vote-1"), Some(true));
         assert_eq!(c.records().len(), 1);
+    }
+
+    #[test]
+    fn meta_195_admin_merge_proposal_serde_and_from_str_roundtrip() {
+        let dt = DecisionType::AdminMergeProposal;
+        assert_eq!(dt.as_str(), "admin_merge_proposal");
+        assert_eq!(
+            "admin_merge_proposal".parse::<DecisionType>().unwrap(),
+            DecisionType::AdminMergeProposal
+        );
+        assert_eq!(
+            "admin-merge-proposal".parse::<DecisionType>().unwrap(),
+            DecisionType::AdminMergeProposal
+        );
+        assert_eq!(
+            "AdminMergeProposal".parse::<DecisionType>().unwrap(),
+            DecisionType::AdminMergeProposal
+        );
+        let json = serde_json::to_string(&dt).unwrap();
+        let back: DecisionType = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, DecisionType::AdminMergeProposal);
+        let from_snake: DecisionType = serde_json::from_str("\"admin_merge_proposal\"").unwrap();
+        assert_eq!(from_snake, DecisionType::AdminMergeProposal);
+    }
+
+    #[test]
+    fn meta_195_admin_merge_proposal_consensus_reaches_approved_and_default_mode_is_enforce() {
+        assert_eq!(default_consensus_merge_gate_mode(), "enforce");
+        let mut c = ConsensusCoordinator::new();
+        let req = VoteRequest {
+            vote_id: "admin-merge-pr-4200".to_string(),
+            initiator: "bot-merge".to_string(),
+            decision_type: DecisionType::AdminMergeProposal,
+            reason: "gh-api-5xx transient while checks green".to_string(),
+            context: "pr=4200 gap=META-195".to_string(),
+            quorum: 2,
+            timeout_secs: 60,
+        };
+        c.initiate_vote(req);
+        let p1 = c.cast_vote("admin-merge-pr-4200", "curator-a", Vote::Approve);
+        let p2 = c.cast_vote("admin-merge-pr-4200", "curator-b", Vote::Approve);
+        let mut votes = HashMap::new();
+        votes.insert("curator-a".to_string(), p1);
+        votes.insert("curator-b".to_string(), p2);
+        c.finalize_vote("admin-merge-pr-4200", votes);
+        assert_eq!(c.should_proceed("admin-merge-pr-4200"), Some(true));
+        let rec = &c.records()[0];
+        assert_eq!(rec.request.decision_type, DecisionType::AdminMergeProposal);
+        assert_eq!(rec.decision, ConsensusDecision::Proceed);
+        assert_eq!(rec.approval_count, 2);
     }
 }

@@ -141,6 +141,51 @@ else
     fail "partial: expected INFRA-B, got '$picked'"
 fi
 
+# ── Test 6 (INFRA-8143): v0.2 JSON schema + claim-mode planner_rank tiebreak ─
+cat > "$TMP/.chump-locks/gap-priority.json" <<'EOF'
+{
+  "version": "0.2",
+  "generated_at": "2026-05-14T12:00:00Z",
+  "planner_version": "0.1.0",
+  "weights_identity": "synthetic",
+  "items": [
+    {"rank": 1, "gap_id": "INFRA-C", "score": 140.0, "priority": "P1", "effort": "s", "unblocks": 3, "domain": "INFRA", "title": "high unblock"},
+    {"rank": 2, "gap_id": "INFRA-A", "score": 80.0, "priority": "P1", "effort": "s", "unblocks": 0, "domain": "INFRA", "title": "older low leverage"}
+  ]
+}
+EOF
+status_check="$(python3 -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/scripts/dispatch')
+import _pick_and_claim_gap as p
+ranks, status = p._load_planner_priority('$TMP')
+assert status == 'ok', f'expected ok, got {status}'
+assert ranks.get('INFRA-C') == 1, f'expected INFRA-C rank 1, got {ranks}'
+print('ok')
+")"
+if [[ "$status_check" == "ok" ]]; then
+    ok "INFRA-8143: _load_planner_priority parses v0.2 schema with status=ok"
+else
+    fail "INFRA-8143: _load_planner_priority failed ($status_check)"
+fi
+claim_preview_picked="$(
+    GAP_JSON_FILE="$TMP/gaps.json" \
+    CHUMP_REPO="$TMP" \
+    REPO_ROOT="$TMP" \
+    CHUMP_FLEET_DRY_RUN=1 \
+    CHUMP_AFFINITY=0 \
+    CHUMP_REBALANCE=0 \
+    FLEET_MODEL=opus \
+    WORKER_INDEX=1 \
+    WORKER_ID=test-worker \
+      python3 "$REPO_ROOT/scripts/dispatch/_pick_and_claim_gap.py"
+)"
+if [[ "$claim_preview_picked" == "INFRA-C" ]]; then
+    ok "INFRA-8143: claim-mode tiebreak picks high-UNBLK INFRA-C ahead of older INFRA-A"
+else
+    fail "INFRA-8143: claim-mode expected INFRA-C, got '$claim_preview_picked'"
+fi
+
 echo
 echo "=== Summary: $PASS passed, $FAIL failed ==="
 if (( FAIL > 0 )); then
