@@ -1,0 +1,17 @@
+# chump-branch-reaper.timer — INFRA-8126 daily cadence for chump-branch-reaper.service.
+# RESILIENT-1455: OnUnitInactiveSec alongside OnUnitActiveSec so oneshot timers self-perpetuate.
+
+[Unit]
+Description=Run Chump branch reaper daily (INFRA-8126)
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=24h
+OnUnitInactiveSec=24h
+RandomizedDelaySec=5min
+AccuracySec=1min
+Persistent=true
+Unit=chump-branch-reaper.service
+
+[Install]
+WantedBy=timers.target

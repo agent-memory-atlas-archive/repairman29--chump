@@ -1,0 +1,16 @@
+# chump-ghost-pr-closer.timer — INFRA-8146 15-minute cadence for chump-ghost-pr-closer.service.
+# RESILIENT-1455: OnUnitInactiveSec alongside OnUnitActiveSec so oneshot timers self-perpetuate.
+
+[Unit]
+Description=Run Chump ghost-PR closer every 15 minutes (INFRA-8146)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+OnUnitInactiveSec=15min
+AccuracySec=30s
+Persistent=true
+Unit=chump-ghost-pr-closer.service
+
+[Install]
+WantedBy=timers.target

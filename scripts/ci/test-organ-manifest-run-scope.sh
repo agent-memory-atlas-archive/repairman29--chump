@@ -148,12 +148,25 @@ grep -q "enable.*chump-paused-by-file" "$CALLS" \
 grep -q "enable.*chump-active-organ.timer" "$CALLS" \
   || fail "organ-reconcile must still enable non-retired chump-active-organ.timer; out=$out_ret calls=$(cat "$CALLS")"
 
-for retired_base in armed-pr-rebaser pr-auto-rebase rot-reaper stale-pr-reaper auto-arm-sweeper auto-merge-armer; do
+for retired_base in pr-auto-rebase rot-reaper stale-pr-reaper auto-arm-sweeper auto-merge-armer; do
   grep -Eq "^retired[[:space:]]+chump-${retired_base}\\.(timer|service).*retired: done by the GitHub merge queue \\(PHASE-R R3\\)" "$REPO_ROOT/scripts/ops/organ-manifest.txt" \
     || fail "real organ-manifest.txt must mark chump-${retired_base} retired with PHASE-R R3 reason"
   grep -Eq "^enabled[[:space:]]+chump-${retired_base}\\.(timer|service)" "$REPO_ROOT/scripts/ops/organ-manifest.txt" \
     && fail "real organ-manifest.txt must not leave chump-${retired_base} enabled"
 done
 pass "RESILIENT-1644: retired state + paused-timers.txt honoured by parser, organ-reconcile, and real organ-manifest.txt"
+
+# ── 6. INFRA-8126 / INFRA-8144 / INFRA-8146: Linux-ported organs ─────────────
+for ported_organ in branch-reaper stale-branch-reaper armed-pr-rebaser dup-pr-detector pr-book ghost-pr-closer github-liaison daemon-activator; do
+  [[ -f "$REPO_ROOT/scripts/dispatch/chump-${ported_organ}.service" ]] \
+    || fail "missing systemd service unit scripts/dispatch/chump-${ported_organ}.service"
+  [[ -f "$REPO_ROOT/scripts/dispatch/chump-${ported_organ}.timer" ]] \
+    || fail "missing systemd timer unit scripts/dispatch/chump-${ported_organ}.timer"
+  grep -Eq "^enabled[[:space:]]+chump-${ported_organ}\\.timer.*platforms=systemd,launchd" "$REPO_ROOT/scripts/ops/organ-manifest.txt" \
+    || fail "organ-manifest.txt must declare chump-${ported_organ}.timer enabled with platforms=systemd,launchd"
+  organ_is_paused_or_retired "chump-${ported_organ}.timer" "$REPO_ROOT/scripts/ops/organ-manifest.txt" \
+    && fail "chump-${ported_organ}.timer must NOT be marked paused or retired in organ-manifest.txt"
+done
+pass "INFRA-8126 / INFRA-8144 / INFRA-8146: all 8 Linux-ported organs have tracked systemd .service+.timer units and enabled platforms=systemd,launchd manifest entries"
 
 echo "ALL PASS"

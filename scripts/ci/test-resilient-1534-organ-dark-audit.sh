@@ -102,8 +102,8 @@ printf 'enabled  chump-quoted.timer  role=data requires=bin:chump platforms=laun
 got="$(bash -c "source '$LIB'; declare -a po en; declare -A ro rq pl; organ_manifest_parse '$T/quoted-manifest.txt' po en ro rq pl; echo \"\${pl[chump-quoted.timer]}|\${rq[chump-quoted.timer]}|\${ro[chump-quoted.timer]}\"")"
 [[ "$got" == "launchd|bin:chump|data" ]] && ok "manifest parser ignores field-like tokens inside a trailing # comment (the mission-grade mis-parse)" || bad "comment tokens leaked into fields: $got"
 
-# ── The real manifest: the 14 organs the gap reported dark ───────────────────
-REPORTED="github-liaison ghost-pr-closer stale-branch-reaper daemon-activator main-worktree-drift-detector planner distill-pr-skills almanac-code-intel a2a-dead-letter-reaper decomposition-hint-tracker refresh-model-prices fleet-version-skew-detect mission-grade quartermaster-audit"
+# ── The real manifest: the remaining launchd-only organs + 4 newly Linux-ported (INFRA-8126/8146) ──
+REPORTED="main-worktree-drift-detector planner distill-pr-skills almanac-code-intel a2a-dead-letter-reaper decomposition-hint-tracker refresh-model-prices fleet-version-skew-detect mission-grade quartermaster-audit"
 : > "$T/active"   # nothing is active in CI
 bad14=0
 for o in $REPORTED; do
@@ -114,7 +114,19 @@ for o in $REPORTED; do
   c="$(bash -c "source '$LIB'; organ_dark_cause '$unit' '$plats' '' systemd '$ROOT' '$SD'")"
   [[ "$c" == "scoped-off:platforms=launchd" ]] || { echo "    $unit -> $c"; bad14=1; }
 done
-[[ $bad14 -eq 0 ]] && ok "all 14 reported organs are correctly scoped off a systemd hub (platforms=launchd), with root cause named — not 'dark'" || bad "some of the 14 are not scoped off (see above)"
+[[ $bad14 -eq 0 ]] && ok "remaining launchd-only organs are correctly scoped off a systemd hub (platforms=launchd), with root cause named — not 'dark'" || bad "some launchd-only organs are not scoped off (see above)"
+
+# INFRA-8126 / INFRA-8146: github-liaison, ghost-pr-closer, stale-branch-reaper, daemon-activator
+# are now ported to Linux (platforms=systemd,launchd with tracked scripts/dispatch/ units).
+PORTED_LINUX="github-liaison ghost-pr-closer stale-branch-reaper branch-reaper daemon-activator"
+bad_ported=0
+for o in $PORTED_LINUX; do
+  unit="chump-$o.timer"
+  [[ -f "$ROOT/scripts/dispatch/chump-$o.service" && -f "$ROOT/scripts/dispatch/chump-$o.timer" ]] || { echo "    missing unit files: $o"; bad_ported=1; continue; }
+  plats="$(bash -c "source '$LIB'; declare -a po en; declare -A ro rq pl; organ_manifest_parse '$ROOT/scripts/ops/organ-manifest.txt' po en ro rq pl; printf %s \"\${pl[$unit]:-}\"")"
+  [[ ",$plats," == *",systemd,"* ]] || { echo "    $unit not systemd-enabled: $plats"; bad_ported=1; }
+done
+[[ $bad_ported -eq 0 ]] && ok "INFRA-8126/INFRA-8146 ported organs have tracked systemd .service+.timer units and platforms=systemd,launchd" || bad "some ported organs missing systemd units or platform tag"
 
 # The audit on the real manifest never lists any of the 14 as UNEXPECTED-DARK.
 out="$(CHUMP_REPO_ROOT="$ROOT" CHUMP_ORGAN_DEPLOY_SYSTEMD_DIR="$SD" bash "$DEPLOY" --audit-only 2>&1 || true)"

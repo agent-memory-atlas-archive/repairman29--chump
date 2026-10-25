@@ -1,0 +1,16 @@
+# chump-github-liaison.timer — INFRA-8146 60-second cadence for chump-github-liaison.service.
+# RESILIENT-1455: OnUnitInactiveSec alongside OnUnitActiveSec so oneshot timers self-perpetuate.
+
+[Unit]
+Description=Run Chump GitHub liaison cache refresh every 60 seconds (INFRA-8146)
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=10s
+Persistent=true
+Unit=chump-github-liaison.service
+
+[Install]
+WantedBy=timers.target

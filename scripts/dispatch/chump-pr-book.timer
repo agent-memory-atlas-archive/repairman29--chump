@@ -1,0 +1,16 @@
+# chump-pr-book.timer — INFRA-8144 15-minute cadence for chump-pr-book.service.
+# RESILIENT-1455: OnUnitInactiveSec alongside OnUnitActiveSec so oneshot timers self-perpetuate.
+
+[Unit]
+Description=Run Chump PR book every 15 minutes (INFRA-8144)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+OnUnitInactiveSec=15min
+AccuracySec=30s
+Persistent=true
+Unit=chump-pr-book.service
+
+[Install]
+WantedBy=timers.target

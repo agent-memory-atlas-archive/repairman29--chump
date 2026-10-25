@@ -1,0 +1,22 @@
+# chump-ghost-pr-closer.service — INFRA-8146 Linux port of ghost-pr-closer-launchd
+# (scripts/setup/install-ghost-pr-closer.sh / bootstrap-manifest.yaml).
+#
+# Runs scripts/coord/ghost-pr-closer.sh to close open PRs that are DIRTY or
+# CONFLICTING AND whose primary gap is already closed in state.db.
+#
+# Placeholders (__HOME__, __REPO_ROOT__) are substituted at install time by
+# chump-node-install.sh place_role_unit_files / organ-unit-install-lib.sh.
+
+[Unit]
+Description=Chump ghost-PR closer — close DIRTY/CONFLICTING PRs whose gap is already done (INFRA-8146)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+Environment=PATH=__HOME__/.local/bin:__HOME__/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec bash __REPO_ROOT__/scripts/coord/ghost-pr-closer.sh'
+TimeoutStartSec=300

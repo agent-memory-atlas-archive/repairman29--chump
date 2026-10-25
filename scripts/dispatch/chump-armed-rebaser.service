@@ -17,4 +17,5 @@ Wants=network-online.target
 Type=oneshot
 Environment=HOME=__HOME__
 Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+Environment=CHUMP_REBASER_MAX_PER_CYCLE=3
 ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec __REPO_ROOT__/scripts/coord/armed-pr-rebaser.sh'

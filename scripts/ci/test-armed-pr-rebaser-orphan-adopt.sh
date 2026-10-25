@@ -165,6 +165,53 @@ else
 fi
 rm -rf "$tmp2"
 
+# ── Scenario 3 (INFRA-8144): CHUMP_REBASER_MAX_PER_CYCLE caps rebases <= 3 ──
+tmp3="$(mktemp -d -t armed-pr-rebaser-throttle-XXXXXX)"
+build_fixture "$tmp3" "throttle-seed"
+for i in 1 2 3 4 5; do
+    git -C "$tmp3/seed" checkout -q -b "pr-branch-$i" "origin/pr-branch"
+    echo "change-$i" > "$tmp3/seed/fix-$i.txt"
+    git -C "$tmp3/seed" add "fix-$i.txt"
+    git -C "$tmp3/seed" commit -q -m "fix $i"
+    git -C "$tmp3/seed" push -q origin "pr-branch-$i"
+done
+root3="$tmp3/root"
+git clone -q "$tmp3/origin.git" "$root3"
+git -C "$root3" config user.email "test@example.com"
+git -C "$root3" config user.name "Test Root"
+mkdir -p "$root3/.chump-locks" "$tmp3/bin"
+cat > "$tmp3/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1:$2" in
+    pr:list)
+        cat <<'JSON'
+[
+  {"number": 6001, "mergeStateStatus": "BEHIND", "autoMergeRequest": {"mergeMethod": "SQUASH"}, "headRefName": "pr-branch-1", "labels": [], "statusCheckRollup": []},
+  {"number": 6002, "mergeStateStatus": "BEHIND", "autoMergeRequest": {"mergeMethod": "SQUASH"}, "headRefName": "pr-branch-2", "labels": [], "statusCheckRollup": []},
+  {"number": 6003, "mergeStateStatus": "BEHIND", "autoMergeRequest": {"mergeMethod": "SQUASH"}, "headRefName": "pr-branch-3", "labels": [], "statusCheckRollup": []},
+  {"number": 6004, "mergeStateStatus": "BEHIND", "autoMergeRequest": {"mergeMethod": "SQUASH"}, "headRefName": "pr-branch-4", "labels": [], "statusCheckRollup": []},
+  {"number": 6005, "mergeStateStatus": "BEHIND", "autoMergeRequest": {"mergeMethod": "SQUASH"}, "headRefName": "pr-branch-5", "labels": [], "statusCheckRollup": []}
+]
+JSON
+        ;;
+esac
+exit 0
+EOF
+chmod +x "$tmp3/bin/gh"
+out3="$(PATH="$tmp3/bin:$PATH" CHUMP_REPO_ROOT="$root3" CHUMP_PR_REPO="test/repo" CHUMP_REBASER_MAX_PER_CYCLE=10 bash "$TARGET" 2>&1)"
+rebased_n="$(echo "$out3" | grep -c "rebased clean + pushed" || true)"
+if [[ "$rebased_n" -eq 3 ]]; then
+    ok "INFRA-8144 throttle: capped at 3 rebases per cycle even when 5 BEHIND PRs exist and CHUMP_REBASER_MAX_PER_CYCLE=10"
+else
+    fail "INFRA-8144 throttle: expected 3 rebases, got $rebased_n; output: $out3"
+fi
+if echo "$out3" | grep -q "reached CHUMP_REBASER_MAX_PER_CYCLE=3"; then
+    ok "INFRA-8144 throttle: logged deferral after 3 rebases"
+else
+    fail "INFRA-8144 throttle: missing deferral log line; output: $out3"
+fi
+rm -rf "$tmp3"
+
 echo ""
 echo "=== RESULTS: $PASS passed, $FAIL failed ==="
 if [[ $FAIL -gt 0 ]]; then

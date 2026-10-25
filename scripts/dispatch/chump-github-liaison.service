@@ -1,0 +1,23 @@
+# chump-github-liaison.service — INFRA-8146 Linux port of github-liaison-launchd
+# (scripts/setup/install-github-liaison.sh / bootstrap-manifest.yaml).
+#
+# Runs scripts/ops/github-liaison.sh --once every 60s (via chump-github-liaison.timer)
+# to refresh .chump/github_cache.db so cache-first readers have fresh PR state on Linux.
+#
+# Placeholders (__HOME__, __REPO_ROOT__) are substituted at install time by
+# chump-node-install.sh place_role_unit_files / organ-unit-install-lib.sh.
+
+[Unit]
+Description=Chump GitHub liaison — refresh .chump/github_cache.db from GitHub REST API (INFRA-8146)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+Environment=CHUMP_LIAISON_ENABLED=1
+Environment=PATH=__HOME__/.local/bin:__HOME__/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec bash __REPO_ROOT__/scripts/ops/github-liaison.sh --once'
+TimeoutStartSec=120

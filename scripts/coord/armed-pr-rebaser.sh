@@ -30,6 +30,14 @@ set -uo pipefail
 REPO="${CHUMP_PR_REPO:-repairman29/chump}"
 ROOT="${CHUMP_REPO_ROOT:-$HOME/Projects/Chump}"
 AMB="$ROOT/.chump-locks/ambient.jsonl"
+# INFRA-8144: throttle per-cycle rebases (default 3, max <= 3) so a backlog of
+# DIRTY/BEHIND PRs never storms CI all at once.
+MAX_PER_CYCLE="${CHUMP_REBASER_MAX_PER_CYCLE:-3}"
+if ! [[ "$MAX_PER_CYCLE" =~ ^[0-9]+$ ]] || [ "$MAX_PER_CYCLE" -lt 1 ]; then
+    MAX_PER_CYCLE=3
+elif [ "$MAX_PER_CYCLE" -gt 3 ]; then
+    MAX_PER_CYCLE=3
+fi
 cd "$ROOT" 2>/dev/null || exit 1
 command -v gh >/dev/null 2>&1 || exit 0
 
@@ -64,8 +72,13 @@ for p in json.load(sys.stdin):
         print(p['number'], p['headRefName'], 'armed' if armed else 'adopt')" 2>/dev/null)"
 [ -z "$prs" ] && exit 0
 
+rebased_count=0
 while read -r num br mode; do
     [ -z "$num" ] && continue
+    if [ "$rebased_count" -ge "$MAX_PER_CYCLE" ]; then
+        echo "[armed-pr-rebaser] reached CHUMP_REBASER_MAX_PER_CYCLE=$MAX_PER_CYCLE ($rebased_count rebased this cycle) — deferring #$num ($br) to next cycle (INFRA-8144)"
+        break
+    fi
     # INFRA-8221: skip held PRs entirely (no rebase, no force-push, no arm). An
     # already-armed PR is not being re-armed, so skip the re-arm timeline audit
     # there (it would log a pr_rearmed that did not happen); adopt mode does arm.
@@ -79,6 +92,7 @@ while read -r num br mode; do
     # starts from what's actually on the remote — never a stale local ref
     # that would clobber commits pushed there since.
     git worktree add -B "$br" "$wt" "origin/$br" >/dev/null 2>&1 || continue
+    rebased_count=$((rebased_count + 1))
     (
         cd "$wt" || exit 0
         if git rebase origin/main >/dev/null 2>&1 \

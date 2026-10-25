@@ -1,0 +1,21 @@
+# chump-dup-pr-detector.service — INFRA-8144 Linux port of duplicate-pr-detector.
+#
+# Runs scripts/coord/duplicate-pr-detector.sh --apply to detect and close
+# duplicate open PRs for the same gap ID (keeping the freshest PR).
+#
+# Placeholders (__HOME__, __REPO_ROOT__) are substituted at install time by
+# chump-node-install.sh place_role_unit_files / organ-unit-install-lib.sh.
+
+[Unit]
+Description=Chump duplicate-PR detector — close older duplicate open PRs per gap (INFRA-8144)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+Environment=PATH=__HOME__/.local/bin:__HOME__/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec bash __REPO_ROOT__/scripts/coord/duplicate-pr-detector.sh --apply'
+TimeoutStartSec=300

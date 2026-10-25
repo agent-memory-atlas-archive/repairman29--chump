@@ -1,0 +1,16 @@
+# chump-daemon-activator.timer — INFRA-8146 5-minute cadence for chump-daemon-activator.service.
+# RESILIENT-1455: OnUnitInactiveSec alongside OnUnitActiveSec so oneshot timers self-perpetuate.
+
+[Unit]
+Description=Run Chump daemon activator every 5 minutes (INFRA-8146)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+OnUnitInactiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=chump-daemon-activator.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,22 @@
+# chump-pr-book.service — INFRA-8144 Linux port of pr-book (CREDIBLE-458).
+#
+# Runs scripts/coord/pr-book.sh to maintain the append-only per-PR prediction
+# ledger (.chump-locks/pr-book.jsonl) so chump-pr-book-settle.timer has entries
+# to settle for Brier calibration.
+#
+# Placeholders (__HOME__, __REPO_ROOT__) are substituted at install time by
+# chump-node-install.sh place_role_unit_files / organ-unit-install-lib.sh.
+
+[Unit]
+Description=Chump PR book — append-only per-PR prediction ledger (INFRA-8144)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+Environment=PATH=__HOME__/.local/bin:__HOME__/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec bash __REPO_ROOT__/scripts/coord/pr-book.sh'
+TimeoutStartSec=120

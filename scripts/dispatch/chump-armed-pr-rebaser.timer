@@ -1,0 +1,16 @@
+# chump-armed-pr-rebaser.timer — INFRA-8144 20-minute cadence for chump-armed-pr-rebaser.service.
+# RESILIENT-1455: OnUnitInactiveSec alongside OnUnitActiveSec so oneshot timers self-perpetuate.
+
+[Unit]
+Description=Run Chump armed-PR rebaser every 20 minutes (INFRA-8144)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=20min
+OnUnitInactiveSec=20min
+AccuracySec=30s
+Persistent=true
+Unit=chump-armed-pr-rebaser.service
+
+[Install]
+WantedBy=timers.target
