@@ -147,10 +147,11 @@ organ_manifest_parse() {
   return 0
 }
 
-# RESILIENT-1644 (PHASE-R R3 slice c): true (exit 0) when <unit> (or its
+# RESILIENT-1644 / RESILIENT-1692: true (exit 0) when <unit> (or its
 # .timer/.service sibling or bare organ name) is declared `retired` in
 # <manifest-file> OR listed in <paused-timers-file> (default:
-# ${CHUMP_PAUSED_TIMERS_FILE:-${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/paused-timers.txt}).
+# ${CHUMP_PAUSED_TIMERS_FILE:-${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/paused-timers.txt}),
+# stripping trailing `# <iso-ts> <reason>` comments and normalizing `.timer`/`.service` suffixes.
 organ_is_paused_or_retired() {
   local unit="$1"
   local manifest="${2:-}"
@@ -159,17 +160,24 @@ organ_is_paused_or_retired() {
   local bare="${base#chump-}"
 
   if [[ -n "$manifest" && -f "$manifest" ]]; then
-    if grep -Eq "^[[:space:]]*retired[[:space:]]+(${unit}|${base}\\.timer|${base}\\.service|${base})([[:space:]]|$)" "$manifest" 2>/dev/null; then
+    if grep -Eq "^[[:space:]]*retired[[:space:]]+(${unit}|${base}\\.timer|${base}\\.service|${base})([[:space:]#]|$)" "$manifest" 2>/dev/null; then
       return 0
     fi
   fi
 
-  local pf
+  local pf raw_line stripped entry entry_base entry_bare
   for pf in "$paused_file" "${HOME:-/root}/.chump/paused-timers.txt"; do
     [[ -n "$pf" && -f "$pf" ]] || continue
-    if grep -Eq "^[[:space:]]*(${unit}|${base}\\.timer|${base}\\.service|${base}|${bare})([[:space:]#]|$)" "$pf" 2>/dev/null; then
-      return 0
-    fi
+    while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+      stripped="${raw_line%%#*}"
+      read -r entry _ <<<"$stripped"
+      [[ -n "${entry:-}" ]] || continue
+      entry_base="${entry%.service}"; entry_base="${entry_base%.timer}"
+      entry_bare="${entry_base#chump-}"
+      if [[ "$entry" == "$unit" || "$entry_base" == "$base" || "$entry_bare" == "$bare" ]]; then
+        return 0
+      fi
+    done < "$pf"
   done
   return 1
 }

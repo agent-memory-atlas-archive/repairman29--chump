@@ -14846,4 +14846,90 @@ events:
     consumers: [ambient, fleet-brief, vital-signs]
     fields_required: [ts, kind, pr, branch, mode]
 
+  # ── Wave 12: CREDIBLE-1613, RESILIENT-1692, RESILIENT-1690, CREDIBLE-1608, CREDIBLE-1612, RESILIENT-1691, RESILIENT-1689 ──
+  - kind: gap_reclaimed_with_open_pr
+    status: active
+    effect_metric: zero_waste
+    emitter: src/dispatch_repair.rs (CREDIBLE-1613)
+    emitter_paths: [src/dispatch_repair.rs, src/main.rs, scripts/dispatch/worker.sh]
+    trigger: >
+      Emitted when `chump gap preflight` or worker dispatch detects that the target
+      gap already has an open PR on GitHub (via `gap_prs` or `gh pr list --state open`
+      matching `chump/<gap-id-lower>-*` or `claude/<gap-id-lower>*`), records/links
+      the PR, and refuses duplicate worker execution.
+    consumers: [ambient, fleet-brief, ops-audit]
+    fields_required: [ts, kind, gap_id, pr_number, head_ref]
+
+  - kind: organ_revived
+    status: active
+    effect_metric: resilient
+    emitter: scripts/ops/organ-reconcile.sh (RESILIENT-1692)
+    emitter_paths: [scripts/ops/organ-reconcile.sh]
+    trigger: >
+      Emitted when organ-reconcile.sh enables and starts an applicable organ unit
+      that was previously inactive/disabled and neither paused in paused-timers.txt
+      nor manually stopped by an operator within the last 60 minutes.
+    consumers: [ambient, fleet-brief, ops-audit]
+    fields_required: [ts, kind, unit, prev_state, reason]
+
+  - kind: node_auth_dead
+    status: active
+    effect_metric: resilient
+    emitter: src/farmer_status.rs (RESILIENT-1690)
+    emitter_paths: [src/farmer_status.rs]
+    trigger: >
+      Emitted once per outage (deduped via .chump-locks/node_auth_dead.stamp) when
+      farmer auth freshness finds no valid model credential source on the node
+      (e.g., ~/.chump/oauth-token.json missing or rotated to .exhausted* and no
+      ANTHROPIC_API_KEY / BYOK / valid .credentials.json fallback). Also files a
+      blocking operator ask.
+    consumers: [ambient, fleet-brief, operator-recall, ops-audit]
+    fields_required: [ts, kind, reason, recovery]
+
+  - kind: worker_dev_binary
+    status: active
+    effect_metric: credible
+    emitter: scripts/dispatch/worker.sh (CREDIBLE-1608)
+    emitter_paths: [scripts/dispatch/worker.sh]
+    trigger: >
+      Emitted by worker.sh when CHUMP_BIN resolves to a binary whose version string
+      shows git_sha=dev or dirty=true and the worker either rebuilds or refuses
+      execution until a stamped release binary is installed.
+    consumers: [ambient, fleet-brief, ops-audit]
+    fields_required: [ts, kind, binary, version]
+
+  - kind: model_floor_violation
+    status: active
+    effect_metric: credible
+    emitter: scripts/dispatch/worker.sh (CREDIBLE-1612)
+    emitter_paths: [scripts/dispatch/worker.sh]
+    trigger: >
+      Emitted when a worker tick is invoked with a sub-floor model (e.g. haiku) on
+      a non-trivial gap without an explicit operator override, enforcing the sonnet
+      floor for gap execution.
+    consumers: [ambient, fleet-brief, ops-audit]
+    fields_required: [ts, kind, model, gap_id]
+
+  - kind: worker_reexec_failed
+    status: active
+    effect_metric: resilient
+    emitter: scripts/ops/node-refresh-chump.sh (RESILIENT-1691)
+    emitter_paths: [scripts/ops/node-refresh-chump.sh]
+    trigger: >
+      Emitted when node-refresh-chump.sh updates the chump/chumpd binary on a node
+      and restarting or re-execing the worker daemon fails verification.
+    consumers: [ambient, fleet-brief, ops-audit]
+    fields_required: [ts, kind, unit, reason]
+
+  - kind: prepush_budget
+    status: active
+    effect_metric: zero_waste
+    emitter: scripts/git-hooks/pre-push (RESILIENT-1689)
+    emitter_paths: [scripts/git-hooks/pre-push]
+    trigger: >
+      Emitted by the pre-push hook to report per-stage and total wall-clock budget
+      consumption or budget exhaustion across pre-push verification guards.
+    consumers: [ambient, fleet-brief, ops-audit]
+    fields_required: [ts, kind, elapsed_s, budget_s]
+
   # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──

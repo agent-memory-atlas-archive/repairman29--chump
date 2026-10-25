@@ -69,9 +69,10 @@ struct Args {
     #[arg(long, default_value_t = false)]
     dry_run: bool,
 
-    /// Auto-merge flag (Phase 1 default ON for parity with bash callsite).
-    /// Reserved for future toggling; Phase 1 always arms when push lands.
-    #[arg(long, default_value_t = true)]
+    /// CREDIBLE-1607: Auto-merge flag (defaults to `false`; worker ship paths
+    /// must NEVER arm auto-merge by default — arming is owned by the review
+    /// organ after `VERDICT: APPROVE`).
+    #[arg(long, default_value_t = false)]
     auto_merge: bool,
 }
 
@@ -102,14 +103,20 @@ async fn main() -> ExitCode {
 }
 
 async fn run(args: Args) -> Result<(), ShipError> {
-    let repo_root = args
-        .repo_root
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-    // Resolve branch: explicit > git HEAD ref name.
-    let branch = match args.branch {
-        Some(b) => b,
-        None => resolve_head_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string()),
+    let invoking_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let (repo_root, branch) = match chump_ship::manual_ship::resolve_worktree_and_branch(
+        &invoking_cwd,
+        args.repo_root.as_deref(),
+        args.branch.as_deref(),
+    ) {
+        Ok((wt, br)) => (wt, br),
+        Err(_) => {
+            let wt = args.repo_root.unwrap_or(invoking_cwd);
+            let br = args
+                .branch
+                .unwrap_or_else(|| resolve_head_branch(&wt).unwrap_or_else(|| "HEAD".to_string()));
+            (wt, br)
+        }
     };
 
     let session_id = args.session_id.unwrap_or_else(|| {
@@ -131,12 +138,14 @@ async fn run(args: Args) -> Result<(), ShipError> {
 
     let receipt = match args.mode {
         ShipModeArg::Manual => {
-            let shipper = ManualShipPath::new(intent, &repo_root, args.dry_run)?;
+            let shipper = ManualShipPath::new(intent, &repo_root, args.dry_run)?
+                .with_auto_merge(args.auto_merge);
             tracing::info!(
                 gap = %args.gap,
                 branch = %branch,
                 base = %args.base,
                 dry_run = args.dry_run,
+                auto_merge = args.auto_merge,
                 "chump-ship manual starting"
             );
             shipper.ship().await?

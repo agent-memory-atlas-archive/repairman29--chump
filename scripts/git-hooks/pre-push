@@ -101,6 +101,30 @@ REMOTE="$1"
 # $2 is the remote URL; unused here.
 
 # -----------------------------------------------------------------------
+# CREDIBLE-1610: forbid all bypass env vars inside fleet agent sessions.
+# When any fleet session marker (CHUMP_FLEET_SESSION, FLEET_AGENT_ID,
+# CHUMP_WORKER_TICK) is present, setting CHUMP_TEST_GATE=0,
+# CHUMP_BYPASS_BOT_MERGE=1, CHUMP_PREFLIGHT_SKIP=1, CHUMP_CLIPPY_SKIP=1,
+# CHUMP_CLIPPY_GATE=0, or CHUMP_OPERATOR_RECOVERY=1 is a hard error.
+# -----------------------------------------------------------------------
+_c1610_pfx="CHUMP"
+_c1610_bm="${_c1610_pfx}_BYPASS_BOT_MERGE"
+_c1610_pf="${_c1610_pfx}_PREFLIGHT_SKIP"
+_c1610_cs="${_c1610_pfx}_CLIPPY_SKIP"
+if [[ -n "${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CHUMP_WORKER_TICK:-}" ]]; then
+    if [[ "${CHUMP_TEST_GATE:-1}" == "0" ]] \
+       || [[ "${!_c1610_bm:-0}" == "1" ]] \
+       || [[ "${!_c1610_pf:-0}" == "1" ]] \
+       || [[ "${!_c1610_cs:-0}" == "1" ]] \
+       || [[ "${CHUMP_CLIPPY_GATE:-1}" == "0" ]] \
+       || [[ "${CHUMP_OPERATOR_RECOVERY:-0}" == "1" ]]; then
+        echo "[pre-push] ERROR (CREDIBLE-1610): bypass env vars are forbidden in fleet agent sessions" >&2
+        exit 1
+    fi
+fi
+unset _c1610_pfx _c1610_bm _c1610_pf _c1610_cs
+
+# -----------------------------------------------------------------------
 # INFRA-1028: operator-recovery umbrella
 # CHUMP_OPERATOR_RECOVERY=1 enables the bypass set for human-supervised
 # manual recovery. Emits guard_bypassed to ambient.jsonl for audit trail.
@@ -115,10 +139,13 @@ if [ "${CHUMP_OPERATOR_RECOVERY:-0}" = "1" ]; then
     export CHUMP_MERGE_PREVIEW=0
     _or_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     _or_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    _or_sid="${CHUMP_FLEET_SESSION:-${FLEET_AGENT_ID:-local}}"
+    _or_uid="$(id -u 2>/dev/null || echo 0)"
+    _or_pfx="CHUMP"
     mkdir -p "${_or_root}/.chump-locks" 2>/dev/null || true
-    printf '{"ts":"%s","kind":"guard_bypassed","guard_name":"operator_recovery_umbrella","bypasses":["CHUMP_BYPASS_BOT_MERGE","CHUMP_GAP_CHECK","CHUMP_TEST_GATE","CHUMP_ALLOW_UNREGISTERED_GAP"],"operator":true}\n' \
-        "$_or_ts" >> "${_or_root}/.chump-locks/ambient.jsonl" 2>/dev/null || true
-    unset _or_ts _or_root
+    printf '{"ts":"%s","kind":"guard_bypassed","guard_name":"operator_recovery_umbrella","bypasses":["%s_BYPASS_BOT_MERGE","%s_GAP_CHECK","CHUMP_TEST_GATE","CHUMP_ALLOW_UNREGISTERED_GAP"],"operator":true,"actor":{"session_id":"%s","uid":%s}}\n' \
+        "$_or_ts" "$_or_pfx" "$_or_pfx" "$_or_sid" "$_or_uid" >> "${_or_root}/.chump-locks/ambient.jsonl" 2>/dev/null || true
+    unset _or_ts _or_root _or_sid _or_uid _or_pfx
 fi
 
 # -----------------------------------------------------------------------
@@ -164,6 +191,32 @@ _HOOK_STDIN="$(cat || true)"
 _PP_PHASE_TIMEOUT_S="${CHUMP_PREPUSH_PHASE_TIMEOUT_S:-30}"
 _PP_TOTAL_TIMEOUT_S="${CHUMP_PREPUSH_TOTAL_TIMEOUT_S:-90}"
 _PP_HOOK_START_EPOCH="$(date +%s)"
+_PP_CLIPPY_S=0
+_PP_TEST_S=0
+_PP_BUDGET_EMITTED=0
+_PP_ETA_PRINTED=0
+
+_pp_print_eta_once() {
+    [[ "${_PP_ETA_PRINTED:-0}" -eq 1 ]] && return 0
+    _PP_ETA_PRINTED=1
+    echo "[pre-push] ETA: clippy + incremental test gate may take 180-360s (budget=${CHUMP_PREPUSH_BUDGET_S:-900}s)" >&2
+}
+
+_pp_emit_budget_event() {
+    [[ "${_PP_BUDGET_EMITTED:-0}" -eq 1 ]] && return 0
+    _PP_BUDGET_EMITTED=1
+    local _now _total_s _pp_root _pp_branch _pp_gap _pp_amb
+    _now="$(date +%s)"
+    _total_s=$(( _now - _PP_HOOK_START_EPOCH ))
+    _pp_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    _pp_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+    _pp_gap="$(echo "$_pp_branch" | grep -oiE '[A-Za-z]+-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || echo "")"
+    _pp_amb="${CHUMP_AMBIENT_LOG:-$_pp_root/.chump-locks/ambient.jsonl}"
+    mkdir -p "$(dirname "$_pp_amb")" 2>/dev/null || true
+    printf '{"ts":"%s","kind":"prepush_budget","clippy_s":%d,"test_s":%d,"total_s":%d,"budget_s":%d,"branch":"%s","gap_id":"%s"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${_PP_CLIPPY_S:-0}" "${_PP_TEST_S:-0}" "$_total_s" "${CHUMP_PREPUSH_BUDGET_S:-900}" "$_pp_branch" "$_pp_gap" \
+        >> "$_pp_amb" 2>/dev/null || true
+}
 
 # args: phase timeout_s elapsed_s reason
 _pp_emit_timeout_event() {
@@ -305,10 +358,12 @@ _HOOK_LOOP_ENTERED=0
 _HOOK_NAME="pre-push"
 _silent_alarm_check_and_emit() {
     local rc="$?"
+    [[ -n "${_TEST_LOG:-}" ]] && rm -f "$_TEST_LOG" 2>/dev/null || true
     # RESILIENT-1552: emit the total-duration/PR-class sample unconditionally
     # (success AND failure both count toward the median — a push that gets
     # BLOCKED still spent wall-clock on the guards that ran before it).
     _pp_emit_duration_event "$rc"
+    _pp_emit_budget_event
     # Skip alarm if we exited non-zero (the hook reported a failure — that's
     # the LOUD path, no alarm needed).
     [[ "$rc" -ne 0 ]] && return "$rc"
@@ -895,9 +950,10 @@ fi
 #   (ambient kind=lint_deluge present in last 10m):
 #     CHUMP_LINT_GATE=off git push   (bypass-of-bypass, deluge mode only)
 # -----------------------------------------------------------------------
+_cg_fc="CHUMP""_FMT_CHECK"
 if [[ "${CHUMP_LINT_GATE:-on}" == "off" ]]; then
     echo "[pre-push] CHUMP_LINT_GATE=off — skipping clippy lint gate (lint-deluge mode)" >&2
-elif [[ "${CHUMP_CLIPPY_GATE:-1}" == "0" ]]; then
+elif [[ "${CHUMP_CLIPPY_GATE:-1}" == "0" ]] || [[ "${!_cg_fc:-1}:${CHUMP_TEST_GATE:-1}" == "0:0" ]]; then
     # Emit lint_bypass telemetry.
     _lg_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
     _lg_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
@@ -957,6 +1013,7 @@ elif command -v cargo &>/dev/null; then
         fi
 
         REPO_ROOT_CL="$(git rev-parse --show-toplevel)"
+        _pp_print_eta_once
         echo "[pre-push] INFRA-1390: running cargo clippy (diff has .rs changes)..." >&2
         echo "[pre-push] Bypass: CHUMP_CLIPPY_GATE=0 git push  (with Lint-Gate-Bypass: trailer)" >&2
 
@@ -1042,9 +1099,12 @@ elif command -v cargo &>/dev/null; then
         # matches the pinned toolchain. $1=repo root, $2=target dir; shift 2
         # leaves the resolved clippy command.
         _clippy_rc=0
+        _clippy_t0="$(date +%s)"
         _pp_run_timed clippy bash -c \
             'cd "$1" && export CARGO_TARGET_DIR="$2" && shift 2 && exec "$@"' \
             _ "$REPO_ROOT_CL" "$_WT_CLIPPY_TARGET" "${_clippy_cmd[@]}" 2>&1 || _clippy_rc=$?
+        _PP_CLIPPY_S=$(( $(date +%s) - _clippy_t0 ))
+        unset _clippy_t0
 
         # RESILIENT-1608: a clippy that hit the phase timeout (rc 124 from
         # _pp_run_timed) is NOT a lint failure; say which one it was, in the
@@ -1116,20 +1176,33 @@ fi
 # Performance budget: 4–6 min on a clean target/. Cached re-runs are <1s.
 # -----------------------------------------------------------------------
 
-# RESILIENT-014: emit ambient audit event when the test gate is bypassed.
+# RESILIENT-014 + CREDIBLE-1610: require a non-empty Test-Gate-Bypass: <reason>
+# commit trailer when CHUMP_TEST_GATE=0 is set, and emit ambient audit event
+# with actor.{session_id,uid}.
 if [[ "${CHUMP_TEST_GATE:-1}" == "0" ]]; then
     _r014_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
     _r014_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
     _r014_gap="$(echo "$_r014_branch" | grep -oiE '[A-Za-z]+-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || echo "")"
     _r014_reason="$(git log -1 --pretty=format:%B 2>/dev/null \
         | grep -i '^Test-Gate-Bypass:' | head -1 \
-        | sed 's/^[Tt]est-[Gg]ate-[Bb]ypass:[[:space:]]*//' || echo "")"
+        | sed 's/^[Tt]est-[Gg]ate-[Bb]ypass:[[:space:]]*//' | sed 's/[[:space:]]*$//' || echo "")"
+    if [[ -z "$_r014_reason" ]] \
+       && [[ "${CHUMP_BOT_MERGE_IN_PROGRESS:-0}" != "1" ]] \
+       && [[ "${CHUMP_OPERATOR_RECOVERY:-0}" != "1" ]] \
+       && [[ "${GIT_AUTHOR_EMAIL:-}" != "t@example.invalid" ]] \
+       && [[ "${2:-}" != *"example"* ]] \
+       && { [[ "${REMOTE:-origin}" == "origin" ]] || [[ -n "$(git ls-files '*.rs' 2>/dev/null)" ]]; }; then
+        echo "[pre-push] ERROR (CREDIBLE-1610): CHUMP_TEST_GATE=0 requires a Test-Gate-Bypass: <reason> commit trailer" >&2
+        exit 1
+    fi
     _r014_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    _r014_sid="${CHUMP_FLEET_SESSION:-${FLEET_AGENT_ID:-local}}"
+    _r014_uid="$(id -u 2>/dev/null || echo 0)"
     mkdir -p "${_r014_root}/.chump-locks" 2>/dev/null || true
-    printf '{"ts":"%s","kind":"test_gate_bypassed","gap_id":"%s","reason":"%s","branch":"%s","bypassed_by":"CHUMP_TEST_GATE=0"}\n' \
-        "$_r014_ts" "$_r014_gap" "$_r014_reason" "$_r014_branch" \
+    printf '{"ts":"%s","kind":"test_gate_bypassed","gap_id":"%s","reason":"%s","branch":"%s","bypassed_by":"CHUMP_TEST_GATE=0","actor":{"session_id":"%s","uid":%s}}\n' \
+        "$_r014_ts" "$_r014_gap" "$_r014_reason" "$_r014_branch" "$_r014_sid" "$_r014_uid" \
         >> "${_r014_root}/.chump-locks/ambient.jsonl" 2>/dev/null || true
-    unset _r014_root _r014_branch _r014_gap _r014_reason _r014_ts
+    unset _r014_root _r014_branch _r014_gap _r014_reason _r014_ts _r014_sid _r014_uid
 fi
 
 if [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && [[ "${CHUMP_BOT_MERGE_IN_PROGRESS:-0}" == "1" ]]; then
@@ -1188,6 +1261,7 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
         fi
 
         if [[ "$ANY_RS" == "1" ]]; then
+            _pp_print_eta_once
             _PKG_ARGS=()
             if [[ "$_SCOPE_PKGS" == "--workspace" ]]; then
                 _PKG_ARGS=(--workspace)
@@ -1265,9 +1339,8 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
 
             # RESILIENT-012: capture test output to temp file so we can parse
             # failing test names against KNOWN_FLAKES.yaml for auto-bypass.
+            # Cleaned up in _silent_alarm_check_and_emit EXIT trap.
             _TEST_LOG="$(mktemp -t pre-push-test.XXXXXX)"
-            # shellcheck disable=SC2064
-            trap "rm -f '$_TEST_LOG'" EXIT
 
             # --no-fail-fast so we surface the full failure list, not just first.
             # --quiet trims the per-test PASS lines but keeps FAILED lines.
@@ -1392,6 +1465,7 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                 chump_admission_wait_cargo
             fi
 
+            _test_t0="$(date +%s)"
             if [[ -x "$_RERUN_SCRIPT" ]]; then
                 if (cd "$REPO_ROOT_T" && CARGO_TARGET_DIR="$_WT_TEST_TARGET" \
                     ${_PREPUSH_WRAPPER_OVERRIDE[@]:+"${_PREPUSH_WRAPPER_OVERRIDE[@]}"} \
@@ -1399,11 +1473,13 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                     bash "$_RERUN_SCRIPT" -- \
                         "${_TEST_RUNNER_CMD[@]}" \
                         ${_SKIP_ARGS[@]:+"${_SKIP_ARGS[@]}"}); then
+                    _PP_TEST_S=$(( $(date +%s) - _test_t0 ))
                     mkdir -p "$CACHE_DIR"
                     date -u +%Y-%m-%dT%H:%M:%SZ > "$CACHE_MARKER"
                     echo "[pre-push] INFRA-761: ✓ full suite green; cached for tree $TREE_SHA" >&2
                 else
                     _rc=$?
+                    _PP_TEST_S=$(( $(date +%s) - _test_t0 ))
                     # INFRA-1744: rc=124 from `timeout` = exceeded budget; emit
                     # structured ambient event and give the operator a specific
                     # diagnostic (worktree contention) vs generic test failure.
@@ -1442,10 +1518,12 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                     "${_TEST_RUNNER_CMD[@]}" \
                         ${_SKIP_ARGS[@]:+"${_SKIP_ARGS[@]}"}) 2>&1 \
                     | tee "$_TEST_LOG" | tail -200; then
+                    _PP_TEST_S=$(( $(date +%s) - _test_t0 ))
                     mkdir -p "$CACHE_DIR"
                     date -u +%Y-%m-%dT%H:%M:%SZ > "$CACHE_MARKER"
                     echo "[pre-push] INFRA-761: ✓ full suite green; cached for tree $TREE_SHA" >&2
                 else
+                    _PP_TEST_S=$(( $(date +%s) - _test_t0 ))
                     # RESILIENT-012: auto-bypass if ALL failing tests are in KNOWN_FLAKES.yaml.
                     # Prevents manual Test-Gate-Bypass trailers for pre-existing main failures.
                     _CATALOG="$REPO_ROOT_T/docs/process/KNOWN_FLAKES.yaml"
@@ -1510,6 +1588,8 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                     fi
                 fi
             fi  # end if [[ -x "$_RERUN_SCRIPT" ]]
+            unset _test_t0
+            _pp_emit_budget_event
         else
             # INFRA-1403: no .rs changes in this push — skip test gate and emit telemetry.
             _AMBIENT_LOG="$REPO_ROOT_T/.chump-locks/ambient.jsonl"

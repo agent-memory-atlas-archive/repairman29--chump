@@ -482,4 +482,38 @@ grep -qF "$CHECKOUT_REAL/scripts/coord/pr-book.sh" "$T14_UNITS/chump-pr-book.ser
     || fail "INFRA-8106: rendered chump-pr-book.service missing host-rewritten pr-book.sh ExecStart"
 ok "INFRA-8106: _ensure_pr_book_timer renders and installs chump-pr-book.{service,timer} alongside settle timer"
 
+# ── Test 15: INFRA-8639: chump-worker@.service template + node-orchestrator.sh worker unit resolution ──
+WORKER_TPL="$REPO_ROOT/scripts/dispatch/chump-worker@.service"
+[[ -f "$WORKER_TPL" ]] || fail "INFRA-8639: missing $WORKER_TPL"
+grep -qE '^WorkingDirectory=(__REPO_ROOT__|%h/chump)$' "$WORKER_TPL" \
+    || fail "INFRA-8639: chump-worker@.service missing WorkingDirectory=__REPO_ROOT__"
+grep -qE '^EnvironmentFile=-(__HOME__|%h)/\.chump/node\.env$' "$WORKER_TPL" \
+    || fail "INFRA-8639: chump-worker@.service missing EnvironmentFile=-__HOME__/.chump/node.env"
+grep -qE 'set -a.*providers\.env' "$WORKER_TPL" \
+    && fail "INFRA-8639: chump-worker@.service must not source providers.env with set -a"
+ORCH_SCRIPT="$REPO_ROOT/scripts/ops/node-orchestrator.sh"
+T15_OUT="$(
+    unset CHUMP_ORCH_WORKER_UNIT
+    export HOME="$TMP/t15-home"
+    mkdir -p "$HOME/.config/systemd/user"
+    cp "$WORKER_TPL" "$HOME/.config/systemd/user/chump-worker@.service"
+    # shellcheck disable=SC1090
+    source "$ORCH_SCRIPT" 2>/dev/null || true
+    printf 'unit=%s slot1=%s slot2=%s\n' "$WORKER_UNIT" "$(_worker_unit_for_slot 1)" "$(_worker_unit_for_slot 2)"
+)"
+[[ "$T15_OUT" == "unit=chump-worker@ slot1=chump-worker@1.service slot2=chump-worker@2.service" ]] \
+    || fail "INFRA-8639: node-orchestrator.sh did not resolve chump-worker@ (got: $T15_OUT)"
+T15_FALLBACK="$(
+    unset CHUMP_ORCH_WORKER_UNIT
+    export HOME="$TMP/t15-fallback-home"
+    mkdir -p "$HOME/.config/systemd/user"
+    touch "$HOME/.config/systemd/user/chump-node1-worker.service"
+    # shellcheck disable=SC1090
+    source "$ORCH_SCRIPT" 2>/dev/null || true
+    printf 'unit=%s slot1=%s slot2=%s\n' "$WORKER_UNIT" "$(_worker_unit_for_slot 1)" "$(_worker_unit_for_slot 2)"
+)"
+[[ "$T15_FALLBACK" == "unit=chump-node1-worker slot1=chump-node1-worker.service slot2=chump-worker@2.service" ]] \
+    || fail "INFRA-8639: node-orchestrator.sh fallback to chump-node1-worker.service failed (got: $T15_FALLBACK)"
+ok "INFRA-8639: chump-worker@.service is portable and node-orchestrator.sh resolves chump-worker@ (with chump-node1-worker.service fallback)"
+
 printf '\033[0;32mALL PASS\033[0m scripts/ci/test-node-converge.sh\n'

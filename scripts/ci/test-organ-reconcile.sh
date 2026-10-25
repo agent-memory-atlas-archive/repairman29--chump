@@ -561,4 +561,57 @@ grep -q '"action":"deletion_gap_filed"' "$PRUNE_AMB" \
     || fail "expected deletion_gap_filed on --on-passed"
 pass "12: rule-prune-cycle ranks non-protected delete candidates, emits rule_prune_proposal, and protects floor (ZERO-WASTE-125)"
 
+# ── 13. RESILIENT-1692: paused-timers.txt comment+suffix matching, 60m manual-stop guard, and organ_revived emit ──
+PAUSED_TEST_FILE="$TMP/paused-timers-test.txt"
+cat > "$PAUSED_TEST_FILE" <<'EOF'
+# Operator pause ledger
+chump-paused-organ.timer  # 2026-10-25T10:00:00Z manual maintenance window
+EOF
+MANIFEST="$TMP/manifest-resilient-1692.txt"
+cat > "$MANIFEST" <<'EOF'
+enabled  chump-paused-organ.service  role=muscle requires=bin:chump-good-binary
+enabled  chump-revive-organ.service  role=muscle requires=bin:chump-good-binary
+EOF
+: > "$ACTIVE_FILE"; : > "$ENABLE_FAIL_FILE"; : > "$VERIFY_FAIL_FILE"; : > "$CALL_LOG"
+rm -rf "$BACKOFF_DIR"
+: > "$AMBIENT"
+
+# 13a. Stub journalctl reporting manual stop within 60m skips revival of chump-revive-organ.service;
+#      chump-paused-organ.service is skipped via paused-timers.txt (matching .timer -> .service + comment).
+cat > "$TMP/bins/journalctl" <<'EOF'
+#!/usr/bin/env bash
+echo "Oct 25 10:55:00 host systemd[1]: chump-revive-organ.service: Deactivated successfully."
+exit 0
+EOF
+chmod +x "$TMP/bins/journalctl"
+
+reconcile_13a="$(CHUMP_PAUSED_TIMERS_FILE="$PAUSED_TEST_FILE" run_reconcile --apply)"
+grep -q "enable --now chump-paused-organ.service" "$CALL_LOG" \
+    && fail "13a: paused organ (.timer entry with comment) must NOT be enabled; calls: $(cat "$CALL_LOG")"
+grep -q "enable --now chump-revive-organ.service" "$CALL_LOG" \
+    && fail "13a: manually-stopped organ within 60m must NOT be enabled; calls: $(cat "$CALL_LOG")"
+grep -q "manually stopped within 60m.*chump-revive-organ.service" <<<"$reconcile_13a" \
+    || fail "13a: expected manually-stopped skip for chump-revive-organ.service; got: $reconcile_13a"
+
+# 13b. When journalctl reports no manual stop in the last 60m, chump-revive-organ.service
+#      is revived and emits kind=organ_revived, while chump-paused-organ.service stays skipped.
+cat > "$TMP/bins/journalctl" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/bins/journalctl"
+: > "$CALL_LOG"; : > "$AMBIENT"
+
+CHUMP_PAUSED_TIMERS_FILE="$PAUSED_TEST_FILE" run_reconcile --apply >/dev/null
+grep -q "enable --now chump-paused-organ.service" "$CALL_LOG" \
+    && fail "13b: paused organ must remain skipped; calls: $(cat "$CALL_LOG")"
+grep -q "enable --now chump-revive-organ.service" "$CALL_LOG" \
+    || fail "13b: unpaused organ without recent manual stop must be revived"
+grep -q '"kind":"organ_revived"' "$AMBIENT" \
+    || fail "13b: expected kind=organ_revived in ambient when reviving inactive organ; got: $(cat "$AMBIENT")"
+grep -q '"unit":"chump-revive-organ.service"' "$AMBIENT" \
+    || fail "13b: expected unit=chump-revive-organ.service in organ_revived event; got: $(cat "$AMBIENT")"
+rm -f "$TMP/bins/journalctl"
+pass "13: paused-timers.txt comment+suffix matching, 60m manual-stop guard, and organ_revived emit (RESILIENT-1692)"
+
 echo "ALL PASS"

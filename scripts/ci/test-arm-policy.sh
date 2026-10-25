@@ -543,7 +543,7 @@ echo "gh $*" >>"$ORGLOG"; a="$*"; pr="$(grep -oE ' [0-9]{3} ' <<<" $a " | tr -d 
 # The organ's own authenticated identity: the account it posts verdict comments
 # as, and therefore the ONLY author whose VERDICT it trusts. gh api user returns
 # it; pr comment stores it as the comment author (CREDIBLE-1542 review REQUIRED).
-ORGAN_SELF=organbot
+ORGAN_SELF="${ORGAN_SELF:-organbot}"
 # CREDIBLE-1599 capture: the branch-reconcile calls the organ makes on an
 # APPROVEd-but-unmergeable head — the BEHIND update-branch (REST PUT with
 # expected_head_sha) and the DIRTY shell-only rebase (gh pr update-branch --rebase).
@@ -575,7 +575,11 @@ case "$1 $2" in
       exit 0
     fi
     if [[ "$a" == *isDraft* ]]; then cross=false; [[ "$pr" == 202 ]] && cross=true
-      echo "{\"isDraft\":false,\"isCrossRepository\":$cross,\"headRefOid\":\"deadbeef1234567890abcdef1234567890abcdef\",\"author\":{\"login\":\"botx\"},\"headRefName\":\"claude/credible-9${pr}-x\"}"; exit 0; fi
+      _pr_author="${ORG_PR_AUTHOR:-botx}"
+      _pr_ref="${ORG_HEAD_REF:-claude/credible-9${pr}-x}"
+      _pr_labels="${ORG_PR_LABELS:-[]}"
+      _pr_title="${ORG_PR_TITLE:-feat: clean}"
+      echo "{\"isDraft\":false,\"isCrossRepository\":$cross,\"headRefOid\":\"deadbeef1234567890abcdef1234567890abcdef\",\"author\":{\"login\":\"$_pr_author\"},\"headRefName\":\"$_pr_ref\",\"labels\":$_pr_labels,\"title\":\"$_pr_title\",\"body\":\"\"}"; exit 0; fi
     # Serves both review_hold_allows (labels,comments) and current_head_verdict (comments).
     if [[ "$a" == *comments* ]]; then cat "$ORGCMT" 2>/dev/null || echo '{"labels":[],"comments":[]}'; exit 0; fi
     if [[ "$a" == *statusCheckRollup* ]]; then
@@ -586,7 +590,7 @@ case "$1 $2" in
       exit 0
     fi
     if [[ "$a" == *isCrossRepository* ]]; then [[ "$pr" == 202 ]] && echo true || echo false; exit 0; fi
-    if [[ "$a" == *headRefName* ]]; then echo "claude/credible-9${pr}-x"; exit 0; fi
+    if [[ "$a" == *headRefName* ]]; then echo "${ORG_HEAD_REF:-claude/credible-9${pr}-x}"; exit 0; fi
     exit 0;;
   "pr diff")
     case "$pr" in
@@ -1375,11 +1379,42 @@ only_bm="$(comm -13 <(printf '%s\n' "$shared_globs") <(printf '%s\n' "$bm_globs"
 organ_run --pr 202
 [[ -s "$ORGLOG.merges" ]] && bad "organ: a fork PR was armed/merged" || ok "organ: fork PR never armed"
 
-# Own-lane PR (author == --self-login) is skipped (independence). Clear any
+# Own-lane PR (author == --self-login on own lane branch) is skipped (independence). Clear any
 # comment left by an earlier run, then confirm a self-login run posts none.
 rm -f "$ORGLOG.cmt.203"
-organ_run --pr 203 --self-login botx
+ORG_HEAD_REF="review-organ/self-203" organ_run --pr 203 --self-login botx
 if [[ -e "$ORGLOG.cmt.203" ]]; then bad "organ: own-lane PR was still reviewed"; else ok "organ: own-lane PR (author==self-login) skipped"; fi
+
+# CREDIBLE-1608: on a single-account node (all PR authors == repairman29), fleet
+# worker PRs (chump/*-fleet-* or claude/*) without a review-organ self-marker
+# MUST be reviewed even when --self-login repairman29 is passed, while
+# organ-authored/marked PRs under the same login are still skipped.
+rm -f "$ORGLOG.cmt.203"
+ORG_PR_AUTHOR="repairman29" ORGAN_SELF="repairman29" ORG_HEAD_REF="chump/credible-9203-fleet-1-20261025" \
+    organ_run --pr 203 --self-login repairman29
+if [[ -e "$ORGLOG.cmt.203" ]] && grep -q '^MERGE pr merge 203 --squash --match-head-commit' "$ORGLOG.merges"; then
+    ok "CREDIBLE-1608: single-account node (author==repairman29==--self-login) reviews & arms fleet PR (chump/*-fleet-*)"
+else
+    bad "CREDIBLE-1608: single-account node skipped or failed to arm fleet PR 203"
+fi
+rm -f "$ORGLOG.cmt.203"
+ORG_PR_AUTHOR="repairman29" ORGAN_SELF="repairman29" ORG_HEAD_REF="chump/credible-9203-fleet-1-20261025" \
+    ORG_PR_LABELS='[{"name":"review-organ-self"}]' \
+    organ_run --pr 203 --self-login repairman29
+if [[ -e "$ORGLOG.cmt.203" ]]; then
+    bad "CREDIBLE-1608: review-organ-self labeled PR under repairman29 was reviewed"
+else
+    ok "CREDIBLE-1608: review-organ-self labeled PR under repairman29 is skipped as own-lane"
+fi
+rm -f "$ORGLOG.cmt.203"
+ORG_PR_AUTHOR="repairman29" ORGAN_SELF="repairman29" ORG_HEAD_REF="chump/credible-9203-fleet-1-20261025" \
+    ORG_PR_TITLE="[review-organ] self-authored repair" \
+    organ_run --pr 203 --self-login repairman29
+if [[ -e "$ORGLOG.cmt.203" ]]; then
+    bad "CREDIBLE-1608: [review-organ] title-marked PR under repairman29 was reviewed"
+else
+    ok "CREDIBLE-1608: [review-organ] title-marked PR under repairman29 is skipped as own-lane"
+fi
 
 # Idempotency (design item (a) / CREDIBLE-1542 review REQUIRED): a PR whose CURRENT
 # head already has a verdict comment FROM THE ORGAN must NOT be re-reviewed,

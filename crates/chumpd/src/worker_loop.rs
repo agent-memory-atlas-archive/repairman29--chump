@@ -243,17 +243,84 @@ fn write_heartbeat(path: &Path, state: &str) {
     let _ = fs::write(path, format!("{} {}\n", now_epoch(), state));
 }
 
+/// CREDIBLE-1612: Forwarded worker/model/timeout environment variables.
+pub const FORWARDED_WORKER_ENV_VARS: &[&str] = &[
+    "FLEET_BACKEND",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "BASH_DEFAULT_TIMEOUT_MS",
+    "BASH_MAX_TIMEOUT_MS",
+];
+
+/// Read a single `KEY=VALUE` (or `export KEY=VALUE`) from `<state_dir>/node.env`.
+pub fn read_env_from_node_env(state_dir: &Path, key: &str) -> Option<String> {
+    let body = fs::read_to_string(state_dir.join("node.env")).ok()?;
+    for raw_line in body.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").map(str::trim).unwrap_or(line);
+        if let Some((k, v)) = line.split_once('=') {
+            if k.trim() == key {
+                let val = v
+                    .split('#')
+                    .next()
+                    .unwrap_or(v)
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// CREDIBLE-1612: Resolve `FLEET_MODEL` (from `std::env`, falling back to
+/// `<state_dir>/node.env`, defaulting to `"sonnet"`) plus any set values for
+/// [`FORWARDED_WORKER_ENV_VARS`] so the spawned tick/worker subprocess inherits
+/// the node's model floor and tool timeouts.
+pub fn resolve_worker_child_env(state_dir: &Path) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    let fleet_model = std::env::var("FLEET_MODEL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| read_env_from_node_env(state_dir, "FLEET_MODEL"))
+        .unwrap_or_else(|| "sonnet".to_string());
+    pairs.push(("FLEET_MODEL".to_string(), fleet_model));
+
+    for &key in FORWARDED_WORKER_ENV_VARS {
+        let val = std::env::var(key)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| read_env_from_node_env(state_dir, key));
+        if let Some(v) = val {
+            pairs.push((key.to_string(), v));
+        }
+    }
+    pairs
+}
+
 /// Run one tick body under an optional wall-clock budget. Returns the child's
 /// exit code (or -1 if it was budget-killed / failed to spawn).
 fn run_tick_with_budget(cfg: &WorkerConfig) -> i32 {
-    let mut child = match Command::new("bash")
-        .arg("-c")
+    let mut cmd = Command::new("bash");
+    cmd.arg("-c")
         .arg(&cfg.tick_cmd)
         .current_dir(&cfg.repo)
         // The shim path: the shell body runs a single pass, not its own loop.
-        .env("CHUMP_WORKER_SINGLE_TICK", "1")
-        .spawn()
-    {
+        .env("CHUMP_WORKER_SINGLE_TICK", "1");
+    for (k, v) in resolve_worker_child_env(&cfg.state_dir) {
+        cmd.env(k, v);
+    }
+    let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("chumpd worker: tick spawn failed: {e}");
@@ -580,6 +647,82 @@ mod tests {
         assert!(
             !amb_body.contains("chumpd_worker_tick_budget_killed"),
             "default config (budget_secs=0) must never emit chumpd_worker_tick_budget_killed: {amb_body:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn worker_child_env_forwards_fleet_model_and_node_env_defaults_credible_1612() {
+        let dir =
+            std::env::temp_dir().join(format!("chumpd-wl-credible1612-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let state_dir = dir.join("state");
+        let repo_dir = dir.join("repo");
+        fs::create_dir_all(&state_dir).unwrap();
+        fs::create_dir_all(&repo_dir).unwrap();
+
+        // 1. With no node.env and FLEET_MODEL unset, defaults to "sonnet".
+        let prev_model = std::env::var("FLEET_MODEL").ok();
+        std::env::remove_var("FLEET_MODEL");
+        let pairs_default = resolve_worker_child_env(&state_dir);
+        assert!(
+            pairs_default
+                .iter()
+                .any(|(k, v)| k == "FLEET_MODEL" && v == "sonnet"),
+            "expected FLEET_MODEL=sonnet by default, got: {pairs_default:?}"
+        );
+
+        // 2. With node.env specifying FLEET_MODEL and timeout vars, they are read
+        // and forwarded into the spawned tick subprocess environment.
+        fs::write(
+            state_dir.join("node.env"),
+            "export FLEET_MODEL=claude-sonnet-4-5\n\
+             FLEET_BACKEND=claude\n\
+             ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-5\n\
+             BASH_DEFAULT_TIMEOUT_MS=120000\n\
+             BASH_MAX_TIMEOUT_MS=600000\n",
+        )
+        .unwrap();
+
+        let env_dump = dir.join("child_env.txt");
+        let cfg = WorkerConfig {
+            repo: repo_dir.clone(),
+            tick_cmd: format!(
+                "printf 'FLEET_MODEL=%s\\nFLEET_BACKEND=%s\\nSONNET=%s\\nTIMEOUT=%s\\nMAX_TIMEOUT=%s\\n' \
+                 \"$FLEET_MODEL\" \"$FLEET_BACKEND\" \"$ANTHROPIC_DEFAULT_SONNET_MODEL\" \
+                 \"$BASH_DEFAULT_TIMEOUT_MS\" \"$BASH_MAX_TIMEOUT_MS\" > {}",
+                env_dump.display()
+            ),
+            cadence_secs: 0,
+            budget_secs: 0,
+            pause_file: repo_dir.join(".chump/fleet-paused"),
+            state_dir: state_dir.clone(),
+            heartbeat_file: dir.join("worker.hb"),
+            ambient: dir.join("ambient.jsonl"),
+            agent_id: "test-1612".to_string(),
+            max_ticks: 1,
+        };
+        let rc = run_with_config(cfg);
+        if let Some(m) = prev_model {
+            std::env::set_var("FLEET_MODEL", m);
+        }
+        assert_eq!(rc, 0);
+        let dumped = fs::read_to_string(&env_dump).unwrap();
+        assert!(
+            dumped.contains("FLEET_MODEL=claude-sonnet-4-5"),
+            "tick subprocess must receive FLEET_MODEL from node.env: {dumped}"
+        );
+        assert!(
+            dumped.contains("FLEET_BACKEND=claude"),
+            "tick subprocess must receive FLEET_BACKEND: {dumped}"
+        );
+        assert!(
+            dumped.contains("SONNET=claude-sonnet-4-5"),
+            "tick subprocess must receive ANTHROPIC_DEFAULT_SONNET_MODEL: {dumped}"
+        );
+        assert!(
+            dumped.contains("TIMEOUT=120000") && dumped.contains("MAX_TIMEOUT=600000"),
+            "tick subprocess must receive BASH timeout env vars: {dumped}"
         );
         let _ = fs::remove_dir_all(&dir);
     }

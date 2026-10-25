@@ -76,6 +76,10 @@ pub struct ManualShipPath {
     /// actually pushing or calling GitHub. Smoke tests + dry-runs use
     /// this; production ships pass `false`.
     dry_run: bool,
+    /// CREDIBLE-1607: Whether to arm auto-merge after opening the PR.
+    /// Defaults to `false` — worker ship paths must NEVER arm auto-merge
+    /// by default; arming is owned by the review organ after `VERDICT: APPROVE`.
+    auto_merge: bool,
 }
 
 /// RAII wrapper that holds the bound socket + path-to-clean-up-on-drop.
@@ -161,7 +165,21 @@ impl ManualShipPath {
                 socket_path,
             },
             dry_run,
+            auto_merge: false,
         })
+    }
+
+    /// CREDIBLE-1607: Explicitly opt in (or out) of arming auto-merge during `ship()`.
+    /// By default `auto_merge` is `false` so worker ship paths open the PR and exit
+    /// without arming `gh pr merge --auto`.
+    pub fn with_auto_merge(mut self, auto_merge: bool) -> Self {
+        self.auto_merge = auto_merge;
+        self
+    }
+
+    /// Returns whether this executor will attempt to arm auto-merge after PR creation.
+    pub fn auto_merge(&self) -> bool {
+        self.auto_merge
     }
 
     /// Construct a `Command` for invoking `git` from `repo_root` with the
@@ -218,6 +236,25 @@ impl ManualShipPath {
                 passed: false,
                 detail: format!("failed to run git rev-parse: {err}"),
             },
+        }
+    }
+
+    /// Pre-flight gate (CREDIBLE-1611): refuse shipping directly from `main`,
+    /// `master`, or detached `HEAD`.
+    fn gate_branch_not_main(&self) -> PreflightGate {
+        let b = self.intent.branch.trim();
+        if b == "main" || b == "master" || b == "HEAD" || b.is_empty() {
+            PreflightGate {
+                name: "branch_not_main".into(),
+                passed: false,
+                detail: format!("Already on {b}. Run from a feature/agent branch."),
+            }
+        } else {
+            PreflightGate {
+                name: "branch_not_main".into(),
+                passed: true,
+                detail: String::new(),
+            }
         }
     }
 
@@ -424,6 +461,7 @@ impl Ship for ManualShipPath {
     async fn preflight(&self) -> Result<PreflightReport, ShipError> {
         let gates = vec![
             self.gate_branch_exists().await,
+            self.gate_branch_not_main(),
             self.gate_ahead_of_base().await,
         ];
         Ok(PreflightReport { gates })
@@ -451,8 +489,14 @@ impl Ship for ManualShipPath {
         // 4. Resolve head SHA for the receipt.
         let head_sha = self.resolve_head_sha().await?;
 
-        // 5. Arm auto-merge.
-        let auto_merge_armed = self.arm_auto_merge(pr_number).await?;
+        // 5. CREDIBLE-1607: Arm auto-merge ONLY when explicitly requested.
+        //    Worker ship paths leave auto_merge=false; arming is owned by the
+        //    review organ after VERDICT: APPROVE.
+        let auto_merge_armed = if self.auto_merge {
+            self.arm_auto_merge(pr_number).await?
+        } else {
+            false
+        };
 
         Ok(ShipReceipt {
             pr_number,
@@ -479,6 +523,120 @@ pub(crate) fn socket_path_for(session_id: &str) -> PathBuf {
 /// `https://github.com/owner/repo/pull/1913`.
 fn parse_pr_number_from_url(url: &str) -> Option<u64> {
     url.rsplit('/').next().and_then(|seg| seg.parse().ok())
+}
+
+/// CREDIBLE-1611: Resolve the active git worktree root and current branch from
+/// the invoking `cwd` (or an explicit `--worktree` / `--branch` argument),
+/// never from `CHUMP_REPO`, `CHUMP_REPO_ROOT`, or `REPO_ROOT` pointing at the
+/// main checkout. When invoked inside `.claude/worktrees/<name>` or
+/// `.chump/worktrees/<name>`, `git -C <cwd> rev-parse --show-toplevel` returns
+/// the linked worktree path and `--abbrev-ref HEAD` returns the feature branch.
+pub fn resolve_worktree_and_branch(
+    invoking_cwd: &Path,
+    explicit_worktree: Option<&Path>,
+    explicit_branch: Option<&str>,
+) -> Result<(PathBuf, String), String> {
+    let base_dir = explicit_worktree.unwrap_or(invoking_cwd);
+    let mut git_top = std::process::Command::new("git");
+    for v in ENV_LEAK_VARS {
+        git_top.env_remove(v);
+    }
+    let worktree = match git_top
+        .arg("-C")
+        .arg(base_dir)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+    {
+        Ok(o) if o.status.success() => {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() {
+                base_dir.to_path_buf()
+            } else {
+                PathBuf::from(s)
+            }
+        }
+        _ => base_dir.to_path_buf(),
+    };
+
+    let branch = if let Some(b) = explicit_branch.map(str::trim).filter(|s| !s.is_empty()) {
+        b.to_string()
+    } else {
+        let mut git_br = std::process::Command::new("git");
+        for v in ENV_LEAK_VARS {
+            git_br.env_remove(v);
+        }
+        let out = git_br
+            .arg("-C")
+            .arg(&worktree)
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .map_err(|e| format!("failed to run git rev-parse in {}: {e}", worktree.display()))?;
+        if !out.status.success() {
+            return Err(format!(
+                "git rev-parse --abbrev-ref HEAD failed in {}: {}",
+                worktree.display(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    Ok((worktree, branch))
+}
+
+/// CREDIBLE-1611: Build a `bot_merge_completed` payload where `pr_number == 0`
+/// or any non-`"shipped"` outcome ALWAYS sets `terminal_state = "failed"` and
+/// includes a non-empty `"reason"` field (never `"unknown"`).
+pub fn format_bot_merge_completed(
+    gap_id: &str,
+    pr_number: u64,
+    duration_ms: u64,
+    terminal_state: &str,
+    failure_reason: Option<&str>,
+    pid: u32,
+) -> serde_json::Value {
+    let ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    if terminal_state == "shipped" && pr_number > 0 {
+        serde_json::json!({
+            "ts": ts,
+            "kind": "bot_merge_completed",
+            "gap_id": gap_id,
+            "pr_number": pr_number,
+            "duration_ms": duration_ms,
+            "terminal_state": "shipped",
+            "pid": pid,
+            "note": "META-156 AC#7",
+        })
+    } else {
+        let reason = failure_reason
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                if terminal_state != "unknown"
+                    && terminal_state != "failed"
+                    && terminal_state != "shipped"
+                    && !terminal_state.trim().is_empty()
+                {
+                    terminal_state.trim().to_string()
+                } else if pr_number == 0 {
+                    "bot_merge_exited_before_pr_opened".to_string()
+                } else {
+                    "bot_merge_failed".to_string()
+                }
+            });
+        serde_json::json!({
+            "ts": ts,
+            "kind": "bot_merge_completed",
+            "gap_id": gap_id,
+            "pr_number": pr_number,
+            "duration_ms": duration_ms,
+            "terminal_state": "failed",
+            "reason": reason,
+            "pid": pid,
+            "note": "META-156 AC#7",
+        })
+    }
 }
 
 // ---- Tests --------------------------------------------------------------
@@ -671,5 +829,130 @@ mod tests {
         let ev = std::fs::read_to_string(&amb).unwrap();
         assert!(ev.contains("label:review-held"), "{ev}");
         assert!(ev.contains("read_error:gh pr view failed"), "{ev}");
+    }
+
+    /// CREDIBLE-1607: Default `ManualShipPath` leaves `auto_merge == false`, so
+    /// worker ship paths open the PR and exit without ever arming auto-merge.
+    #[tokio::test]
+    async fn default_ship_does_not_arm_auto_merge_credible_1607() {
+        let tmp = TempDir::new().unwrap();
+        let session = unique_session_id("credible-1607");
+        let intent = ShipIntent::owned(
+            "CREDIBLE-1607",
+            "chump/credible-1607",
+            "main",
+            "fix(CREDIBLE-1607): no default auto-merge",
+            session,
+        );
+        let shipper = ManualShipPath::new(intent, tmp.path(), true).expect("bind");
+        assert!(
+            !shipper.auto_merge(),
+            "ManualShipPath must default to auto_merge=false (CREDIBLE-1607)"
+        );
+
+        let session2 = unique_session_id("credible-1607-optin");
+        let intent2 = ShipIntent::owned(
+            "CREDIBLE-1607",
+            "chump/credible-1607",
+            "main",
+            "fix(CREDIBLE-1607): opt-in auto-merge",
+            session2,
+        );
+        let opt_in = ManualShipPath::new(intent2, tmp.path(), true)
+            .expect("bind")
+            .with_auto_merge(true);
+        assert!(opt_in.auto_merge());
+    }
+
+    /// CREDIBLE-1611: Invoking from a `.claude/worktrees/<name>` linked worktree
+    /// resolves the worktree path and feature branch from `cwd`, never from the
+    /// main checkout on `main`; and `gate_branch_not_main` refuses `main`.
+    #[tokio::test]
+    async fn linked_worktree_resolves_feature_branch_and_refuses_main_credible_1611() {
+        let tmp = TempDir::new().unwrap();
+        let main_repo = tmp.path().join("main-repo");
+        std::fs::create_dir_all(&main_repo).unwrap();
+
+        let run_git = |dir: &Path, args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .status()
+                .expect("git");
+            assert!(status.success(), "git {args:?} failed in {}", dir.display());
+        };
+        run_git(&main_repo, &["init", "-b", "main"]);
+        run_git(&main_repo, &["config", "user.email", "test@chump.local"]);
+        run_git(&main_repo, &["config", "user.name", "Chump Test"]);
+        std::fs::write(main_repo.join("README.md"), "init\n").unwrap();
+        run_git(&main_repo, &["add", "README.md"]);
+        run_git(&main_repo, &["commit", "-m", "initial"]);
+
+        let wt_dir = main_repo.join(".claude/worktrees/agent-wt");
+        std::fs::create_dir_all(wt_dir.parent().unwrap()).unwrap();
+        run_git(
+            &main_repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "chump/credible-1611-fix",
+                wt_dir.to_str().unwrap(),
+                "main",
+            ],
+        );
+
+        let (resolved_wt, resolved_branch) =
+            resolve_worktree_and_branch(&wt_dir, None, None).expect("resolve linked worktree");
+        assert_eq!(resolved_branch, "chump/credible-1611-fix");
+        assert_eq!(
+            resolved_wt.canonicalize().unwrap(),
+            wt_dir.canonicalize().unwrap()
+        );
+
+        // Shipping on `main` fails the `branch_not_main` preflight gate.
+        let session = unique_session_id("credible-1611-main");
+        let intent_main = ShipIntent::owned("CREDIBLE-1611", "main", "main", "msg", session);
+        let shipper_main = ManualShipPath::new(intent_main, &main_repo, true).expect("bind");
+        let report = shipper_main.preflight().await.expect("preflight");
+        assert!(!report.all_passed());
+        let fail = report.first_failure().unwrap();
+        assert_eq!(fail.name, "branch_not_main");
+        assert!(
+            fail.detail
+                .contains("Already on main. Run from a feature/agent branch."),
+            "unexpected detail: {}",
+            fail.detail
+        );
+    }
+
+    /// CREDIBLE-1611: `format_bot_merge_completed` with `pr_number=0` or failure
+    /// always emits `terminal_state="failed"` and a `reason` field (never `"unknown"`).
+    #[test]
+    fn bot_merge_completed_pr_zero_emits_failed_with_reason_credible_1611() {
+        let ev = format_bot_merge_completed(
+            "CREDIBLE-1611",
+            0,
+            120,
+            "unknown",
+            Some("Already on main. Run from a feature/agent branch."),
+            999,
+        );
+        assert_eq!(ev["terminal_state"], "failed");
+        assert_eq!(ev["pr_number"], 0);
+        assert_eq!(
+            ev["reason"],
+            "Already on main. Run from a feature/agent branch."
+        );
+
+        let ev_default = format_bot_merge_completed("CREDIBLE-1611", 0, 50, "unknown", None, 999);
+        assert_eq!(ev_default["terminal_state"], "failed");
+        assert_eq!(ev_default["reason"], "bot_merge_exited_before_pr_opened");
+
+        let ev_ok = format_bot_merge_completed("CREDIBLE-1611", 42, 500, "shipped", None, 999);
+        assert_eq!(ev_ok["terminal_state"], "shipped");
+        assert_eq!(ev_ok["pr_number"], 42);
+        assert!(ev_ok.get("reason").is_none());
     }
 }

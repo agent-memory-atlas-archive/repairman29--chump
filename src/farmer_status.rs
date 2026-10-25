@@ -211,7 +211,8 @@ fn check_oauth_fresh(repo_root: &Path, reasons: &mut Vec<String>) -> bool {
     // The `~/.chump/oauth-token.json` env token — last-resort fallback, reached
     // only when NOTHING above gave a signal (no api key / cache / free-tier /
     // `.credentials.json` token).
-    let token_path = PathBuf::from(&home).join(".chump/oauth-token.json");
+    let chump_dir = PathBuf::from(&home).join(".chump");
+    let token_path = chump_dir.join("oauth-token.json");
     if cfg!(target_os = "linux") {
         // RESILIENT-1652 (task 2): on Linux this file IS the credential
         // `claude -p` uses — it exports CLAUDE_CODE_OAUTH_TOKEN from it — and NO
@@ -223,9 +224,10 @@ fn check_oauth_fresh(repo_root: &Path, reasons: &mut Vec<String>) -> bool {
         // The raw read result is handed to a pure helper so BOTH the present-file
         // content arm and the missing-file `Err` RED arm are unit-testable without
         // touching the host fs/env (the M-A pin).
-        return linux_oauth_token_file_verdict(
+        return linux_oauth_token_file_verdict_with_dir(
             std::fs::read_to_string(&token_path),
             now_ms(),
+            Some(&chump_dir),
             reasons,
         );
     } else if token_path.exists() {
@@ -237,9 +239,144 @@ fn check_oauth_fresh(repo_root: &Path, reasons: &mut Vec<String>) -> bool {
             Some(age) => return oauth_token_verdict(age, free_tier_cascade_active(), reasons),
             None => return true,
         }
+    } else if let Some((exhausted_name, exhausted_date)) = find_exhausted_oauth_token(&chump_dir) {
+        // RESILIENT-1690: even on non-Linux, if oauth-token.json is missing and an
+        // oauth-token.json.exhausted* rotation artifact is present (with no valid
+        // api-key / cache / free-tier / .credentials.json above), surface the exact
+        // exhausted filename, date, spend-limit reason, and recovery command.
+        reasons.push(format_exhausted_oauth_reason(
+            &exhausted_name,
+            &exhausted_date,
+        ));
+        return false;
     }
 
     // No positive signal of trouble — fail-open (non-Linux, token absent).
+    true
+}
+
+/// RESILIENT-1690: recovery command surfaced when `~/.chump/oauth-token.json`
+/// is missing or rotated out to `~/.chump/oauth-token.json.exhausted*`.
+pub const OAUTH_RECOVERY_COMMAND: &str =
+    "run 'claude setup-token' and save to ~/.chump/oauth-token.json, or set ANTHROPIC_API_KEY";
+
+/// RESILIENT-1690: scan `chump_dir` (`~/.chump`) for a rotated-out
+/// `oauth-token.json.exhausted*` file. Returns `(exact_filename, date_str)`
+/// for the most recent matching file when present.
+pub fn find_exhausted_oauth_token(chump_dir: &Path) -> Option<(String, String)> {
+    let entries = std::fs::read_dir(chump_dir).ok()?;
+    let mut matches: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("oauth-token.json.exhausted") {
+                Some((name, e.path()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    matches.sort_by(|a, b| b.0.cmp(&a.0));
+    let (filename, path) = matches.into_iter().next()?;
+    let suffix = filename
+        .strip_prefix("oauth-token.json.exhausted")
+        .unwrap_or("")
+        .trim_start_matches(['-', '.', '_']);
+    let date = if !suffix.is_empty() {
+        suffix.to_string()
+    } else {
+        std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .map(|mtime| {
+                let dt: chrono::DateTime<chrono::Utc> = mtime.into();
+                dt.format("%Y-%m-%d").to_string()
+            })
+            .unwrap_or_else(|| "unknown-date".to_string())
+    };
+    Some((filename, date))
+}
+
+/// RESILIENT-1690: format the operator-actionable reason when
+/// `~/.chump/oauth-token.json` is missing and `~/.chump/oauth-token.json.exhausted*`
+/// is present.
+pub fn format_exhausted_oauth_reason(filename: &str, date: &str) -> String {
+    format!(
+        "~/.chump/oauth-token.json missing — rotated to ~/.chump/{filename} on {date} due to \
+         OAuth spend-limit/exhaustion; recovery: {OAUTH_RECOVERY_COMMAND}"
+    )
+}
+
+/// RESILIENT-1690: when no valid model credential source exists on the node
+/// (`!oauth_fresh`), emit `kind=node_auth_dead` once (deduped via
+/// `<repo_root>/.chump-locks/node_auth_dead.stamp`) and auto-file an operator
+/// ASK in `<repo_root>/.chump-locks/operator-asks.jsonl` (plus `ask_jeff_db`
+/// when `sessions/` exists). Returns `true` if a new event/ask was emitted, or
+/// `false` if suppressed by the dedup stamp.
+pub fn record_node_auth_dead_once(repo_root: &Path, reasons: &[String]) -> bool {
+    let locks_dir = repo_root.join(".chump-locks");
+    let stamp_path = locks_dir.join("node_auth_dead.stamp");
+    if stamp_path.exists() {
+        return false;
+    }
+    if std::fs::create_dir_all(&locks_dir).is_err() {
+        return false;
+    }
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let reason_summary = if reasons.is_empty() {
+        "no valid model credential source on node".to_string()
+    } else {
+        reasons.join("; ")
+    };
+    let _ = std::fs::write(&stamp_path, format!("{ts} {reason_summary}\n"));
+
+    let ambient_path = std::env::var("CHUMP_AMBIENT_LOG")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| locks_dir.join("ambient.jsonl"));
+    if let Some(parent) = ambient_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // scanner-anchor: "kind":"node_auth_dead"
+    let event_line = format!(
+        "{{\"ts\":\"{ts}\",\"kind\":\"node_auth_dead\",\"reason\":{},\"recovery\":{}}}\n",
+        serde_json::to_string(&reason_summary).unwrap_or_else(|_| "\"auth_dead\"".to_string()),
+        serde_json::to_string(OAUTH_RECOVERY_COMMAND).unwrap_or_else(|_| "\"\"".to_string()),
+    );
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ambient_path)
+    {
+        use std::io::Write;
+        let _ = f.write_all(event_line.as_bytes());
+    }
+
+    let question = format!(
+        "Node model credentials are dead or exhausted ({reason_summary}). Please refresh credentials: {OAUTH_RECOVERY_COMMAND}"
+    );
+    let ask_path = locks_dir.join("operator-asks.jsonl");
+    let ask_line = serde_json::json!({
+        "ts": ts,
+        "ask_type": "operator_ask",
+        "topic": "node_auth_dead",
+        "priority": "blocking",
+        "question": question,
+        "reason": reason_summary,
+        "recovery": OAUTH_RECOVERY_COMMAND,
+    });
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&ask_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "{ask_line}");
+    }
+    if repo_root.join("sessions").is_dir() {
+        let _ = crate::ask_jeff_db::question_ask(&question, Some(&reason_summary), "blocking");
+    }
     true
 }
 
@@ -262,6 +399,15 @@ fn linux_oauth_token_file_verdict(
     now_ms: i64,
     reasons: &mut Vec<String>,
 ) -> bool {
+    linux_oauth_token_file_verdict_with_dir(read, now_ms, None, reasons)
+}
+
+fn linux_oauth_token_file_verdict_with_dir(
+    read: std::io::Result<String>,
+    now_ms: i64,
+    chump_dir: Option<&Path>,
+    reasons: &mut Vec<String>,
+) -> bool {
     match read {
         Ok(body) => match oauth_token_json_content_verdict(&body, now_ms) {
             Some(true) => true,
@@ -275,11 +421,20 @@ fn linux_oauth_token_file_verdict(
             }
         },
         Err(_) => {
-            reasons.push(
-                "~/.chump/oauth-token.json missing (claude -p has no CLAUDE_CODE_OAUTH_TOKEN \
-                 source and no api-key / cache / free-tier / .credentials.json signal)"
-                    .to_string(),
-            );
+            if let Some((exhausted_name, exhausted_date)) =
+                chump_dir.and_then(find_exhausted_oauth_token)
+            {
+                reasons.push(format_exhausted_oauth_reason(
+                    &exhausted_name,
+                    &exhausted_date,
+                ));
+            } else {
+                reasons.push(
+                    "~/.chump/oauth-token.json missing (claude -p has no CLAUDE_CODE_OAUTH_TOKEN \
+                     source and no api-key / cache / free-tier / .credentials.json signal)"
+                        .to_string(),
+                );
+            }
             false
         }
     }
@@ -579,6 +734,9 @@ pub fn compute_at(repo_root: &Path, state_dir: &Path) -> FarmerStatus {
     let sentinel_absent = check_sentinel(&chump_dir, &mut reasons);
     let exit78_free = check_exit78_free(&mut reasons);
     let oauth_fresh = check_oauth_fresh(repo_root, &mut reasons);
+    if !oauth_fresh {
+        let _ = record_node_auth_dead_once(repo_root, &reasons);
+    }
     let (heartbeat_fresh, heartbeat_age_s) = heartbeat_verdict(&chump_dir);
     let pause_signal = node_is_paused(state_dir);
     let paused = pause_signal.is_some();
@@ -1491,5 +1649,66 @@ mod tests {
         // claude_creds_verdict Some(false), which check_oauth_fresh turns to RED.
         let body = r#"{"claudeAiOauth":{"accessToken":"sk-x","expiresAt":1}}"#;
         assert_eq!(claude_creds_verdict(body, 1_000_000), Some(false));
+    }
+
+    #[test]
+    fn exhausted_oauth_token_surfaces_filename_date_and_recovery_resilient_1690() {
+        let dir = tempfile::tempdir().unwrap();
+        let chump_dir = dir.path().join(".chump");
+        std::fs::create_dir_all(&chump_dir).unwrap();
+        std::fs::write(
+            chump_dir.join("oauth-token.json.exhausted-2026-10-25"),
+            r#"{"token":"sk-ant-oat01-exhausted"}"#,
+        )
+        .unwrap();
+
+        let (fname, date) = find_exhausted_oauth_token(&chump_dir).expect("should find .exhausted");
+        assert_eq!(fname, "oauth-token.json.exhausted-2026-10-25");
+        assert_eq!(date, "2026-10-25");
+
+        let mut reasons = Vec::new();
+        let missing =
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no such file or directory");
+        assert!(!linux_oauth_token_file_verdict_with_dir(
+            Err(missing),
+            now_ms(),
+            Some(&chump_dir),
+            &mut reasons
+        ));
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("oauth-token.json.exhausted-2026-10-25"));
+        assert!(reasons[0].contains("2026-10-25"));
+        assert!(reasons[0].contains("spend-limit/exhaustion"));
+        assert!(reasons[0].contains("claude setup-token"));
+        assert!(reasons[0].contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn node_auth_dead_emits_once_and_files_operator_ask_resilient_1690() {
+        let repo = tempfile::tempdir().unwrap();
+        let reasons = vec![format_exhausted_oauth_reason(
+            "oauth-token.json.exhausted-2026-10-25",
+            "2026-10-25",
+        )];
+
+        // First invocation emits node_auth_dead, writes stamp, and files operator ask.
+        assert!(record_node_auth_dead_once(repo.path(), &reasons));
+        let locks = repo.path().join(".chump-locks");
+        assert!(locks.join("node_auth_dead.stamp").exists());
+
+        let ambient = std::fs::read_to_string(locks.join("ambient.jsonl")).unwrap();
+        assert!(ambient.contains("\"kind\":\"node_auth_dead\""));
+        assert!(ambient.contains("oauth-token.json.exhausted-2026-10-25"));
+        assert!(ambient.contains("claude setup-token"));
+
+        let asks = std::fs::read_to_string(locks.join("operator-asks.jsonl")).unwrap();
+        assert!(asks.contains("\"topic\":\"node_auth_dead\""));
+        assert!(asks.contains("\"priority\":\"blocking\""));
+
+        // Second invocation is deduped by node_auth_dead.stamp.
+        assert!(!record_node_auth_dead_once(repo.path(), &reasons));
+        let ambient_after = std::fs::read_to_string(locks.join("ambient.jsonl")).unwrap();
+        assert_eq!(ambient.lines().count(), 1);
+        assert_eq!(ambient_after.lines().count(), 1);
     }
 }

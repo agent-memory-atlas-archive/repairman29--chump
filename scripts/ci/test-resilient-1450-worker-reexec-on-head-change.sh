@@ -38,7 +38,7 @@ ok "extracted _check_worker_head_reexec verbatim from worker.sh"
 
 # Also require the wiring call inside the main loop, right at the cycle
 # boundary (before any gap-claim work happens for the cycle).
-if ! grep -A3 '^while :; do' "$WORKER_SH" | grep -q '_check_worker_head_reexec'; then
+if ! grep -A4 '^while ' "$WORKER_SH" | grep -q '_check_worker_head_reexec'; then
     fail "worker.sh main loop does not call _check_worker_head_reexec at the cycle boundary"
 else
     ok "worker.sh main loop calls _check_worker_head_reexec right after cycle increment"
@@ -128,9 +128,102 @@ else
     ok "CHUMP_WORKER_HEAD_REEXEC=0 disables the re-exec"
 fi
 
+# ── 4. RESILIENT-1689: self-re-exec loop is bounded at 3 attempts + emits worker_reexec_failed ──
+rm -f "$TMP/ambient.jsonl" "$TMP/reexec-count.log" "$TMP/.chump-locks/worker-reexec-test-agent.state"
+cat > "$TMP/scripts/dispatch/worker.sh" <<EOF
+#!/usr/bin/env bash
+set -uo pipefail
+echo "run" >> "$TMP/reexec-count.log"
+REPO_ROOT="$TMP"
+AGENT_ID="test-agent"
+CHUMP_AMBIENT_LOG="$TMP/ambient.jsonl"
+CHUMP_WORKER_HEAD_REEXEC=1
+CHUMP_FAST_TEST=1
+_WORKER_START_SHA="0000000000000000000000000000000000000000"
+log() { :; }
+$FUNC_SNIPPET
+_check_worker_head_reexec
+EOF
+chmod +x "$TMP/scripts/dispatch/worker.sh"
+
+_loop_rc=0
+bash "$TMP/scripts/dispatch/worker.sh" >/dev/null 2>&1 || _loop_rc=$?
+_attempts="$(wc -l < "$TMP/reexec-count.log" 2>/dev/null | tr -d ' ' || echo 0)"
+# Initial invocation (1) + 3 re-execs = 4 invocations max (3 re-exec attempts)
+if [[ "$_loop_rc" -ne 0 ]] && [[ "$_attempts" -le 4 ]]; then
+    ok "RESILIENT-1689: self-re-exec loop halted after $(( _attempts - 1 )) re-exec attempts with rc=$_loop_rc"
+else
+    fail "RESILIENT-1689: expected self-re-exec loop to halt within 3 re-execs (got attempts=$_attempts rc=$_loop_rc)"
+fi
+if grep -q '"kind":"worker_reexec_failed"' "$TMP/ambient.jsonl" 2>/dev/null; then
+    ok "RESILIENT-1689: emitted kind=worker_reexec_failed after max re-exec attempts"
+else
+    fail "RESILIENT-1689: missing kind=worker_reexec_failed in ambient.jsonl"
+fi
+
+# Also test bogus REPO_ROOT (/home/ubuntu/Projects/Chump) fails closed with worker_reexec_failed
+rm -f "$TMP/ambient.jsonl" "$TMP/.chump-locks/worker-reexec-test-agent.state"
+cat > "$TMP/bogus-harness.sh" <<EOF
+set -uo pipefail
+REPO_ROOT="/nonexistent/home/ubuntu/Projects/Chump"
+AGENT_ID="test-agent"
+CHUMP_AMBIENT_LOG="$TMP/ambient.jsonl"
+CHUMP_WORKER_HEAD_REEXEC=1
+CHUMP_FAST_TEST=1
+_WORKER_START_SHA="0000000000000000000000000000000000000000"
+git() { echo "1111111111111111111111111111111111111111"; }
+log() { :; }
+$FUNC_SNIPPET
+_check_worker_head_reexec
+EOF
+_bogus_rc=0
+bash "$TMP/bogus-harness.sh" >/dev/null 2>&1 || _bogus_rc=$?
+if [[ "$_bogus_rc" -ne 0 ]] && grep -q '"kind":"worker_reexec_failed"' "$TMP/ambient.jsonl" 2>/dev/null; then
+    ok "RESILIENT-1689: bogus Mac-cased REPO_ROOT fails closed with kind=worker_reexec_failed"
+else
+    fail "RESILIENT-1689: bogus REPO_ROOT did not fail closed with worker_reexec_failed (rc=$_bogus_rc)"
+fi
+
+# ── 5. CREDIBLE-1612 / CREDIBLE-1613 / RESILIENT-1693 in worker.sh ───────────
+FLOOR_SNIPPET="$(sed -n '/^_enforce_claude_model_floor() {/,/^}$/p' "$WORKER_SH")"
+if [[ -n "$FLOOR_SNIPPET" ]]; then
+    rm -f "$TMP/ambient.jsonl"
+    _resolved_m="$(
+        FLEET_BACKEND="claude"
+        FLEET_MODEL="haiku"
+        GAP_ID="CREDIBLE-1612"
+        AGENT_ID="1"
+        REPO_ROOT="$TMP"
+        CHUMP_AMBIENT_LOG="$TMP/ambient.jsonl"
+        eval "$FLOOR_SNIPPET"
+        _enforce_claude_model_floor "haiku" 2>/dev/null
+        printf '%s' "$FLEET_MODEL"
+    )"
+    if [[ "$_resolved_m" == "sonnet" ]] && grep -q '"kind":"model_floor_violation"' "$TMP/ambient.jsonl" 2>/dev/null; then
+        ok "CREDIBLE-1612: FLEET_BACKEND=claude + haiku emits kind=model_floor_violation and overrides to sonnet"
+    else
+        fail "CREDIBLE-1612: expected sonnet + model_floor_violation (got model=$_resolved_m)"
+    fi
+else
+    fail "CREDIBLE-1612: _enforce_claude_model_floor missing from worker.sh"
+fi
+
+if grep -q 'BASH_DEFAULT_TIMEOUT_MS="${BASH_DEFAULT_TIMEOUT_MS:-900000}"' "$WORKER_SH" \
+   && grep -q 'BASH_MAX_TIMEOUT_MS="${BASH_MAX_TIMEOUT_MS:-1800000}"' "$WORKER_SH"; then
+    ok "RESILIENT-1693: worker.sh exports BASH_DEFAULT_TIMEOUT_MS=900000 and BASH_MAX_TIMEOUT_MS=1800000"
+else
+    fail "RESILIENT-1693: worker.sh missing BASH_DEFAULT_TIMEOUT_MS / BASH_MAX_TIMEOUT_MS exports"
+fi
+
+if grep -q 'chump gap link-pr "$GAP_ID" "$open_pr_num"' "$WORKER_SH"; then
+    ok "CREDIBLE-1613: worker.sh links open PR via chump gap link-pr before releasing lease"
+else
+    fail "CREDIBLE-1613: worker.sh missing post-agent chump gap link-pr check"
+fi
+
 echo
 if [[ "$FAIL" -eq 0 ]]; then
-    echo "PASS: RESILIENT-1450 worker re-exec-on-HEAD-change holds ($PASS checks)"
+    echo "PASS: RESILIENT-1450/1689 worker re-exec + model floor + timeout checks hold ($PASS checks)"
     exit 0
 else
     echo "FAIL: $FAIL check(s) failed ($0)"

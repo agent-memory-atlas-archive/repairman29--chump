@@ -879,18 +879,17 @@ async fn free_tier_ship(gap_id: &str, repo_root: &std::path::Path) -> Result<()>
     // gates that. FAIL aborts the ship; the gap stays open for a retry.
     verify_fix_before_ship(gap_id, repo_root).await?;
 
-    // arm-policy: delegated (INFRA-8221). execute-gap never arms or merges a PR
-    // itself: bot-merge.sh opens the PR and arms it through auto-merge-armer.sh,
-    // which calls arm_policy_allows (scripts/coord/lib/arm-policy.sh), so a held
-    // PR (no-auto-merge label / `Auto-merge: hold`) is refused there.
+    // CREDIBLE-1607 / arm-policy: delegated (INFRA-8221). Worker ship paths NEVER
+    // arm auto-merge by default: bot-merge.sh opens the PR and exits; arming is
+    // delegated to the review organ / auto-merge-armer.sh (arm_policy_allows)
+    // after VERDICT: APPROVE.
     let script = repo_root.join("scripts/coord/bot-merge.sh");
-    eprintln!("[execute-gap] free-tier ship: bot-merge.sh --gap {gap_id} --fast --auto-merge");
+    eprintln!("[execute-gap] free-tier ship: bot-merge.sh --gap {gap_id} --fast");
     let status = tokio::process::Command::new("bash")
         .arg(&script)
         .arg("--gap")
         .arg(gap_id)
         .arg("--fast")
-        .arg("--auto-merge")
         .current_dir(repo_root)
         .status()
         .await

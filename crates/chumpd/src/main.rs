@@ -274,13 +274,32 @@ fn spawn_worker(cfg: &Config, agent_id: usize) -> std::io::Result<Child> {
     // MISSION-051 / RESILIENT-184: backend selection. CHUMPD_FLEET_BACKEND
     // lets an operator run the fleet on an open model (chump-local) instead
     // of the Claude subscription.
-    let backend = std::env::var("CHUMPD_FLEET_BACKEND").unwrap_or_else(|_| "claude".into());
-    // RESILIENT-612: the picker's model/effort gate keys on the deepseek
-    // tier set (flash: xs,s; pro: m; l/xl go to decompose), not haiku/sonnet.
-    let (fleet_model, effort_filter) = if backend == "chump-local" {
-        ("flash", "xs,s")
+    let state_dir = std::env::var("CHUMP_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| cfg.home.join(".chump"));
+    let backend = std::env::var("CHUMPD_FLEET_BACKEND")
+        .or_else(|_| std::env::var("FLEET_BACKEND"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| worker_loop::read_env_from_node_env(&state_dir, "FLEET_BACKEND"))
+        .unwrap_or_else(|| "claude".into());
+    // CREDIBLE-1612: honor FLEET_MODEL from env or <state_dir>/node.env,
+    // defaulting to "sonnet" on the claude backend ("flash" on chump-local).
+    let default_model = if backend == "chump-local" {
+        "flash"
     } else {
-        ("pro", "m")
+        "sonnet"
+    };
+    let fleet_model = std::env::var("FLEET_MODEL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| worker_loop::read_env_from_node_env(&state_dir, "FLEET_MODEL"))
+        .unwrap_or_else(|| default_model.to_string());
+    let effort_filter = if backend == "chump-local" {
+        "xs,s"
+    } else {
+        "m"
     };
 
     let build_jobs = cargo_build_jobs();
@@ -290,6 +309,10 @@ fn spawn_worker(cfg: &Config, agent_id: usize) -> std::io::Result<Child> {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "claude".to_string());
+
+    for (k, v) in worker_loop::resolve_worker_child_env(&state_dir) {
+        command.env(k, v);
+    }
 
     command
         .current_dir(&cfg.repo)
@@ -303,7 +326,7 @@ fn spawn_worker(cfg: &Config, agent_id: usize) -> std::io::Result<Child> {
         .env("FLEET_PRIORITY_FILTER", "P0,P1")
         .env("FLEET_EFFORT_FILTER", effort_filter)
         .env("FLEET_BACKEND", &backend)
-        .env("FLEET_MODEL", fleet_model)
+        .env("FLEET_MODEL", &fleet_model)
         .env("FLEET_SESSION", "chumpd")
         .env("FLEET_INLINE_BRIEFING", "1")
         .env("CHUMP_AGENT_HARNESS", &agent_harness)

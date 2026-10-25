@@ -67,7 +67,8 @@ CLAUDE_BIN="claude"
 # sandbox); --checkout, which the unit NEVER passes, overrides it for tests that
 # cannot relocate HOME. NEVER an env var on this safety input (Chief 2026-10-20).
 CHECKOUT="$HOME/chump"
-SELF_LOGIN=""          # own-lane skip: a PR authored by this login is not reviewed
+SELF_LOGIN=""          # own-lane skip: a PR authored by the review organ's own lane is not reviewed (CREDIBLE-1608)
+SKIP_SAME_LOGIN_NON_FLEET=1
 REPO=""                # owner/repo; empty = current checkout's repo
 # CREDIBLE-1589 / CREDIBLE-1596 (AC3): the lane-1 Rust slice (`chump dispatch
 # --repair`) is wired, so the repair dispatch path is ON by default.
@@ -80,6 +81,7 @@ while (( $# )); do
         --claude-bin)     CLAUDE_BIN="${2:-}"; shift 2 ;;
         --checkout)       CHECKOUT="${2:-}"; shift 2 ;;
         --self-login)     SELF_LOGIN="${2:-}"; shift 2 ;;
+        --skip-same-login-non-fleet) SKIP_SAME_LOGIN_NON_FLEET=1; shift ;;
         --repo)           REPO="${2:-}"; shift 2 ;;
         --pr)             ONLY_PRS+=("${2:-}"); shift 2 ;;
         --enable-repair)  ENABLE_REPAIR=1; shift ;;
@@ -766,18 +768,50 @@ sys.exit(1)
 # process_pr <pr> — the whole per-PR decision. Testable with stub gh + claude.
 process_pr() {
     local pr="$1"
-    local meta author head draft fork
+    local meta author head draft fork head_ref own_lane
     meta="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} \
-        --json isDraft,isCrossRepository,headRefOid,author,headRefName 2>/dev/null || true)"
+        --json isDraft,isCrossRepository,headRefOid,author,headRefName,labels,title,body 2>/dev/null || true)"
     if [[ -z "$meta" ]]; then log "PR #$pr: unreadable — skip"; SKIPPED=$((SKIPPED+1)); return 0; fi
     draft="$(printf '%s' "$meta" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("isDraft"))' 2>/dev/null)"
     fork="$(printf '%s'  "$meta" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("isCrossRepository"))' 2>/dev/null)"
     head="$(printf '%s'  "$meta" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("headRefOid") or "")' 2>/dev/null)"
     author="$(printf '%s' "$meta" | python3 -c 'import json,sys;d=json.load(sys.stdin).get("author") or {};print(d.get("login") or "")' 2>/dev/null)"
+    head_ref="$(printf '%s' "$meta" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("headRefName") or "")' 2>/dev/null)"
+    own_lane="$(printf '%s' "$meta" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+ref = (d.get("headRefName") or "").strip()
+labels = {((x or {}).get("name") or "").strip() for x in (d.get("labels") or [])}
+title = d.get("title") or ""
+body = d.get("body") or ""
+text = f"{title}\n{body}"
+if (
+    ref.startswith("review-organ/")
+    or "/review-organ" in ref
+    or "-review-organ" in ref
+    or bool(labels & {"review-organ-self", "lane:review-organ", "review-organ"})
+    or "[review-organ]" in text
+    or "lane:review-organ" in text
+    or "Chump-Lane: review-organ" in text
+):
+    print("1")
+elif ref.startswith("chump/") or ref.startswith("claude/"):
+    print("0")
+else:
+    print("1")
+' 2>/dev/null)"
 
     if [[ "$draft" == "True" ]]; then log "PR #$pr: draft — skip"; SKIPPED=$((SKIPPED+1)); return 0; fi
+    # CREDIBLE-1608: on a single-account node (e.g. repairman29), every fleet worker
+    # PR shares author.login with --self-login. Independence is decided by lane
+    # marker: fleet/worker branches (chump/* or claude/*) without a review-organ
+    # self-marker are reviewed; review-organ own-lane PRs (or non-fleet branches
+    # under the same login when --skip-same-login-non-fleet is active) are skipped.
     if [[ -n "$SELF_LOGIN" && "$author" == "$SELF_LOGIN" ]]; then
-        log "PR #$pr: authored by own lane ($author) — not reviewing (independence)"; SKIPPED=$((SKIPPED+1)); return 0
+        if [[ "$own_lane" == "1" && ( "$SKIP_SAME_LOGIN_NON_FLEET" == "1" || "$head_ref" == review-organ/* || "$head_ref" == *review-organ* ) ]]; then
+            log "PR #$pr: authored by own lane ($author, branch=$head_ref) — not reviewing (independence)"; SKIPPED=$((SKIPPED+1)); return 0
+        fi
+        log "PR #$pr: author=$author matches --self-login but branch=$head_ref is an independent fleet lane (CREDIBLE-1608) — reviewing"
     fi
     [[ "$head" =~ ^[0-9a-fA-F]{7,40}$ ]] || { log "PR #$pr: no head sha — skip"; SKIPPED=$((SKIPPED+1)); return 0; }
 

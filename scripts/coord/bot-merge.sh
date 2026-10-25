@@ -663,10 +663,11 @@ _bm_step_done() {
 _BM_COMPLETED_EMITTED=0
 _BM_SESSION_T0_MS=0
 _BM_TERMINAL_STATE="unknown"
+_BM_FAILURE_REASON=""
 _bm_completed_emit() {
     [[ "$_BM_COMPLETED_EMITTED" == "1" ]] && return 0
     _BM_COMPLETED_EMITTED=1
-    local now_ms duration_ms ts gap_label pr_number ambient
+    local now_ms duration_ms ts gap_label pr_number ambient term_state reason_field=""
     now_ms="$(_bm_ms_now)"
     duration_ms=$(( now_ms - _BM_SESSION_T0_MS ))
     [[ "$duration_ms" -lt 0 ]] && duration_ms=0
@@ -674,10 +675,30 @@ _bm_completed_emit() {
     gap_label="${GAP_IDS[0]:-${GAP_ID:-unknown}}"
     pr_number="${TARGET_PR:-${EXISTING_PR:-0}}"
     [[ -z "$pr_number" ]] && pr_number=0
+    term_state="${_BM_TERMINAL_STATE:-unknown}"
+    # CREDIBLE-1611: when pr_number=0 or on any failure/refusal, terminal_state
+    # MUST be "failed" with a structured "reason" field (never "unknown").
+    if [[ "$term_state" != "shipped" || "$pr_number" == "0" ]]; then
+        local reason_txt="${_BM_FAILURE_REASON:-}"
+        if [[ -z "$reason_txt" ]]; then
+            if [[ "$term_state" != "unknown" && "$term_state" != "failed" && "$term_state" != "shipped" ]]; then
+                reason_txt="$term_state"
+            elif [[ "$pr_number" == "0" ]]; then
+                reason_txt="bot_merge_exited_before_pr_opened"
+            else
+                reason_txt="bot_merge_failed"
+            fi
+        fi
+        term_state="failed"
+        reason_txt="${reason_txt//\\/\\\\}"
+        reason_txt="${reason_txt//\"/\\\"}"
+        reason_txt="${reason_txt//$'\n'/ }"
+        reason_field="$(printf ',"reason":"%s"' "$reason_txt")"
+    fi
     ambient="${CHUMP_AMBIENT_LOG:-${REPO_ROOT:-.}/.chump-locks/ambient.jsonl}"
     # scanner-anchor: "kind":"bot_merge_completed"
-    printf '{"ts":"%s","kind":"bot_merge_completed","gap_id":"%s","pr_number":%s,"duration_ms":%d,"terminal_state":"%s","pid":%d,"note":"META-156 AC#7"}\n' \
-        "$ts" "$gap_label" "$pr_number" "$duration_ms" "${_BM_TERMINAL_STATE:-unknown}" "$_BM_PID" \
+    printf '{"ts":"%s","kind":"bot_merge_completed","gap_id":"%s","pr_number":%s,"duration_ms":%d,"terminal_state":"%s"%s,"pid":%d,"note":"META-156 AC#7"}\n' \
+        "$ts" "$gap_label" "$pr_number" "$duration_ms" "$term_state" "$reason_field" "$_BM_PID" \
         >> "$ambient" 2>/dev/null || true
 }
 
@@ -1379,7 +1400,7 @@ fi
 # elapsed seconds. Silent intervals >30s are the symptom INFRA-026 was
 # filed about; banners make them attributable.
 green()  { printf '\033[0;32m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }
-red()    { printf '\033[0;31m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }
+red()    { _BM_FAILURE_REASON="$*"; printf '\033[0;31m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }
 yellow() { printf '\033[0;33m[bot-merge %s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }
 warn()   { yellow "$*"; }
 info()   { printf '[bot-merge %s] %s\n' "$(date +%H:%M:%S)" "$*"; orch_log_step "$*"; }

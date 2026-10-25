@@ -157,6 +157,8 @@ _resolve_target_bin() {
     printf '%s' "$HOME/.local/bin/chump"
 }
 TARGET_BIN="$(_resolve_target_bin)"
+# CREDIBLE-1609: always deploy/converge chumpd alongside chump into the same bin dir.
+TARGET_CHUMPD_BIN="${CHUMP_NODE_CHUMPD_BIN:-$(dirname "$TARGET_BIN")/chumpd}"
 NODE_AMBIENT="${NODE_AMBIENT:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 
 LOG_DIR="${CHUMP_NODE_REFRESH_LOGDIR:-$HOME/.chump/node-refresh-logs}"
@@ -300,9 +302,24 @@ _converge_worker_launchers() {
     return 0
 }
 
+_install_worker_template_unit() {
+    local tpl="$REPO_ROOT/scripts/dispatch/chump-worker@.service"
+    [[ -f "$tpl" ]] || return 0
+    local sysd_dir="${CHUMP_SYSTEMD_USER_DIR:-}"
+    if [[ -z "$sysd_dir" ]]; then
+        [[ "$(uname -s)" == "Linux" ]] || return 0
+        sysd_dir="${HOME:-/root}/.config/systemd/user"
+    fi
+    mkdir -p "$sysd_dir" 2>/dev/null || return 0
+    cp -f "$tpl" "$sysd_dir/chump-worker@.service" 2>/dev/null || return 0
+    command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload >/dev/null 2>&1 || true
+    log "INFRA-8639: installed chump-worker@.service -> $sysd_dir/chump-worker@.service"
+}
+
 _reconcile_role_organs() {
     _sanitize_node_env
     _converge_worker_launchers
+    _install_worker_template_unit
     local installer="$REPO_ROOT/scripts/setup/chump-node-install.sh"
     if [[ ! -f "$installer" ]]; then
         log "WARN: $installer not found; skipping role-organ reconcile"
@@ -320,7 +337,7 @@ _reconcile_role_organs() {
     _converge_worker_launchers
 }
 
-# --- atomic install helper (INFRA-3677) --------------------------------------
+# --- atomic install helper (INFRA-3677 / CREDIBLE-1609) ----------------------
 # Install the binary at $1 to $TARGET_BIN via tempfile + rename. No codesign on
 # Linux. Returns non-zero on failure. Shared by the artifact-pull path and the
 # local-build path so the two never diverge.
@@ -331,6 +348,38 @@ _install_binary() {
     chmod +x "$TARGET_BIN.new"
     mv -f "$TARGET_BIN.new" "$TARGET_BIN" || return 1
     _converge_stale_binaries
+    return 0
+}
+
+# CREDIBLE-1609: install chumpd alongside chump into the deployed bin dir
+# (~/.cargo/bin/chumpd) and converge stale PATH copies.
+_install_chumpd_binary() {
+    local src="$1"
+    [[ -n "$src" && -f "$src" ]] || return 1
+    mkdir -p "$(dirname "$TARGET_CHUMPD_BIN")" 2>/dev/null || true
+    cp -f "$src" "$TARGET_CHUMPD_BIN.new" 2>>"$LOG" || return 1
+    chmod +x "$TARGET_CHUMPD_BIN.new"
+    mv -f "$TARGET_CHUMPD_BIN.new" "$TARGET_CHUMPD_BIN" || return 1
+    _converge_stale_chumpd_binaries
+    return 0
+}
+
+_converge_stale_chumpd_binaries() {
+    [[ "${CHUMP_NODE_CONVERGE_BINS:-1}" == "0" ]] && return 0
+    [[ -e "$TARGET_CHUMPD_BIN" ]] || return 0
+    local canon; canon="$(readlink -f "$TARGET_CHUMPD_BIN" 2>/dev/null || printf '%s' "$TARGET_CHUMPD_BIN")"
+    local c
+    for c in "$HOME/.cargo/bin/chumpd" "$HOME/.local/bin/chumpd" "/usr/local/bin/chumpd"; do
+        [[ -e "$c" || -L "$c" ]] || continue
+        [[ "$(readlink -f "$c" 2>/dev/null)" == "$canon" ]] && continue
+        if ln -sfn "$canon" "$c.new" 2>/dev/null && mv -f "$c.new" "$c" 2>/dev/null; then
+            log "converge: $c -> $canon"
+            emit node_binary_converged "\"path\":\"$c\",\"canonical\":\"$canon\""
+        else
+            rm -f "$c.new" 2>/dev/null || true
+            log "WARN: converge: cannot repoint stale $c (not writable)"
+        fi
+    done
     return 0
 }
 
@@ -447,6 +496,10 @@ _try_artifact_pull() {
         emit node_binary_artifact_miss "\"sha\":\"$full_sha\",\"target\":\"$target\",\"reason\":\"install_failed\""
         rm -rf "$dl"; return 1
     fi
+    if [[ -f "$dl/chumpd" ]]; then
+        chmod +x "$dl/chumpd" 2>/dev/null || true
+        _install_chumpd_binary "$dl/chumpd" || log "WARN: artifact-pull chumpd install to $TARGET_CHUMPD_BIN failed"
+    fi
     rm -rf "$dl"
 
     local new_sha
@@ -526,6 +579,13 @@ _try_release_pull() {
         log "release-pull: install to $TARGET_BIN failed → next"
         emit node_binary_release_miss "\"sha\":\"$full_sha\",\"target\":\"$target\",\"reason\":\"install_failed\""
         rm -rf "$dl"; return 1
+    fi
+    if [[ -f "$dl/chumpd-${target}-${full_sha}" ]]; then
+        chmod +x "$dl/chumpd-${target}-${full_sha}" 2>/dev/null || true
+        _install_chumpd_binary "$dl/chumpd-${target}-${full_sha}" || log "WARN: release-pull chumpd install to $TARGET_CHUMPD_BIN failed"
+    elif [[ -f "$dl/chumpd" ]]; then
+        chmod +x "$dl/chumpd" 2>/dev/null || true
+        _install_chumpd_binary "$dl/chumpd" || log "WARN: release-pull chumpd install to $TARGET_CHUMPD_BIN failed"
     fi
     rm -rf "$dl"
 
@@ -763,7 +823,8 @@ fi
 # skip here still leaves the checkout current — this is precisely the bash-only-
 # merge case (binary unchanged, scripts changed) that must still reach the iron.
 if [[ "$INSTALLED_SHA" == "$MAIN_SHA"* || "$MAIN_SHA" == "$INSTALLED_SHA"* ]] \
-   && [[ "$INSTALLED_SHA" != "none" && "$INSTALLED_SHA" != "unknown" ]]; then
+   && [[ "$INSTALLED_SHA" != "none" && "$INSTALLED_SHA" != "unknown" ]] \
+   && [[ -x "$TARGET_CHUMPD_BIN" ]]; then
     log "SKIP: binary already current ($INSTALLED_SHA); source tree already at origin/main HEAD"
     emit node_binary_refresh_skipped "\"reason\":\"already_current\",\"sha\":\"$INSTALLED_SHA\""
     _reconcile_role_organs
@@ -886,14 +947,16 @@ _cleanup_build_wt() {
     git -C "$REPO_ROOT" checkout -- Cargo.lock workspace-hack/Cargo.toml 2>/dev/null || true
 }
 
-log "cargo build --release --bin chump (warm target $CARGO_TARGET_DIR_ABS, source $BUILD_DIR) …"
-if ! ( cd "$BUILD_DIR" && PATH="$(dirname "$CARGO"):$PATH" CARGO_TARGET_DIR="$CARGO_TARGET_DIR_ABS" "$CARGO" build --release --bin chump ) >>"$LOG" 2>&1; then
+log "cargo build --release --bin chump --bin chumpd (warm target $CARGO_TARGET_DIR_ABS, source $BUILD_DIR) …"
+if ! ( cd "$BUILD_DIR" && PATH="$(dirname "$CARGO"):$PATH" CARGO_TARGET_DIR="$CARGO_TARGET_DIR_ABS" "$CARGO" build --release --bin chump --bin chumpd ) >>"$LOG" 2>&1 \
+   && ! ( cd "$BUILD_DIR" && PATH="$(dirname "$CARGO"):$PATH" CARGO_TARGET_DIR="$CARGO_TARGET_DIR_ABS" "$CARGO" build --release --bin chump ) >>"$LOG" 2>&1; then
     log "FATAL: cargo build failed; see $LOG"
     emit node_binary_refresh_failed "\"reason\":\"cargo_build_failed\""
     _cleanup_build_wt
     exit 1
 fi
 BUILT_BIN="$CARGO_TARGET_DIR_ABS/release/chump"
+BUILT_CHUMPD_BIN="$CARGO_TARGET_DIR_ABS/release/chumpd"
 if [[ ! -x "$BUILT_BIN" ]]; then
     log "FATAL: $BUILT_BIN missing after build"
     emit node_binary_refresh_failed "\"reason\":\"binary_missing_post_build\""
@@ -908,6 +971,14 @@ if ! _install_binary "$BUILT_BIN"; then
     log "FATAL: install of $BUILT_BIN → $TARGET_BIN failed"
     emit node_binary_refresh_failed "\"reason\":\"cp_failed\""
     exit 1
+fi
+# CREDIBLE-1609: install chumpd alongside chump into the deployed bin dir (~/.cargo/bin/chumpd).
+if [[ -x "$BUILT_CHUMPD_BIN" ]]; then
+    log "install $BUILT_CHUMPD_BIN → $TARGET_CHUMPD_BIN"
+    _install_chumpd_binary "$BUILT_CHUMPD_BIN" || log "WARN: install of $BUILT_CHUMPD_BIN → $TARGET_CHUMPD_BIN failed"
+elif [[ ! -x "$TARGET_CHUMPD_BIN" ]]; then
+    log "install $BUILT_BIN → $TARGET_CHUMPD_BIN (stub fallback)"
+    _install_chumpd_binary "$BUILT_BIN" || true
 fi
 
 NEW_SHA="$("$TARGET_BIN" --version 2>/dev/null | grep -oE '\(([a-f0-9]+) built' | head -1 | sed 's/[( ]//g;s/built//' || echo unknown)"

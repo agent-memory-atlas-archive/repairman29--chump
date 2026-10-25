@@ -238,7 +238,7 @@ pub fn run(args: &[String]) -> i32 {
         if let Some(p) = &parsed.paths {
             println!("  paths:           {p}");
         }
-        println!("  auto_merge:      true");
+        println!("  auto_merge:      false");
         return 0;
     }
 
@@ -285,7 +285,7 @@ pub fn run(args: &[String]) -> i32 {
             model: String::new(),
             prompt: parsed.prompt.clone(),
         },
-        auto_merge: true,
+        auto_merge: false,
         skip_tests: false,
         paths: parsed.paths.as_deref(),
         repo_root,

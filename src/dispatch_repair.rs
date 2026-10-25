@@ -152,7 +152,96 @@ pub fn find_open_pr_for_gap(repo_root: &Path, gap_id: &str) -> Option<OpenPr> {
     }
     let branch = format!("claude/{}", gap_id.to_ascii_lowercase().replace('_', "-"));
     let by_head = gh_pr_list(repo_root, &["--head", &branch]);
-    match_open_pr(gap_id, &by_head)
+    if let Some(pr) = match_open_pr(gap_id, &by_head) {
+        return Some(pr);
+    }
+    let (number, head_branch) = find_open_pr_by_branch_prefix(repo_root, gap_id)?;
+    Some(OpenPr {
+        number,
+        head_branch,
+        title: String::new(),
+        head_sha: String::new(),
+    })
+}
+
+/// CREDIBLE-1613: Match the first open PR in `[{"number": N, "headRefName": "..."}]`
+/// whose `headRefName` matches `chump/<gap-id-lower>-*` or `claude/<gap-id-lower>*`
+/// (case-insensitive prefix match on `<gap-id>` via [`branch_is_for_gap`]).
+pub fn match_open_pr_by_branch_prefix(
+    gap_id: &str,
+    prs: &[serde_json::Value],
+) -> Option<(u64, String)> {
+    prs.iter().find_map(|v| {
+        let number = v.get("number")?.as_u64()?;
+        let head = v.get("headRefName")?.as_str()?;
+        if branch_is_for_gap(head, gap_id) {
+            Some((number, head.to_string()))
+        } else {
+            None
+        }
+    })
+}
+
+/// CREDIBLE-1613: Query `gh pr list --state open --json number,headRefName` and
+/// return `Some((pr_number, head_ref))` if an open PR already exists for `gap_id`.
+/// Honors `CHUMP_GH_BIN` when set by hermetic tests; defaults to `gh` in `PATH`.
+pub fn find_open_pr_by_branch_prefix(repo_root: &Path, gap_id: &str) -> Option<(u64, String)> {
+    let gh_bin = std::env::var("CHUMP_GH_BIN")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "gh".to_string());
+    let out = Command::new(&gh_bin)
+        .args([
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "number,headRefName",
+        ])
+        .current_dir(repo_root)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let prs: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
+    match_open_pr_by_branch_prefix(gap_id, &prs)
+}
+
+/// CREDIBLE-1613: Emit `kind=gap_reclaimed_with_open_pr` (`gap_id`, `pr_number`,
+/// `head_ref`) to the ambient log (`CHUMP_AMBIENT_LOG` or `<repo_root>/.chump-locks/ambient.jsonl`).
+pub fn emit_gap_reclaimed_with_open_pr(
+    repo_root: &Path,
+    gap_id: &str,
+    pr_number: u64,
+    head_ref: &str,
+) {
+    let amb_path = std::env::var("CHUMP_AMBIENT_LOG")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| repo_root.join(".chump-locks/ambient.jsonl"));
+    if let Some(parent) = amb_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    // scanner-anchor: "kind":"gap_reclaimed_with_open_pr"
+    let ev = serde_json::json!({
+        "ts": ts,
+        "kind": "gap_reclaimed_with_open_pr",
+        "gap_id": gap_id,
+        "pr_number": pr_number,
+        "head_ref": head_ref,
+    });
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&amb_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "{ev}");
+    }
 }
 
 /// Same truthiness rule `chump claim` uses for the bypass: set, non-empty,
@@ -822,5 +911,51 @@ mod tests {
         assert_eq!(v["head_branch"], "claude/credible-1491");
         assert_eq!(v["failing_checks"], "fmt,clippy");
         assert_eq!(v["checks_source"], "gh");
+    }
+
+    #[test]
+    fn find_open_pr_by_branch_prefix_with_stub_gh_and_emit_credible_1613() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let stub_gh = tmp.path().join("gh-stub");
+        std::fs::write(
+            &stub_gh,
+            "#!/usr/bin/env bash\n\
+             echo '[{\"number\":5801,\"headRefName\":\"chump/credible-1613-reclaim-guard\"},{\"number\":5802,\"headRefName\":\"claude/other-gap\"}]'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub_gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let amb = tmp.path().join("ambient.jsonl");
+        std::env::set_var("CHUMP_GH_BIN", &stub_gh);
+        std::env::set_var("CHUMP_AMBIENT_LOG", &amb);
+
+        let found = find_open_pr_by_branch_prefix(tmp.path(), "CREDIBLE-1613");
+        assert_eq!(
+            found,
+            Some((5801, "chump/credible-1613-reclaim-guard".to_string()))
+        );
+        // Token-bounded: CREDIBLE-161 must NOT match CREDIBLE-1613.
+        assert_eq!(
+            find_open_pr_by_branch_prefix(tmp.path(), "CREDIBLE-161"),
+            None
+        );
+
+        emit_gap_reclaimed_with_open_pr(
+            tmp.path(),
+            "CREDIBLE-1613",
+            5801,
+            "chump/credible-1613-reclaim-guard",
+        );
+
+        std::env::remove_var("CHUMP_GH_BIN");
+        std::env::remove_var("CHUMP_AMBIENT_LOG");
+
+        let amb_body = std::fs::read_to_string(&amb).unwrap();
+        let v: serde_json::Value = serde_json::from_str(amb_body.trim()).unwrap();
+        assert_eq!(v["kind"], "gap_reclaimed_with_open_pr");
+        assert_eq!(v["gap_id"], "CREDIBLE-1613");
+        assert_eq!(v["pr_number"], 5801);
+        assert_eq!(v["head_ref"], "chump/credible-1613-reclaim-guard");
     }
 }

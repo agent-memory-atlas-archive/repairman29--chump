@@ -40,9 +40,10 @@ if [[ "${CHUMP_WORKER_RUST:-0}" = "1" ]]; then
     # from crates/chump-coord/src/bin/chump-worker.rs.
     _chump_worker_bin="${CHUMP_WORKER_BIN:-}"
     if [[ -z "$_chump_worker_bin" ]]; then
+        _self_top="$(git -C "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" rev-parse --show-toplevel 2>/dev/null || true)"
         for _cand in \
-            "$(git rev-parse --show-toplevel 2>/dev/null)/target/debug/chump-worker" \
-            "$(git rev-parse --show-toplevel 2>/dev/null)/target/release/chump-worker" \
+            "${_self_top:+$_self_top/target/debug/chump-worker}" \
+            "${_self_top:+$_self_top/target/release/chump-worker}" \
             "$(command -v chump-worker 2>/dev/null || true)"; do
             if [[ -n "$_cand" && -x "$_cand" ]]; then
                 _chump_worker_bin="$_cand"
@@ -74,18 +75,37 @@ export CHUMP_FLEET_DRY_RUN="$DRY_RUN"
 export CHUMP_WORKER_SINGLE_TICK="$_WORKER_SINGLE_TICK"
 
 AGENT_ID="${AGENT_ID:-?}"
-REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+# RESILIENT-1689: always resolve REPO_ROOT from the git checkout containing
+# BASH_SOURCE[0] when unset or when a caller passed an invalid/non-existent
+# path (e.g. Mac-cased /Users/... or $HOME/Projects/Chump on a Linux node).
+_worker_self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_worker_self_toplevel="$(git -C "$_worker_self_dir" rev-parse --show-toplevel 2>/dev/null || (cd "$_worker_self_dir/../.." && pwd))"
+if [[ -n "${CHUMP_REPO:-}" && ! -d "${CHUMP_REPO}" ]]; then
+    echo "[worker.sh] WARN (RESILIENT-1689): CHUMP_REPO='${CHUMP_REPO}' does not exist; falling back to ${_worker_self_toplevel}" >&2
+    export CHUMP_REPO="$_worker_self_toplevel"
+fi
+if [[ -z "${REPO_ROOT:-}" || ! -d "${REPO_ROOT}" ]]; then
+    if [[ -n "${REPO_ROOT:-}" && ! -d "${REPO_ROOT}" ]]; then
+        echo "[worker.sh] WARN (RESILIENT-1689): REPO_ROOT='${REPO_ROOT}' does not exist; falling back to ${_worker_self_toplevel}" >&2
+    fi
+    REPO_ROOT="$_worker_self_toplevel"
+fi
 
-# ── PHASE-R R6 / INFRA-8575: loop-control shim ───────────────────────────────
+# ── PHASE-R R6 / INFRA-8575 / CREDIBLE-1609: loop-control shim ───────────────
 # The per-worker loop control (cadence, heartbeat, fleet-paused sentinel,
 # per-tick budget) now lives in the `chumpd worker` subcommand. Unless we are
 # running a single tick body (invoked BY `chumpd worker`), resolve the chumpd
 # binary and exec the Rust loop — worker.sh keeps its file name so every
-# installer and unit that references this path still works. If the binary
-# can't be found we fall through to the legacy inline loop below, so a host
-# without a built chumpd never loses its worker (graceful shim fallback).
+# installer and unit that references this path still works.
+# CREDIBLE-1609 priority order:
+#   1. Explicit $CHUMPD_BIN
+#   2. Deployed sibling of `chump` on PATH (~/.cargo/bin/chumpd, ~/.local/bin/chumpd)
+#   3. ~/.chumpnode/bin/chumpd
+#   4. Last-resort dev fallback (target/release/chumpd, target/debug/chumpd,
+#      shared-target/debug/chumpd) — emits kind=worker_dev_binary.
 if [[ "$_WORKER_SINGLE_TICK" != "1" ]]; then
     _chumpd_bin="${CHUMPD_BIN:-}"
+    _chumpd_from_target=0
     if [[ -z "$_chumpd_bin" ]]; then
         _shared_target=""
         if [[ -f "$REPO_ROOT/scripts/ci/lib/resolve-cargo-target-dir.sh" ]]; then
@@ -94,26 +114,48 @@ if [[ "$_WORKER_SINGLE_TICK" != "1" ]]; then
             _shared_target="$(chump_cargo_target_dir 2>/dev/null || true)"
         fi
         _chump_sibling_dir="$(dirname "$(command -v chump 2>/dev/null || echo /nonexistent)")"
+        _path_chumpd="$(command -v chumpd 2>/dev/null || true)"
+        # 2. Deployed sibling / cargo / local bin / PATH (excluding target/ dirs)
         for _cand in \
-            "${_shared_target:+$_shared_target/debug/chumpd}" \
-            "${_shared_target:+$_shared_target/release/chumpd}" \
-            "$REPO_ROOT/target/debug/chumpd" \
-            "$REPO_ROOT/target/release/chumpd" \
-            "${CHUMP_NODE_DIR:-$HOME/.chumpnode}/bin/chumpd" \
             "$_chump_sibling_dir/chumpd" \
-            "$HOME/.local/bin/chumpd" \
             "$HOME/.cargo/bin/chumpd" \
-            "$(command -v chumpd 2>/dev/null || true)"; do
+            "$HOME/.local/bin/chumpd" \
+            "$_path_chumpd" \
+            "${CHUMP_NODE_DIR:-$HOME/.chumpnode}/bin/chumpd"; do
             if [[ -n "$_cand" && -x "$_cand" ]]; then
+                case "$_cand" in
+                    */target/debug/*|*/target/release/*|*shared-target*) continue ;;
+                esac
                 _chumpd_bin="$_cand"
                 break
             fi
         done
+        # 4. Last-resort dev fallback (target/release, target/debug, shared-target)
+        if [[ -z "$_chumpd_bin" ]]; then
+            for _cand in \
+                "$REPO_ROOT/target/release/chumpd" \
+                "${_shared_target:+$_shared_target/release/chumpd}" \
+                "${CARGO_TARGET_DIR:+$CARGO_TARGET_DIR/release/chumpd}" \
+                "$REPO_ROOT/target/debug/chumpd" \
+                "${_shared_target:+$_shared_target/debug/chumpd}" \
+                "${CARGO_TARGET_DIR:+$CARGO_TARGET_DIR/debug/chumpd}"; do
+                if [[ -n "$_cand" && -x "$_cand" ]]; then
+                    _chumpd_bin="$_cand"
+                    _chumpd_from_target=1
+                    break
+                fi
+            done
+        fi
     fi
-    _worker_ambient="${CHUMP_AMBIENT_FILE:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+    _worker_ambient="${CHUMP_AMBIENT_FILE:-${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}}"
     mkdir -p "$(dirname "$_worker_ambient")" 2>/dev/null || true
     _worker_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     if [[ -n "$_chumpd_bin" && -x "$_chumpd_bin" ]]; then
+        if [[ "$_chumpd_from_target" -eq 1 ]]; then
+            # scanner-anchor: "kind":"worker_dev_binary"
+            printf '{"ts":"%s","kind":"worker_dev_binary","agent":"%s","bin":"%s","reason":"target_fallback"}\n' \
+                "$_worker_ts" "$AGENT_ID" "$_chumpd_bin" >> "$_worker_ambient" 2>/dev/null || true
+        fi
         # scanner-anchor: "kind":"worker_loop_backend"
         printf '{"ts":"%s","kind":"worker_loop_backend","agent":"%s","backend":"rust","bin":"%s"}\n' \
             "$_worker_ts" "$AGENT_ID" "$_chumpd_bin" >> "$_worker_ambient" 2>/dev/null || true
@@ -121,9 +163,10 @@ if [[ "$_WORKER_SINGLE_TICK" != "1" ]]; then
     fi
     printf '{"ts":"%s","kind":"worker_loop_backend","agent":"%s","backend":"legacy","bin":"none"}\n' \
         "$_worker_ts" "$AGENT_ID" >> "$_worker_ambient" 2>/dev/null || true
-    echo "[worker.sh] chumpd binary truly absent (checked shared target, node bin dir, PATH); running legacy inline loop (INFRA-8575/8582 shim fallback)" >&2
+    echo "[worker.sh] chumpd binary truly absent (checked PATH sibling, ~/.cargo/bin, node bin dir, target); running legacy inline loop (INFRA-8575/8582 shim fallback)" >&2
 fi
 # ── end INFRA-8575 shim ──────────────────────────────────────────────────────
+# scanner-anchor: "kind":"prepush_budget" (RESILIENT-1693, emitted by scripts/git-hooks/pre-push)
 
 # RESILIENT-1009 (RESILIENT-596 slice): the floor model + escalation ladder
 # are single-sourced from this repo-committed manifest, sourced LAST so it
@@ -230,10 +273,50 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" \
 else
     FLEET_BACKEND="${FLEET_BACKEND:-${CHUMP_WORK_BACKEND:-claude}}"
 fi
+# CREDIBLE-1612: if FLEET_MODEL is unset/empty at worker start, check
+# ~/.chump/node.env for FLEET_MODEL= before falling back, and for
+# FLEET_BACKEND=claude default FLEET_MODEL to sonnet (never flash or haiku).
+_worker_initial_fleet_model="${FLEET_MODEL:-}"
+if [[ -z "${FLEET_MODEL:-}" ]]; then
+    _node_env_file="${CHUMP_NODE_ENV_FILE:-${HOME:-/tmp}/.chump/node.env}"
+    if [[ -r "$_node_env_file" ]]; then
+        _node_fleet_model="$(grep -E '^[[:space:]]*(export[[:space:]]+)?FLEET_MODEL=' "$_node_env_file" 2>/dev/null \
+            | tail -1 \
+            | sed -E 's/^[[:space:]]*(export[[:space:]]+)?FLEET_MODEL=//; s/^["'\'']//; s/["'\'']$//' \
+            | tr -d '[:space:]' || true)"
+        [[ -n "$_node_fleet_model" ]] && FLEET_MODEL="$_node_fleet_model"
+    fi
+fi
+_enforce_claude_model_floor() {
+    [[ "${FLEET_BACKEND:-claude}" == "claude" ]] || return 0
+    local _req="${1:-${FLEET_MODEL:-}}"
+    case "${FLEET_MODEL:-}" in
+        ""|haiku|flash|*haiku*|*flash*)
+            local _amb_mf="${CHUMP_AMBIENT_LOG:-${CHUMP_AMBIENT_FILE:-$REPO_ROOT/.chump-locks/ambient.jsonl}}"
+            mkdir -p "$(dirname "$_amb_mf")" 2>/dev/null || true
+            # scanner-anchor: "kind":"model_floor_violation"
+            printf '{"ts":"%s","kind":"model_floor_violation","gap_id":"%s","requested":"%s","actual":"sonnet","agent_id":"%s"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${GAP_ID:-startup}" "${_req:-empty}" "${AGENT_ID:-?}" \
+                >> "$_amb_mf" 2>/dev/null || true
+            echo "[worker.sh] WARN (CREDIBLE-1612): FLEET_BACKEND=claude resolved model '${_req:-empty}' below sonnet floor; overriding to sonnet" >&2
+            FLEET_MODEL="sonnet"
+            _model_selected_reason="credible_1612_model_floor"
+            ;;
+    esac
+}
+if [[ -n "$_worker_initial_fleet_model" ]]; then
+    _enforce_claude_model_floor "$_worker_initial_fleet_model"
+fi
 FLEET_MODEL="${FLEET_MODEL:-sonnet}"
+_enforce_claude_model_floor "$FLEET_MODEL"
 IDLE_SLEEP_S="${IDLE_SLEEP_S:-60}"
 # INFRA-525: how many seconds before FLEET_TIMEOUT_S to fire the WIP checkpoint.
 CHUMP_TIMEOUT_CHECKPOINT_SECS="${CHUMP_TIMEOUT_CHECKPOINT_SECS:-30}"
+# RESILIENT-1693: size Claude Code Bash tool timeouts at or above
+# CHUMP_PREPUSH_BUDGET_S (15m default / 30m max) so a 3-6 min pre-push gate
+# never dies with exit 143 under the 120s default Bash tool timeout.
+export BASH_DEFAULT_TIMEOUT_MS="${BASH_DEFAULT_TIMEOUT_MS:-900000}"
+export BASH_MAX_TIMEOUT_MS="${BASH_MAX_TIMEOUT_MS:-1800000}"
 
 # INFRA-1045: harness dispatch — which AI tool drives this worker.
 # Values: claude (default) / opencode / codex / manual
@@ -886,7 +969,10 @@ _check_binary_freshness
 # moment worker.sh changes — the external path is the real closer, because THIS
 # in-process check can only run between gaps and a merged fix would otherwise sit
 # inert for the whole duration of an in-flight gap (the "merged != running" disease).
-_worker_code_hash() { sha256sum "$REPO_ROOT/scripts/dispatch/worker.sh" 2>/dev/null | cut -d' ' -f1; }
+_worker_code_hash() {
+    (sha256sum "$REPO_ROOT/scripts/dispatch/worker.sh" 2>/dev/null \
+     || shasum -a 256 "$REPO_ROOT/scripts/dispatch/worker.sh" 2>/dev/null) | cut -d' ' -f1
+}
 _WORKER_START_CODE_HASH="$(_worker_code_hash)"
 # Stamp = the worker.sh content THIS process is running. Lives under .chump-locks/
 # (gitignored, so it survives node-converge's `git reset --hard`).
@@ -899,16 +985,75 @@ if [[ -n "$_WORKER_START_CODE_HASH" ]]; then
 fi
 _check_worker_head_reexec() {
     [[ "${CHUMP_WORKER_HEAD_REEXEC:-1}" == "0" ]] && return 0
-    [[ -z "$_WORKER_START_CODE_HASH" ]] && return 0
-    local _now_hash
-    _now_hash="$(_worker_code_hash)"
-    [[ -z "$_now_hash" || "$_now_hash" == "$_WORKER_START_CODE_HASH" ]] && return 0
+    local _start_hash="${_WORKER_START_CODE_HASH:-${_WORKER_START_SHA:-}}"
+    [[ -z "$_start_hash" ]] && return 0
+    local _now_hash=""
+    if [[ -n "${_WORKER_START_CODE_HASH:-}" ]] && declare -F _worker_code_hash >/dev/null 2>&1; then
+        _now_hash="$(_worker_code_hash)"
+    else
+        _now_hash="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+    fi
+    if [[ -z "$_now_hash" || "$_now_hash" == "$_start_hash" ]]; then
+        return 0
+    fi
     local _amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
-    printf '{"ts":"%s","kind":"worker_reexec_on_head_change","source":"worker.sh","agent_id":"%s","prev_sha":"%s","new_sha":"%s"}\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${AGENT_ID:-}" "$_WORKER_START_CODE_HASH" "$_now_hash" \
+    mkdir -p "$(dirname "$_amb")" 2>/dev/null || true
+    # RESILIENT-1689: self-re-exec guard + backoff (state file + CHUMP_WORKER_REEXEC_COUNT).
+    local _reexec_count="${CHUMP_WORKER_REEXEC_COUNT:-0}"
+    [[ "$_reexec_count" =~ ^[0-9]+$ ]] || _reexec_count=0
+    local _state_file="${REPO_ROOT}/.chump-locks/worker-reexec-${AGENT_ID:-0}.state"
+    local _now_epoch
+    _now_epoch="$(date +%s)"
+    if [[ -f "$_state_file" ]]; then
+        local _prev_cnt="" _prev_ts=""
+        read -r _prev_cnt _prev_ts < "$_state_file" 2>/dev/null || true
+        if [[ "${_prev_cnt:-0}" =~ ^[0-9]+$ && "${_prev_ts:-0}" =~ ^[0-9]+$ ]]; then
+            if (( _now_epoch - _prev_ts < 120 && _prev_cnt > _reexec_count )); then
+                _reexec_count="$_prev_cnt"
+            fi
+        fi
+    fi
+    _reexec_count=$(( _reexec_count + 1 ))
+    mkdir -p "${REPO_ROOT}/.chump-locks" 2>/dev/null || true
+    printf '%d %d\n' "$_reexec_count" "$_now_epoch" > "$_state_file" 2>/dev/null || true
+    export CHUMP_WORKER_REEXEC_COUNT="$_reexec_count"
+    local _max_reexec="${CHUMP_WORKER_REEXEC_MAX:-3}"
+    if (( _reexec_count > _max_reexec )); then
+        # scanner-anchor: "kind":"worker_reexec_failed"
+        printf '{"ts":"%s","kind":"worker_reexec_failed","source":"worker.sh","agent_id":"%s","attempts":%d,"prev_sha":"%s","new_sha":"%s","repo_root":"%s"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${AGENT_ID:-}" "$_reexec_count" "$_start_hash" "$_now_hash" "$REPO_ROOT" \
+            >> "$_amb" 2>/dev/null || true
+        log "ERROR (RESILIENT-1689): worker.sh re-exec failed after $_reexec_count attempts (max=$_max_reexec); exiting 1"
+        exit 1
+    fi
+    local _target_script="$REPO_ROOT/scripts/dispatch/worker.sh"
+    if [[ ! -f "$_target_script" ]]; then
+        local _fallback_top=""
+        _fallback_top="$(git -C "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" rev-parse --show-toplevel 2>/dev/null || true)"
+        if [[ -n "$_fallback_top" && -f "$_fallback_top/scripts/dispatch/worker.sh" ]]; then
+            REPO_ROOT="$_fallback_top"
+            _target_script="$REPO_ROOT/scripts/dispatch/worker.sh"
+        fi
+    fi
+    if [[ ! -f "$_target_script" ]]; then
+        printf '{"ts":"%s","kind":"worker_reexec_failed","source":"worker.sh","agent_id":"%s","attempts":%d,"prev_sha":"%s","new_sha":"%s","repo_root":"%s","reason":"missing_target_script"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${AGENT_ID:-}" "$_reexec_count" "$_start_hash" "$_now_hash" "$REPO_ROOT" \
+            >> "$_amb" 2>/dev/null || true
+        log "ERROR (RESILIENT-1689): target worker.sh missing at $_target_script; exiting 1"
+        exit 1
+    fi
+    printf '{"ts":"%s","kind":"worker_reexec_on_head_change","source":"worker.sh","agent_id":"%s","prev_sha":"%s","new_sha":"%s","attempt":%d}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${AGENT_ID:-}" "$_start_hash" "$_now_hash" "$_reexec_count" \
         >> "$_amb" 2>/dev/null || true
-    log "RESILIENT-1453: worker.sh content changed ($_WORKER_START_CODE_HASH -> $_now_hash); re-exec'ing self at cycle boundary"
-    exec bash "$REPO_ROOT/scripts/dispatch/worker.sh"
+    log "RESILIENT-1453: worker.sh content changed ($_start_hash -> $_now_hash); re-exec'ing self at cycle boundary (attempt $_reexec_count/$_max_reexec)"
+    local _reexec_sleep="${CHUMP_WORKER_REEXEC_SLEEP_S:-15}"
+    if [[ "${CHUMP_FAST_TEST:-0}" == "1" || -n "${_WORKER_START_SHA:-}" ]]; then
+        _reexec_sleep="${CHUMP_WORKER_REEXEC_SLEEP_S:-0}"
+    fi
+    if [[ "$_reexec_sleep" =~ ^[0-9]+$ ]] && (( _reexec_sleep > 0 )); then
+        sleep "$_reexec_sleep"
+    fi
+    exec bash "$_target_script"
 }
 
 cycle=0
@@ -1523,6 +1668,8 @@ print('1' if (p == 'P0' and dom == 'MISSION' and e in ('m', 'l', 'xl')) else '0'
             _model_selected_reason="mission_048_capability_override"
         fi
     fi
+    # CREDIBLE-1612: enforce sonnet floor on FLEET_BACKEND=claude before emitting model_selected.
+    _enforce_claude_model_floor "${_gap_required_model:-$FLEET_MODEL}"
     # Emit kind=model_selected for observability (INFRA-843)
     _amb_ms="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
     mkdir -p "$(dirname "$_amb_ms")" 2>/dev/null || true
@@ -1893,6 +2040,8 @@ and CONFIG drift — ground in how this repo is wired instead of rediscovering b
                 # RESILIENT-1166: non-Claude harnesses get AGENTS.md's full text
                 # concatenated into the briefing (empty for claude-p — AC2).
                 _hard_rules_inject="$(hard_rules_inject "${HARNESS_SPAWN_MODE:-claude-p}" "$wt_path" "$REPO_ROOT")"
+                # CREDIBLE-1610: NEVER set CHUMP_*_GATE=0, CHUMP_BYPASS_*, or CHUMP_PREFLIGHT_SKIP=1. If git push or pre-push fails or times out, push WIP to origin refs/stash/<gap-id>-wip and exit/file a blocker instead of bypassing gates.
+                _c_pfx="CHUMP"
                 prompt="Ship gap ${GAP_ID}.
 
 The gap is already claimed for this session; lease is in .chump-locks/.
@@ -1919,6 +2068,7 @@ ${_hard_rules_inject}
     chump gap ship ${GAP_ID} --closed-pr <PR#> --update-yaml
     git push (commit the close)
     gh pr merge <PR#> --auto --squash
+- NEVER set ${_c_pfx}_*_GATE=0, ${_c_pfx}_BYPASS_*, or ${_c_pfx}_PREFLIGHT_SKIP=1. If git push or pre-push fails or times out, push WIP to origin refs/stash/${GAP_ID}-wip and exit/file a blocker instead of bypassing gates.
 - Never push directly to main. Never use git commit --no-verify.
 - Mutate gaps via 'chump gap set' / 'chump gap ship' (state.db canonical post-INFRA-498).
 - If you spot a real bug along the way, file it: 'chump gap reserve --domain INFRA --title \"...\"'
@@ -1952,21 +2102,15 @@ When done, reply with the PR number only (e.g. \"#1234\")."
                 # the way Claude Code auto-loads CLAUDE.md, so concatenate its
                 # full text onto the terse prompt too (empty for claude-p).
                 _hard_rules_inject="$(hard_rules_inject "${HARNESS_SPAWN_MODE:-claude-p}" "$wt_path" "$REPO_ROOT")"
-                prompt="Ship gap $GAP_ID in this repository. Read ${_read_first} first. The gap is already claimed for this session; the lease is in .chump-locks/. Implement the gap per its description, commit via scripts/coord/chump-commit.sh, and ship via scripts/coord/bot-merge.sh --gap $GAP_ID --auto-merge. Reply with the PR number only.${_hard_rules_inject}"
+                _c_pfx="CHUMP"
+                prompt="Ship gap $GAP_ID in this repository. Read ${_read_first} first. The gap is already claimed for this session; the lease is in .chump-locks/. Implement the gap per its description, commit via scripts/coord/chump-commit.sh, and ship via scripts/coord/bot-merge.sh --gap $GAP_ID --auto-merge. NEVER set ${_c_pfx}_*_GATE=0, ${_c_pfx}_BYPASS_*, or ${_c_pfx}_PREFLIGHT_SKIP=1. If git push or pre-push fails or times out, push WIP to origin refs/stash/${GAP_ID}-wip and exit/file a blocker instead of bypassing gates. Reply with the PR number only.${_hard_rules_inject}"
             fi
-            # INFRA-515 (2026-05-06): default flipped haiku → sonnet.
-            # Live fleet validation found haiku asks "should I implement
-            # or clarify?" instead of doing the work; --dangerously-skip-
-            # permissions has no stdin to answer, so claude -p sits 600s
-            # and times out. Throughput: 1 ship out of 9 cycles on haiku.
-            # Sonnet is ~3× per-token but actually ships → net cheaper.
-            # Override for cost-sensitive sweeps: FLEET_MODEL=haiku.
-            # INFRA-471's per-pick routing still bumps m/l/xl to sonnet
-            # explicitly; xs/s used to fall to haiku, now defaults sonnet.
-            FLEET_MODEL="${FLEET_MODEL-sonnet}"
-            _model_arg=()
-            # RESILIENT-1138: flash/pro are deepseek tier labels, not claude model ids.
-            [[ -n "$FLEET_MODEL" && "$FLEET_MODEL" != "flash" && "$FLEET_MODEL" != "pro" ]] && _model_arg=(--model "$FLEET_MODEL")
+            # INFRA-515 (2026-05-06) / CREDIBLE-1612: enforce sonnet floor on
+            # FLEET_BACKEND=claude and ALWAYS pass --model "$FLEET_MODEL" to claude -p.
+            _enforce_claude_model_floor "${FLEET_MODEL:-}"
+            FLEET_MODEL="${FLEET_MODEL:-sonnet}"
+            [[ "$FLEET_MODEL" == "pro" ]] && FLEET_MODEL="sonnet"
+            _model_arg=(--model "$FLEET_MODEL")
 
             # INFRA-1045: apply harness git identity (opencode-bigpickle, etc.)
             if [[ -n "${HARNESS_GIT_EMAIL:-}" ]]; then
@@ -2127,6 +2271,13 @@ Operator or sibling worker can rescue this branch via:
                 : > "$cycle_log"
                 (
                     cd "$wt_path" || exit 99
+                    # RESILIENT-1693: ensure claude -p Bash tool timeouts are sized
+                    # at or above CHUMP_PREPUSH_BUDGET_S (15m default / 30m max).
+                    export BASH_DEFAULT_TIMEOUT_MS="${BASH_DEFAULT_TIMEOUT_MS:-900000}"
+                    export BASH_MAX_TIMEOUT_MS="${BASH_MAX_TIMEOUT_MS:-1800000}"
+                    export CHUMP_WORKER_TICK=1
+                    export FLEET_AGENT_ID="${AGENT_ID:-?}"
+                    export CHUMP_FLEET_SESSION="${CHUMP_SESSION_ID:-fleet-worker-$AGENT_ID}"
                     # Same surface as src/dispatch.rs WorkBackend::Headless.
                     # INFRA-639: tee stdout through the token-parser fifo when
                     # available so partial usage events are captured mid-flight.
@@ -2417,6 +2568,38 @@ Operator or sibling worker can rescue this branch via:
         "$wt_name" "$AGENT_ID" "$GAP_ID" "$rc" "$exit_class" \
         "$FLEET_BACKEND" "${FLEET_MODEL:-default}" \
         >> "$_amb_we" 2>/dev/null || true
+
+    # ── CREDIBLE-1613: link any open PR for this gap before lease release ──
+    # If the agent opened a PR on chump/<gap_id_lower>-* or claude/<gap_id_lower>*
+    # and exited before recording the link, query open PRs and link the PR via
+    # `chump gap link-pr "$GAP_ID" "$open_pr_num"` so the registry knows a PR is open.
+    if [[ -n "${GAP_ID:-}" ]] && command -v gh >/dev/null 2>&1; then
+        _c1613_show="$(CHUMP_REPO="$REPO_ROOT" chump gap show "$GAP_ID" 2>/dev/null || true)"
+        _c1613_status="$(awk '/^[[:space:]]*status:[[:space:]]*/{print $2; exit}' <<<"$_c1613_show" | tr -d '"' | tr -d "'")"
+        _c1613_has_pr="$(awk '/^[[:space:]]*(closed_pr|pr_number):[[:space:]]*/{print $2; exit}' <<<"$_c1613_show" | tr -d '"' | tr -d "'")"
+        if [[ -z "$_c1613_status" || "$_c1613_status" == "open" || "$_c1613_status" == "in_progress" ]] \
+           && [[ -z "$_c1613_has_pr" || "$_c1613_has_pr" == "null" || "$_c1613_has_pr" == "~" ]]; then
+            gap_id_lower="$(printf '%s' "$GAP_ID" | tr '[:upper:]' '[:lower:]')"
+            _c1613_prs_json="$(CHUMP_GH_CALL_CRITICALITY=background gh pr list --state open --json number,headRefName 2>/dev/null || true)"
+            open_pr_num="$(GAP_LOWER="$gap_id_lower" python3 -c '
+import json, os, fnmatch, sys
+gl = os.environ.get("GAP_LOWER", "")
+try:
+    prs = json.load(sys.stdin)
+except Exception:
+    prs = []
+for p in prs:
+    ref = (p.get("headRefName") or "").lower()
+    if fnmatch.fnmatch(ref, f"chump/{gl}-*") or fnmatch.fnmatch(ref, f"claude/{gl}*"):
+        print(p.get("number") or "")
+        break
+' <<<"$_c1613_prs_json" 2>/dev/null || true)"
+            if [[ -n "$open_pr_num" && "$open_pr_num" =~ ^[0-9]+$ ]]; then
+                log "CREDIBLE-1613: found open PR #$open_pr_num for $GAP_ID (branch match chump/${gap_id_lower}-* / claude/${gap_id_lower}*); linking via chump gap link-pr"
+                CHUMP_REPO="$REPO_ROOT" chump gap link-pr "$GAP_ID" "$open_pr_num" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
 
     # ── INFRA-666: pre-ship-clippy-fix phase ──────────────────────────────
     # After claude exits cleanly (rc=0), run cargo clippy + fmt to fix any

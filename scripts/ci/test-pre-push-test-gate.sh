@@ -102,6 +102,7 @@ run_hook() {
     PATH="$TMP/bin:$PATH" \
     CHUMP_FMT_CHECK=0 \
     CHUMP_GAP_CHECK=0 \
+    CHUMP_CLIPPY_MIN_DISK_KB=0 \
     CHUMP_AUTOMERGE_OVERRIDE=1 \
     CHUMP_FORCE_LEASE_CHECK=0 \
     CHUMP_REBASE_DETECT=0 \
@@ -118,6 +119,7 @@ run_hook_stdin() {
     PATH="$TMP/bin:$PATH" \
     CHUMP_FMT_CHECK=0 \
     CHUMP_GAP_CHECK=0 \
+    CHUMP_CLIPPY_MIN_DISK_KB=0 \
     CHUMP_AUTOMERGE_OVERRIDE=1 \
     CHUMP_FORCE_LEASE_CHECK=0 \
     CHUMP_REBASE_DETECT=0 \
@@ -196,14 +198,53 @@ else
     fail "cache marker should NOT exist for failed tests"
 fi
 
-# ── Test 5: bypass env → skip ───────────────────────────────────────────────
-echo "--- Test 5: CHUMP_TEST_GATE=0 → guard skips even on red tests ---"
-OUT=$(CHUMP_TEST_GATE=0 CHUMP_TEST_GATE_FAKE_RC=101 run_hook)
+# ── Test 5: bypass env → requires Test-Gate-Bypass: trailer & non-fleet actor (CREDIBLE-1610) ──
+echo "--- Test 5: CHUMP_TEST_GATE=0 requires Test-Gate-Bypass: trailer and forbids fleet sessions ---"
+rm -f .chump-locks/ambient.jsonl
+OUT_NOTRAILER=$(CHUMP_TEST_GATE=0 CHUMP_TEST_GATE_FAKE_RC=101 run_hook)
+RC_NOTRAILER=$?
+if [[ "$RC_NOTRAILER" -ne 0 ]] && grep -q "requires a Test-Gate-Bypass:" <<<"$OUT_NOTRAILER"; then
+    ok "CREDIBLE-1610: CHUMP_TEST_GATE=0 without Test-Gate-Bypass: trailer is refused (rc=$RC_NOTRAILER)"
+else
+    fail "CREDIBLE-1610: CHUMP_TEST_GATE=0 without trailer should be refused (rc=$RC_NOTRAILER, out=$OUT_NOTRAILER)"
+fi
+
+git commit --amend -qm "$(printf 'rs change failing\n\nTest-Gate-Bypass: emergency human override for red test\n')"
+OUT_FLEET_TG=$(FLEET_AGENT_ID=agent-1 CHUMP_TEST_GATE=0 CHUMP_TEST_GATE_FAKE_RC=101 run_hook)
+RC_FLEET_TG=$?
+_bm_pfx="CHUMP"
+_bm_var="${_bm_pfx}_BYPASS_BOT_MERGE"
+OUT_FLEET_BM=$(
+    export FLEET_AGENT_ID=agent-1
+    export "${_bm_var}=1"
+    CHUMP_TEST_GATE_FAKE_RC=0 run_hook
+)
+RC_FLEET_BM=$?
+if [[ "$RC_FLEET_TG" -ne 0 ]] && [[ "$RC_FLEET_BM" -ne 0 ]] \
+   && grep -q "forbidden in fleet agent sessions" <<<"$OUT_FLEET_TG" \
+   && grep -q "forbidden in fleet agent sessions" <<<"$OUT_FLEET_BM"; then
+    ok "CREDIBLE-1610: fleet agent sessions cannot set CHUMP_TEST_GATE=0 (even with trailer) or bot-merge bypass"
+else
+    fail "CREDIBLE-1610: fleet session bypass was not refused (rc_tg=$RC_FLEET_TG, rc_bm=$RC_FLEET_BM)"
+fi
+
+rm -f .chump-locks/ambient.jsonl
+OUT=$(
+    unset CHUMP_FLEET_SESSION FLEET_AGENT_ID CHUMP_WORKER_TICK
+    CHUMP_TEST_GATE=0 CHUMP_TEST_GATE_FAKE_RC=101 run_hook
+)
 RC=$?
 if [[ "$RC" -eq 0 ]] && ! echo "$OUT" | grep -qE "(INFRA-761: running cargo test|CREDIBLE-278: running cargo nextest)"; then
-    ok "bypass env skipped the gate"
+    ok "bypass env with Test-Gate-Bypass: trailer skipped the gate"
 else
-    fail "bypass env should skip (rc=$RC, out=$OUT)"
+    fail "bypass env with trailer should skip (rc=$RC, out=$OUT)"
+fi
+if grep -q '"kind":"test_gate_bypassed"' .chump-locks/ambient.jsonl 2>/dev/null \
+   && grep -q '"reason":"emergency human override for red test"' .chump-locks/ambient.jsonl 2>/dev/null \
+   && grep -q '"uid":' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "CREDIBLE-1610: test_gate_bypassed logs reason and actor.uid"
+else
+    fail "CREDIBLE-1610: test_gate_bypassed missing reason or actor.uid: $(cat .chump-locks/ambient.jsonl 2>/dev/null)"
 fi
 
 # ── Test 6: CHUMP_BOT_MERGE_IN_PROGRESS=1 → skip (RESILIENT-1550) ──────────
@@ -483,6 +524,30 @@ if [[ "$VR_BAD_RC" -ne 0 ]] \
     ok "INFRA-8174: vercel-resolve.sh madeupname exits non-zero ($VR_BAD_RC) with resolution instructions on stderr"
 else
     fail "INFRA-8174: vercel-resolve.sh madeupname should fail cleanly (rc=$VR_BAD_RC, stdout='$VR_BAD_STDOUT', stderr='$VR_BAD_STDERR')"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════
+# RESILIENT-1693: upfront pre-push ETA line + prepush_budget telemetry
+# ══════════════════════════════════════════════════════════════════════════
+echo "--- Test 15 (RESILIENT-1693): upfront ETA line and prepush_budget telemetry ---"
+echo "// test-pre-push-test-gate.sh RESILIENT-1693 change $(date +%s)" >> src/lib.rs
+git add src/lib.rs
+git commit -qm "rs change for RESILIENT-1693"
+rm -f .chump-locks/ambient.jsonl
+OUT_1693=$(CHUMP_TEST_GATE_FAKE_RC=0 run_hook)
+RC_1693=$?
+if [[ "$RC_1693" -eq 0 ]] && grep -q '\[pre-push\] ETA: clippy + incremental test gate may take 180-360s' <<<"$OUT_1693"; then
+    ok "RESILIENT-1693: upfront ETA line printed before clippy/test gate"
+else
+    fail "RESILIENT-1693: missing upfront ETA line (rc=$RC_1693, out=$OUT_1693)"
+fi
+if grep -q '"kind":"prepush_budget"' .chump-locks/ambient.jsonl 2>/dev/null \
+   && grep -q '"clippy_s":' .chump-locks/ambient.jsonl 2>/dev/null \
+   && grep -q '"test_s":' .chump-locks/ambient.jsonl 2>/dev/null \
+   && grep -q '"total_s":' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "RESILIENT-1693: prepush_budget event emitted with clippy_s, test_s, total_s"
+else
+    fail "RESILIENT-1693: prepush_budget event missing or incomplete: $(cat .chump-locks/ambient.jsonl 2>/dev/null)"
 fi
 
 # ── Summary ─────────────────────────────────────────────────────────────────

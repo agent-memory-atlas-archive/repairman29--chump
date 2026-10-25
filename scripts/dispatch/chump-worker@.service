@@ -1,10 +1,15 @@
 [Unit]
-Description=Chump headless fleet worker %i (RESILIENT-283)
+Description=Chump headless fleet worker %i (RESILIENT-283 / INFRA-8639)
 After=network-online.target
+Wants=network-online.target
+
 [Service]
 Type=simple
-ExecStart=__REPO_ROOT__/scripts/dispatch/worker-run.sh %i
+WorkingDirectory=__REPO_ROOT__
+EnvironmentFile=-__HOME__/.chump/node.env
+ExecStart=/bin/bash __REPO_ROOT__/scripts/dispatch/node-worker-run.sh %i
 Restart=always
 RestartSec=10
+
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

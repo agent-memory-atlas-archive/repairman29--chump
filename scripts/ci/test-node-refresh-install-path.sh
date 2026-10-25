@@ -227,4 +227,67 @@ else
     fail "node-refresh did not emit node_deadman_verified — the timer-active verification is missing (AC1)"
 fi
 
+# ── Test 5 (CREDIBLE-1609): node-refresh installs chumpd + worker.sh prefers deployed sibling over target/debug ─
+if [ -x "$FAKEHOME/.cargo/bin/chumpd" ]; then
+    ok "CREDIBLE-1609: node-refresh installed deployed sibling ~/.cargo/bin/chumpd alongside ~/.cargo/bin/chump"
+else
+    fail "CREDIBLE-1609: node-refresh did not install ~/.cargo/bin/chumpd"
+fi
+
+C1609_DIR="$TMP/c1609"
+mkdir -p "$C1609_DIR/home/.cargo/bin" "$C1609_DIR/chump-shared-target/debug" "$C1609_DIR/repo/.chump-locks"
+git init -q "$C1609_DIR/repo"
+cat > "$C1609_DIR/home/.cargo/bin/chump" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat > "$C1609_DIR/home/.cargo/bin/chumpd" <<EOF
+#!/usr/bin/env bash
+echo "deployed:\$*" > "$C1609_DIR/which-chumpd"
+exit 0
+EOF
+cat > "$C1609_DIR/chump-shared-target/debug/chumpd" <<EOF
+#!/usr/bin/env bash
+echo "stale-debug:\$*" > "$C1609_DIR/which-chumpd"
+exit 0
+EOF
+chmod +x "$C1609_DIR/home/.cargo/bin/chump" "$C1609_DIR/home/.cargo/bin/chumpd" "$C1609_DIR/chump-shared-target/debug/chumpd"
+
+env -u CHUMPD_BIN -u CHUMP_WORKER_SINGLE_TICK \
+    HOME="$C1609_DIR/home" \
+    REPO_ROOT="$C1609_DIR/repo" \
+    CARGO_TARGET_DIR="$C1609_DIR/chump-shared-target" \
+    CHUMP_AMBIENT_FILE="$C1609_DIR/repo/.chump-locks/ambient.jsonl" \
+    PATH="$C1609_DIR/home/.cargo/bin:/usr/bin:/bin" \
+    bash "$REPO_ROOT/scripts/dispatch/worker.sh" >/dev/null 2>&1
+
+if grep -q '^deployed:worker$' "$C1609_DIR/which-chumpd" 2>/dev/null; then
+    ok "CREDIBLE-1609: worker.sh chose deployed sibling chumpd ahead of chump-shared-target/debug/chumpd"
+else
+    fail "CREDIBLE-1609: worker.sh did not choose deployed sibling chumpd (got: $(cat "$C1609_DIR/which-chumpd" 2>/dev/null || echo none))"
+fi
+if grep -q '"kind":"worker_dev_binary"' "$C1609_DIR/repo/.chump-locks/ambient.jsonl" 2>/dev/null; then
+    fail "CREDIBLE-1609: worker_dev_binary should not emit when deployed chumpd is used"
+else
+    ok "CREDIBLE-1609: no worker_dev_binary emitted when deployed sibling chumpd is chosen"
+fi
+
+# Now remove deployed chumpd so only the target fallback exists; assert worker_dev_binary emits.
+rm -f "$C1609_DIR/home/.cargo/bin/chumpd" "$C1609_DIR/which-chumpd" "$C1609_DIR/repo/.chump-locks/ambient.jsonl"
+env -u CHUMPD_BIN -u CHUMP_WORKER_SINGLE_TICK \
+    HOME="$C1609_DIR/home" \
+    REPO_ROOT="$C1609_DIR/repo" \
+    CARGO_TARGET_DIR="$C1609_DIR/chump-shared-target" \
+    CHUMP_AMBIENT_FILE="$C1609_DIR/repo/.chump-locks/ambient.jsonl" \
+    PATH="$C1609_DIR/home/.cargo/bin:/usr/bin:/bin" \
+    bash "$REPO_ROOT/scripts/dispatch/worker.sh" >/dev/null 2>&1
+
+if grep -q '^stale-debug:worker$' "$C1609_DIR/which-chumpd" 2>/dev/null \
+   && grep -q '"kind":"worker_dev_binary"' "$C1609_DIR/repo/.chump-locks/ambient.jsonl" 2>/dev/null \
+   && grep -q '"reason":"target_fallback"' "$C1609_DIR/repo/.chump-locks/ambient.jsonl" 2>/dev/null; then
+    ok "CREDIBLE-1609: target/ fallback emits kind=worker_dev_binary (reason=target_fallback)"
+else
+    fail "CREDIBLE-1609: target/ fallback did not emit kind=worker_dev_binary (ambient: $(cat "$C1609_DIR/repo/.chump-locks/ambient.jsonl" 2>/dev/null || echo none))"
+fi
+
 exit 0

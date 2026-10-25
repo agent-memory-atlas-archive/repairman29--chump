@@ -935,3 +935,12 @@ code_review_unavailable  # reason: CREDIBLE-1529 — registered as a RESILIENT-1
 pr_links_multiple_gaps  # reason: CREDIBLE-1559 — registered as a RESILIENT-1618 fragment (docs/observability/events.d/pr_links_multiple_gaps.yaml), which the CI coverage gate reads via gen-registries.sh but src/verify/rules/event_registry.rs does not (reads only monolith EVENT_REGISTRY.yaml).
 # ── CREDIBLE-1577: dispatch --auto-merge gate-file refusal ────────────────
 dispatch_auto_merge_refused  # reason: CREDIBLE-1577 — registered as a RESILIENT-1618 fragment (docs/observability/events.d/dispatch_auto_merge_refused.yaml), which the CI coverage gate reads via gen-registries.sh but src/verify/rules/event_registry.rs does not (reads only monolith EVENT_REGISTRY.yaml).
+
+# ── Wave 12 sibling-PR shell emitters (CREDIBLE-1608, CREDIBLE-1612, RESILIENT-1691, RESILIENT-1689) ──
+worker_dev_binary  # reason: CREDIBLE-1608 — emitted by scripts/dispatch/worker.sh in the Wave 12 sibling shell PR; reserved here so register-without-emit passes while both Wave 12 PRs land.
+model_floor_violation  # reason: CREDIBLE-1612 — emitted by scripts/dispatch/worker.sh in the Wave 12 sibling shell PR; reserved here so register-without-emit passes while both Wave 12 PRs land.
+worker_reexec_failed  # reason: RESILIENT-1691 — emitted by scripts/ops/node-refresh-chump.sh in the Wave 12 sibling shell PR; reserved here so register-without-emit passes while both Wave 12 PRs land.
+prepush_budget  # reason: RESILIENT-1689 — emitted by scripts/git-hooks/pre-push in the Wave 12 sibling shell PR (and scripts/git-hooks/ is outside PROD_PATHS); reserved here so register-without-emit passes.
+gap_reclaimed_with_open_pr  # reason: CREDIBLE-1613 — emitted by src/dispatch_repair.rs via escaped Rust format! string (scanner-anchor present); reserved here in case the installed chump verify rule's unescaped-quote needle scans before rebuild.
+node_auth_dead  # reason: RESILIENT-1690 — emitted by src/farmer_status.rs via escaped Rust format! string (scanner-anchor present); reserved here in case the installed chump verify rule's unescaped-quote needle scans before rebuild.
+organ_revived  # reason: RESILIENT-1692 — emitted by scripts/ops/organ-reconcile.sh via local emit() helper (scanner-anchor present); reserved here in case the installed chump verify rule scans before rebuild.

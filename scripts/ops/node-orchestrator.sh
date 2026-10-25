@@ -29,7 +29,57 @@ REPO="${CHUMP_REPO_ROOT:-$HOME/Projects/chump}"
 INV="$STATE_DIR/resource-inventory.json"
 INTERVAL="${CHUMP_ORCH_INTERVAL:-120}"
 AUTOPLACE="${CHUMP_ORCH_AUTOPLACE:-0}"          # 0 = sense+recommend only; 1 = graceful auto-relocate
-WORKER_UNIT="${CHUMP_ORCH_WORKER_UNIT:-chump-cj-worker}"   # worker@1 is this; worker@N are extras
+# INFRA-8639: resolve worker unit prefix from CHUMP_ORCH_WORKER_UNIT,
+# organ-manifest.txt, or chump-worker@ (with chump-node1-worker.service fallback)
+# instead of hardcoded chump-cj-worker{N}.
+_resolve_worker_unit() {
+  if [ -n "${CHUMP_ORCH_WORKER_UNIT:-}" ]; then
+    echo "$CHUMP_ORCH_WORKER_UNIT"
+    return
+  fi
+  local manifest="${CHUMP_ORCH_MANIFEST:-$REPO/scripts/ops/organ-manifest.txt}"
+  if [ -f "$manifest" ] && grep -qE '^enabled[[:space:]]+chump-worker@' "$manifest" 2>/dev/null; then
+    echo "chump-worker@"
+    return
+  fi
+  if [ -f "${HOME:-/nonexistent}/.config/systemd/user/chump-node1-worker.service" ] \
+     && [ ! -f "${HOME:-/nonexistent}/.config/systemd/user/chump-worker@.service" ]; then
+    echo "chump-node1-worker"
+    return
+  fi
+  echo "chump-worker@"
+}
+WORKER_UNIT="$(_resolve_worker_unit)"
+_worker_unit_for_slot() {
+  local n="$1"
+  case "$WORKER_UNIT" in
+    *@)
+      echo "${WORKER_UNIT}${n}.service"
+      ;;
+    chump-node1-worker*)
+      if [ "$n" -le 1 ] 2>/dev/null; then
+        echo "chump-node1-worker.service"
+      else
+        echo "chump-worker@${n}.service"
+      fi
+      ;;
+    *.service)
+      local base="${WORKER_UNIT%.service}"
+      if [ "$n" -le 1 ] 2>/dev/null; then
+        echo "${base}.service"
+      else
+        echo "${base}${n}.service"
+      fi
+      ;;
+    *)
+      if [ "$n" -le 1 ] 2>/dev/null; then
+        echo "${WORKER_UNIT}.service"
+      else
+        echo "${WORKER_UNIT}${n}"
+      fi
+      ;;
+  esac
+}
 WORKER_MAX="${CHUMP_ORCH_WORKER_MAX:-0}"        # 0 = auto (cores-1)
 SCALE_UP_LOAD="${CHUMP_ORCH_SCALE_UP_LOAD:-70}"   # per-core load% below which we may scale up
 SCALE_DN_LOAD="${CHUMP_ORCH_SCALE_DN_LOAD:-300}"  # per-core load% = GENUINE thrash (build fleets peg cores; busy≠oversubscribed)
@@ -99,10 +149,11 @@ enforce_cap() {
   local max; max=$(effective_max)
   while [ "$WORKERS_UP" -gt "$max" ]; do
     local n=$WORKERS_UP
-    if sudo systemctl stop "chump-cj-worker${n}" 2>/dev/null; then
-      log "ENFORCE: WORKERS_UP=$WORKERS_UP > WORKER_MAX=$max -> stopped chump-cj-worker${n}"
+    local unit; unit="$(_worker_unit_for_slot "$n")"
+    if sudo systemctl stop "$unit" 2>/dev/null || systemctl --user stop "$unit" 2>/dev/null; then
+      log "ENFORCE: WORKERS_UP=$WORKERS_UP > WORKER_MAX=$max -> stopped $unit"
     else
-      log "ENFORCE: WORKERS_UP=$WORKERS_UP > WORKER_MAX=$max but could not stop chump-cj-worker${n} -> giving up this tick"
+      log "ENFORCE: WORKERS_UP=$WORKERS_UP > WORKER_MAX=$max but could not stop $unit -> giving up this tick"
       break
     fi
     WORKERS_UP=$((WORKERS_UP-1))
@@ -168,7 +219,7 @@ sense() {
   BEST_VOL=$(df -P -x tmpfs -x devtmpfs -x vfat 2>/dev/null | awk 'NR>1 && $6!~"/boot" && $6!~"/print" && $6!="/" {print $4, $6}' | sort -rn | head -1)
   BEST_VOL_FREE_KB=$(echo "$BEST_VOL" | awk '{print $1}')
   BEST_VOL_MNT=$(echo "$BEST_VOL" | awk '{print $2}')
-  WORKERS_UP=$(systemctl list-units "${WORKER_UNIT}*" 'chump-cj-worker2*' --state=active --no-legend 2>/dev/null | grep -c "\.service")
+  WORKERS_UP=$( { systemctl list-units "${WORKER_UNIT}*" 'chump-worker@*.service' 'chump-node1-worker.service' --state=active --no-legend 2>/dev/null; systemctl --user list-units "${WORKER_UNIT}*" 'chump-worker@*.service' 'chump-node1-worker.service' --state=active --no-legend 2>/dev/null; } | awk '{print $1}' | grep '\.service$' | sort -u | wc -l | tr -d ' ' )
   printf '{"ts":"%s","cores":%d,"load1":%s,"load_pct":%d,"ram_avail_mb":%d,"root_pct":%d,"best_vol":"%s","best_vol_free_gb":%d,"workers_up":%d}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$CORES" "$LOAD1" "$LOADPCT" "$RAM_AVAIL_MB" "$ROOT_PCT" "${BEST_VOL_MNT:-none}" "$((${BEST_VOL_FREE_KB:-0}/1024/1024))" "$WORKERS_UP" > "$INV"
 }
@@ -214,11 +265,15 @@ scale() {
   echo "$target" > "$mark"
   [ "$target" = "$WORKERS_UP" ] && return 0
   [ "$target" != "$prev" ] && { log "SCALE: intent $target not yet confirmed (was $prev) — waiting one cycle"; return 0; }
-  # act: worker@N units are chump-cj-worker2, worker3... (N=2 is the existing extra)
+  # act: INFRA-8639 resolve worker@N units via _worker_unit_for_slot (chump-worker@1.service, chump-worker@2.service, or chump-node1-worker.service fallback)
   if [ "$target" -gt "$WORKERS_UP" ]; then
-    local n=$((target)); sudo systemctl start "chump-cj-worker${n}" 2>/dev/null && log "SCALE: started chump-cj-worker${n}" || log "SCALE: chump-cj-worker${n} not installed (need unit) — cannot scale up past installed workers"
+    local n=$((target))
+    local unit; unit="$(_worker_unit_for_slot "$n")"
+    { sudo systemctl start "$unit" 2>/dev/null || systemctl --user start "$unit" 2>/dev/null; } && log "SCALE: started $unit" || log "SCALE: $unit not installed (need unit) — cannot scale up past installed workers"
   else
-    local n=$((WORKERS_UP)); sudo systemctl stop "chump-cj-worker${n}" 2>/dev/null && log "SCALE: stopped chump-cj-worker${n}"
+    local n=$((WORKERS_UP))
+    local unit; unit="$(_worker_unit_for_slot "$n")"
+    { sudo systemctl stop "$unit" 2>/dev/null || systemctl --user stop "$unit" 2>/dev/null; } && log "SCALE: stopped $unit"
   fi
 }
 

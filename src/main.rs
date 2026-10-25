@@ -31,10 +31,11 @@ mod asi_telemetry;
 mod ask_jeff_db;
 mod ask_jeff_tool;
 mod assertion;
-// EFFECTIVE-399: atomic_claim + its autonomy_level leaf dep extracted into
-// crates/chump-atomic-claim for build speed. Re-exported at crate root so every
-// existing `crate::atomic_claim::X` / `crate::autonomy_level::X` (and bare
-// `atomic_claim::X`) reference across the bin resolves with zero caller edits.
+mod organ_cmd; // RESILIENT-1692: `chump organ pause|resume <unit>`
+               // EFFECTIVE-399: atomic_claim + its autonomy_level leaf dep extracted into
+               // crates/chump-atomic-claim for build speed. Re-exported at crate root so every
+               // existing `crate::atomic_claim::X` / `crate::autonomy_level::X` (and bare
+               // `atomic_claim::X`) reference across the bin resolves with zero caller edits.
 pub use chump_atomic_claim::{atomic_claim, autonomy_level};
 mod auth;
 mod autonomy_fsm;
@@ -3592,6 +3593,13 @@ async fn main() -> Result<()> {
             let _ = std::io::stdout().flush();
         }
         return Ok(());
+    }
+
+    // RESILIENT-1692: `chump organ pause|resume <unit>` — record/remove unit in
+    // paused-timers.txt and stop/disable or enable/start via systemctl.
+    if args.get(1).map(String::as_str) == Some("organ") {
+        let sub_args: Vec<String> = args.iter().skip(2).cloned().collect();
+        std::process::exit(organ_cmd::run(&sub_args));
     }
 
     // RESILIENT-1614: `chump node pause|resume` — enforce paused mode as an invariant.
@@ -12972,6 +12980,34 @@ async fn main() -> Result<()> {
                                 eprintln!(
                                     "[preflight] FAIL {} — live-claimed by session {} in the shared NATS registry (INFRA-2472; invisible to local state.db).",
                                     gap_id, holder
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                        // CREDIBLE-1613: Refuse re-claim when an open PR already exists
+                        // for this gap in gap_prs OR via `gh pr list --state open --json number,headRefName`.
+                        if !dispatch_repair::allow_duplicate_pr_from_env() {
+                            let mut open_pr: Option<(u64, String)> =
+                                store.list_prs_for_gap(&gap_id).ok().and_then(|rows| {
+                                    rows.into_iter()
+                                        .find(|r| {
+                                            r.state.eq_ignore_ascii_case("open") && r.pr_number > 0
+                                        })
+                                        .map(|r| (r.pr_number as u64, r.head_sha))
+                                });
+                            if open_pr.is_none() {
+                                open_pr = dispatch_repair::find_open_pr_by_branch_prefix(
+                                    &repo_root, &gap_id,
+                                );
+                            }
+                            if let Some((pr_number, head_ref)) = open_pr {
+                                let _ = store.link_pr(&gap_id, pr_number as i64, &head_ref);
+                                dispatch_repair::emit_gap_reclaimed_with_open_pr(
+                                    &repo_root, &gap_id, pr_number, &head_ref,
+                                );
+                                eprintln!(
+                                    "[preflight] FAIL {} — open PR #{} (head_ref={}) already exists for this gap (CREDIBLE-1613).",
+                                    gap_id, pr_number, head_ref
                                 );
                                 std::process::exit(1);
                             }

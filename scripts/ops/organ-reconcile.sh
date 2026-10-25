@@ -180,6 +180,27 @@ clear_backoff() {  # unit
   rm -f "$BACKOFF_DIR/${1}.json" 2>/dev/null || true
 }
 
+# RESILIENT-1692: 60-minute manual-stop guard. Before reviving an inactive
+# timer/service, check `journalctl -u <unit> --since '-60m'` (and user-unit
+# equivalent) for `Stopped` / `Deactivated successfully` without a subsequent
+# crash/failure. If stopped manually within 60m, skip revival.
+organ_stopped_manually_within_60m() {
+  local unit="$1"
+  command -v journalctl >/dev/null 2>&1 || return 1
+  local jout=""
+  jout="$(journalctl -u "$unit" --since "-60m" --no-pager 2>/dev/null || true)"
+  if [[ -z "$jout" ]]; then
+    jout="$(journalctl --user -u "$unit" --since "-60m" --no-pager 2>/dev/null || true)"
+  fi
+  [[ -n "$jout" ]] || return 1
+  if grep -Eq 'Stopped |Deactivated successfully' <<<"$jout"; then
+    if ! grep -Eq 'Failed with result|Main process exited, code=exited, status=[1-9]|Entered failed state|unit failed' <<<"$jout"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 # RESILIENT-1016 (a): drift-REMOVAL discovery. Lists every chump-managed unit
 # FILE present on the host (installed, whether active or not) so the caller
 # can diff it against the role-filtered manifest's expected set. Only
@@ -674,6 +695,17 @@ for unit in "${ENABLED[@]}"; do
     continue
   fi
 
+  # RESILIENT-1692: skip revival if journalctl shows the unit was manually
+  # stopped/deactivated within the last 60 minutes without a crash/failure.
+  if organ_stopped_manually_within_60m "$unit"; then
+    echo "SKIP (manually stopped within 60m): $unit"
+    continue
+  fi
+
+  prev_state="$("$SYSTEMCTL_BIN" is-active "$unit" 2>/dev/null || true)"
+  prev_state="${prev_state%%$'\n'*}"
+  [[ -z "$prev_state" ]] && prev_state="inactive"
+
   # RESILIENT-1513: refuse to `enable --now` a unit whose OWN installed
   # ExecStart binary does not resolve on disk — the exit-127 class (binary
   # never built, e.g. chump-fleet-server.service execing a never-cargo-built
@@ -722,6 +754,9 @@ for unit in "${ENABLED[@]}"; do
   if "$SYSTEMCTL_BIN" is-active --quiet "$unit" 2>/dev/null; then
     CHANGED+=("started:$unit")
     clear_backoff "$unit"
+    # scanner-anchor: "kind":"organ_revived" (RESILIENT-1692; fires whenever
+    # organ-reconcile starts/enables an inactive organ)
+    emit organ_revived "\"unit\":\"$unit\",\"prev_state\":\"$prev_state\",\"reason\":\"reconcile_enable_now\""
   else
     echo "WARN: $unit enabled but did not verify active — disabling + backing off" >&2
     "$SYSTEMCTL_BIN" disable --now "$unit" 2>/dev/null || true

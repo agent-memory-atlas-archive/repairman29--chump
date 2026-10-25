@@ -66,6 +66,8 @@ _resolve_target_bin() {
     printf '%s' "$HOME/.local/bin/chump"
 }
 TARGET_BIN="$(_resolve_target_bin)"
+# CREDIBLE-1609: also check deploy lag for chumpd alongside chump.
+TARGET_CHUMPD_BIN="${CHUMP_NODE_CHUMPD_BIN:-$(dirname "$TARGET_BIN")/chumpd}"
 
 # 1. Loud, unconditional signal: did the LAST refresh run time out? This is
 #    the direct RESILIENT-523 case — checked first and independent of SLO lag,
@@ -86,26 +88,37 @@ if [[ -z "$MAIN_SHA" || -z "$MAIN_TIME" ]]; then
     exit 0
 fi
 
-# 3. Installed binary sha.
+# 3. Installed binary sha (chump + chumpd).
 INSTALLED_SHA_SHORT="$("$TARGET_BIN" --version 2>/dev/null | grep -oE '\(([a-f0-9]+)' | head -1 | tr -d '(')"
 MAIN_SHA_SHORT="${MAIN_SHA:0:${#INSTALLED_SHA_SHORT}}"
 [[ -z "$INSTALLED_SHA_SHORT" ]] && INSTALLED_SHA_SHORT="unknown"
+INSTALLED_CHUMPD_SHA_SHORT=""
+if [[ -x "$TARGET_CHUMPD_BIN" ]]; then
+    INSTALLED_CHUMPD_SHA_SHORT="$("$TARGET_CHUMPD_BIN" --version 2>/dev/null | grep -oE '\(([a-f0-9]+)' | head -1 | tr -d '(' || true)"
+    [[ -z "$INSTALLED_CHUMPD_SHA_SHORT" ]] && INSTALLED_CHUMPD_SHA_SHORT="$INSTALLED_SHA_SHORT"
+elif [[ -n "${CHUMP_NODE_CHUMPD_BIN:-}" ]]; then
+    INSTALLED_CHUMPD_SHA_SHORT="missing"
+else
+    INSTALLED_CHUMPD_SHA_SHORT="$INSTALLED_SHA_SHORT"
+fi
 
 # 4. Compare.
 # INFRA-8098: Rust-aware — the binary is current if it contains the last
 # Rust-affecting commit, even when HEAD advanced past it on non-Rust commits.
 if declare -F binary_has_rust_head >/dev/null 2>&1 && [[ "$INSTALLED_SHA_SHORT" != "unknown" ]]; then
     RUST_SHA="$(rust_head_sha "$REPO_ROOT" "origin/main")"
-    if binary_has_rust_head "$RUST_SHA" "$INSTALLED_SHA_SHORT" "$REPO_ROOT"; then
-        echo "[node-deploy-lag-watchdog] current (rust-aware): installed=$INSTALLED_SHA_SHORT contains last Rust commit ${RUST_SHA:0:12}; HEAD=$MAIN_SHA_SHORT is non-Rust ahead"
-        emit "node_deploy_lag_ok" "\"sha\":\"$MAIN_SHA_SHORT\",\"reason\":\"rust_current\",\"rust_sha\":\"${RUST_SHA:0:12}\""
+    if binary_has_rust_head "$RUST_SHA" "$INSTALLED_SHA_SHORT" "$REPO_ROOT" \
+       && [[ "$INSTALLED_CHUMPD_SHA_SHORT" != "missing" ]] \
+       && binary_has_rust_head "$RUST_SHA" "$INSTALLED_CHUMPD_SHA_SHORT" "$REPO_ROOT"; then
+        echo "[node-deploy-lag-watchdog] current (rust-aware): installed=$INSTALLED_SHA_SHORT chumpd=$INSTALLED_CHUMPD_SHA_SHORT contains last Rust commit ${RUST_SHA:0:12}; HEAD=$MAIN_SHA_SHORT is non-Rust ahead"
+        emit "node_deploy_lag_ok" "\"sha\":\"$MAIN_SHA_SHORT\",\"chumpd_sha\":\"$INSTALLED_CHUMPD_SHA_SHORT\",\"reason\":\"rust_current\",\"rust_sha\":\"${RUST_SHA:0:12}\""
         exit 0
     fi
 fi
 
-if [[ "$INSTALLED_SHA_SHORT" == "$MAIN_SHA_SHORT" && "$INSTALLED_SHA_SHORT" != "unknown" ]]; then
-    echo "[node-deploy-lag-watchdog] current: installed=$INSTALLED_SHA_SHORT == main=$MAIN_SHA_SHORT"
-    emit "node_deploy_lag_ok" "\"sha\":\"$MAIN_SHA_SHORT\""
+if [[ "$INSTALLED_SHA_SHORT" == "$MAIN_SHA_SHORT" && "$INSTALLED_SHA_SHORT" != "unknown" && "$INSTALLED_CHUMPD_SHA_SHORT" == "$MAIN_SHA_SHORT" ]]; then
+    echo "[node-deploy-lag-watchdog] current: installed=$INSTALLED_SHA_SHORT chumpd=$INSTALLED_CHUMPD_SHA_SHORT == main=$MAIN_SHA_SHORT"
+    emit "node_deploy_lag_ok" "\"sha\":\"$MAIN_SHA_SHORT\",\"chumpd_sha\":\"$INSTALLED_CHUMPD_SHA_SHORT\""
     exit 0
 fi
 
@@ -115,14 +128,14 @@ LAG=$(( NOW - MAIN_TIME ))
 LAG_MIN=$(( LAG / 60 ))
 
 if [[ "$LAG" -le "$SLO" ]]; then
-    echo "[node-deploy-lag-watchdog] behind but within SLO: installed=$INSTALLED_SHA_SHORT main=$MAIN_SHA_SHORT lag=${LAG_MIN}m (SLO=$(( SLO / 60 ))m) — deploy pending"
+    echo "[node-deploy-lag-watchdog] behind but within SLO: installed=$INSTALLED_SHA_SHORT chumpd=$INSTALLED_CHUMPD_SHA_SHORT main=$MAIN_SHA_SHORT lag=${LAG_MIN}m (SLO=$(( SLO / 60 ))m) — deploy pending"
     exit 0
 fi
 
 # Past SLO: alert + self-heal.
-echo "[node-deploy-lag-watchdog] LAG EXCEEDED: installed=$INSTALLED_SHA_SHORT main=$MAIN_SHA_SHORT lag=${LAG_MIN}m > SLO=$(( SLO / 60 ))m"
+echo "[node-deploy-lag-watchdog] LAG EXCEEDED: installed=$INSTALLED_SHA_SHORT chumpd=$INSTALLED_CHUMPD_SHA_SHORT main=$MAIN_SHA_SHORT lag=${LAG_MIN}m > SLO=$(( SLO / 60 ))m"
 emit "node_deploy_lag_exceeded" \
-    "\"installed_sha\":\"$INSTALLED_SHA_SHORT\",\"main_sha\":\"$MAIN_SHA_SHORT\",\"lag_secs\":$LAG,\"slo_secs\":$SLO,\"unit\":\"$UNIT\""
+    "\"installed_sha\":\"$INSTALLED_SHA_SHORT\",\"chumpd_sha\":\"$INSTALLED_CHUMPD_SHA_SHORT\",\"main_sha\":\"$MAIN_SHA_SHORT\",\"lag_secs\":$LAG,\"slo_secs\":$SLO,\"unit\":\"$UNIT\""
 
 if [[ "${CHUMP_NODE_DEPLOY_LAG_NO_HEAL:-0}" != "1" ]]; then
     echo "[node-deploy-lag-watchdog] self-heal: restarting $UNIT"
