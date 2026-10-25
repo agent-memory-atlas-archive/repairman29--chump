@@ -2106,6 +2106,8 @@ CHUMP_FLEET_FORCE_LAUNCH
 CHUMP_LANDING_PROVIDER
 # detected in: (standard input)
 CHUMP_MERGE_QUEUE_ENABLED
+# META-196: force-enable (=1) or force-disable (=0) native GitHub Merge Queue (merge_group) enqueue mode in bot-merge.sh and auto-merge-armer.sh.
+CHUMP_USE_MERGE_QUEUE
 # detected in: (standard input)
 CHUMP_PR_SHEPHERD_STRICT_CACHE_FILE
 # detected in: (standard input)

@@ -1,0 +1,341 @@
+# Canonical Rule & Gate Registry (ZERO-WASTE-125)
+#
+# Tracks rules across CLAUDE.md, AGENTS.md, scripts/git-hooks/*, scripts/ci/test-*.sh,
+# and gap-reserve gates so `chump rules audit` and `scripts/coord/rule-prune-cycle.sh`
+# can measure every rule's fire/catch/bypass/false-positive rate and propose deleting
+# rules that do not earn their keep.
+#
+# Protected floor (`protected: true`) entries are NEVER proposed for auto-deletion.
+
+version: 1
+
+budgets:
+  claude_md:
+    path: CLAUDE.md
+    target_lines: 150
+    ceiling_lines: 720
+  agents_md:
+    path: AGENTS.md
+    target_lines: 300
+    ceiling_lines: 1200
+
+rules:
+  # ── Protected Floor (protected: true — NEVER auto-deleted) ──────────────────
+  - id: never-push-to-main
+    source: git_hook
+    path: scripts/git-hooks/pre-push
+    signal: pre_push_main_blocked
+    bypass_signal: ""
+    protected: true
+    estimated_cost_per_fire_s: 5
+    description: Never push directly to main; all changes land via PRs and merge_group.
+
+  - id: no-secrets-in-repo
+    source: git_hook
+    path: scripts/git-hooks/pre-commit
+    signal: credential_check_failed
+    bypass_signal: credential_check_bypassed
+    protected: true
+    estimated_cost_per_fire_s: 10
+    description: Block committing credentials, tokens, or API keys into git history.
+
+  - id: proprietary-ban
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-private-topology-guard.sh
+    signal: private_topology_blocked
+    bypass_signal: ""
+    protected: true
+    estimated_cost_per_fire_s: 5
+    description: Block private host IPs, internal topology, and proprietary paths from public repo.
+
+  - id: no-destructive-ops-without-operator
+    source: doc
+    path: CLAUDE.md
+    signal: destructive_git_blocked
+    bypass_signal: ""
+    protected: true
+    estimated_cost_per_fire_s: 5
+    description: Refuse destructive git/disk/infra operations without explicit operator authorization.
+
+  - id: t1-t4-escalation-triggers
+    source: doc
+    path: CLAUDE.md
+    signal: hitl_approval_required
+    bypass_signal: hitl_approval_granted
+    protected: true
+    estimated_cost_per_fire_s: 15
+    description: T1-T4 operator escalation triggers for security, money, credentials, and force operations.
+
+  - id: pre-push-secret-scan
+    source: git_hook
+    path: scripts/git-hooks/pre-push
+    signal: secret_scan_blocked
+    bypass_signal: ""
+    protected: true
+    estimated_cost_per_fire_s: 10
+    description: Pre-push secret scanning gate preventing leaked tokens from reaching origin.
+
+  # ── Git Hooks (scripts/git-hooks/pre-*) ─────────────────────────────────────
+  - id: pre-commit-rust-first
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-rust-first.sh
+    signal: rust_first_blocked
+    bypass_signal: rust_first_bypass_used
+    protected: false
+    estimated_cost_per_fire_s: 20
+    description: Enforce Rust-first over new >200 LOC or state-mutating shell scripts (META-064).
+
+  - id: pre-commit-redundancy
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-redundancy.sh
+    signal: redundancy_blocked
+    bypass_signal: redundancy_bypass_used
+    protected: false
+    estimated_cost_per_fire_s: 20
+    description: Block new scripts whose function-name Jaccard overlap >= 0.6 with existing sibling (META-063).
+
+  - id: pre-commit-shared-service
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-shared-service.sh
+    signal: shared_service_warning
+    bypass_signal: shared_service_bypass_used
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Nudge/block bespoke LLM HTTP calls outside ProviderCascade (INFRA-3463).
+
+  - id: pre-commit-event-registry
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-event-registry.sh
+    signal: event_registry_unregistered_blocked
+    bypass_signal: event_registry_bypass_used
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Require every emitted ambient event kind to be registered in EVENT_REGISTRY.yaml.
+
+  - id: pre-commit-effect-metric
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-effect-metric.sh
+    signal: effect_metric_missing_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Require effect_metric on every EVENT_REGISTRY.yaml entry.
+
+  - id: pre-commit-obs-budget
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-obs-budget.sh
+    signal: obs_budget_exceeded
+    bypass_signal: obs_budget_bypass_used
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Enforce observability event-count budget ceiling.
+
+  - id: pre-commit-ac-completeness
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-ac-completeness.sh
+    signal: ac_completeness_blocked
+    bypass_signal: ac_completeness_bypass_used
+    protected: false
+    estimated_cost_per_fire_s: 20
+    description: Verify acceptance criteria coverage before closing a gap.
+
+  - id: pre-commit-autodoc-envvars
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-autodoc-envvars.sh
+    signal: autodoc_envvars_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Keep env-vars-internal.txt synchronized with new CHUMP_* env vars.
+
+  - id: pre-commit-bash-portability
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-bash-portability.sh
+    signal: bash_portability_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Catch non-portable GNU/macOS bash constructs in scripts/.
+
+  - id: pre-commit-css-token-discipline
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-css-token-discipline.sh
+    signal: css_token_discipline_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Enforce design-system CSS tokens over raw hex literals in web/PWA files.
+
+  - id: pre-commit-default-flip
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-default-flip.sh
+    signal: default_flip_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Guard against unannounced default-flag flips.
+
+  - id: pre-commit-gap-divergence
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-gap-divergence.sh
+    signal: gap_divergence_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Prevent divergence between state.db and gap YAML mirrors.
+
+  - id: pre-commit-git-identity
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-git-identity.sh
+    signal: git_identity_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 5
+    description: Validate git author/committer identity before committing.
+
+  - id: pre-commit-grep-c-echo0-guard
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-grep-c-echo0-guard.sh
+    signal: grep_c_echo0_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Block `grep -c ... || echo 0` double-zero output bug in shell scripts.
+
+  - id: pre-commit-hardcoded-dates
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-hardcoded-dates.sh
+    signal: hardcoded_dates_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Prevent hardcoded stale calendar dates in prompts and tests.
+
+  - id: pre-commit-main-worktree-config
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-main-worktree-config.sh
+    signal: main_worktree_commit_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Refuse direct commits on the main checkout when an isolated worktree is required.
+
+  - id: pre-commit-preflight-ci-parity
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-preflight-ci-parity.sh
+    signal: preflight_ci_parity_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Keep chump preflight and CI workflow checks aligned.
+
+  - id: pre-commit-pwa-index-uniq
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-pwa-index-uniq.sh
+    signal: pwa_index_uniq_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Guard against duplicate script/tab definitions in PWA index.html.
+
+  - id: pre-push-actionlint-guard
+    source: git_hook
+    path: scripts/git-hooks/pre-push-actionlint-guard.sh
+    signal: actionlint_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Validate GitHub Actions workflow syntax before push.
+
+  - id: pre-push-bypass-trailers
+    source: git_hook
+    path: scripts/git-hooks/pre-push-bypass-trailers.sh
+    signal: bypass_trailer_missing_blocked
+    bypass_signal: preflight_bypassed
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Require audit trailers in commit messages when preflight/hooks are bypassed.
+
+  - id: pre-push-ci-regression-guard
+    source: git_hook
+    path: scripts/git-hooks/pre-push-ci-regression-guard.sh
+    signal: ci_regression_blocked
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 30
+    description: Run targeted CI regression scripts matching touched files before push.
+
+  # ── Doc Rules (CLAUDE.md / AGENTS.md) ───────────────────────────────────────
+  - id: doc-cache-first-reads
+    source: doc
+    path: AGENTS.md
+    signal: gh_self_throttled
+    bypass_signal: graphql_exhausted
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Read PR state from .chump/github_cache.db before calling gh api (INFRA-1081).
+
+  - id: doc-local-ci-preflight
+    source: doc
+    path: AGENTS.md
+    signal: preflight_ran
+    bypass_signal: preflight_bypassed
+    protected: false
+    estimated_cost_per_fire_s: 45
+    description: Run local CI preflight before pushing Rust or script changes (INFRA-1673).
+
+  - id: doc-lease-before-edit
+    source: doc
+    path: CLAUDE.md
+    signal: gap_claimed
+    bypass_signal: unclaimed_edit_warning
+    protected: false
+    estimated_cost_per_fire_s: 10
+    description: Claim a gap lease before editing tracked files in a worktree.
+
+  # ── Gap Reserve Gates (reserve_gate) ────────────────────────────────────────
+  - id: reserve-pillar-cap
+    source: reserve_gate
+    path: src/pillar_cap.rs
+    signal: pillar_cap_blocked
+    bypass_signal: pillar_cap_override
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Enforce weekly per-pillar merge-share floor/cap at gap reserve (CREDIBLE-072).
+
+  - id: reserve-p0-budget
+    source: reserve_gate
+    path: src/main.rs
+    signal: p0_budget_blocked
+    bypass_signal: p0_budget_override
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Cap open manual P0 gaps at 5 unless --p0-override reason is supplied (CREDIBLE-1543).
+
+  # ── Representative CI Gates (scripts/ci/test-*.sh) ──────────────────────────
+  - id: ci-arm-policy
+    source: ci_gate
+    path: scripts/ci/test-arm-policy.sh
+    signal: pr_arm_skipped_hold
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 20
+    description: Verify every shell armer honors no-auto-merge and Auto-merge hold markers.
+
+  - id: ci-event-registry-coverage
+    source: ci_gate
+    path: scripts/ci/test-event-registry-coverage.sh
+    signal: event_registry_drift_detected
+    bypass_signal: event_registry_allow_drift
+    protected: false
+    estimated_cost_per_fire_s: 25
+    description: Full-tree audit that all emitted ambient event kinds are registered.
+
+  - id: ci-no-new-bypass-env-vars
+    source: ci_gate
+    path: scripts/ci/test-no-new-bypass-env-vars.sh
+    signal: bypass_ceiling_exceeded
+    bypass_signal: ""
+    protected: false
+    estimated_cost_per_fire_s: 15
+    description: Ratchet ceiling on skip/bypass/disable environment variables.

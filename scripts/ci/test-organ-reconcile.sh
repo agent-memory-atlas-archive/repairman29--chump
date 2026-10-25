@@ -483,6 +483,82 @@ GOV_OUT="$(
     || fail "expected stale in_progress INFRA-B2 to be reset to open under --apply"
 grep -q '"kind":"backlog_governor_tick"' "$GOV_AMB" \
     || fail "expected backlog_governor_tick in ambient log"
-pass "11: backlog-governor net-burn gauge + stale-lease wedge healer + manifest registration (INFRA-8175, INFRA-8143)"
+
+# Verify cuphead schema (where completed_at/shipped_at/updated_at are absent,
+# leaving single-column or closed_at/closed_date ship_cols) runs with zero state_db_error.
+CUP_DB="$GOV_TMP/locks/cuphead-state.db"
+sqlite3 "$CUP_DB" <<SQL
+CREATE TABLE gaps (
+  id TEXT PRIMARY KEY,
+  domain TEXT,
+  title TEXT,
+  description TEXT,
+  priority TEXT,
+  effort TEXT,
+  status TEXT,
+  acceptance_criteria TEXT,
+  depends_on TEXT,
+  notes TEXT,
+  source_doc TEXT,
+  created_at TEXT,
+  closed_at TEXT,
+  opened_date TEXT,
+  closed_date TEXT,
+  closed_pr TEXT
+);
+INSERT INTO gaps (id, priority, status, created_at, closed_at) VALUES ('INFRA-B8', 'P1', 'done', '$NOW_ISO', '$NOW_ISO');
+SQL
+CUP_OUT="$(
+  CHUMP_STATE_DB="$CUP_DB" \
+  CHUMP_LOCKS_DIR="$GOV_TMP/locks" \
+  CHUMP_AMBIENT_LOG="$GOV_AMB" \
+  bash "$GOV_SCRIPT" --dry-run
+)"
+[[ "$(printf '%s' "$CUP_OUT" | jq -r '.wedges | map(select(startswith("state_db_error"))) | length')" == "0" ]] \
+    || fail "expected zero state_db_error on cuphead schema, got: $CUP_OUT"
+[[ "$(printf '%s' "$CUP_OUT" | jq -r '.shipped_24h')" == "1" ]] \
+    || fail "expected shipped_24h=1 on cuphead schema, got: $CUP_OUT"
+pass "11: backlog-governor net-burn gauge + stale-lease wedge healer + cuphead schema compatibility (INFRA-8175, INFRA-8143)"
+
+# ── 12. ZERO-WASTE-125: rule-prune-cycle.sh + RULE_REGISTRY.yaml ──
+PRUNE_SCRIPT="$REPO_ROOT/scripts/coord/rule-prune-cycle.sh"
+REAL_RULE_REGISTRY="$REPO_ROOT/docs/observability/RULE_REGISTRY.yaml"
+[[ -x "$PRUNE_SCRIPT" ]] || fail "missing executable $PRUNE_SCRIPT"
+[[ -f "$REAL_RULE_REGISTRY" ]] || fail "missing $REAL_RULE_REGISTRY"
+
+PRUNE_AMB="$TMP/prune-ambient.jsonl"
+cat > "$PRUNE_AMB" <<EOF
+{"ts":"$NOW_ISO","kind":"rust_first_blocked","session":"s1"}
+{"ts":"$NOW_ISO","kind":"rust_first_bypass_used","session":"s1"}
+{"ts":"$NOW_ISO","kind":"redundancy_blocked","session":"s2","outcome":"catch"}
+EOF
+
+PRUNE_OUT="$("$PRUNE_SCRIPT" --propose --window 30d --registry "$REAL_RULE_REGISTRY" --ambient "$PRUNE_AMB")"
+python3 - "$PRUNE_OUT" <<'PY' || fail "rule-prune-cycle candidate ranking / protected floor failed: $PRUNE_OUT"
+import json, sys
+d = json.loads(sys.argv[1])
+assert d["protected_floor_count"] >= 6, d
+cands = [c["id"] for c in d["delete_candidates"]]
+assert "pre-commit-rust-first" in cands, cands
+assert "pre-commit-redundancy" not in cands, cands
+for p in (
+    "never-push-to-main",
+    "no-secrets-in-repo",
+    "proprietary-ban",
+    "no-destructive-ops-without-operator",
+    "t1-t4-escalation-triggers",
+    "pre-push-secret-scan",
+):
+    assert p not in cands, (p, cands)
+PY
+grep -q '"kind":"rule_prune_proposal"' "$PRUNE_AMB" \
+    || fail "expected rule_prune_proposal in ambient log"
+if "$PRUNE_SCRIPT" --on-passed never-push-to-main --registry "$REAL_RULE_REGISTRY" --ambient "$PRUNE_AMB" >/dev/null 2>&1; then
+    fail "rule-prune-cycle must refuse --on-passed for protected-floor rule never-push-to-main"
+fi
+"$PRUNE_SCRIPT" --on-passed pre-commit-rust-first --registry "$REAL_RULE_REGISTRY" --ambient "$PRUNE_AMB" >/dev/null
+grep -q '"action":"deletion_gap_filed"' "$PRUNE_AMB" \
+    || fail "expected deletion_gap_filed on --on-passed"
+pass "12: rule-prune-cycle ranks non-protected delete candidates, emits rule_prune_proposal, and protects floor (ZERO-WASTE-125)"
 
 echo "ALL PASS"

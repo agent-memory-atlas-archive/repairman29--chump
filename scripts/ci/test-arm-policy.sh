@@ -2001,6 +2001,28 @@ for hold_lbl in pr-cut no-auto-merge; do
 done
 unset ORG_ROLLUP
 
+# ── (h) META-196: bot-merge.sh --enqueue-batch enqueues into merge_group while honoring arm-policy ──
+echo "[h] META-196: bot-merge.sh --enqueue-batch enqueues clean PRs into merge_group and skips held PRs"
+: >"$STUB_LOG.arms"
+: >"$CHUMP_AMBIENT_LOG"
+export PATH="$TMP/bin:$PATH"
+CHUMP_USE_MERGE_QUEUE=1 GITHUB_REPOSITORY="o/r" \
+    bash "$REPO_ROOT/scripts/coord/bot-merge.sh" --enqueue-batch 101 102 107 >"$TMP/bm-batch.out" 2>&1 || true
+if grep -q '^ARMED 101' "$STUB_LOG.arms"; then
+    bad "META-196: bot-merge.sh --enqueue-batch enqueued held PR 101"
+else
+    ok "META-196: bot-merge.sh --enqueue-batch skipped held PR 101"
+fi
+if grep -q '^ARMED 102' "$STUB_LOG.arms" && grep -q '^ARMED 107' "$STUB_LOG.arms"; then
+    ok "META-196: bot-merge.sh --enqueue-batch enqueued clean PRs 102 and 107 via merge_group"
+else
+    bad "META-196: bot-merge.sh --enqueue-batch failed to enqueue 102/107 (arms: $(cat "$STUB_LOG.arms" 2>/dev/null))"
+fi
+grep -q '"kind":"pr_merge_group_enqueued","pr":102' "$CHUMP_AMBIENT_LOG" \
+    && grep -q '"kind":"pr_merge_group_enqueued","pr":107' "$CHUMP_AMBIENT_LOG" \
+    && ok "META-196: emitted kind=pr_merge_group_enqueued for batch-enqueued PRs" \
+    || bad "META-196: missing pr_merge_group_enqueued in ambient ($(cat "$CHUMP_AMBIENT_LOG" 2>/dev/null))"
+
 echo
 echo "=== test-arm-policy: $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]

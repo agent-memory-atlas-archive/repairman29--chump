@@ -96,7 +96,7 @@ if os.path.isdir(locks_dir):
 # 2. Query state.db for open priorities, 24h filed vs shipped, and stale in_progress claims
 if os.path.isfile(state_db):
     try:
-        conn = sqlite3.connect(state_db)
+        conn = sqlite3.connect(state_db, timeout=5.0)
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(gaps)")
         cols = {row[1] for row in cur.fetchall()}
@@ -112,7 +112,7 @@ if os.path.isfile(state_db):
                 if st in ("in_progress", "claimed"):
                     in_progress_counts[p] += int(cnt)
 
-            created_col = "created_at" if "created_at" in cols else None
+            created_col = "created_at" if "created_at" in cols else ("opened_date" if "opened_date" in cols else None)
             if created_col:
                 cur.execute(
                     f"SELECT COUNT(*) FROM gaps WHERE {created_col} >= ? OR {created_col} >= ?",
@@ -120,11 +120,11 @@ if os.path.isfile(state_db):
                 )
                 filed_24h = int(cur.fetchone()[0] or 0)
 
-            ship_cols = [c for c in ("completed_at", "shipped_at", "updated_at", "created_at") if c in cols]
+            ship_cols = [c for c in ("completed_at", "shipped_at", "closed_at", "closed_date", "updated_at", "created_at") if c in cols]
             if ship_cols:
-                coalesce_expr = f"COALESCE({', '.join(ship_cols)})"
+                coalesce_expr = ship_cols[0] if len(ship_cols) == 1 else f"COALESCE({', '.join(ship_cols)})"
                 cur.execute(
-                    f"SELECT COUNT(*) FROM gaps WHERE LOWER(status) = 'done' AND ({coalesce_expr} >= ? OR {coalesce_expr} >= ?)",
+                    f"SELECT COUNT(*) FROM gaps WHERE LOWER(status) IN ('done', 'closed', 'shipped') AND ({coalesce_expr} >= ? OR {coalesce_expr} >= ?)",
                     (cut_iso, cut_sql),
                 )
                 shipped_24h = int(cur.fetchone()[0] or 0)
@@ -133,8 +133,9 @@ if os.path.isfile(state_db):
             id_col = "id" if "id" in cols else ("gap_id" if "gap_id" in cols else None)
             ts_col = "updated_at" if "updated_at" in cols else ("claimed_at" if "claimed_at" in cols else created_col)
             if id_col:
+                ts_expr = ts_col if ts_col else "''"
                 cur.execute(
-                    f"SELECT {id_col}, {ts_col if ts_col else ''''''} FROM gaps WHERE LOWER(status) IN ('in_progress', 'claimed')"
+                    f"SELECT {id_col}, {ts_expr} FROM gaps WHERE LOWER(status) IN ('in_progress', 'claimed')"
                 )
                 stale_ids = []
                 for gid, gts in cur.fetchall():

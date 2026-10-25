@@ -14819,4 +14819,31 @@ events:
     consumers: [ambient, fleet-brief, vital-signs]
     fields_required: [ts, kind, open_total, open_p0, open_p1, open_p2, open_p3, filed_24h, shipped_24h, net_burn_24h, wedges, healed_leases]
 
+  # ── ZERO-WASTE-125: self-pruning rulebook weekly prune proposal ──────────────
+  - kind: rule_prune_proposal
+    status: active
+    effect_metric: zero_waste
+    emitter: scripts/coord/rule-prune-cycle.sh (ZERO-WASTE-125)
+    emitter_paths: [scripts/coord/rule-prune-cycle.sh, src/rules_audit.rs]
+    trigger: >
+      Emitted by the weekly rule-prune cycle for non-protected rules in
+      RULE_REGISTRY.yaml that have zero catches in the 30d window or >50%
+      bypass/false-positive rate, and when a consensus proposal passes to file
+      an auto-deletion gap.
+    consumers: [ambient, fleet-brief, consensus]
+    fields_required: [ts, kind, rule_id, source, path, catches, bypasses, status]
+
+  # ── META-196: PR enqueued into GitHub native merge_group (merge queue) ───────
+  - kind: pr_merge_group_enqueued
+    status: active
+    effect_metric: velocity
+    emitter: scripts/coord/bot-merge.sh (META-196)
+    emitter_paths: [scripts/coord/bot-merge.sh, scripts/coord/auto-merge-armer.sh]
+    trigger: >
+      Emitted when bot-merge.sh or auto-merge-armer.sh enqueues an open PR (or a
+      batch of PRs via --enqueue-batch) into GitHub's native Merge Queue
+      (merge_group) instead of per-PR squash-arming.
+    consumers: [ambient, fleet-brief, vital-signs]
+    fields_required: [ts, kind, pr, branch, mode]
+
   # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──

@@ -870,7 +870,14 @@ NEXT_IS_STACK_ON=0
 # per-step (not appendable, not tail-friendly).
 PROGRESS_FILE_OVERRIDE=""
 NEXT_IS_PROGRESS_FILE=0
+ENQUEUE_BATCH_PRS=()
+IN_ENQUEUE_BATCH=0
 for arg in "$@"; do
+    if [[ $IN_ENQUEUE_BATCH -eq 1 && "$arg" != --* ]]; then
+        for _bpr in $arg; do ENQUEUE_BATCH_PRS+=("$_bpr"); done
+        continue
+    fi
+    IN_ENQUEUE_BATCH=0
     if [[ $NEXT_IS_GAP -eq 1 ]]; then
         # Support --gap "AUTO-003 COMP-002" (space-separated) or --gap AUTO-003 --gap COMP-002
         for gid in $arg; do GAP_IDS+=("$gid"); done
@@ -929,6 +936,7 @@ for arg in "$@"; do
         --review)             BM_FORCE_REVIEW=1 ;;    # Mode B: skip batched queue, use existing PR flow
         --hot-fix)            BM_FORCE_HOTFIX=1 ;;    # Mode C: P0 hot-fix, skip batched queue
         --legacy)             BM_LEGACY_MODE=1 ;;     # force old behavior (Mode B) for all gaps
+        --enqueue-batch)      IN_ENQUEUE_BATCH=1; [[ ${#GAP_IDS[@]} -eq 0 ]] && GAP_IDS=("none") ;;   # META-196: batch-enqueue PRs into native GitHub merge_group
         *) echo "unknown flag: $arg" >&2; exit 2 ;;
     esac
 done
@@ -1068,6 +1076,99 @@ done
 GAP_IDS=()
 if [[ ${#_filtered[@]} -gt 0 ]]; then
     GAP_IDS=("${_filtered[@]}")
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/coord/lib/arm-policy.sh
+source "$SCRIPT_DIR/lib/arm-policy.sh"
+
+# ── META-196: native GitHub Merge Queue (merge_group) detection + enqueue ────
+# Detects whether GitHub Merge Queue is active on the target branch (via
+# CHUMP_USE_MERGE_QUEUE=1, CHUMP_MERGE_QUEUE_ENABLED=1, or live GraphQL
+# repository.mergeQueue query) and enqueues PRs into merge_group while
+# honoring arm_policy_allows (RESILIENT-1613).
+bot_merge_detect_merge_queue() {
+    local target_branch="${1:-${BASE_BRANCH:-main}}"
+    local repo_slug="${2:-${GITHUB_REPOSITORY:-}}"
+    if [[ "${CHUMP_USE_MERGE_QUEUE:-}" == "1" || "${CHUMP_MERGE_QUEUE_ENABLED:-}" == "1" ]]; then
+        return 0
+    fi
+    if [[ "${CHUMP_USE_MERGE_QUEUE:-}" == "0" || "${CHUMP_MERGE_QUEUE_ENABLED:-}" == "0" ]]; then
+        return 1
+    fi
+    if [[ -z "$repo_slug" ]]; then
+        repo_slug="$(git remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]||;s|\.git$||' || true)"
+    fi
+    [[ -n "$repo_slug" ]] || return 1
+    local owner="${repo_slug%%/*}"
+    local name="${repo_slug##*/}"
+    local mq_active
+    mq_active="$(gh api graphql \
+        -f owner="$owner" -f name="$name" -f branch="$target_branch" \
+        -f query='query($owner:String!,$name:String!,$branch:String!){repository(owner:$owner,name:$name){mergeQueue(branch:$branch){id}}}' \
+        --jq '.data.repository.mergeQueue != null' 2>/dev/null || echo "false")"
+    [[ "$mq_active" == "true" ]]
+}
+
+bot_merge_enqueue_or_arm() {
+    local pr_num="$1"
+    local caller_label="${2:-bot-merge.sh}"
+    local batch_size="${3:-1}"
+    local force_mq="${4:-0}"
+    local repo_slug="${GITHUB_REPOSITORY:-}"
+    local amb="${CHUMP_AMBIENT_LOG:-${REPO_ROOT:-.}/.chump-locks/ambient.jsonl}"
+    if ! arm_policy_allows "$pr_num" "$caller_label" "$repo_slug"; then
+        return 1
+    fi
+    local use_mq=0
+    if [[ "$force_mq" == "1" ]] || bot_merge_detect_merge_queue "${BASE_BRANCH:-main}" "$repo_slug"; then
+        use_mq=1
+    fi
+    if [[ "$use_mq" == "1" ]]; then
+        local mq_out="" mq_rc=0
+        mq_out="$(gh pr merge "$pr_num" --auto 2>&1)" || mq_rc=$?
+        if [[ $mq_rc -ne 0 ]]; then
+            local pr_node_id
+            pr_node_id="$(gh pr view "$pr_num" --json id --jq '.id' 2>/dev/null || true)"
+            if [[ -n "$pr_node_id" ]]; then
+                gh api graphql -f id="$pr_node_id" \
+                    -f query='mutation($id:ID!){enqueuePullRequest(input:{pullRequestId:$id}){mergeQueueEntry{id}}}' \
+                    >/dev/null 2>&1 && mq_rc=0 || true
+            fi
+        fi
+        if [[ $mq_rc -eq 0 ]]; then
+            mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+            # scanner-anchor: "kind":"pr_merge_group_enqueued"
+            printf '{"ts":"%s","kind":"pr_merge_group_enqueued","pr":%s,"branch":"%s","gap":"%s","batch_size":%s,"mode":"merge_group"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr_num" "${BASE_BRANCH:-main}" "${GAP_IDS[0]:-none}" "$batch_size" \
+                >> "$amb" 2>/dev/null || true
+            return 0
+        fi
+        return "$mq_rc"
+    fi
+    local arm_out="" arm_rc=0
+    arm_out="$(gh pr merge "$pr_num" --auto --squash 2>&1)" || arm_rc=$?
+    if grep -qiE 'merge queue|MergeQueue' <<<"$arm_out"; then
+        if gh pr merge "$pr_num" --auto >/dev/null 2>&1; then
+            mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+            printf '{"ts":"%s","kind":"pr_merge_group_enqueued","pr":%s,"branch":"%s","gap":"%s","batch_size":%s,"mode":"merge_group"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr_num" "${BASE_BRANCH:-main}" "${GAP_IDS[0]:-none}" "$batch_size" \
+                >> "$amb" 2>/dev/null || true
+            return 0
+        fi
+    fi
+    return "$arm_rc"
+}
+
+if [[ ${#ENQUEUE_BATCH_PRS[@]} -gt 0 ]]; then
+    _batch_total="${#ENQUEUE_BATCH_PRS[@]}"
+    _batch_failed=0
+    for _bpr in "${ENQUEUE_BATCH_PRS[@]}"; do
+        if ! bot_merge_enqueue_or_arm "$_bpr" "bot-merge.sh(enqueue-batch)" "$_batch_total" "1"; then
+            _batch_failed=1
+        fi
+    done
+    [[ $_batch_failed -eq 0 ]] && exit 0 || exit 2
 fi
 
 # ── INFRA-1939: graphql_exhausted wedge guard ───────────────────────────────
@@ -2260,7 +2361,7 @@ if [[ "${CHUMP_BOT_MERGE_RECOVERY_MODE:-0}" == "1" ]]; then
         bot_merge_gate_arm_refused "$AUTO_MERGE" || exit 2
         stage_start "recovery: arm auto-merge"
         if arm_policy_allows "$_recover_pr_num" "bot-merge.sh(recovery)"; then
-            gh pr merge "$_recover_pr_num" --auto --squash 2>/dev/null || true
+            bot_merge_enqueue_or_arm "$_recover_pr_num" "bot-merge.sh(recovery)" 2>/dev/null || true
         fi
         stage_done
         info "INFRA-1422: PR #$_recover_pr_num armed for auto-merge (recovery path)"
@@ -4872,7 +4973,7 @@ if [[ $AUTO_MERGE -eq 1 ]]; then
             # when REST quota was healthy. Disable with CHUMP_BOT_MERGE_REST_DIRECT=0.
             _rest_direct_merged=0
             _rd_amb="${CHUMP_AMBIENT_LOG:-${REPO_ROOT:-.}/.chump-locks/ambient.jsonl}"
-            if [[ "${CHUMP_BOT_MERGE_REST_DIRECT:-1}" != "0" && $DRY_RUN -eq 0 ]]; then
+            if [[ "${CHUMP_BOT_MERGE_REST_DIRECT:-1}" != "0" && $DRY_RUN -eq 0 ]] && ! bot_merge_detect_merge_queue "${BASE_BRANCH:-main}"; then
                 stage_start "INFRA-1166: REST-direct fast path (check all CI green)"
                 _rd_nwo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)
                 _rd_sha=$(gh api "repos/$_rd_nwo/pulls/$TARGET_PR" --jq '.head.sha' 2>/dev/null || true)
@@ -5122,6 +5223,11 @@ See docs/process/HITL_APPROVAL.md for the full operator flow." 2>/dev/null || tr
                 if ! run_timed_hb "auto-merge-arm" 60 "$SCRIPT_DIR/auto-merge-armer.sh" --pr "$TARGET_PR"; then  # gh pr merge
                     red "auto-merge-armer failed (see above)."
                     exit 2
+                fi
+                if bot_merge_detect_merge_queue "${BASE_BRANCH:-main}"; then
+                    printf '{"ts":"%s","kind":"pr_merge_group_enqueued","pr":%s,"branch":"%s","gap":"%s","batch_size":1,"mode":"merge_group"}\n' \
+                        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TARGET_PR" "${BASE_BRANCH:-main}" "${GAP_IDS[0]:-none}" \
+                        >> "${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}" 2>/dev/null || true
                 fi
             fi
 

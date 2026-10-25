@@ -349,10 +349,10 @@ log_red_head_once() {
 # Cached in $MERGE_QUEUE_ACTIVE after first call — one API round-trip per
 # armer invocation. Returns "true" or "false".
 _detect_merge_queue() {
-    if [[ "${CHUMP_MERGE_QUEUE_ENABLED:-}" == "1" ]]; then
+    if [[ "${CHUMP_MERGE_QUEUE_ENABLED:-}" == "1" || "${CHUMP_USE_MERGE_QUEUE:-}" == "1" ]]; then
         printf 'true'; return
     fi
-    if [[ "${CHUMP_MERGE_QUEUE_ENABLED:-}" == "0" ]]; then
+    if [[ "${CHUMP_MERGE_QUEUE_ENABLED:-}" == "0" || "${CHUMP_USE_MERGE_QUEUE:-}" == "0" ]]; then
         printf 'false'; return
     fi
     # Live check: GitHub returns a non-null MergeQueue object when the queue
@@ -420,6 +420,12 @@ arm_with_retry() {
             # --auto can return 0 silently under GraphQL exhaustion without setting
             # autoMergeRequest. verify_arm sleeps 2s then checks; retries once at 30s.
             if verify_arm "${pr_num}" "${attempt}"; then
+                if [[ "${MERGE_QUEUE_ACTIVE}" == "true" ]]; then
+                    # scanner-anchor: "kind":"pr_merge_group_enqueued"
+                    _ambient_write "${LOCKS_DIR}/ambient.jsonl" \
+                        "$(printf '{"ts":"%s","kind":"pr_merge_group_enqueued","pr":%s,"branch":"main","mode":"merge_group"}' \
+                            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${pr_num}")"
+                fi
                 # INFRA-1311: successful merge + verified — clear backoff state.
                 _backoff_clear "${pr_num}"
                 rm -f "${LOCKS_DIR}/bot-merge-backoff-${pr_num}.count" 2>/dev/null || true

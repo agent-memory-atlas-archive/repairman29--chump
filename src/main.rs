@@ -254,6 +254,7 @@ mod roadmap_status;
 mod rollup_cmd; // INFRA-1455: chump rollup --semantic (Marcus M-B converge)
 mod routes;
 mod rpc_mode;
+mod rules_audit; // ZERO-WASTE-125: `chump rules <audit|check-budget>` — self-pruning rulebook auditor
 mod run_test_tool;
 mod runtime_flags;
 mod sandbox; // INFRA-1454: agent bash syscall-restriction layer (macOS sandbox-exec wrap)
@@ -2572,6 +2573,13 @@ async fn main() -> Result<()> {
     if args.get(1).map(String::as_str) == Some("admit") {
         let sub_args: Vec<String> = args.iter().skip(2).cloned().collect();
         std::process::exit(admit::run(&sub_args));
+    }
+
+    // `chump rules <audit|check-budget> [--window 30d] [--json]` (ZERO-WASTE-125)
+    // — self-pruning rulebook auditor and one-in-one-out doc budget ratchet.
+    if args.get(1).map(String::as_str) == Some("rules") {
+        let sub_args: Vec<String> = args.iter().skip(2).cloned().collect();
+        std::process::exit(rules_audit::run(&sub_args));
     }
 
     // `chump systematize <target-repo-path> [--json]` (INFRA-1783, phase 4 of
