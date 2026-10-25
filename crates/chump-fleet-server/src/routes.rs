@@ -56,6 +56,8 @@ pub fn build_router(store: SharedStore, repo_root: PathBuf) -> Router {
         .route("/api/mission", post(post_mission))
         .route("/api/gap", post(post_gap))
         .route("/api/gaps", get(get_gaps))
+        .route("/api/store/gaps", get(get_store_gaps))
+        .route("/api/store/gaps/{id}", get(get_store_gap_by_id))
         .route("/api/doc/{name}", get(get_doc))
         .route("/api/sentinel-heartbeat", post(post_sentinel_heartbeat))
         .route("/api/fleet/nodes", get(get_fleet_nodes))
@@ -96,6 +98,15 @@ pub struct GapsQuery {
     pub priority: Option<String>,
     pub status: Option<String>,
     pub domain: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct StoreGapsQuery {
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub domain: Option<String>,
+    pub limit: Option<usize>,
+    pub order: Option<String>,
 }
 
 // ── response envelopes ────────────────────────────────────────────────────────
@@ -375,6 +386,93 @@ async fn get_gaps(
         }
         Err(e) => {
             tracing::error!("GET /api/gaps task join error: {e}");
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// GET /api/store/gaps (RESILIENT-1700) — canonical SQLite `gaps` table read
+/// endpoint for store-over-API organs.
+///
+/// Queries `gaps` from the configured SQLite `state.db` (`CHUMP_STATE_DB` /
+/// `<state_dir>/state.db`) and returns JSON rows with the canonical 15-column
+/// SQLite schema (`id, title, description, domain, priority, status, effort,
+/// skills_required, acceptance_criteria, depends_on, parent_id, notes,
+/// closed_pr, closed_date, created_at`), supporting optional `?status=`,
+/// `?priority=`, `?domain=`, `?limit=`, and `?order=id|priority`.
+async fn get_store_gaps(State(s): State<AppState>, Query(q): Query<StoreGapsQuery>) -> Response {
+    let repo_root = s.repo_root.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        gap_write::query_store_gaps(
+            &repo_root,
+            q.status.as_deref(),
+            q.priority.as_deref(),
+            q.domain.as_deref(),
+            q.limit,
+            q.order.as_deref(),
+        )
+    })
+    .await;
+
+    match result {
+        Ok(Ok(rows)) => (
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "application/json; charset=utf-8",
+            )],
+            gap_write::format_sqlite_json_array(&rows),
+        )
+            .into_response(),
+        Ok(Err(e)) => {
+            tracing::error!("GET /api/store/gaps failed: {e}");
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!("GET /api/store/gaps task join error: {e}");
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// GET /api/store/gaps/{id} (RESILIENT-1700) — single canonical gap row read by
+/// `id` (or 404 if not found).
+async fn get_store_gap_by_id(State(s): State<AppState>, Path(id): Path<String>) -> Response {
+    let repo_root = s.repo_root.clone();
+    let lookup_id = id.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        gap_write::query_store_gap_by_id(&repo_root, &lookup_id)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(Some(row))) => Json(row).into_response(),
+        Ok(Ok(None)) => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("gap {id:?} not found")})),
+        )
+            .into_response(),
+        Ok(Err(e)) => {
+            tracing::error!("GET /api/store/gaps/{id} failed: {e}");
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!("GET /api/store/gaps/{id} task join error: {e}");
             (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": "internal error"})),

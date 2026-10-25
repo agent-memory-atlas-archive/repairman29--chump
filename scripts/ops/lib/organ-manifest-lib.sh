@@ -30,12 +30,13 @@
 # string so a caller can filter ENABLED to units applicable to the CURRENT
 # host (see organ_platform_matches / organ_current_platform below).
 
-# organ_manifest_parse <manifest-file> <paging_off-array-name> <enabled-array-name> <role-assoc-array-name> <requires-assoc-array-name> [<platforms-assoc-array-name>] [<node-assoc-array-name>] [<run-scope-assoc-array-name>]
+# organ_manifest_parse <manifest-file> <paging_off-array-name> <enabled-array-name> <role-assoc-array-name> <requires-assoc-array-name> [<platforms-assoc-array-name>] [<node-assoc-array-name>] [<run-scope-assoc-array-name>] [<retired-array-name>] [<home-assoc-array-name>]
 #
 # Populates the caller-provided array names (via nameref) from the manifest
 # file. Caller must declare them first (any prior contents are cleared). The
-# 6th (platforms) and 7th (node) array names are OPTIONAL — omitting either
-# preserves the original 5-arg call signature verbatim for existing callers.
+# 6th (platforms), 7th (node), 8th (run-scope), 9th (retired), and 10th (home)
+# array names are OPTIONAL — omitting any preserves the original 5-arg call
+# signature verbatim for existing callers.
 # Returns 1 (and prints an error) if the manifest file is missing.
 #
 # RESILIENT-1535: `enabled` lines may also carry a `node=NAME,NAME,...`
@@ -58,6 +59,11 @@
 # (organ_run_scope_matches below), instead of placing a unit that can only
 # fail there. The host's scope comes from the typed Host enum
 # (`chump node host --field run-scope`, crates/chump-provision).
+#
+# RESILIENT-1694 (RESILIENT-1691 slice): every organ entry carries a
+# `home=cuphead|slim|mac|closetjunky|any` token naming its canonical home
+# node. The 10th (optional) nameref receives per-unit `home` across all
+# states (`enabled`, `paging_off`, `retired`).
 organ_manifest_parse() {
   local manifest="$1"
   local -n _omp_paging_off="$2"
@@ -88,6 +94,12 @@ organ_manifest_parse() {
     _omp_have_retired=1
     _omp_retired=()
   fi
+  local _omp_have_home=0
+  if [[ $# -ge 10 && -n "${10:-}" ]]; then
+    local -n _omp_home="${10}"
+    _omp_have_home=1
+    _omp_home=()
+  fi
 
   _omp_paging_off=()
   _omp_enabled=()
@@ -99,11 +111,11 @@ organ_manifest_parse() {
     return 1
   fi
 
-  local state unit rest role requires platforms node runscope tok
+  local state unit rest role requires platforms node runscope home tok
   while read -r state unit rest; do
     [[ -z "${state:-}" ]] && continue
     [[ "$state" == \#* ]] && continue
-    role="" requires="" platforms="" node="" runscope=""
+    role="" requires="" platforms="" node="" runscope="" home=""
     for tok in $rest; do
       # RESILIENT-1534: a trailing `# ...` comment is NOT part of the directive.
       # Several rows quote field names in their comments (e.g. "platforms= stays
@@ -118,13 +130,22 @@ organ_manifest_parse() {
         platforms=*) platforms="${tok#platforms=}" ;;
         node=*)      node="${tok#node=}" ;;
         run-scope=*) runscope="${tok#run-scope=}" ;;
+        home=*)      home="${tok#home=}" ;;
       esac
     done
     case "$state" in
-      paging_off) _omp_paging_off+=("$unit") ;;
+      paging_off)
+        _omp_paging_off+=("$unit")
+        if [[ "$_omp_have_home" == 1 ]]; then
+          _omp_home["$unit"]="$home"
+        fi
+        ;;
       retired)
         if [[ "$_omp_have_retired" == 1 ]]; then
           _omp_retired+=("$unit")
+        fi
+        if [[ "$_omp_have_home" == 1 ]]; then
+          _omp_home["$unit"]="$home"
         fi
         ;;
       enabled)
@@ -139,6 +160,9 @@ organ_manifest_parse() {
         fi
         if [[ "$_omp_have_scope" == 1 ]]; then
           _omp_scope["$unit"]="${runscope:-any}"
+        fi
+        if [[ "$_omp_have_home" == 1 ]]; then
+          _omp_home["$unit"]="$home"
         fi
         ;;
       *) echo "WARN: unknown state '$state' for '$unit' in manifest; ignoring" >&2 ;;
@@ -283,6 +307,24 @@ organ_node_matches() {
   local IFS=',' tok
   for tok in $csv; do
     [[ "$tok" == "$current" ]] && return 0
+  done
+  return 1
+}
+
+# organ_home_matches <home-csv> <current-node>
+#
+# RESILIENT-1694: Does <current-node> match an organ's declared `home=` field?
+# Unlike `node=`, `home=` is REQUIRED on every organ entry (`cuphead`, `slim`,
+# `mac`, `closetjunky`, or `any`). Empty `home` returns 1 (missing home); `any`
+# matches any node; otherwise <current-node> must match one of the comma-separated
+# home tokens.
+organ_home_matches() {
+  local csv="${1:-}" current="${2:-}"
+  [[ -z "$csv" || -z "$current" ]] && return 1
+  [[ "$csv" == "any" ]] && return 0
+  local IFS=',' tok
+  for tok in $csv; do
+    [[ "$tok" == "any" || "$tok" == "$current" ]] && return 0
   done
   return 1
 }

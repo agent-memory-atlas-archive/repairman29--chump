@@ -1,0 +1,20 @@
+# chump-gap-decompose.service — RESILIENT-1707 (RESILIENT-1691 slice)
+#
+# Oneshot service paired with chump-gap-decompose.timer. Scans open P0/P1 gaps
+# with effort=l (or umbrella markers), runs `chump gap decompose <ID> --apply`
+# once per gap, records a stamp so each parent is decomposed at most once, and
+# emits `kind=gap_decomposed` with the filed child IDs.
+[Unit]
+Description=Chump auto-decompose organ for large/umbrella P0/P1 gaps (RESILIENT-1707)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+Environment=HOME=__HOME__
+Environment=PATH=__BIN_DIR__:/usr/local/bin:/usr/bin:/bin
+Environment=CHUMP_REPO=__REPO_ROOT__
+EnvironmentFile=-__NODE_ENV__
+ExecStart=/bin/bash __REPO_ROOT__/scripts/coord/gap-decompose-organ.sh --apply
+TimeoutStartSec=180
+Nice=10

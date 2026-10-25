@@ -120,6 +120,31 @@ else
     fail "sibling could not claim gap after pivot (got: '$pick2')"
 fi
 
+# Step 4 (RESILIENT-1707): skipping an effort=l gap emits kind=gap_skipped_needs_decompose
+cat >"$TMP/gaps-large.json" <<'EOF'
+[
+  {"id":"INFRA-TEST-LARGE","domain":"INFRA","priority":"P1","effort":"l","created_at":1000,"depends_on":"","status":"open"}
+]
+EOF
+AMBIENT_JSONL="$lock_dir/ambient.jsonl" \
+CHUMP_SESSION_ID="session-large" \
+GAP_JSON_FILE="$TMP/gaps-large.json" \
+CHUMP_LOCK_DIR="$lock_dir" \
+FLEET_PRIORITY_FILTER="P0,P1" \
+FLEET_DOMAIN_FILTER="INFRA" \
+FLEET_EFFORT_FILTER="xs,s,m" \
+EXCLUDE_RE="^$" \
+WORKER_INDEX="1" \
+python3 "$PICKER" >/dev/null 2>&1 || true
+
+if [[ -f "$lock_dir/ambient.jsonl" ]] \
+   && grep -q '"kind":"gap_skipped_needs_decompose"' "$lock_dir/ambient.jsonl" \
+   && grep -q '"gap_id":"INFRA-TEST-LARGE"' "$lock_dir/ambient.jsonl"; then
+    ok "picker emitted kind=gap_skipped_needs_decompose for effort=l gap (RESILIENT-1707)"
+else
+    fail "picker did not emit kind=gap_skipped_needs_decompose for effort=l gap"
+fi
+
 echo
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]

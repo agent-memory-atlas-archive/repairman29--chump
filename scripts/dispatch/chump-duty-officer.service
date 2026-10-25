@@ -6,14 +6,25 @@
 # Written in the helsinki (/root) convention; install-helsinki-atc.sh + chump-node-
 # install.sh host-rewrite /root -> the run-user HOME (User=, HOME=, WorkingDirectory,
 # PATH) so the SAME unit works on any owned node (cuphead/CJ: ubuntu/jeff HOME).
+# RESILIENT-1702 (RESILIENT-1691 slice): 4GB memory constraint on slim (3.7GB
+# usable RAM). Profiled normal-load RSS is ~210-340MB (bash + jq + python3 +
+# single claude -p subprocess). MemoryHigh=3072M and MemoryMax=3584M cap the
+# cgroup below 4GB with >400MB kernel/OS headroom; CHUMP_ADMISSION_MAX_CONCURRENT=1
+# and bounded model parameters (CHUMP_DUTY_OFFICER_MAX_TOKENS=4096,
+# CHUMP_DUTY_OFFICER_MAX_TURNS=6) prevent unbounded Sonnet/Opus inference.
 [Unit]
 Description=Chump duty-officer — route firing health signals T1 auto-heal / T2 runbook / T3 page (RESILIENT-274)
 After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
+MemoryHigh=3072M
+MemoryMax=3584M
 Environment=HOME=__HOME__
 Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
 Environment=CHUMP_DUTY_OFFICER_EXECUTE=1
+Environment=CHUMP_ADMISSION_MAX_CONCURRENT=1
+Environment=CHUMP_DUTY_OFFICER_MAX_TOKENS=4096
+Environment=CHUMP_DUTY_OFFICER_MAX_TURNS=6
 ExecStart=/bin/bash -lc "source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; cd __REPO_ROOT__; exec bash scripts/coord/duty-officer-loop.sh tick"
 TimeoutStartSec=300

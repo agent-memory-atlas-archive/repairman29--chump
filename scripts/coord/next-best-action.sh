@@ -92,6 +92,10 @@ JOURNEY="${CHUMP_JOURNEY_ODDS:-$HOME/.chump/journey-odds.json}"
 FACULTY="${CHUMP_FACULTY_OUT:-$HOME/.chump/faculty-status.json}"
 AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO/.chump-locks/ambient.jsonl}"
 MODEL_JQ="$DIR/pr-book-model.jq"
+if [[ -f "$DIR/../lib/store-api-client.sh" ]]; then
+  # shellcheck source=../lib/store-api-client.sh
+  source "$DIR/../lib/store-api-client.sh"
+fi
 mkdir -p "$HOME/.chump"
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -324,6 +328,8 @@ else FAC_CAND='[]'; fi
 # before the JSON array, so strip everything before the first top-level `[`.
 if [[ -n "${CHUMP_NBA_GAPS_FIXTURE:-}" && -f "${CHUMP_NBA_GAPS_FIXTURE}" ]]; then
   GAP_JSON="$(cat "$CHUMP_NBA_GAPS_FIXTURE")"
+elif [[ -n "${CHUMP_STORE_API_URL:-}" ]] && declare -F chump_store_query_gaps >/dev/null 2>&1; then
+  GAP_JSON="$(chump_store_query_gaps --status open --order priority 2>/dev/null || echo '[]')"
 else
   GAP_JSON="$(chump gap list --json 2>/dev/null | sed -n '/^\[/,$p')"
 fi

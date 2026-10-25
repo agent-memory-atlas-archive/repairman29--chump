@@ -20,6 +20,10 @@ STATE_DB="${CHUMP_STATE_DB:-$LOCKS_DIR/state.db}"
 if [[ ! -f "$STATE_DB" && -f "${HOME:-}/.chump/state.db" ]]; then
   STATE_DB="${HOME}/.chump/state.db"
 fi
+if [[ -f "$REPO_ROOT/scripts/lib/store-api-client.sh" ]]; then
+  # shellcheck source=../lib/store-api-client.sh
+  source "$REPO_ROOT/scripts/lib/store-api-client.sh"
+fi
 
 APPLY="${CHUMP_BACKLOG_GOVERNOR_APPLY:-0}"
 DRY_RUN=0
@@ -34,17 +38,27 @@ done
 
 STALE_SECS="${CHUMP_BACKLOG_STALE_LEASE_SECS:-7200}"
 NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+STORE_API_TMP=""
+if [[ -n "${CHUMP_STORE_API_URL:-}" ]] && declare -F chump_store_query_gaps >/dev/null 2>&1; then
+  STORE_API_TMP="$(mktemp "${TMPDIR:-/tmp}/chump-bg-store.XXXXXX")"
+  trap '[[ -n "${STORE_API_TMP:-}" ]] && rm -f "$STORE_API_TMP"' EXIT
+  if ! chump_store_query_gaps --order id >"$STORE_API_TMP" 2>/dev/null; then
+    rm -f "$STORE_API_TMP"
+    STORE_API_TMP=""
+  fi
+fi
 
-TICK_JSON="$(python3 - "$STATE_DB" "$LOCKS_DIR" "$APPLY" "$DRY_RUN" "$STALE_SECS" "$NOW_ISO" <<'PY'
+TICK_JSON="$(python3 - "$STATE_DB" "$LOCKS_DIR" "$APPLY" "$DRY_RUN" "$STALE_SECS" "$NOW_ISO" "${STORE_API_TMP:-}" <<'PY'
 import datetime, glob, json, os, sqlite3, sys, time
 
-state_db, locks_dir, apply_flag, dry_run_flag, stale_secs, now_iso = (
+state_db, locks_dir, apply_flag, dry_run_flag, stale_secs, now_iso, store_api_tmp = (
     sys.argv[1],
     sys.argv[2],
     int(sys.argv[3]) == 1,
     int(sys.argv[4]) == 1,
     int(sys.argv[5]),
     sys.argv[6],
+    sys.argv[7] if len(sys.argv) > 7 else "",
 )
 
 now_ts = time.time()
@@ -93,8 +107,38 @@ if os.path.isdir(locks_dir):
         elif gap_id:
             active_leased_gaps.add(gap_id)
 
-# 2. Query state.db for open priorities, 24h filed vs shipped, and stale in_progress claims
-if os.path.isfile(state_db):
+# 2. Query store-over-API (RESILIENT-1700) or state.db for open priorities, 24h filed vs shipped, and stale in_progress claims
+if store_api_tmp and os.path.isfile(store_api_tmp):
+    try:
+        with open(store_api_tmp, "r", encoding="utf-8") as fh:
+            api_gaps = json.load(fh)
+        if isinstance(api_gaps, list):
+            for g in api_gaps:
+                if not isinstance(g, dict):
+                    continue
+                prio = str(g.get("priority") or "P2").upper()
+                st = str(g.get("status") or "open").lower()
+                p = prio if prio in open_counts else "P2"
+                if st in ("open", "in_progress", "claimed"):
+                    open_counts[p] += 1
+                    if st in ("in_progress", "claimed"):
+                        in_progress_counts[p] += 1
+                        gid_s = str(g.get("id") or "")
+                        gts_s = str(g.get("created_at") or "")
+                        if gid_s and gid_s not in active_leased_gaps and (not gts_s or gts_s < stale_cut_iso):
+                            wedges.append(f"stale_in_progress:{gid_s}")
+                created_val = g.get("created_at")
+                if isinstance(created_val, (int, float)) and created_val >= cut_dt.timestamp():
+                    filed_24h += 1
+                elif isinstance(created_val, str) and (created_val >= cut_iso or created_val >= cut_sql):
+                    filed_24h += 1
+                if st in ("done", "closed", "shipped"):
+                    closed_d = str(g.get("closed_date") or "")
+                    if closed_d and (closed_d >= cut_iso[:10] or closed_d >= cut_sql):
+                        shipped_24h += 1
+    except Exception as exc:
+        wedges.append(f"store_api_error:{type(exc).__name__}")
+elif os.path.isfile(state_db):
     try:
         conn = sqlite3.connect(state_db, timeout=5.0)
         cur = conn.cursor()

@@ -342,6 +342,60 @@ exit 0
     assert!(draft_entries[0].contains("\"platform\":\"twitter\""));
     assert!(draft_entries[0].contains("\"user_id\":\"jeff\""));
 
+    // ── RESILIENT-1700: GET /api/store/gaps and GET /api/store/gaps/{id} ──
+    let store_dir = dir.join("store-api");
+    let store_chump = store_dir.join(".chump");
+    std::fs::create_dir_all(&store_chump).unwrap();
+    let store_db = store_chump.join("state.db");
+    let conn = rusqlite::Connection::open(&store_db).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE gaps (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            description TEXT,
+            domain TEXT,
+            priority TEXT,
+            status TEXT,
+            effort TEXT,
+            skills_required TEXT,
+            acceptance_criteria TEXT,
+            depends_on TEXT,
+            parent_id TEXT,
+            notes TEXT,
+            closed_pr INTEGER,
+            closed_date TEXT,
+            created_at INTEGER
+        );
+        INSERT INTO gaps VALUES
+            ('RESILIENT-1700', 'Store-over-API backend', 'sqlite over http', 'RESILIENT', 'P1', 'open', 'm', 'rust', '[\"ac\"]', '[]', 'RESILIENT-1691', 'notes', NULL, '', 1778700001),
+            ('INFRA-0010', 'First gap by id', 'desc', 'INFRA', 'P0', 'done', 's', '', '[]', '[]', NULL, '', 101, '2026-10-25', 1778700000);",
+    )
+    .unwrap();
+    drop(conn);
+
+    std::env::remove_var("CHUMP_STATE_DB");
+    let (status, store_all) =
+        get_gaps_uri(build_app(&store_dir), "/api/store/gaps?order=id", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let store_arr = store_all.as_array().expect("store/gaps must return array");
+    assert_eq!(store_arr.len(), 2);
+    assert_eq!(store_arr[0]["id"].as_str(), Some("INFRA-0010"));
+    assert_eq!(store_arr[1]["id"].as_str(), Some("RESILIENT-1700"));
+    assert_eq!(store_arr[1]["parent_id"].as_str(), Some("RESILIENT-1691"));
+
+    let (status, one_gap) = get_gaps_uri(
+        build_app(&store_dir),
+        "/api/store/gaps/RESILIENT-1700",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(one_gap, store_arr[1]);
+
+    let (status, _) =
+        get_gaps_uri(build_app(&store_dir), "/api/store/gaps/NO-SUCH-GAP", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
     std::env::remove_var("CHUMP_BIN");
     let _ = std::fs::remove_dir_all(&dir);
 }

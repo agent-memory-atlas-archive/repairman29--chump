@@ -485,9 +485,9 @@ ok "INFRA-8106: _ensure_pr_book_timer renders and installs chump-pr-book.{servic
 # ── Test 15: INFRA-8639: chump-worker@.service template + node-orchestrator.sh worker unit resolution ──
 WORKER_TPL="$REPO_ROOT/scripts/dispatch/chump-worker@.service"
 [[ -f "$WORKER_TPL" ]] || fail "INFRA-8639: missing $WORKER_TPL"
-grep -qE '^WorkingDirectory=(__REPO_ROOT__|%h/chump)$' "$WORKER_TPL" \
+grep -qE '^WorkingDirectory=__REPO_ROOT__$' "$WORKER_TPL" \
     || fail "INFRA-8639: chump-worker@.service missing WorkingDirectory=__REPO_ROOT__"
-grep -qE '^EnvironmentFile=-(__HOME__|%h)/\.chump/node\.env$' "$WORKER_TPL" \
+grep -qE '^EnvironmentFile=-__HOME__/\.chump/node\.env$' "$WORKER_TPL" \
     || fail "INFRA-8639: chump-worker@.service missing EnvironmentFile=-__HOME__/.chump/node.env"
 grep -qE 'set -a.*providers\.env' "$WORKER_TPL" \
     && fail "INFRA-8639: chump-worker@.service must not source providers.env with set -a"
@@ -515,5 +515,92 @@ T15_FALLBACK="$(
 [[ "$T15_FALLBACK" == "unit=chump-node1-worker slot1=chump-node1-worker.service slot2=chump-worker@2.service" ]] \
     || fail "INFRA-8639: node-orchestrator.sh fallback to chump-node1-worker.service failed (got: $T15_FALLBACK)"
 ok "INFRA-8639: chump-worker@.service is portable and node-orchestrator.sh resolves chump-worker@ (with chump-node1-worker.service fallback)"
+
+# ── Test 16: RESILIENT-1708: node-orchestrator scales configured CHUMP_ORCH_WORKER_UNIT and dedupes missing-unit emit ──
+T16_BIN="$TMP/t16-bin"
+T16_LOG="$TMP/t16-systemctl.log"
+mkdir -p "$T16_BIN"
+cat > "$T16_BIN/systemctl" <<EOF
+#!/usr/bin/env bash
+args="\$*"
+if [[ "\$1" == "--user" ]]; then
+  shift
+fi
+cmd="\${1:-}"
+unit="\${2:-}"
+case "\$cmd" in
+  cat)
+    if [[ "\$unit" == "chump-cuphead-worker@1.service" || "\$unit" == "chump-cuphead-worker@.service" ]]; then
+      echo "# chump-cuphead-worker@.service"
+      exit 0
+    fi
+    exit 1
+    ;;
+  list-unit-files)
+    if [[ "\$args" == *"chump-cuphead-worker"* ]]; then
+      echo "chump-cuphead-worker@.service enabled"
+      exit 0
+    fi
+    exit 0
+    ;;
+  start)
+    echo "started:\$unit" >> "$T16_LOG"
+    exit 0
+    ;;
+  stop)
+    echo "stopped:\$unit" >> "$T16_LOG"
+    exit 0
+    ;;
+esac
+exit 0
+EOF
+chmod +x "$T16_BIN/systemctl"
+
+# 16a. Configured worker unit in node.env exists -> SCALE starts it after hysteresis confirmation.
+T16_STATE_OK="$TMP/t16-state-ok"
+mkdir -p "$T16_STATE_OK" "$TMP/t16-locks-ok"
+printf 'CHUMP_ORCH_WORKER_UNIT=chump-cuphead-worker@\n' > "$T16_STATE_OK/node.env"
+(
+    unset CHUMP_ORCH_WORKER_UNIT
+    export PATH="$T16_BIN:$PATH"
+    export CHUMP_STATE_DIR="$T16_STATE_OK"
+    export CHUMP_REPO_ROOT="$TMP"
+    export CHUMP_LOCK_DIR="$TMP/t16-locks-ok"
+    export CHUMP_AMBIENT_LOG="$TMP/t16-locks-ok/ambient.jsonl"
+    # shellcheck disable=SC1090
+    source "$ORCH_SCRIPT" 2>/dev/null || true
+    CORES=4 LOADPCT=10 RAM_AVAIL_MB=4000 WORKERS_UP=0 WORKER_MAX=2
+    scale
+    scale
+) > "$TMP/t16-ok.out" 2>&1
+grep -qxF "started:chump-cuphead-worker@1.service" "$T16_LOG" \
+    || fail "RESILIENT-1708: expected SCALE to start chump-cuphead-worker@1.service (log: $(cat "$T16_LOG" 2>/dev/null); out: $(cat "$TMP/t16-ok.out"))"
+
+# 16b. Configured worker unit is missing -> emits kind=orchestrator_worker_unit_missing ONCE and does NOT loop 0->1 on second tick.
+T16_STATE_MISS="$TMP/t16-state-miss"
+T16_LOCKS_MISS="$TMP/t16-locks-miss"
+T16_AMB_MISS="$T16_LOCKS_MISS/ambient.jsonl"
+mkdir -p "$T16_STATE_MISS" "$T16_LOCKS_MISS"
+printf 'CHUMP_ORCH_WORKER_UNIT=chump-missing-worker@\n' > "$T16_STATE_MISS/node.env"
+(
+    unset CHUMP_ORCH_WORKER_UNIT
+    export PATH="$T16_BIN:$PATH"
+    export CHUMP_STATE_DIR="$T16_STATE_MISS"
+    export CHUMP_REPO_ROOT="$TMP"
+    export CHUMP_LOCK_DIR="$T16_LOCKS_MISS"
+    export CHUMP_AMBIENT_LOG="$T16_AMB_MISS"
+    # shellcheck disable=SC1090
+    source "$ORCH_SCRIPT" 2>/dev/null || true
+    CORES=4 LOADPCT=10 RAM_AVAIL_MB=4000 WORKERS_UP=0 WORKER_MAX=2
+    scale > "$TMP/t16-miss-tick1.out" 2>&1
+    scale > "$TMP/t16-miss-tick2.out" 2>&1
+)
+[[ -f "$T16_LOCKS_MISS/orchestrator_worker_unit_missing_chump-missing-worker@.stamp" ]] \
+    || fail "RESILIENT-1708: missing stamp file $T16_LOCKS_MISS/orchestrator_worker_unit_missing_chump-missing-worker@.stamp"
+[[ "$(grep -c '"kind":"orchestrator_worker_unit_missing"' "$T16_AMB_MISS" 2>/dev/null || echo 0)" == "1" ]] \
+    || fail "RESILIENT-1708: expected orchestrator_worker_unit_missing to be emitted exactly once, got: $(cat "$T16_AMB_MISS" 2>/dev/null)"
+[[ ! -s "$TMP/t16-miss-tick2.out" ]] \
+    || fail "RESILIENT-1708: second tick must not loop or re-log SCALE 0->1 when worker unit is missing, got: $(cat "$TMP/t16-miss-tick2.out")"
+ok "RESILIENT-1708: node-orchestrator scales configured CHUMP_ORCH_WORKER_UNIT and emits orchestrator_worker_unit_missing once without looping"
 
 printf '\033[0;32mALL PASS\033[0m scripts/ci/test-node-converge.sh\n'

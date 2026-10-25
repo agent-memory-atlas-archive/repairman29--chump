@@ -169,4 +169,286 @@ for ported_organ in branch-reaper stale-branch-reaper armed-pr-rebaser dup-pr-de
 done
 pass "INFRA-8126 / INFRA-8144 / INFRA-8146: all 8 Linux-ported organs have tracked systemd .service+.timer units and enabled platforms=systemd,launchd manifest entries"
 
+# ── 7. RESILIENT-1694: organ-manifest home field & fleet-doctor verification ─
+MANIFEST_TXT="$REPO_ROOT/scripts/ops/organ-manifest.txt"
+MANIFEST_YAML="$REPO_ROOT/scripts/ops/organ-manifest.yaml"
+DOCTOR="$REPO_ROOT/scripts/coord/fleet-doctor-strict.sh"
+DECOMPOSE_ORGAN="$REPO_ROOT/scripts/coord/gap-decompose-organ.sh"
+PICKER="$REPO_ROOT/scripts/dispatch/_pick_and_claim_gap.py"
+
+[[ -f "$MANIFEST_YAML" ]] || fail "scripts/ops/organ-manifest.yaml missing"
+pass "scripts/ops/organ-manifest.yaml exists"
+
+if grep -qE '^\s*home:' "$MANIFEST_YAML" && grep -q 'required:.*home' "$MANIFEST_YAML"; then
+  pass "organ-manifest.yaml schema includes required 'home' field"
+else
+  fail "organ-manifest.yaml schema missing required 'home' field"
+fi
+
+declare -a R1694_PAGING_OFF=() R1694_ENABLED=() R1694_RETIRED=()
+declare -A R1694_ROLE=() R1694_REQUIRES=() R1694_PLATFORMS=() R1694_NODE=() R1694_SCOPE=() R1694_HOME_MAP=()
+organ_manifest_parse "$MANIFEST_TXT" R1694_PAGING_OFF R1694_ENABLED R1694_ROLE R1694_REQUIRES R1694_PLATFORMS R1694_NODE R1694_SCOPE R1694_RETIRED R1694_HOME_MAP
+
+all_units=("${R1694_ENABLED[@]}" "${R1694_PAGING_OFF[@]}" "${R1694_RETIRED[@]}")
+missing_home=0
+for u in "${all_units[@]}"; do
+  h="${R1694_HOME_MAP[$u]:-}"
+  if [[ -z "$h" ]]; then
+    fail "organ-manifest.txt unit '$u' missing home= field"
+    missing_home=1
+  elif ! organ_home_matches "$h" "cuphead" && ! organ_home_matches "$h" "slim" && ! organ_home_matches "$h" "mac" && ! organ_home_matches "$h" "closetjunky"; then
+    fail "organ-manifest.txt unit '$u' has invalid home='$h'"
+    missing_home=1
+  fi
+done
+if [[ "$missing_home" -eq 0 && "${#all_units[@]}" -gt 0 ]]; then
+  pass "all ${#all_units[@]} organs in organ-manifest.txt have a valid home= field via organ_manifest_parse"
+fi
+
+run_doctor_home_check() {
+  local manifest_override="$1"
+  local active_organs="$2"
+  local node_name="${3:-cuphead}"
+  (
+    export CHUMP_ORGAN_MANIFEST="$manifest_override"
+    export CHUMP_ORGAN_MANIFEST_YAML="$MANIFEST_YAML"
+    export CHUMP_DOCTOR_ACTIVE_ORGANS="$active_organs"
+    export CHUMP_DOCTOR_NODE_NAME="$node_name"
+    export FLEET_DOCTOR_SOURCED=1
+    set --
+    # shellcheck source=/dev/null
+    source "$DOCTOR"
+    CHECKS=()
+    STATUSES=()
+    DETAILS=()
+    REMEDIES=()
+    PASS_COUNT=0
+    FAIL_COUNT=0
+    check_organ_home_placement
+    printf '%s|%s\n' "${STATUSES[0]:-none}" "${DETAILS[0]:-}"
+  )
+}
+
+green_out="$(run_doctor_home_check "$MANIFEST_TXT" "chump-pr-lander.timer:cuphead,chump-duty-officer.timer:slim,chump-gap-decompose.timer:cuphead" "cuphead")"
+if [[ "${green_out%%|*}" == "pass" ]] && grep -q "GREEN" <<<"$green_out"; then
+  pass "fleet-doctor returns GREEN when all organs have home set and run on their home nodes"
+else
+  fail "fleet-doctor expected GREEN/pass, got: $green_out"
+fi
+
+red_misplaced="$(run_doctor_home_check "$MANIFEST_TXT" "chump-duty-officer.timer:cuphead,chump-pr-lander.timer:slim" "cuphead")"
+if [[ "${red_misplaced%%|*}" == "fail" ]] && grep -q "RED" <<<"$red_misplaced"; then
+  pass "fleet-doctor returns RED when an organ runs on a node different from its home"
+else
+  fail "fleet-doctor expected RED/fail on misplaced organ, got: $red_misplaced"
+fi
+
+MUTANT_MANIFEST="$TMP/organ-manifest-missing-home.txt"
+sed 's/ home=cuphead//' "$MANIFEST_TXT" > "$MUTANT_MANIFEST"
+red_missing="$(run_doctor_home_check "$MUTANT_MANIFEST" "chump-duty-officer.timer:slim" "slim")"
+if [[ "${red_missing%%|*}" == "fail" ]] && grep -q "missing or invalid home field" <<<"$red_missing"; then
+  pass "fleet-doctor returns RED when any organ in manifest is missing its home field"
+else
+  fail "fleet-doctor expected RED/fail on missing home field, got: $red_missing"
+fi
+
+# ── 8. RESILIENT-1707: decompose organ & picker gap_skipped_needs_decompose ─
+if [[ "${R1694_HOME_MAP[chump-gap-decompose.timer]:-}" == "cuphead" && "${R1694_SCOPE[chump-gap-decompose.timer]:-}" == "user" ]]; then
+  pass "chump-gap-decompose.timer registered in organ-manifest with run-scope=user and home=cuphead"
+else
+  fail "chump-gap-decompose.timer missing or misconfigured in organ-manifest"
+fi
+
+if [[ -f "$REPO_ROOT/scripts/dispatch/chump-gap-decompose.service" && -f "$REPO_ROOT/scripts/dispatch/chump-gap-decompose.timer" && -x "$DECOMPOSE_ORGAN" ]]; then
+  pass "chump-gap-decompose.{service,timer} and executable gap-decompose-organ.sh present"
+else
+  fail "chump-gap-decompose units or gap-decompose-organ.sh missing"
+fi
+
+PICK_TMP="$TMP/picker"
+mkdir -p "$PICK_TMP/.chump-locks"
+cat > "$PICK_TMP/gaps.json" <<'JSON'
+[
+  {
+    "id": "TEST-UMB-1",
+    "title": "Synthetic large umbrella gap",
+    "status": "open",
+    "priority": "P1",
+    "domain": "RESILIENT",
+    "effort": "l"
+  },
+  {
+    "id": "TEST-SMALL-2",
+    "title": "Synthetic small slice",
+    "status": "open",
+    "priority": "P1",
+    "domain": "RESILIENT",
+    "effort": "s"
+  }
+]
+JSON
+
+FAKE_BIN="$PICK_TMP/bin"
+mkdir -p "$FAKE_BIN"
+cat > "$FAKE_BIN/chump" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod +x "$FAKE_BIN/chump"
+
+picked_id="$(
+  GAP_JSON_FILE="$PICK_TMP/gaps.json" \
+  CHUMP_LOCK_DIR="$PICK_TMP/.chump-locks" \
+  AMBIENT_JSONL="$PICK_TMP/.chump-locks/ambient.jsonl" \
+  CHUMP_BIN="$FAKE_BIN/chump" \
+  FLEET_PRIORITY_FILTER="P0,P1" \
+  FLEET_EFFORT_FILTER="xs,s,m" \
+  WORKER_ID="w-test" \
+  python3 "$PICKER" 2>/dev/null
+)"
+[[ "$picked_id" == "TEST-SMALL-2" ]] || fail "picker expected TEST-SMALL-2, got '$picked_id'"
+pass "picker skipped effort=l TEST-UMB-1 and picked effort=s TEST-SMALL-2"
+
+if [[ -f "$PICK_TMP/.chump-locks/ambient.jsonl" ]] \
+  && grep -q '"kind":"gap_skipped_needs_decompose"' "$PICK_TMP/.chump-locks/ambient.jsonl" \
+  && grep -q '"gap_id":"TEST-UMB-1"' "$PICK_TMP/.chump-locks/ambient.jsonl"; then
+  pass "picker emitted kind=gap_skipped_needs_decompose with gap_id=TEST-UMB-1"
+else
+  fail "picker did not emit kind=gap_skipped_needs_decompose for TEST-UMB-1"
+fi
+
+DEC_TMP="$TMP/decompose"
+mkdir -p "$DEC_TMP/.chump" "$DEC_TMP/.chump-locks" "$DEC_TMP/bin"
+DEC_DB="$DEC_TMP/.chump/state.db"
+sqlite3 "$DEC_DB" <<'SQL'
+CREATE TABLE gaps (
+  id TEXT PRIMARY KEY,
+  title TEXT,
+  description TEXT,
+  acceptance TEXT,
+  priority TEXT,
+  status TEXT,
+  domain TEXT,
+  effort TEXT,
+  parent_id TEXT,
+  notes TEXT
+);
+INSERT INTO gaps (id, title, description, acceptance, priority, status, domain, effort, parent_id, notes)
+VALUES (
+  'TEST-UMB-100',
+  'Synthetic effort=l P1 umbrella gap',
+  'Umbrella description',
+  '- Slice A\n- Slice B\n- Slice C',
+  'P1',
+  'open',
+  'RESILIENT',
+  'l',
+  NULL,
+  ''
+);
+INSERT INTO gaps (id, title, description, acceptance, priority, status, domain, effort, parent_id, notes)
+VALUES
+  ('RESILIENT-1691', 'Umbrella: 2-host fleet layout (cuphead + slim)', 'Umbrella', '', 'P2', 'decomposed', 'RESILIENT', 'l', NULL, 'Decomposed into 3 slices: RESILIENT-1694, RESILIENT-1702, RESILIENT-1707'),
+  ('RESILIENT-1694', 'Add home field to organ-manifest and fleet-doctor verification (RESILIENT-1691 slice)', 'Slice 1', '', 'P1', 'open', 'RESILIENT', 's', 'RESILIENT-1691', ''),
+  ('RESILIENT-1702', 'Optimize duty-officer and architect loop for 4GB memory constraint (RESILIENT-1691 slice)', 'Slice 2', '', 'P1', 'open', 'RESILIENT', 'm', 'RESILIENT-1691', ''),
+  ('RESILIENT-1707', 'large umbrellas never decompose on their own (RESILIENT-1691 slice)', 'Slice 3', '', 'P1', 'open', 'RESILIENT', 'm', 'RESILIENT-1691', '');
+SQL
+
+cat > "$DEC_TMP/bin/chump" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "gap" && "${2:-}" == "decompose" ]]; then
+  parent_id="${3:-}"
+  echo "$parent_id" >> "$CHUMP_DECOMPOSE_CALL_LOG"
+  sqlite3 "$CHUMP_STATE_DB" "
+    INSERT INTO gaps (id, title, description, acceptance, priority, status, domain, effort, parent_id, notes)
+    VALUES
+      ('${parent_id}-A', 'Slice A (${parent_id} slice)', 'Child A', '- AC1', 'P1', 'open', 'RESILIENT', 's', '${parent_id}', ''),
+      ('${parent_id}-B', 'Slice B (${parent_id} slice)', 'Child B', '- AC2', 'P1', 'open', 'RESILIENT', 's', '${parent_id}', '');
+    UPDATE gaps
+       SET priority = 'P2',
+           status = 'decomposed',
+           notes = 'Decomposed into 2 slices: ${parent_id}-A, ${parent_id}-B'
+     WHERE id = '${parent_id}';
+  "
+  printf '{"parent":"%s","slices":["%s-A","%s-B"]}\n' "$parent_id" "$parent_id" "$parent_id"
+  exit 0
+fi
+exit 0
+SH
+chmod +x "$DEC_TMP/bin/chump"
+
+CHUMP_STATE_DB="$DEC_DB" \
+CHUMP_LOCK_DIR="$DEC_TMP/.chump-locks" \
+CHUMP_AMBIENT_LOG="$DEC_TMP/.chump-locks/ambient.jsonl" \
+CHUMP_BIN="$DEC_TMP/bin/chump" \
+CHUMP_DECOMPOSE_CALL_LOG="$DEC_TMP/calls.log" \
+bash "$DECOMPOSE_ORGAN" --apply
+
+parent_state="$(sqlite3 "$DEC_DB" "SELECT status || '|' || priority FROM gaps WHERE id='TEST-UMB-100';")"
+child_count="$(sqlite3 "$DEC_DB" "SELECT COUNT(*) FROM gaps WHERE parent_id='TEST-UMB-100';")"
+res1691_children="$(sqlite3 "$DEC_DB" "SELECT COUNT(*) FROM gaps WHERE parent_id='RESILIENT-1691';")"
+[[ "$parent_state" == "decomposed|P2" && "$child_count" -eq 2 && "$res1691_children" -eq 3 ]] \
+  || fail "unexpected state after tick 1: parent_state=$parent_state child_count=$child_count res1691_children=$res1691_children"
+pass "decompose organ filed children within one tick, demoted parent to status=decomposed/P2, and verified RESILIENT-1691 child receipts"
+
+if grep -q '"kind": "gap_decomposed"\|"kind":"gap_decomposed"' "$DEC_TMP/.chump-locks/ambient.jsonl" \
+  && grep -q 'TEST-UMB-100-A' "$DEC_TMP/.chump-locks/ambient.jsonl" \
+  && grep -q 'TEST-UMB-100-B' "$DEC_TMP/.chump-locks/ambient.jsonl"; then
+  pass "decompose organ emitted kind=gap_decomposed with child IDs"
+else
+  fail "decompose organ did not emit kind=gap_decomposed with child IDs"
+fi
+
+CHUMP_STATE_DB="$DEC_DB" \
+CHUMP_LOCK_DIR="$DEC_TMP/.chump-locks" \
+CHUMP_AMBIENT_LOG="$DEC_TMP/.chump-locks/ambient.jsonl" \
+CHUMP_BIN="$DEC_TMP/bin/chump" \
+CHUMP_DECOMPOSE_CALL_LOG="$DEC_TMP/calls.log" \
+bash "$DECOMPOSE_ORGAN" --apply
+
+call_lines="$(wc -l < "$DEC_TMP/calls.log" | tr -d ' ')"
+[[ "$call_lines" -eq 1 ]] || fail "expected 1 decompose invocation across 2 ticks, got $call_lines"
+pass "decompose organ runs chump gap decompose --apply at most once per gap"
+
+# ── 9. RESILIENT-1702: 4GB memory constraints for duty-officer and architect ─
+for unit_file in \
+  "$REPO_ROOT/scripts/dispatch/chump-duty-officer.service" \
+  "$REPO_ROOT/scripts/dispatch/chump-architect-tick.service"; do
+  bname="$(basename "$unit_file")"
+  if grep -q '^MemoryHigh=3072M$' "$unit_file" \
+    && grep -q '^MemoryMax=3584M$' "$unit_file" \
+    && grep -q '^Environment=CHUMP_ADMISSION_MAX_CONCURRENT=1$' "$unit_file"; then
+    pass "$bname declares MemoryHigh=3072M, MemoryMax=3584M (<4GB with headroom), and CHUMP_ADMISSION_MAX_CONCURRENT=1"
+  else
+    fail "$bname missing 4GB memory constraints"
+  fi
+done
+
+if grep -q 'CHUMP_DUTY_OFFICER_MAX_TOKENS' "$REPO_ROOT/scripts/coord/duty-officer-loop.sh" \
+  && grep -q 'CHUMP_DUTY_OFFICER_MAX_TURNS' "$REPO_ROOT/scripts/coord/duty-officer-loop.sh" \
+  && grep -q -- '--max-turns' "$REPO_ROOT/scripts/coord/duty-officer-loop.sh" \
+  && grep -q -- '--max-budget-usd' "$REPO_ROOT/scripts/coord/duty-officer-loop.sh"; then
+  pass "duty-officer-loop.sh bounds model calls (tokens, turns, budget)"
+else
+  fail "duty-officer-loop.sh missing model call bounds"
+fi
+
+if grep -qiE 'sqlite3.*(INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP)[[:space:]]' \
+  "$REPO_ROOT/scripts/coord/duty-officer-loop.sh" \
+  "$REPO_ROOT/scripts/dispatch/architect-ro.sh" \
+  "$REPO_ROOT/scripts/dispatch/architect-tick.sh"; then
+  fail "found store write SQL in duty-officer-loop.sh or architect scripts"
+else
+  pass "zero canonical store write SQL operations in duty-officer-loop.sh, architect-ro.sh, and architect-tick.sh"
+fi
+
+if [[ -f "$REPO_ROOT/docs/operations/SLIM_4GB_THINKING_ORGANS.md" ]] \
+  && grep -q 'MemoryMax' "$REPO_ROOT/docs/operations/SLIM_4GB_THINKING_ORGANS.md" \
+  && grep -q 'Tuning Recommendations' "$REPO_ROOT/docs/operations/SLIM_4GB_THINKING_ORGANS.md"; then
+  pass "docs/operations/SLIM_4GB_THINKING_ORGANS.md records profiling results and tuning recommendations"
+else
+  fail "docs/operations/SLIM_4GB_THINKING_ORGANS.md missing or incomplete"
+fi
+
 echo "ALL PASS"

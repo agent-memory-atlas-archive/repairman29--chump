@@ -2082,6 +2082,192 @@ check_installed_unit_host_literals() {
     fi
 }
 
+# ── Check 24 (RESILIENT-1694): organ-manifest home field & home-node placement ──
+# Verifies:
+#   1. Every organ entry in organ-manifest.txt (and organ-manifest.yaml when
+#      present) has a valid `home` field set (cuphead|slim|mac|closetjunky|any).
+#   2. Every active organ is running on its declared `home` node (returns RED /
+#      fail when any organ runs on a node different from its `home`, GREEN /
+#      pass when all organs are on their home nodes).
+check_organ_home_placement() {
+    local manifest="${CHUMP_ORGAN_MANIFEST:-$REPO_ROOT/scripts/ops/organ-manifest.txt}"
+    local yaml_manifest="${CHUMP_ORGAN_MANIFEST_YAML:-$REPO_ROOT/scripts/ops/organ-manifest.yaml}"
+    if [[ ! -f "$manifest" ]]; then
+        register_check "organ-home-placement" "fail" \
+            "organ-manifest not found at $manifest (RESILIENT-1694)" \
+            "restore scripts/ops/organ-manifest.txt with home=<node> on every entry"
+        return
+    fi
+
+    local -A unit_home=()
+    local -a enabled_units=()
+    local missing_home=()
+    local total_organs=0
+    local raw_line line state unit rest tok home val
+
+    while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+        line="${raw_line%%#*}"
+        read -r state unit rest <<<"$line"
+        [[ -z "${state:-}" ]] && continue
+        case "$state" in
+            enabled|paging_off|retired) ;;
+            *) continue ;;
+        esac
+        total_organs=$(( total_organs + 1 ))
+        home=""
+        for tok in $rest; do
+            case "$tok" in
+                home=*) home="${tok#home=}" ;;
+            esac
+        done
+        if [[ -z "$home" ]]; then
+            missing_home+=("$unit(missing home=)")
+            continue
+        fi
+        local valid_home=1
+        local IFS_SAVE="$IFS"
+        IFS=','
+        for val in $home; do
+            case "$val" in
+                cuphead|slim|mac|closetjunky|any) ;;
+                *) valid_home=0 ;;
+            esac
+        done
+        IFS="$IFS_SAVE"
+        if [[ "$valid_home" -eq 0 ]]; then
+            missing_home+=("$unit(invalid home=$home)")
+            continue
+        fi
+        unit_home["$unit"]="$home"
+        local base="${unit%.timer}"; base="${base%.service}"
+        unit_home["$base"]="$home"
+        unit_home["${base#chump-}"]="$home"
+        [[ "$state" == "enabled" ]] && enabled_units+=("$unit")
+    done < "$manifest"
+
+    if [[ -f "$yaml_manifest" ]] && command -v python3 >/dev/null 2>&1; then
+        local yaml_err=""
+        yaml_err="$(python3 - "$yaml_manifest" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+if "home:" not in text or "\norgans:\n" not in text:
+    print("schema_missing_home")
+    sys.exit(0)
+organs_block = text.split("\norgans:\n", 1)[1]
+units = re.findall(r'^\s*-\s*unit:\s*(\S+)', organs_block, flags=re.M)
+homes = re.findall(r'^\s*home:\s*(\S+)', organs_block, flags=re.M)
+if not units or len(homes) < len(units):
+    print(f"yaml_incomplete_home({len(homes)}/{len(units)})")
+    sys.exit(0)
+valid = {"cuphead", "slim", "mac", "closetjunky", "any"}
+for u, h in zip(units, homes):
+    h_clean = h.strip('"\'')
+    if not all(part in valid for part in h_clean.split(",")):
+        print(f"{u}(invalid yaml home={h_clean})")
+        sys.exit(0)
+PY
+)"
+        if [[ -n "$yaml_err" ]]; then
+            missing_home+=("$yaml_err")
+        fi
+    fi
+
+    if [[ "$total_organs" -eq 0 ]]; then
+        register_check "organ-home-placement" "fail" \
+            "organ-manifest at $manifest contains zero organ entries" \
+            "populate scripts/ops/organ-manifest.txt"
+        return
+    fi
+
+    if [[ ${#missing_home[@]} -gt 0 ]]; then
+        register_check "organ-home-placement" "fail" \
+            "organ-manifest entry missing or invalid home field (RED): ${missing_home[*]}" \
+            "set home=cuphead|slim|mac|closetjunky|any on every organ in organ-manifest.txt and organ-manifest.yaml"
+        return
+    fi
+
+    local misplaced=()
+    local default_node="${CHUMP_DOCTOR_NODE_NAME:-}"
+    if [[ -z "$default_node" ]]; then
+        local hn
+        hn="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo "")"
+        case "$hn" in
+            cuphead|slim|mac|closetjunky) default_node="$hn" ;;
+        esac
+    fi
+
+    if [[ -n "${CHUMP_DOCTOR_ACTIVE_ORGANS:-}" ]]; then
+        local item active_unit active_node expected_home matched
+        local spec="${CHUMP_DOCTOR_ACTIVE_ORGANS//,/ }"
+        for item in $spec; do
+            [[ -z "$item" ]] && continue
+            if [[ "$item" == *:* ]]; then
+                active_unit="${item%%:*}"
+                active_node="${item#*:}"
+            else
+                active_unit="$item"
+                active_node="${default_node:-unknown}"
+            fi
+            expected_home="${unit_home[$active_unit]:-}"
+            if [[ -z "$expected_home" ]]; then
+                misplaced+=("${active_unit}@${active_node}(unregistered_in_manifest)")
+                continue
+            fi
+            if [[ "$expected_home" != "any" ]]; then
+                matched=0
+                local hpart
+                local IFS_SAVE="$IFS"
+                IFS=','
+                for hpart in $expected_home; do
+                    if [[ "$hpart" == "any" || "$hpart" == "$active_node" ]]; then
+                        matched=1
+                        break
+                    fi
+                done
+                IFS="$IFS_SAVE"
+                if [[ "$matched" -eq 0 ]]; then
+                    misplaced+=("${active_unit}@${active_node}(expected home=${expected_home})")
+                fi
+            fi
+        done
+    elif [[ -n "$default_node" ]]; then
+        local systemctl_bin="${CHUMP_ORGAN_RECONCILE_SYSTEMCTL_BIN:-${SYSTEMCTL_BIN:-systemctl}}"
+        if command -v "$systemctl_bin" >/dev/null 2>&1; then
+            local u expected_home matched hpart
+            for u in "${enabled_units[@]}"; do
+                if "$systemctl_bin" is-active --quiet "$u" 2>/dev/null; then
+                    expected_home="${unit_home[$u]:-}"
+                    if [[ -n "$expected_home" && "$expected_home" != "any" ]]; then
+                        matched=0
+                        local IFS_SAVE="$IFS"
+                        IFS=','
+                        for hpart in $expected_home; do
+                            if [[ "$hpart" == "any" || "$hpart" == "$default_node" ]]; then
+                                matched=1
+                                break
+                            fi
+                        done
+                        IFS="$IFS_SAVE"
+                        if [[ "$matched" -eq 0 ]]; then
+                            misplaced+=("${u}@${default_node}(expected home=${expected_home})")
+                        fi
+                    fi
+                fi
+            done
+        fi
+    fi
+
+    if [[ ${#misplaced[@]} -gt 0 ]]; then
+        register_check "organ-home-placement" "fail" \
+            "RED: organ(s) running on node different from declared home: ${misplaced[*]}" \
+            "stop misplaced organ on foreign node and converge declared home node via organ-reconcile.sh --apply"
+    else
+        register_check "organ-home-placement" "pass" \
+            "GREEN: all ${total_organs} organs have home field set and all active organs are on their home nodes" ""
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -2118,6 +2304,7 @@ check_single_store
 check_cargo_storage_fixed_disk
 check_cargo_nextest
 check_installed_unit_host_literals
+check_organ_home_placement
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

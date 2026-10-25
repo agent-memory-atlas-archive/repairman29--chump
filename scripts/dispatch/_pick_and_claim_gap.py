@@ -233,14 +233,26 @@ def _gh_open_pr_lookup(repo_root: str, gap_id: str):
 
 
 def _emit_ambient(event: dict) -> None:
-    """Best-effort append of one event to AMBIENT_JSONL (never raises)."""
-    path = os.environ.get("AMBIENT_JSONL", ".chump-locks/ambient.jsonl")
+    """Best-effort append of one event to AMBIENT_JSONL / CHUMP_AMBIENT_LOG (never raises)."""
+    paths = []
+    for env_key in ("AMBIENT_JSONL", "CHUMP_AMBIENT_LOG"):
+        val = os.environ.get(env_key, "").strip()
+        if val and val not in paths:
+            paths.append(val)
+    if not paths:
+        try:
+            paths.append(str(_resolve_lock_dir() / "ambient.jsonl"))
+        except Exception:
+            paths.append(".chump-locks/ambient.jsonl")
     event.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-    try:
-        with open(path, "a") as f:
-            f.write(json.dumps(event, separators=(",", ":")) + "\n")
-    except Exception:
-        pass
+    line = json.dumps(event, separators=(",", ":")) + "\n"
+    for path in paths:
+        try:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "a") as f:
+                f.write(line)
+        except Exception:
+            pass
 
 
 def _emit_skipped_open_pr(gaps: list, source: str) -> None:
@@ -254,6 +266,22 @@ def _emit_skipped_open_pr(gaps: list, source: str) -> None:
             "gaps": sorted(set(gaps)),
             "count": len(set(gaps)),
             "source": source,
+            "worker": os.environ.get("WORKER_ID", os.environ.get("AGENT_ID", "")),
+        }
+    )
+
+
+def _emit_skipped_needs_decompose(gap_id: str, effort: str, priority: str) -> None:
+    """RESILIENT-1707: emit kind=gap_skipped_needs_decompose when the picker
+    skips an effort=l (or xl/large) gap instead of failing silently."""
+    if not gap_id:
+        return
+    _emit_ambient(
+        {"kind":"gap_skipped_needs_decompose",  # literal kind at the emit site (EVENT_REGISTRY scanner)
+            "event": "gap_skipped_needs_decompose",
+            "gap_id": gap_id,
+            "effort": effort,
+            "priority": priority,
             "worker": os.environ.get("WORKER_ID", os.environ.get("AGENT_ID", "")),
         }
     )
@@ -1326,11 +1354,15 @@ def main() -> int:
             continue
         e = (g.get("effort") or "").lower()
         if effort_filter and e not in effort_filter:
+            if e in ("l", "xl", "large"):
+                _emit_skipped_needs_decompose(gid, e, p)
             reasons["effort_filter"] += 1
             continue
         # META-044: META-* domain is only fleet-pickable when effort=xs|s.
         # Larger efforts require human judgment on scope and strategy.
         if d == "meta" and e not in ("xs", "s"):
+            if e in ("l", "xl", "large"):
+                _emit_skipped_needs_decompose(gid, e, p)
             reasons["meta_large_effort"] += 1
             continue
         # INFRA-418: skip gaps that require a different model tier.
@@ -1357,9 +1389,13 @@ def main() -> int:
         # RESILIENT-612: deepseek tier gate. flash takes xs/s, pro takes m,
         # l/xl are refused by both (they go to decompose first).
         if worker_model == "flash" and e in ("m", "l", "xl") and not _is_p0_mission:
+            if e in ("l", "xl", "large"):
+                _emit_skipped_needs_decompose(gid, e, p)
             reasons["model_effort_gate"] += 1
             continue
         if worker_model == "pro" and e in ("xs", "s", "l", "xl") and not _is_p0_mission:
+            if e in ("l", "xl", "large"):
+                _emit_skipped_needs_decompose(gid, e, p)
             reasons["model_effort_gate"] += 1
             continue
         # RESILIENT-1138: haiku/sonnet effort gates retired; only deepseek tiers gate.

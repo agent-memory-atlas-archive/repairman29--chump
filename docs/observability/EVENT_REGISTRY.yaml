@@ -14932,4 +14932,43 @@ events:
     consumers: [ambient, fleet-brief, ops-audit]
     fields_required: [ts, kind, elapsed_s, budget_s]
 
+  - kind: orchestrator_worker_unit_missing
+    status: active
+    effect_metric: resilient
+    emitter: scripts/ops/node-orchestrator.sh (RESILIENT-1708)
+    emitter_paths: [scripts/ops/node-orchestrator.sh]
+    trigger: >
+      Emitted once per missing unit (deduped via a stamp file
+      .chump-locks/orchestrator_worker_unit_missing_<unit>.stamp) when
+      node-orchestrator.sh attempts to scale up workers on a host where the
+      configured CHUMP_ORCH_WORKER_UNIT does not exist in systemd, preventing an
+      infinite SCALE 0->1 retry loop.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, unit, host]
+    expected_volume: "0 on a properly provisioned node; at most 1 per missing worker unit"
+
+  - kind: gap_decomposed
+    status: active
+    effect_metric: self
+    emitter: scripts/coord/gap-decompose-organ.sh (RESILIENT-1707)
+    emitter_paths: [scripts/coord/gap-decompose-organ.sh]
+    trigger: >
+      Emitted by gap-decompose-organ.sh when an open P0/P1 effort=l or umbrella
+      gap is decomposed into child slices via chump gap decompose --apply and
+      the parent is demoted per the decompose contract.
+    consumers: [scripts/coord/fleet-doctor-strict.sh, scripts/ops/vital-signs.sh]
+    fields_required: [ts, kind, gap_id, child_ids]
+
+  - kind: gap_skipped_needs_decompose
+    status: active
+    effect_metric: self
+    emitter: scripts/dispatch/_pick_and_claim_gap.py (RESILIENT-1707)
+    emitter_paths: [scripts/dispatch/_pick_and_claim_gap.py]
+    trigger: >
+      Emitted by _pick_and_claim_gap.py whenever the picker skips an effort=l
+      (or xl/large) gap instead of failing silently, surfacing that the gap
+      requires decomposition into executable child slices.
+    consumers: [scripts/coord/gap-decompose-organ.sh, scripts/ops/vital-signs.sh]
+    fields_required: [ts, kind, gap_id]
+
   # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──

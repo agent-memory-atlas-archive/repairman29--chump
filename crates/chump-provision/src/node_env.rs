@@ -33,6 +33,23 @@ pub const TEAM_STORE_KEYS: &[&str] = &[
     "CHUMP_TEAM_API_KEY",
 ];
 
+/// Default systemd worker unit prefix for `node-orchestrator.sh` (RESILIENT-1708).
+pub const DEFAULT_ORCH_WORKER_UNIT: &str = "chump-worker@";
+
+/// Legacy hardcoded CJ worker unit prefix that must never be defaulted on other nodes.
+pub const LEGACY_CJ_WORKER_UNIT: &str = "chump-cj-worker";
+
+/// Resolve the per-node orchestrator worker unit for `CHUMP_ORCH_WORKER_UNIT`:
+/// uses the node profile's configured worker unit when non-empty and not the
+/// legacy `chump-cj-worker` CJ-ism, otherwise defaults to `chump-worker@`
+/// (RESILIENT-1708).
+pub fn resolve_orch_worker_unit(profile_unit: Option<&str>) -> &str {
+    match profile_unit.map(str::trim).filter(|u| !u.is_empty()) {
+        Some(u) if !u.starts_with(LEGACY_CJ_WORKER_UNIT) => u,
+        _ => DEFAULT_ORCH_WORKER_UNIT,
+    }
+}
+
 /// Returns `true` if `key` is one of the remote team-store configuration keys
 /// that require a live listener check before emission into `node.env`.
 pub fn is_team_store_key(key: &str) -> bool {
@@ -98,9 +115,12 @@ pub fn render_line(key: &str, value: &str) -> String {
 /// Render a full `node.env` document from `(key, value)` pairs in bare `KEY=VALUE`
 /// form (no `export ` prefix). Team-store keys (`CHUMP_STORE_BACKEND`,
 /// `CHUMP_TEAM_URL`, `CHUMP_TEAM_API_KEY`) are only emitted when `store_listening`
-/// is `true` (RESILIENT-1684 / INFRA-8104).
+/// is `true` (RESILIENT-1684 / INFRA-8104). Always emits `CHUMP_ORCH_WORKER_UNIT=<unit>`
+/// using the node profile's worker unit or defaulting to `chump-worker@`, never
+/// a hardcoded `chump-cj-worker` default (RESILIENT-1708).
 pub fn render_node_env(pairs: &[(&str, &str)], store_listening: bool) -> String {
     let mut out = String::new();
+    let mut saw_worker_unit = false;
     for &(raw_key, val) in pairs {
         let key = raw_key
             .trim()
@@ -115,7 +135,21 @@ pub fn render_node_env(pairs: &[(&str, &str)], store_listening: bool) -> String 
         if is_team_store_key(key) && !store_listening {
             continue;
         }
+        if key == "CHUMP_ORCH_WORKER_UNIT" {
+            saw_worker_unit = true;
+            let unit = resolve_orch_worker_unit(Some(val));
+            out.push_str(&render_line(key, unit));
+            out.push('\n');
+            continue;
+        }
         out.push_str(&render_line(key, val));
+        out.push('\n');
+    }
+    if !saw_worker_unit {
+        out.push_str(&render_line(
+            "CHUMP_ORCH_WORKER_UNIT",
+            DEFAULT_ORCH_WORKER_UNIT,
+        ));
         out.push('\n');
     }
     out
@@ -126,6 +160,8 @@ pub fn render_node_env(pairs: &[(&str, &str)], store_listening: bool) -> String 
 /// - Preserves comments and blank lines.
 /// - Drops `CHUMP_STORE_BACKEND`, `CHUMP_TEAM_URL`, and `CHUMP_TEAM_API_KEY`
 ///   assignments when `store_listening` is `false` so they are never flipped blind.
+/// - Rewrites any legacy `CHUMP_ORCH_WORKER_UNIT=chump-cj-worker` to `chump-worker@`
+///   (RESILIENT-1708).
 pub fn sanitize_node_env(contents: &str, store_listening: bool) -> String {
     let mut out = String::new();
     for line in contents.lines() {
@@ -149,7 +185,12 @@ pub fn sanitize_node_env(contents: &str, store_listening: bool) -> String {
             if is_team_store_key(key) && !store_listening {
                 continue;
             }
-            let val = strip_matching_quotes(v.trim());
+            let raw_val = strip_matching_quotes(v.trim());
+            let val = if key == "CHUMP_ORCH_WORKER_UNIT" {
+                resolve_orch_worker_unit(Some(raw_val))
+            } else {
+                raw_val
+            };
             out.push_str(&render_line(key, val));
             out.push('\n');
         } else {
@@ -411,5 +452,40 @@ CHUMP_MAX_CONCURRENT_CARGO_JOBS=2
         // legal bare assignment, not an `export ` statement.
         let contents = "exported_at=123\nexport_count=4\n";
         assert!(export_violations(contents).is_empty());
+    }
+
+    #[test]
+    fn render_node_env_emits_orch_worker_unit_and_rejects_cj_ism_resilient_1708() {
+        // 1. Default when omitted -> chump-worker@.
+        let default_rendered = render_node_env(&[("CHUMP_NODE_ROLE", "muscle")], false);
+        let env_default = parse_systemd_env_file(&default_rendered);
+        assert_eq!(
+            env_default
+                .get("CHUMP_ORCH_WORKER_UNIT")
+                .map(String::as_str),
+            Some("chump-worker@")
+        );
+
+        // 2. Explicit profile unit (e.g. cuphead's chump-node1-worker) is preserved.
+        let custom_rendered = render_node_env(
+            &[
+                ("CHUMP_NODE_ROLE", "muscle"),
+                ("CHUMP_ORCH_WORKER_UNIT", "chump-node1-worker"),
+            ],
+            false,
+        );
+        let env_custom = parse_systemd_env_file(&custom_rendered);
+        assert_eq!(
+            env_custom.get("CHUMP_ORCH_WORKER_UNIT").map(String::as_str),
+            Some("chump-node1-worker")
+        );
+
+        // 3. Legacy CJ-ism `chump-cj-worker` is replaced with `chump-worker@`.
+        let cj_rendered = render_node_env(&[("CHUMP_ORCH_WORKER_UNIT", "chump-cj-worker")], false);
+        let env_cj = parse_systemd_env_file(&cj_rendered);
+        assert_eq!(
+            env_cj.get("CHUMP_ORCH_WORKER_UNIT").map(String::as_str),
+            Some("chump-worker@")
+        );
     }
 }

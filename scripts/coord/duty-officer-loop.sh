@@ -53,14 +53,19 @@
 #   CHUMP_DUTY_OFFICER_SYSTEMCTL_CMD     systemctl invocation (default "systemctl --user";
 #                                         override for tests / non-systemd environments)
 #
-# judgment-tick (RESILIENT-1497) env overrides:
-#   CHUMP_PEER_MODEL              model passed to `claude -p` (default "opus")
+# judgment-tick (RESILIENT-1497 / RESILIENT-1702) env overrides:
+#   CHUMP_PEER_MODEL              model passed to `claude -p` (default "opus"; allowlist opus|sonnet|haiku)
 #   CHUMP_PEER_EXECUTE            1 = actually invoke `claude -p` (default 0 = dry-run
 #                                  log-only, so CI/local runs never spend real budget)
 #   CHUMP_PEER_BUDGET_USD         per-tick cost cap (default 1.00)
 #   CHUMP_PEER_TIMEOUT_S          wall-clock bound per tick (default 300)
+#   CHUMP_DUTY_OFFICER_MAX_TOKENS max output tokens per model call (default 4096; prevents unbounded Sonnet/Opus inference on 4GB slim)
+#   CHUMP_DUTY_OFFICER_MAX_TURNS  max turns per judgment tick (default 6)
 #   CHUMP_PEER_CLAUDE_BIN         override the `claude` binary (tests stub this)
 #   CHUMP_PEER_MEMORY_DB          override chump_memory.db path (see lib/peer-memory.sh)
+#
+# 4GB memory constraint (RESILIENT-1702): runs under MemoryHigh=3072M /
+# MemoryMax=3584M on slim with zero canonical store (state.db) write operations.
 #
 # Rust-First-Bypass: bash glue over existing ambient/registry/notify primitives,
 #   mirrors the observability/fresh-eyes loop shape, no state mutation beyond
@@ -333,7 +338,17 @@ cmd_judgment_tick() {
     local execute="${CHUMP_PEER_EXECUTE:-0}"
     local budget="${CHUMP_PEER_BUDGET_USD:-1.00}"
     local timeout_s="${CHUMP_PEER_TIMEOUT_S:-300}"
+    local max_tokens="${CHUMP_DUTY_OFFICER_MAX_TOKENS:-4096}"
+    local max_turns="${CHUMP_DUTY_OFFICER_MAX_TURNS:-6}"
     local claude_bin="${CHUMP_PEER_CLAUDE_BIN:-claude}"
+
+    # RESILIENT-1702: bound model selection and token/turn budget to prevent
+    # unbounded Sonnet/Opus inference on 4GB slim.
+    case "$model" in
+        opus|sonnet|haiku|claude-*) ;;
+        *) model="sonnet" ;;
+    esac
+    export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$max_tokens"
 
     # shellcheck disable=SC1091
     source "$REPO_ROOT/scripts/coord/lib/peer-memory.sh" 2>/dev/null || true
@@ -402,6 +417,7 @@ one-line summary of what you judged + did (or chose not to do), via: \
             --allowedTools "${allowed[@]}" \
             --disallowedTools "${denied[@]}" \
             --permission-mode dontAsk \
+            --max-turns "$max_turns" \
             --max-budget-usd "$budget" \
             --model "$model" 2>&1)" || rc=$?
     else
@@ -410,6 +426,7 @@ one-line summary of what you judged + did (or chose not to do), via: \
             --allowedTools "${allowed[@]}" \
             --disallowedTools "${denied[@]}" \
             --permission-mode dontAsk \
+            --max-turns "$max_turns" \
             --max-budget-usd "$budget" \
             --model "$model" 2>&1)" || rc=$?
     fi

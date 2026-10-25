@@ -27,6 +27,12 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# RESILIENT-1702 (RESILIENT-1691 slice): 4GB memory constraint for thinking
+# organs (3.7GB usable RAM on slim). MemoryHigh=3072M and MemoryMax=3584M
+# bound the cgroup below 4GB with >400MB kernel/OS headroom;
+# CHUMP_ADMISSION_MAX_CONCURRENT=1 prevents concurrent heavy subprocesses.
+MemoryHigh=3072M
+MemoryMax=3584M
 # Hard ceiling on one tick: the agent run is capped at 1500 s inside the script
 # (git fetch 120 s, reaper 600 s, lease 60 s each, all under timeout(1)), so a
 # hung step can never pin the oneshot and block the next timer fire.
@@ -35,4 +41,5 @@ TimeoutStartSec=1800
 # source it in a shell rather than systemd EnvironmentFile which can't parse
 # `export KEY=val`). HOME is set so the user-scope manager resolves ~/.chump.
 Environment=HOME=__HOME__
+Environment=CHUMP_ADMISSION_MAX_CONCURRENT=1
 ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec __REPO_ROOT__/scripts/dispatch/architect-tick.sh'

@@ -24,7 +24,7 @@ TMP="$(mktemp -d)"
 # W-013 immunization (RESILIENT-024): unset workflow-injected env so this
 # tests own $TMP fixtures are not hijacked by CI workflow CHUMP_LOCK_DIR.
 unset CHUMP_REPO CHUMP_LOCK_DIR
-trap 'rm -rf "$TMP"; [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true' EXIT
+trap 'rm -rf "$TMP"; [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true; [[ -n "${STORE_SERVER_PID:-}" ]] && kill "$STORE_SERVER_PID" 2>/dev/null || true' EXIT
 
 ok()   { printf '\033[0;32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[0;31mFAIL\033[0m %s\n' "$*"; exit 1; }
@@ -277,4 +277,72 @@ assert qa.get("status") != "green", f"ci_qa_score.status must not be green when 
 EOF
 ok "INFRA-8179: /api/dashboard-summary degrades ci_qa and landing below 100% green when PRs are wedged"
 
-ok "ALL INFRA-1197 + INFRA-8179 gap-queue/debt/dashboard-summary checks passed"
+# ── Test 13 (RESILIENT-1700): store-over-API (/api/store/gaps, /api/store/gaps/:id, store-api-client.sh) ──
+sqlite3 "$DB" "ALTER TABLE gaps ADD COLUMN parent_id TEXT DEFAULT NULL;" 2>/dev/null || true
+sqlite3 "$DB" "UPDATE gaps SET parent_id = 'RESILIENT-1691' WHERE id = 'INFRA-AAA';"
+
+_target_dir="$(resolve_cargo_target_dir "$REPO_ROOT")"
+FLEET_SERVER_BIN=""
+if [[ -x "$_target_dir/debug/chump-fleet-server" && -x "$_target_dir/release/chump-fleet-server" ]]; then
+    if [[ "$_target_dir/debug/chump-fleet-server" -nt "$_target_dir/release/chump-fleet-server" ]]; then
+        FLEET_SERVER_BIN="$_target_dir/debug/chump-fleet-server"
+    else
+        FLEET_SERVER_BIN="$_target_dir/release/chump-fleet-server"
+    fi
+elif [[ -x "$_target_dir/debug/chump-fleet-server" ]]; then
+    FLEET_SERVER_BIN="$_target_dir/debug/chump-fleet-server"
+elif [[ -x "$_target_dir/release/chump-fleet-server" ]]; then
+    FLEET_SERVER_BIN="$_target_dir/release/chump-fleet-server"
+elif [[ -x "$(dirname "$CHUMP_BIN")/chump-fleet-server" ]]; then
+    FLEET_SERVER_BIN="$(dirname "$CHUMP_BIN")/chump-fleet-server"
+fi
+if [[ ! -x "$FLEET_SERVER_BIN" ]]; then
+    (cd "$REPO_ROOT" && cargo build -p chump-fleet-server --bin chump-fleet-server 2>&1 | tail -3) || true
+    if [[ -x "$_target_dir/debug/chump-fleet-server" ]]; then
+        FLEET_SERVER_BIN="$_target_dir/debug/chump-fleet-server"
+    elif [[ -x "$(dirname "$CHUMP_BIN")/chump-fleet-server" ]]; then
+        FLEET_SERVER_BIN="$(dirname "$CHUMP_BIN")/chump-fleet-server"
+    fi
+fi
+[[ -x "$FLEET_SERVER_BIN" ]] || fail "no chump-fleet-server binary found in $_target_dir"
+
+STORE_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+STORE_LOG="$TMP/fleet-server.log"
+CHUMP_REPO_ROOT="$TMP" \
+CHUMP_STATE_DB="$DB" \
+CHUMP_FLEET_DB="$TMP/fleet_events.db" \
+    "$FLEET_SERVER_BIN" --port "$STORE_PORT" >"$STORE_LOG" 2>&1 &
+STORE_SERVER_PID=$!
+
+for _ in $(seq 1 50); do
+    sleep 0.2
+    if curl -sf "http://127.0.0.1:$STORE_PORT/healthz" >/dev/null 2>&1; then
+        break
+    fi
+done
+curl -sf "http://127.0.0.1:$STORE_PORT/healthz" >/dev/null \
+    || fail "chump-fleet-server failed to start (log: $(cat "$STORE_LOG"))"
+
+SQLITE_CANONICAL="$(sqlite3 -json "$DB" "SELECT id, title, description, domain, priority, status, effort, skills_required, acceptance_criteria, depends_on, parent_id, notes, closed_pr, closed_date, created_at FROM gaps ORDER BY id ASC;")"
+HTTP_CANONICAL="$(curl -fsSL "http://127.0.0.1:$STORE_PORT/api/store/gaps?order=id")"
+[[ "$HTTP_CANONICAL" == "$SQLITE_CANONICAL" ]] \
+    || fail "RESILIENT-1700: GET /api/store/gaps?order=id did not match sqlite3 -json byte-for-byte"
+ok "RESILIENT-1700: GET /api/store/gaps?order=id matches local SQLite gaps table byte-for-byte"
+
+SINGLE_HTTP="$(curl -fsSL "http://127.0.0.1:$STORE_PORT/api/store/gaps/INFRA-AAA")"
+SINGLE_SQLITE="$(python3 -c 'import json, sys; rows = json.loads(sys.argv[1]); print(json.dumps(next(r for r in rows if r["id"] == "INFRA-AAA"), separators=(",", ":")))' "$SQLITE_CANONICAL")"
+[[ "$SINGLE_HTTP" == "$SINGLE_SQLITE" ]] \
+    || fail "RESILIENT-1700: GET /api/store/gaps/INFRA-AAA mismatch: got $SINGLE_HTTP, expected $SINGLE_SQLITE"
+ok "RESILIENT-1700: GET /api/store/gaps/:id returns the exact canonical gap record"
+
+# shellcheck source=../lib/store-api-client.sh
+source "$REPO_ROOT/scripts/lib/store-api-client.sh"
+CLIENT_HTTP="$(CHUMP_STORE_API_URL="http://127.0.0.1:$STORE_PORT" CHUMP_STATE_DB="$DB" chump_store_query_gaps --order id)"
+CLIENT_LOCAL="$(unset CHUMP_STORE_API_URL; CHUMP_STATE_DB="$DB" chump_store_query_gaps --order id)"
+[[ "$CLIENT_HTTP" == "$SQLITE_CANONICAL" ]] \
+    || fail "RESILIENT-1700: store-api-client.sh over HTTP did not match canonical SQLite JSON"
+[[ "$CLIENT_HTTP" == "$CLIENT_LOCAL" ]] \
+    || fail "RESILIENT-1700: store-api-client.sh HTTP output differed from local SQLite fallback"
+ok "RESILIENT-1700: scripts/lib/store-api-client.sh fetches identical JSON over HTTP and local SQLite"
+
+ok "ALL INFRA-1197 + INFRA-8179 + RESILIENT-1700 gap-queue/debt/dashboard-summary/store-api checks passed"

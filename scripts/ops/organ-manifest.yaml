@@ -1,0 +1,609 @@
+# scripts/ops/organ-manifest.yaml — RESILIENT-1694 (RESILIENT-1691 slice)
+#
+# Structured YAML companion to scripts/ops/organ-manifest.txt declaring the
+# organ-manifest schema (including mandatory `home` placement field) and
+# per-organ home node declarations verified by fleet-doctor-strict.sh.
+schema_version: 1
+schema:
+  organ_entry:
+    required: [unit, state, role, home]
+    properties:
+      unit:
+        type: string
+      state:
+        type: string
+        enum: [enabled, paging_off, retired]
+      role:
+        type: string
+        enum: [brain, muscle, data, janitor, trust]
+      home:
+        type: string
+        enum: [cuphead, slim, mac, closetjunky, any]
+      run_scope:
+        type: string
+        enum: [user, system, any]
+      platforms:
+        type: string
+organs:
+  - unit: chump-heartbeat-monitor.service
+    state: paging_off
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-sla-scorecard.service
+    state: paging_off
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-board-ceo-briefing.service
+    state: paging_off
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-discord-gateway.service
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-pr-lander.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-ci-flake-rerun.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-pr-approval.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-farmer.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-rot-reaper.timer
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-trunk-recovery-reviver.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-integrator.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-backlog-sync-writer.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-organ-watchdog.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-apex-watchdog.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-process-organ-heal.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-conflict-resolution-consumer.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-outcome-verify-heal-consumer.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-gap-closure-reconcile.timer
+    state: enabled
+    role: janitor
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-gap-close-decomposed.timer
+    state: enabled
+    role: janitor
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-gap-decompose.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: user
+    platforms: "systemd"
+  - unit: chump-board-cycle.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-duty-officer.timer
+    state: enabled
+    role: brain
+    home: slim
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-digest.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: holler.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-cj-worker.service
+    state: enabled
+    role: muscle
+    home: closetjunky
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-cj-disk-monitor.service
+    state: enabled
+    role: janitor
+    home: closetjunky
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-cj-sync.service
+    state: enabled
+    role: data
+    home: closetjunky
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-postgrest.service
+    state: enabled
+    role: data
+    home: closetjunky
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-stale-worktree-reaper.timer
+    state: enabled
+    role: muscle
+    home: any
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-cargo-target-reaper.timer
+    state: enabled
+    role: muscle
+    home: any
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-node-converge.timer
+    state: enabled
+    role: muscle
+    home: any
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-fleet-server.service
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-almanac-liveness.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-jeff-bus-ingest.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-faculty-collector.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-pr-book.timer
+    state: enabled
+    role: trust
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-pr-book-settle.timer
+    state: enabled
+    role: trust
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-self-calibrate.timer
+    state: enabled
+    role: trust
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-race-control.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-organ-deploy.timer
+    state: enabled
+    role: janitor
+    home: cuphead
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-gap-drain.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-next-best-action.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-nba-dispatch.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-cascade-unblock-detector.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-gap-store-single-source-check.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-rca-reflex.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-organ-success-verifier.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-effect-verifier.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-opus-curator.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-self-doctor.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-paramedic.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-conductor.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-github-liaison.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-quartermaster-audit.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-ghost-pr-closer.timer
+    state: enabled
+    role: janitor
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-trunk-sentinel.timer
+    state: enabled
+    role: brain
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-pr-shepherd.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-daemon-activator.timer
+    state: enabled
+    role: janitor
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-main-worktree-drift-detector.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-fleet-recorder.service
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-planner.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-queue-health-monitor.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-stale-branch-reaper.timer
+    state: enabled
+    role: janitor
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-branch-reaper.timer
+    state: enabled
+    role: janitor
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-dup-pr-detector.timer
+    state: enabled
+    role: janitor
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-pr-watch-shepherd.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-distill-pr-skills.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-ci-health-gate.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-auto-deploy.timer
+    state: enabled
+    role: janitor
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-almanac-code-intel.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-coord-assign.service
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-a2a-dead-letter-reaper.timer
+    state: enabled
+    role: janitor
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-decomposition-hint-tracker.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-refresh-model-prices.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-fleet-version-skew-detect.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-mission-grade.timer
+    state: enabled
+    role: data
+    home: mac
+    run_scope: any
+    platforms: "launchd"
+  - unit: chump-node-orchestrator.service
+    state: enabled
+    role: brain
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-worktree-reaper.service
+    state: enabled
+    role: janitor
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-disk-monitor.service
+    state: enabled
+    role: janitor
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-main-health-watchdog.service
+    state: enabled
+    role: brain
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-cargo-sweep-gc.service
+    state: enabled
+    role: janitor
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-shared-target-cache-reaper.service
+    state: enabled
+    role: janitor
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-reviver.service
+    state: enabled
+    role: brain
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-pr-stuck-live-scan.service
+    state: enabled
+    role: brain
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-pr-stuck-cluster-detector.service
+    state: enabled
+    role: brain
+    home: any
+    run_scope: system
+    platforms: "systemd"
+  - unit: chump-armed-pr-rebaser.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-backlog-governor.timer
+    state: enabled
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-plan-priority.timer
+    state: enabled
+    role: data
+    home: cuphead
+    run_scope: any
+    platforms: "systemd,launchd"
+  - unit: chump-pr-auto-rebase.timer
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-pr-auto-rebase.service
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-rot-reaper.service
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-stale-pr-reaper.timer
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-stale-pr-reaper.service
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-auto-arm-sweeper.timer
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-auto-arm-sweeper.service
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-auto-merge-armer.timer
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"
+  - unit: chump-auto-merge-armer.service
+    state: retired
+    role: brain
+    home: cuphead
+    run_scope: any
+    platforms: "systemd"

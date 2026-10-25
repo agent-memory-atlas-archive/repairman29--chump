@@ -1,0 +1,17 @@
+# chump-gap-decompose.timer — RESILIENT-1707 (RESILIENT-1691 slice)
+#
+# Fires chump-gap-decompose.service every 15 minutes at user scope on cuphead
+# so open P0/P1 effort=l / umbrella gaps decompose into executable slices
+# within one tick instead of being silently skipped by the picker.
+[Unit]
+Description=Timer for Chump auto-decompose organ (RESILIENT-1707)
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+RandomizedDelaySec=30sec
+Persistent=true
+Unit=chump-gap-decompose.service
+
+[Install]
+WantedBy=timers.target

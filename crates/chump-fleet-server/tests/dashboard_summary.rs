@@ -23,7 +23,12 @@ use chump_fleet_server::{db::FleetStore, routes};
 // ── fixture helpers ───────────────────────────────────────────────────────────
 
 fn tempdir(suffix: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("chump-test-dashboard-{}", suffix));
+    let p = std::env::temp_dir().join(format!(
+        "chump-test-dashboard-{}-{}",
+        std::process::id(),
+        suffix
+    ));
+    let _ = fs::remove_dir_all(&p);
     fs::create_dir_all(&p).unwrap();
     p
 }

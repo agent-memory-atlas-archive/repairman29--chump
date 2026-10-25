@@ -29,13 +29,23 @@ REPO="${CHUMP_REPO_ROOT:-$HOME/Projects/chump}"
 INV="$STATE_DIR/resource-inventory.json"
 INTERVAL="${CHUMP_ORCH_INTERVAL:-120}"
 AUTOPLACE="${CHUMP_ORCH_AUTOPLACE:-0}"          # 0 = sense+recommend only; 1 = graceful auto-relocate
-# INFRA-8639: resolve worker unit prefix from CHUMP_ORCH_WORKER_UNIT,
-# organ-manifest.txt, or chump-worker@ (with chump-node1-worker.service fallback)
-# instead of hardcoded chump-cj-worker{N}.
+# INFRA-8639 / RESILIENT-1708: resolve worker unit prefix from
+# CHUMP_ORCH_WORKER_UNIT (env or ~/.chump/node.env), organ-manifest.txt, or
+# chump-worker@ (with chump-node1-worker.service fallback), never a hardcoded
+# chump-cj-worker{N} default.
 _resolve_worker_unit() {
-  if [ -n "${CHUMP_ORCH_WORKER_UNIT:-}" ]; then
+  if [ -n "${CHUMP_ORCH_WORKER_UNIT:-}" ] && [ "${CHUMP_ORCH_WORKER_UNIT}" != "chump-cj-worker" ]; then
     echo "$CHUMP_ORCH_WORKER_UNIT"
     return
+  fi
+  local node_env="${STATE_DIR}/node.env"
+  if [ -f "$node_env" ]; then
+    local from_node_env
+    from_node_env="$(grep -E '^(export[[:space:]]+)?CHUMP_ORCH_WORKER_UNIT=' "$node_env" 2>/dev/null | tail -1 | sed -E 's/^(export[[:space:]]+)?CHUMP_ORCH_WORKER_UNIT=//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/')"
+    if [ -n "$from_node_env" ] && [ "$from_node_env" != "chump-cj-worker" ]; then
+      echo "$from_node_env"
+      return
+    fi
   fi
   local manifest="${CHUMP_ORCH_MANIFEST:-$REPO/scripts/ops/organ-manifest.txt}"
   if [ -f "$manifest" ] && grep -qE '^enabled[[:space:]]+chump-worker@' "$manifest" 2>/dev/null; then
@@ -245,14 +255,52 @@ heal() {
   done
 }
 
+_worker_unit_exists() {
+  local unit="$1"
+  local template_unit="$unit"
+  if [[ "$unit" == *@*.service ]]; then
+    template_unit="${unit%@*.service}@.service"
+  fi
+  if systemctl cat "$unit" >/dev/null 2>&1 \
+     || systemctl --user cat "$unit" >/dev/null 2>&1 \
+     || systemctl cat "$template_unit" >/dev/null 2>&1 \
+     || systemctl --user cat "$template_unit" >/dev/null 2>&1; then
+    return 0
+  fi
+  local files
+  files="$({ systemctl list-unit-files "$template_unit" "$unit" --no-legend 2>/dev/null; systemctl --user list-unit-files "$template_unit" "$unit" --no-legend 2>/dev/null; } | awk '{print $1}')"
+  if [ -n "$files" ] && { grep -qxF "$template_unit" <<<"$files" || grep -qxF "$unit" <<<"$files"; }; then
+    return 0
+  fi
+  return 1
+}
+
 scale() {
+  WORKER_UNIT="$(_resolve_worker_unit)"
   local max; max=$(effective_max)
   local target=$WORKERS_UP
   # scale up only with idle CPU AND >=1.5G free RAM per new worker AND no CI-queue backpressure —
   # RESILIENT-328: an idle-looking node is still the wrong node to add PR-producing capacity to
   # when the merge pipeline can't drain what's already queued.
   if [ "$LOADPCT" -lt "$SCALE_UP_LOAD" ] && [ "$RAM_AVAIL_MB" -gt 1500 ] && [ "$WORKERS_UP" -lt "$max" ] && ! ci_backpressure; then
-    target=$((WORKERS_UP+1)); log "SCALE: idle (load ${LOADPCT}%/core, RAM ${RAM_AVAIL_MB}MB) -> $WORKERS_UP->$target (max $max)"
+    local next_n=$((WORKERS_UP+1))
+    local next_unit; next_unit="$(_worker_unit_for_slot "$next_n")"
+    local lock_dir="${CHUMP_LOCK_DIR:-$REPO/.chump-locks}"
+    local stamp="${lock_dir}/orchestrator_worker_unit_missing_${WORKER_UNIT}.stamp"
+    if ! _worker_unit_exists "$next_unit"; then
+      if [ ! -f "$stamp" ]; then
+        mkdir -p "$lock_dir" "$(dirname "$AMBIENT")" 2>/dev/null || true
+        local host_name
+        host_name="$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)"
+        printf '{"ts":"%s","kind":"orchestrator_worker_unit_missing","source":"node-orchestrator","unit":"%s","slot_unit":"%s","host":"%s"}\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$WORKER_UNIT" "$next_unit" "$host_name" >> "$AMBIENT"
+        printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$stamp"
+        log "SCALE: worker unit $next_unit ($WORKER_UNIT) missing on $host_name — emitted orchestrator_worker_unit_missing once; skipping scale-up"
+      fi
+      return 0
+    fi
+    rm -f "$stamp" 2>/dev/null || true
+    target=$next_n; log "SCALE: idle (load ${LOADPCT}%/core, RAM ${RAM_AVAIL_MB}MB) -> $WORKERS_UP->$target (max $max)"
   elif [ "$LOADPCT" -lt "$SCALE_UP_LOAD" ] && [ "$RAM_AVAIL_MB" -gt 1500 ] && [ "$WORKERS_UP" -lt "$max" ] && ci_backpressure; then
     log "SCALE: idle capacity available but CI-queue backpressure active -> holding at $WORKERS_UP (not adding PR-producing capacity)"
   elif { [ "$RAM_AVAIL_MB" -lt "$RAM_SHED_MB" ] || [ "$LOADPCT" -gt "$SCALE_DN_LOAD" ]; } && [ "$WORKERS_UP" -gt 1 ]; then
@@ -269,11 +317,11 @@ scale() {
   if [ "$target" -gt "$WORKERS_UP" ]; then
     local n=$((target))
     local unit; unit="$(_worker_unit_for_slot "$n")"
-    { sudo systemctl start "$unit" 2>/dev/null || systemctl --user start "$unit" 2>/dev/null; } && log "SCALE: started $unit" || log "SCALE: $unit not installed (need unit) — cannot scale up past installed workers"
+    { systemctl --user start "$unit" 2>/dev/null || systemctl start "$unit" 2>/dev/null || sudo -n systemctl start "$unit" 2>/dev/null; } && log "SCALE: started $unit" || log "SCALE: $unit not installed (need unit) — cannot scale up past installed workers"
   else
     local n=$((WORKERS_UP))
     local unit; unit="$(_worker_unit_for_slot "$n")"
-    { sudo systemctl stop "$unit" 2>/dev/null || systemctl --user stop "$unit" 2>/dev/null; } && log "SCALE: stopped $unit"
+    { systemctl --user stop "$unit" 2>/dev/null || systemctl stop "$unit" 2>/dev/null || sudo -n systemctl stop "$unit" 2>/dev/null; } && log "SCALE: stopped $unit"
   fi
 }
 
