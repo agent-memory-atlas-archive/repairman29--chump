@@ -26,7 +26,13 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+#[path = "gap_cmd.rs"]
+#[allow(dead_code)]
+pub mod gap_cmd;
 
 /// Result of a single diagnostic check.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,6 +150,8 @@ pub async fn run_all_checks() -> DoctorReport {
     checks.push(check_audit_chain());
     checks.push(check_disk_usage());
     checks.push(check_model_capabilities());
+    checks.push(check_gap_stores());
+    checks.push(check_load_aware_deadman());
     DoctorReport {
         version: env!("CARGO_PKG_VERSION").to_string(),
         checks,
@@ -450,6 +458,293 @@ fn walkdir(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
+/// RESILIENT-1650 (PHASE-R R4): scan candidate gap stores on this node
+/// (`CHUMP_STATE_DB`, `<repo>/.chump/state.db`, `~/.chump/state.db`, and
+/// bounded `$HOME` `.chump/state.db` copies) and classify each as `canonical`,
+/// `non-canonical` (carries `NONCANONICAL` or `CHUMP_STORE_ARCHIVED`), or
+/// `UNMARKED` (extra unmarked live store, which fails the check).
+pub fn classify_node_gap_stores(
+    home: Option<&Path>,
+    repo_root: Option<&Path>,
+    env_state_db: Option<&str>,
+) -> CheckResult {
+    let mut candidate_dbs: Vec<PathBuf> = Vec::new();
+
+    if let Some(raw) = env_state_db.map(str::trim).filter(|s| !s.is_empty()) {
+        candidate_dbs.push(PathBuf::from(raw));
+    }
+    if let Some(repo) = repo_root {
+        candidate_dbs.push(repo.join(".chump").join("state.db"));
+    }
+    if let Some(h) = home {
+        candidate_dbs.push(h.join(".chump").join("state.db"));
+        candidate_dbs.push(h.join("chump").join(".chump").join("state.db"));
+        scan_home_for_chump_stores(h, 0, 4, &mut candidate_dbs);
+    }
+
+    let mut seen_dirs: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut unmarked: Vec<PathBuf> = Vec::new();
+    let mut noncanonical: Vec<String> = Vec::new();
+
+    for db in candidate_dbs {
+        // Ignore symlinks (linked worktrees symlink .chump/state.db to main checkout).
+        if let Ok(meta) = std::fs::symlink_metadata(&db) {
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+        }
+        let Some(parent) = db.parent() else {
+            continue;
+        };
+        let marker = chump_gap_store::GapStore::store_noncanonical_marker(&db);
+        let db_exists = db.is_file();
+        if !db_exists && marker.is_none() {
+            continue;
+        }
+        let canon_dir = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+        if !seen_dirs.insert(canon_dir) {
+            continue;
+        }
+        if let Some(m) = marker {
+            let marker_name = m
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("NONCANONICAL");
+            noncanonical.push(format!("{} ({})", db.display(), marker_name));
+        } else if db_exists {
+            unmarked.push(db);
+        }
+    }
+
+    let preferred_canon: Option<PathBuf> = env_state_db
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| repo_root.map(|r| r.join(".chump").join("state.db")))
+        .or_else(|| home.map(|h| h.join("chump").join(".chump").join("state.db")));
+
+    let mut canonical: Option<PathBuf> = None;
+    let mut unmarked_extras: Vec<PathBuf> = Vec::new();
+
+    if let Some(ref pref) = preferred_canon {
+        let pref_canon = std::fs::canonicalize(pref).ok();
+        for u in &unmarked {
+            let matches_pref = std::fs::canonicalize(u).ok() == pref_canon || u == pref;
+            if canonical.is_none() && matches_pref {
+                canonical = Some(u.clone());
+            }
+        }
+    }
+    if canonical.is_none() && !unmarked.is_empty() {
+        canonical = Some(unmarked[0].clone());
+    }
+    let canon_real = canonical
+        .as_ref()
+        .and_then(|c| std::fs::canonicalize(c).ok());
+    for u in unmarked {
+        let is_canon = match (&canonical, &canon_real) {
+            (Some(c), Some(cr)) => std::fs::canonicalize(&u).ok().as_ref() == Some(cr) || &u == c,
+            (Some(c), None) => &u == c,
+            _ => false,
+        };
+        if !is_canon {
+            unmarked_extras.push(u);
+        }
+    }
+
+    let canon_str = canonical
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let noncanon_str = if noncanonical.is_empty() {
+        "none".to_string()
+    } else {
+        noncanonical.join(", ")
+    };
+
+    if !unmarked_extras.is_empty() {
+        let unmarked_str: Vec<String> = unmarked_extras
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        CheckResult::fail(
+            "single-store",
+            format!(
+                "canonical: {}; non-canonical: {}; UNMARKED: {} (RESILIENT-1650 split-brain hazard)",
+                canon_str,
+                noncanon_str,
+                unmarked_str.join(", ")
+            ),
+            "retire each UNMARKED store with scripts/coord/archive-stale-gap-store.sh <path> --reason <why> --canonical <canonical-store> or drop a NONCANONICAL marker beside it",
+        )
+    } else {
+        CheckResult::pass(
+            "single-store",
+            format!(
+                "canonical: {}; non-canonical: {} (UNMARKED: none)",
+                canon_str, noncanon_str
+            ),
+        )
+    }
+}
+
+fn scan_home_for_chump_stores(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<PathBuf>) {
+    if depth > max_depth {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in rd.flatten() {
+        let Ok(ft) = entry.file_type() else {
+            continue;
+        };
+        if ft.is_symlink() || !ft.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name_s = name.to_string_lossy();
+        if matches!(
+            name_s.as_ref(),
+            "tmp" | ".cache" | "node_modules" | ".cargo" | ".rustup" | ".git" | "target"
+        ) || name_s.ends_with("-backup")
+        {
+            continue;
+        }
+        let path = entry.path();
+        if name_s == ".chump" {
+            out.push(path.join("state.db"));
+            continue;
+        }
+        scan_home_for_chump_stores(&path, depth + 1, max_depth, out);
+    }
+}
+
+pub fn check_gap_stores() -> CheckResult {
+    let home = std::env::var("HOME").ok().map(PathBuf::from);
+    let repo = crate::repo_path::runtime_base();
+    let env_db = std::env::var("CHUMP_STATE_DB").ok();
+    classify_node_gap_stores(home.as_deref(), Some(&repo), env_db.as_deref())
+}
+
+/// CREDIBLE-1568: maximum age (seconds) for `kind=deadman_tick` in `ambient.jsonl`.
+pub const DEADMAN_MAX_AGE_SECS: u64 = 300;
+
+/// CREDIBLE-1568: pure evaluator for `deadman_tick` freshness (`<= 300s`).
+/// When `active_host` is false (non-Linux/non-systemd and
+/// `CHUMP_DOCTOR_CHECK_DEADMAN` is not `"1"`), returns `CheckStatus::Skip`.
+pub fn check_load_aware_deadman_at(
+    ambient_path: &Path,
+    now_unix: u64,
+    active_host: bool,
+) -> CheckResult {
+    if !active_host {
+        return CheckResult::skip(
+            "load-aware-deadman",
+            "not a Linux systemd host (set CHUMP_DOCTOR_CHECK_DEADMAN=1 to force check)",
+        );
+    }
+    let Ok(contents) = std::fs::read_to_string(ambient_path) else {
+        return CheckResult::fail(
+            "load-aware-deadman",
+            format!(
+                "ambient.jsonl missing at {} — cannot verify deadman_tick heartbeat (CREDIBLE-1568)",
+                ambient_path.display()
+            ),
+            "bash scripts/setup/install-load-aware-deadman.sh && systemctl --user status chump-load-aware-deadman.timer",
+        );
+    };
+
+    let mut latest_ts_str: Option<String> = None;
+    for line in contents.lines() {
+        if !line.contains("deadman_tick") {
+            continue;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            if v.get("kind").and_then(|k| k.as_str()) == Some("deadman_tick") {
+                if let Some(ts) = v.get("ts").and_then(|t| t.as_str()) {
+                    latest_ts_str = Some(ts.to_string());
+                }
+            }
+        }
+    }
+
+    let Some(ts_str) = latest_ts_str else {
+        return CheckResult::fail(
+            "load-aware-deadman",
+            format!(
+                "no kind=deadman_tick heartbeat found in {} — load-aware dead-man is silent or not installed (CREDIBLE-1568)",
+                ambient_path.display()
+            ),
+            "bash scripts/setup/install-load-aware-deadman.sh && systemctl --user restart chump-load-aware-deadman.timer",
+        );
+    };
+
+    let Some(tick_unix) = chrono::DateTime::parse_from_rfc3339(&ts_str)
+        .ok()
+        .map(|dt| dt.timestamp().max(0) as u64)
+    else {
+        return CheckResult::fail(
+            "load-aware-deadman",
+            format!(
+                "newest deadman_tick timestamp '{}' could not be parsed (CREDIBLE-1568)",
+                ts_str
+            ),
+            "inspect .chump-locks/ambient.jsonl and chump-load-aware-deadman.timer logs",
+        );
+    };
+
+    let age = now_unix.saturating_sub(tick_unix);
+    if age > DEADMAN_MAX_AGE_SECS {
+        CheckResult::fail(
+            "load-aware-deadman",
+            format!(
+                "last deadman_tick was {}s ago (threshold <={}s) — dead-man heartbeat is stale (CREDIBLE-1568)",
+                age, DEADMAN_MAX_AGE_SECS
+            ),
+            "systemctl --user restart chump-load-aware-deadman.timer",
+        )
+    } else {
+        CheckResult::pass(
+            "load-aware-deadman",
+            format!(
+                "deadman_tick fresh ({}s ago, threshold <={}s)",
+                age, DEADMAN_MAX_AGE_SECS
+            ),
+        )
+    }
+}
+
+pub fn check_load_aware_deadman() -> CheckResult {
+    let forced = std::env::var("CHUMP_DOCTOR_CHECK_DEADMAN")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+    let is_linux_systemd = cfg!(target_os = "linux") && Path::new("/run/systemd/system").exists();
+    let ambient = std::env::var("CHUMP_AMBIENT_LOG")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            if let Ok(home) = std::env::var("HOME") {
+                let candidate = PathBuf::from(&home)
+                    .join("chump")
+                    .join(".chump-locks")
+                    .join("ambient.jsonl");
+                if candidate.exists() {
+                    return candidate;
+                }
+            }
+            crate::repo_path::runtime_base()
+                .join(".chump-locks")
+                .join("ambient.jsonl")
+        });
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    check_load_aware_deadman_at(&ambient, now_unix, forced || is_linux_systemd)
+}
+
 // ── Pretty-printing ───────────────────────────────────────────────────
 
 fn icon(status: &CheckStatus) -> &'static str {
@@ -579,6 +874,125 @@ mod tests {
         }
         if let Some(v) = prev_home {
             std::env::set_var("CHUMP_HOME", v);
+        }
+    }
+
+    #[test]
+    fn resilient1650_classify_node_gap_stores_canonical_noncanonical_and_unmarked() {
+        let sb = tempfile::tempdir().unwrap();
+        let canon_dir = sb.path().join("chump").join(".chump");
+        let noncanon_dir = sb.path().join(".chump");
+        let unmarked_dir = sb.path().join(".chumpnode").join("repo").join(".chump");
+        std::fs::create_dir_all(&canon_dir).unwrap();
+        std::fs::create_dir_all(&noncanon_dir).unwrap();
+        std::fs::create_dir_all(&unmarked_dir).unwrap();
+
+        let canon_db = canon_dir.join("state.db");
+        let noncanon_db = noncanon_dir.join("state.db");
+        let unmarked_db = unmarked_dir.join("state.db");
+        std::fs::write(&canon_db, b"").unwrap();
+        std::fs::write(&noncanon_db, b"").unwrap();
+        std::fs::write(noncanon_dir.join("NONCANONICAL"), b"retired home store\n").unwrap();
+        std::fs::write(&unmarked_db, b"").unwrap();
+
+        // With 1 canonical, 1 NONCANONICAL, and 1 UNMARKED copy: must FAIL and name all three.
+        let res = classify_node_gap_stores(Some(sb.path()), Some(&sb.path().join("chump")), None);
+        assert_eq!(res.status, CheckStatus::Fail, "msg: {}", res.message);
+        assert!(res.message.contains("canonical:"), "msg: {}", res.message);
+        assert!(
+            res.message.contains("non-canonical:") && res.message.contains("NONCANONICAL"),
+            "msg: {}",
+            res.message
+        );
+        assert!(
+            res.message.contains("UNMARKED:")
+                && res.message.contains(&unmarked_db.display().to_string()),
+            "msg: {}",
+            res.message
+        );
+
+        // Once the unmarked copy is marked NONCANONICAL (or CHUMP_STORE_ARCHIVED), check PASSes.
+        std::fs::write(
+            unmarked_dir.join("CHUMP_STORE_ARCHIVED"),
+            b"CHUMP_STORE_ARCHIVED\n",
+        )
+        .unwrap();
+        let res_ok =
+            classify_node_gap_stores(Some(sb.path()), Some(&sb.path().join("chump")), None);
+        assert_eq!(res_ok.status, CheckStatus::Pass, "msg: {}", res_ok.message);
+        assert!(
+            res_ok.message.contains("canonical:") && res_ok.message.contains("non-canonical:"),
+            "msg: {}",
+            res_ok.message
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn credible1568_deadman_liveness_fresh_vs_stale_and_env_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let now_unix = 1_760_000_600u64; // 2025-10-09T08:10:00Z
+
+        // 1. Not active host -> Skip.
+        let r_skip = check_load_aware_deadman_at(&amb, now_unix, false);
+        assert_eq!(r_skip.status, CheckStatus::Skip);
+
+        // 2. Active host, missing ambient.jsonl -> Fail.
+        let r_missing = check_load_aware_deadman_at(&amb, now_unix, true);
+        assert_eq!(r_missing.status, CheckStatus::Fail);
+
+        // 3. Active host, exact boundary 300s (fresh <= 300s) -> Pass (kills `< 300` mutant).
+        let ts_300 = chrono::DateTime::from_timestamp((now_unix - 300) as i64, 0)
+            .unwrap()
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+        std::fs::write(
+            &amb,
+            format!(r#"{{"ts":"{ts_300}","kind":"deadman_tick","load1":0.5}}"#) + "\n",
+        )
+        .unwrap();
+        let r_300 = check_load_aware_deadman_at(&amb, now_unix, true);
+        assert_eq!(
+            r_300.status,
+            CheckStatus::Pass,
+            "300s is within <=300s threshold: {}",
+            r_300.message
+        );
+
+        // 4. Active host, 301s old -> Fail (kills `<= 9999` mutant).
+        let ts_301 = chrono::DateTime::from_timestamp((now_unix - 301) as i64, 0)
+            .unwrap()
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+        std::fs::write(
+            &amb,
+            format!(r#"{{"ts":"{ts_301}","kind":"deadman_tick","load1":0.5}}"#) + "\n",
+        )
+        .unwrap();
+        let r_301 = check_load_aware_deadman_at(&amb, now_unix, true);
+        assert_eq!(
+            r_301.status,
+            CheckStatus::Fail,
+            "301s must fail <=300s threshold: {}",
+            r_301.message
+        );
+
+        // 5. Env-wired check_load_aware_deadman() honors CHUMP_DOCTOR_CHECK_DEADMAN=1.
+        let prev_force = std::env::var("CHUMP_DOCTOR_CHECK_DEADMAN").ok();
+        let prev_amb = std::env::var("CHUMP_AMBIENT_LOG").ok();
+        std::env::set_var("CHUMP_DOCTOR_CHECK_DEADMAN", "1");
+        std::env::set_var("CHUMP_AMBIENT_LOG", &amb);
+        let r_env_stale = check_load_aware_deadman();
+        assert_eq!(r_env_stale.status, CheckStatus::Fail);
+
+        match prev_force {
+            Some(v) => std::env::set_var("CHUMP_DOCTOR_CHECK_DEADMAN", v),
+            None => std::env::remove_var("CHUMP_DOCTOR_CHECK_DEADMAN"),
+        }
+        match prev_amb {
+            Some(v) => std::env::set_var("CHUMP_AMBIENT_LOG", v),
+            None => std::env::remove_var("CHUMP_AMBIENT_LOG"),
         }
     }
 }

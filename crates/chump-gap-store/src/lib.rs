@@ -1108,12 +1108,60 @@ impl GapStore {
             .map_err(anyhow::Error::from)
     }
 
+    /// RESILIENT-1650 (Phase R R4): return the marker path if `dir` carries a
+    /// `NONCANONICAL` or `CHUMP_STORE_ARCHIVED` marker file.
+    pub fn store_noncanonical_marker_in_dir(dir: &Path) -> Option<PathBuf> {
+        for name in ["NONCANONICAL", "CHUMP_STORE_ARCHIVED"] {
+            let candidate = dir.join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
+    /// RESILIENT-1650 (Phase R R4): return the marker path if `db_path` sits
+    /// beside a `NONCANONICAL` or `CHUMP_STORE_ARCHIVED` marker (in its parent
+    /// `.chump` dir or as `<db_path>.NONCANONICAL`).
+    pub fn store_noncanonical_marker(db_path: &Path) -> Option<PathBuf> {
+        if let Some(parent) = db_path.parent() {
+            if let Some(m) = Self::store_noncanonical_marker_in_dir(parent) {
+                return Some(m);
+            }
+        }
+        let sidecar = PathBuf::from(format!("{}.NONCANONICAL", db_path.display()));
+        if sidecar.exists() {
+            return Some(sidecar);
+        }
+        None
+    }
+
+    /// RESILIENT-1650 (Phase R R4): return the non-canonical marker for this
+    /// opened store, if any.
+    pub fn noncanonical_marker(&self) -> Option<PathBuf> {
+        if let Some(p) = self.conn.path().filter(|s| !s.is_empty()) {
+            if let Some(m) = Self::store_noncanonical_marker(Path::new(p)) {
+                return Some(m);
+            }
+        }
+        if let Some(m) = Self::store_noncanonical_marker_in_dir(&self.repo_root.join(".chump")) {
+            return Some(m);
+        }
+        Self::store_noncanonical_marker(&Self::db_path(&self.repo_root))
+    }
+
     /// RESILIENT-1578: replay terminal statuses from a canonical peer store onto
     /// this store so per-checkout state.db copies can't keep serving gaps that
     /// were already superseded/done elsewhere. Only rows that are `open` locally
     /// and terminal in the canonical store are touched. Returns rows updated.
     pub fn reconcile_terminal_from(&self, canonical_db: &Path) -> Result<usize> {
         if !canonical_db.is_file() {
+            return Ok(0);
+        }
+        // RESILIENT-1650: never sync from or into a NONCANONICAL / CHUMP_STORE_ARCHIVED store.
+        if Self::store_noncanonical_marker(canonical_db).is_some()
+            || self.noncanonical_marker().is_some()
+        {
             return Ok(0);
         }
         let uri = format!("file:{}?mode=ro", canonical_db.display());
@@ -7541,6 +7589,12 @@ impl GapStore {
         multi: bool,
         move_link: bool,
     ) -> Result<()> {
+        if let Some(marker) = self.noncanonical_marker() {
+            bail!(
+                "RESILIENT-1650: refusing to write gap_prs ({gap_id} -> PR #{pr_number}) into non-canonical gap store (marker at {})",
+                marker.display()
+            );
+        }
         let existing = self.list_links_for_pr(pr_number)?;
         let other_links: Vec<&GapPrRow> = existing.iter().filter(|r| r.gap_id != gap_id).collect();
         if !other_links.is_empty() {
@@ -15213,5 +15267,47 @@ esac
             resolves,
             "landing_receipt_resolves must verify external repo receipt via CHUMP_GH_BIN"
         );
+    }
+
+    #[test]
+    fn resilient1650_link_pr_refuses_noncanonical_and_archived_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GapStore::open(dir.path()).unwrap();
+        let chump_dir = dir.path().join(".chump");
+
+        // 1. NONCANONICAL marker refuses link_pr and writes zero rows.
+        let noncanon = chump_dir.join("NONCANONICAL");
+        std::fs::write(&noncanon, "non-canonical copy\n").unwrap();
+        let err = store
+            .link_pr("RESILIENT-1650", 5650, "abc1234")
+            .expect_err("link_pr must refuse when NONCANONICAL marker exists");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("RESILIENT-1650") && msg.contains("NONCANONICAL"),
+            "unexpected error message: {msg}"
+        );
+        assert!(
+            store.list_prs_for_gap("RESILIENT-1650").unwrap().is_empty(),
+            "refused link_pr must not insert a gap_prs row"
+        );
+        std::fs::remove_file(&noncanon).unwrap();
+
+        // 2. CHUMP_STORE_ARCHIVED marker also refuses link_pr.
+        let archived = chump_dir.join("CHUMP_STORE_ARCHIVED");
+        std::fs::write(&archived, "CHUMP_STORE_ARCHIVED\n").unwrap();
+        let err2 = store
+            .link_pr("RESILIENT-1650", 5650, "abc1234")
+            .expect_err("link_pr must refuse when CHUMP_STORE_ARCHIVED marker exists");
+        assert!(
+            format!("{err2:#}").contains("CHUMP_STORE_ARCHIVED"),
+            "unexpected error: {err2:#}"
+        );
+        std::fs::remove_file(&archived).unwrap();
+
+        // 3. Without markers, link_pr succeeds.
+        store
+            .link_pr("RESILIENT-1650", 5650, "abc1234")
+            .expect("canonical store without markers accepts link_pr");
+        assert_eq!(store.list_prs_for_gap("RESILIENT-1650").unwrap().len(), 1);
     }
 }

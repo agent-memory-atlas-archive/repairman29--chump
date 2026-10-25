@@ -1823,28 +1823,64 @@ check_single_store() {
         register_check "single-store" "skip" "\$HOME ('$scan_root') is not a directory — cannot scan for node gap stores" ""
         return
     fi
-    local -a stores=()
-    local f d
-    # Real files named state.db at */.chump/state.db, bounded to depth 4 (reaches
-    # ~/.chump, ~/<repo>/.chump, ~/.chumpnode/repo/.chump) with the ephemeral
-    # trees pruned. -type f excludes worktree symlinks; the per-file loop then
-    # drops any store sitting next to a CHUMP_STORE_ARCHIVED marker.
+    local -a stores=() noncanonical_stores=() unmarked_stores=() chump_dirs=()
+    local f d s seen canon_store=""
+    if [[ -n "${CHUMP_STATE_DB:-}" && ! -L "${CHUMP_STATE_DB}" ]]; then
+        d="$(dirname "${CHUMP_STATE_DB}")"
+        [[ -d "$d" ]] && chump_dirs+=("$d")
+    fi
+    # Real files named state.db / NONCANONICAL / CHUMP_STORE_ARCHIVED at */.chump/*,
+    # bounded to depth 4 (reaches ~/.chump, ~/<repo>/.chump, ~/.chumpnode/repo/.chump)
+    # with ephemeral trees pruned. -type f excludes worktree symlinks.
     while IFS= read -r f; do
         [[ -n "$f" ]] || continue
-        d="$(dirname "$f")"
-        [[ -e "$d/CHUMP_STORE_ARCHIVED" ]] && continue
-        stores+=("$f")
+        chump_dirs+=("$(dirname "$f")")
     done < <(find "$scan_root" -maxdepth 4 \
         \( -type d \( -name tmp -o -name '.cache' -o -name 'node_modules' -o -name '*-backup' -o -name '.cargo' -o -name '.rustup' \) -prune \) -o \
-        \( -type f -name state.db -path '*/.chump/state.db' -print \) 2>/dev/null)
+        \( -type f \( -name state.db -o -name NONCANONICAL -o -name CHUMP_STORE_ARCHIVED \) -path '*/.chump/*' -print \) 2>/dev/null)
+
+    local -a uniq_dirs=()
+    for d in "${chump_dirs[@]+"${chump_dirs[@]}"}"; do
+        seen=0
+        for s in "${uniq_dirs[@]+"${uniq_dirs[@]}"}"; do
+            [[ "$s" == "$d" ]] && { seen=1; break; }
+        done
+        (( seen == 0 )) && uniq_dirs+=("$d")
+    done
+
+    for d in "${uniq_dirs[@]+"${uniq_dirs[@]}"}"; do
+        f="$d/state.db"
+        if [[ -e "$d/NONCANONICAL" || -e "$d/CHUMP_STORE_ARCHIVED" || -e "$f.NONCANONICAL" ]]; then
+            noncanonical_stores+=("$f")
+            continue
+        fi
+        [[ -f "$f" && ! -L "$f" ]] && stores+=("$f")
+    done
+
+    for s in "${CHUMP_STATE_DB:-}" "$scan_root/chump/.chump/state.db" "$REPO_ROOT/.chump/state.db"; do
+        [[ -n "$s" ]] || continue
+        for f in "${stores[@]+"${stores[@]}"}"; do
+            if [[ "$f" == "$s" ]]; then
+                canon_store="$f"
+                break 2
+            fi
+        done
+    done
+    [[ -z "$canon_store" && "${#stores[@]}" -gt 0 ]] && canon_store="${stores[0]}"
+    for f in "${stores[@]+"${stores[@]}"}"; do
+        [[ "$f" == "$canon_store" ]] || unmarked_stores+=("$f")
+    done
+
     local n="${#stores[@]}"
+    local noncanon_summary="${noncanonical_stores[*]:-none}"
+    local unmarked_summary="${unmarked_stores[*]:-none}"
     if (( n > 1 )); then
         register_check "single-store" "fail" \
-            "node has $n live gap stores (must be exactly ONE): $(printf '%s;' "${stores[@]}") — split-brain: a process that resolves its store from cwd/node.env can ship a gap against the wrong one (CREDIBLE-1602)" \
-            "keep the canonical store; retire each extra with: scripts/coord/archive-stale-gap-store.sh <path> --reason <why> --canonical <canonical-store>  (renames it aside + writes the CHUMP_STORE_ARCHIVED marker this check honors)"
+            "node has $n live gap stores (must be exactly ONE) — canonical: ${canon_store:-none}; non-canonical: ${noncanon_summary}; UNMARKED: ${unmarked_summary} — split-brain: a process that resolves its store from cwd/node.env can ship a gap against the wrong one (CREDIBLE-1602 / RESILIENT-1650)" \
+            "keep the canonical store; retire each extra with: scripts/coord/archive-stale-gap-store.sh <path> --reason <why> --canonical <canonical-store> (or drop a NONCANONICAL marker beside it)"
     else
         register_check "single-store" "pass" \
-            "exactly $n live gap store(s) on this node (0 or 1 is healthy; CHUMP_STORE_ARCHIVED-marked archives and symlinked worktree stores are not counted)" ""
+            "exactly $n live gap store(s) on this node — canonical: ${canon_store:-none}; non-canonical: ${noncanon_summary}; UNMARKED: none (0 or 1 is healthy; NONCANONICAL / CHUMP_STORE_ARCHIVED stores and symlinked worktree stores are not counted)" ""
     fi
 }
 

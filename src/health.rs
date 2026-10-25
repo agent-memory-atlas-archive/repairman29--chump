@@ -29,6 +29,12 @@ use std::collections::{BTreeMap, HashSet};
 use std::io::Write as IoWrite;
 use std::path::Path;
 
+#[allow(unused_imports)]
+pub use crate::doctor::{
+    check_gap_stores, check_load_aware_deadman, check_load_aware_deadman_at,
+    classify_node_gap_stores, DEADMAN_MAX_AGE_SECS,
+};
+
 // ── Public types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]

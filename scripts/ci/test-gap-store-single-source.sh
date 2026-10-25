@@ -108,6 +108,44 @@ if [ -f "$DOCTOR" ] && [ -f "$ARCHIVER" ]; then
     bad "fleet-doctor check_single_store did NOT PASS after archiving the extras (status='$st_one')"
   fi
   rm -rf "$sb"
+
+  # 6) RESILIENT-1650 runtime: 1 canonical store + 1 NONCANONICAL-marked copy
+  #    (reported as non-canonical, never synced toward canonical) + 1 unmarked
+  #    copy (flagged as UNMARKED). Also verifies that once the unmarked copy is
+  #    marked NONCANONICAL, the check PASSes while still reporting both
+  #    canonical and non-canonical stores.
+  sb2="$(mktemp -d "${TMPDIR:-/tmp}/single-store-r1650.XXXXXX")"
+  mkdir -p "$sb2/chump/.chump" "$sb2/.chump" "$sb2/.chumpnode/repo/.chump"
+  : > "$sb2/chump/.chump/state.db"           # canonical
+  : > "$sb2/.chump/state.db"                 # NONCANONICAL-marked copy
+  printf 'NONCANONICAL: retired home store\n' > "$sb2/.chump/NONCANONICAL"
+  : > "$sb2/.chumpnode/repo/.chump/state.db" # UNMARKED extra copy
+  r1650_out="$(FLEET_DOCTOR_SOURCED=1 HOME="$sb2" bash -c 'source "$0"; check_single_store; printf "%s|%s" "${STATUSES[-1]:-}" "${DETAILS[-1]:-}"' "$DOCTOR" 2>/dev/null)"
+  r1650_st="${r1650_out%%|*}"
+  r1650_det="${r1650_out#*|}"
+  if [ "$r1650_st" = fail ] \
+     && printf '%s' "$r1650_det" | grep -qF "canonical: $sb2/chump/.chump/state.db" \
+     && printf '%s' "$r1650_det" | grep -qF "non-canonical: $sb2/.chump/state.db" \
+     && printf '%s' "$r1650_det" | grep -qF "UNMARKED: $sb2/.chumpnode/repo/.chump/state.db"; then
+    ok "RESILIENT-1650: 1 canonical + 1 NONCANONICAL + 1 UNMARKED classifies all three and REDs on UNMARKED"
+  else
+    bad "RESILIENT-1650: expected fail classifying canonical/non-canonical/UNMARKED, got status='$r1650_st' detail='$r1650_det'"
+  fi
+  printf 'NONCANONICAL: retired node clone\n' > "$sb2/.chumpnode/repo/.chump/NONCANONICAL"
+  r1650_ok_out="$(FLEET_DOCTOR_SOURCED=1 HOME="$sb2" bash -c 'source "$0"; check_single_store; printf "%s|%s" "${STATUSES[-1]:-}" "${DETAILS[-1]:-}"' "$DOCTOR" 2>/dev/null)"
+  r1650_ok_st="${r1650_ok_out%%|*}"
+  r1650_ok_det="${r1650_ok_out#*|}"
+  if [ "$r1650_ok_st" = pass ] \
+     && printf '%s' "$r1650_ok_det" | grep -qF "canonical: $sb2/chump/.chump/state.db" \
+     && printf '%s' "$r1650_ok_det" | grep -qF "non-canonical:" \
+     && printf '%s' "$r1650_ok_det" | grep -qF "$sb2/.chump/state.db" \
+     && printf '%s' "$r1650_ok_det" | grep -qF "$sb2/.chumpnode/repo/.chump/state.db" \
+     && grep -q 'store_noncanonical_marker(canonical_db)\.is_some()' "$LIB"; then
+    ok "RESILIENT-1650: 1 canonical + NONCANONICAL copies PASSes, reports non-canonical copies, and blocks sync toward canonical"
+  else
+    bad "RESILIENT-1650: expected pass reporting canonical + non-canonical copies, got status='$r1650_ok_st' detail='$r1650_ok_det'"
+  fi
+  rm -rf "$sb2"
 else
   bad "fleet-doctor-strict.sh or archive-stale-gap-store.sh missing (CREDIBLE-1602)"
 fi

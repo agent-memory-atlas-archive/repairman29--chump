@@ -338,6 +338,58 @@ else
     fail "branch push should NOT emit prepush_stash_only"
 fi
 
+# ── Test 12 (RESILIENT-1656): zero-bypass stash-before-kill refspec + secret mutant ──
+echo "--- Test 12 (RESILIENT-1656): dispatch stash-before-kill refspec passes with ZERO bypass env vars + secret-scan mutant check ---"
+if grep -q 'let stash_ref = format!("refs/stash/{slug}-{ts}");' "$REPO_ROOT/src/dispatch.rs"; then
+    ok "RESILIENT-1656: src/dispatch.rs stash-before-kill targets refs/stash/<gap>-<ts>"
+else
+    fail "RESILIENT-1656: src/dispatch.rs missing refs/stash/{slug}-{ts} target"
+fi
+
+# (a) Clean WIP pushed to refs/stash/<gap>-<ts> and refs/stash/<gap>-wip with ZERO
+#     CHUMP_* bypass env vars (and CHUMP_TEST_GATE_FAKE_RC=101 so a full gate would fail).
+rm -f .chump-locks/ambient.jsonl
+OUT_ZERO=$(env -u CHUMP_FMT_CHECK -u CHUMP_GAP_CHECK -u CHUMP_AUTOMERGE_OVERRIDE \
+    -u CHUMP_FORCE_LEASE_CHECK -u CHUMP_REBASE_DETECT -u CHUMP_TEST_GATE \
+    -u CHUMP_OPERATOR_RECOVERY -u CHUMP_BYPASS_BOT_MERGE \
+    PATH="$TMP/bin:$PATH" CHUMP_TEST_GATE_FAKE_RC=101 \
+    "$HOOK" origin "$TMP/origin.git" \
+    <<<"HEAD ${MIXED_HEAD} refs/stash/resilient-1656-20261024-120000 ${ZERO_SHA}" 2>&1)
+RC_ZERO=$?
+if [[ "$RC_ZERO" -eq 0 ]] && grep -q '"kind":"prepush_stash_only"' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "RESILIENT-1656: refs/stash/<gap>-<ts> passes pre-push fast-path with zero bypass env vars"
+else
+    fail "RESILIENT-1656: zero-bypass stash push should pass (rc=$RC_ZERO, out=$OUT_ZERO)"
+fi
+
+# (b) Mutant check: a stash-only push (refs/stash/RESILIENT-1656-wip) with a secret is
+#     refused with zero bypass env vars, whereas a mutated hook with the secret-scan
+#     exit disabled would let it through.
+SECRET2="sk-ant-$(printf 'b%.0s' {1..36})"
+printf 'api_key = %s\n' "$SECRET2" > leaked_r1656.txt
+git add leaked_r1656.txt
+git commit -qm "wip with secret for RESILIENT-1656"
+SECRET2_HEAD="$(git rev-parse HEAD)"
+OUT_SEC_ZERO=$(env -u CHUMP_FMT_CHECK -u CHUMP_GAP_CHECK -u CHUMP_AUTOMERGE_OVERRIDE \
+    -u CHUMP_FORCE_LEASE_CHECK -u CHUMP_REBASE_DETECT -u CHUMP_TEST_GATE \
+    -u CHUMP_OPERATOR_RECOVERY -u CHUMP_BYPASS_BOT_MERGE \
+    PATH="$TMP/bin:$PATH" \
+    "$HOOK" origin "$TMP/origin.git" \
+    <<<"HEAD ${SECRET2_HEAD} refs/stash/RESILIENT-1656-wip ${ZERO_SHA}" 2>&1)
+RC_SEC_ZERO=$?
+sed '/RESILIENT-1668 secret scan/,/exit 1/s/exit 1/: # mutant/' "$HOOK" > "$TMP/pre-push-mutant"
+chmod +x "$TMP/pre-push-mutant"
+OUT_MUT=$(PATH="$TMP/bin:$PATH" "$TMP/pre-push-mutant" origin "$TMP/origin.git" \
+    <<<"HEAD ${SECRET2_HEAD} refs/stash/RESILIENT-1656-wip ${ZERO_SHA}" 2>&1)
+RC_MUT=$?
+if [[ "$RC_SEC_ZERO" -ne 0 ]] && echo "$OUT_SEC_ZERO" | grep -q "secret scan" && [[ "$RC_MUT" -eq 0 ]]; then
+    ok "RESILIENT-1656: zero-bypass stash push with secret refused by secret scan (mutant killed)"
+else
+    fail "RESILIENT-1656: secret scan or mutant check failed (rc_real=$RC_SEC_ZERO, rc_mut=$RC_MUT, out=$OUT_SEC_ZERO)"
+fi
+git rm -q leaked_r1656.txt
+git commit -qm "drop RESILIENT-1656 secret fixture"
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo
 echo "=== Results: $PASS passed, $FAIL failed ==="

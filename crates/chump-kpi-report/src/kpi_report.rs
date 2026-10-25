@@ -888,37 +888,114 @@ impl GreenFirstTrySection {
     }
 }
 
-/// Scan ambient.jsonl and correlate `gap_shipped` events against
-/// `bot_merge_phase_failure` events sharing the same `gap_id`.
+/// Scan ambient.jsonl and `.chump/state.db` (`WHERE gaps.status='done'` + `gap_prs`)
+/// and correlate shipped gaps/PRs (`gap_shipped`, `pr_merged`, `gap_done`,
+/// `ship_landed`, `gap_status_done_written`, `WHERE gaps.status='done'`, `gap_prs`)
+/// against failure/repair events (`bot_merge_phase_failure`, `repair_dispatch`,
+/// `pr_repair_dispatched`, failed `prepush_review_verdict`/`code_review_verdict`).
 pub fn build_green_first_try_section(repo_root: &Path) -> GreenFirstTrySection {
-    use std::collections::HashSet;
+    use std::collections::{BTreeMap, HashSet};
 
     let ambient = repo_root.join(".chump-locks/ambient.jsonl");
     let contents = std::fs::read_to_string(&ambient).unwrap_or_default();
+    let db_facts = collect_db_ship_facts(repo_root);
 
     let mut failed_gap_ids: HashSet<String> = HashSet::new();
+    let mut failed_prs: HashSet<u64> = HashSet::new();
     for line in contents.lines() {
         let kind = extract_field(line, "kind").unwrap_or_default();
-        if kind != "bot_merge_phase_failure" {
+        let is_failure = matches!(
+            kind.as_str(),
+            "bot_merge_phase_failure"
+                | "repair_dispatch"
+                | "pr_repair_dispatched"
+                | "ci_failure_repaired"
+                | "prepush_test_gate_failed"
+        ) || (matches!(
+            kind.as_str(),
+            "prepush_review_verdict" | "code_review_verdict"
+        ) && extract_field(line, "verdict")
+            .map(|v| {
+                matches!(
+                    v.to_ascii_lowercase().as_str(),
+                    "fail"
+                        | "failed"
+                        | "reject"
+                        | "rejected"
+                        | "changes_requested"
+                        | "blocked"
+                        | "repair"
+                )
+            })
+            .unwrap_or(false));
+        if !is_failure {
             continue;
         }
-        if let Some(gap_id) = extract_field(line, "gap_id") {
+        if let Some(gap_id) = extract_field(line, "gap_id").filter(|s| !s.is_empty()) {
             failed_gap_ids.insert(gap_id);
+        }
+        if let Some(pr) = extract_pr_from_line(line) {
+            failed_prs.insert(pr);
+            if let Some(gaps) = db_facts.pr_to_gaps.get(&pr) {
+                for g in gaps {
+                    failed_gap_ids.insert(g.clone());
+                }
+            }
+        }
+    }
+
+    let mut shipped_order: Vec<String> = Vec::new();
+    let mut seen_gaps: HashSet<String> = HashSet::new();
+    let mut gap_shipped_seen: BTreeMap<String, u64> = BTreeMap::new();
+
+    for line in contents.lines() {
+        let kind = extract_field(line, "kind").unwrap_or_default();
+        if !matches!(
+            kind.as_str(),
+            "gap_shipped" | "ship_landed" | "pr_merged" | "gap_done" | "gap_status_done_written"
+        ) {
+            continue;
+        }
+        let gap_id_opt = extract_field(line, "gap_id")
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                extract_pr_from_line(line).and_then(|pr| {
+                    db_facts
+                        .pr_to_gaps
+                        .get(&pr)
+                        .and_then(|gs| gs.first().cloned())
+                        .or_else(|| Some(format!("PR#{pr}")))
+                })
+            });
+        let Some(gap_id) = gap_id_opt else {
+            continue;
+        };
+        if kind == "gap_shipped" {
+            let cnt = gap_shipped_seen.entry(gap_id.clone()).or_insert(0);
+            *cnt += 1;
+            if (*cnt == 1 && seen_gaps.insert(gap_id.clone())) || *cnt > 1 {
+                shipped_order.push(gap_id);
+            }
+        } else if seen_gaps.insert(gap_id.clone()) {
+            shipped_order.push(gap_id);
+        }
+    }
+
+    for gap_id in db_facts.done_gaps.keys() {
+        if seen_gaps.insert(gap_id.clone()) {
+            shipped_order.push(gap_id.clone());
         }
     }
 
     let mut section = GreenFirstTrySection::default();
-    for line in contents.lines() {
-        let kind = extract_field(line, "kind").unwrap_or_default();
-        if kind != "gap_shipped" {
-            continue;
-        }
-        let gap_id = match extract_field(line, "gap_id") {
-            Some(id) => id,
-            None => continue,
-        };
+    for gap_id in shipped_order {
         section.total_ships += 1;
-        if !failed_gap_ids.contains(&gap_id) {
+        let pr_failed = db_facts
+            .gap_to_prs
+            .get(&gap_id)
+            .map(|prs| prs.iter().any(|p| failed_prs.contains(p)))
+            .unwrap_or(false);
+        if !failed_gap_ids.contains(&gap_id) && !pr_failed {
             section.green_first_try += 1;
         }
     }
@@ -979,22 +1056,28 @@ fn percentile_u64_slice(sorted: &[u64], pct: usize) -> Option<u64> {
     Some(sorted[idx])
 }
 
-/// Scan ambient.jsonl and correlate `gap_claimed` events against `gap_shipped`
-/// events sharing the same `gap_id`, taking the earliest claim before each ship.
+/// Scan ambient.jsonl and `.chump/state.db` (`gaps` + `gap_prs`) and correlate
+/// claim/open timestamps (`gap_claimed`, `gap_prs.opened_at`, `gaps.created_at`)
+/// against ship/merge timestamps (`gap_shipped`, `pr_merged`, `gap_done`,
+/// `ship_landed`, `gap_status_done_written`, `gaps.closed_at`).
 pub fn build_time_to_land_section(repo_root: &Path) -> TimeToLandSection {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     let ambient = repo_root.join(".chump-locks/ambient.jsonl");
     let contents = std::fs::read_to_string(&ambient).unwrap_or_default();
+    let db_facts = collect_db_ship_facts(repo_root);
 
     let mut claimed_at: HashMap<String, u64> = HashMap::new();
     for line in contents.lines() {
         let kind = extract_field(line, "kind").unwrap_or_default();
-        if kind != "gap_claimed" {
+        if !matches!(
+            kind.as_str(),
+            "gap_claimed" | "session_start" | "dispatch_started"
+        ) {
             continue;
         }
         let (Some(gap_id), Some(ts)) = (
-            extract_field(line, "gap_id"),
+            extract_field(line, "gap_id").filter(|s| !s.is_empty()),
             extract_field(line, "ts").and_then(|t| parse_iso8601_to_unix(&t)),
         ) else {
             continue;
@@ -1004,22 +1087,60 @@ pub fn build_time_to_land_section(repo_root: &Path) -> TimeToLandSection {
             .and_modify(|existing| *existing = (*existing).min(ts))
             .or_insert(ts);
     }
+    for (gap_id, &opened_ts) in &db_facts.gap_opened_at {
+        claimed_at.entry(gap_id.clone()).or_insert(opened_ts);
+    }
 
     let mut durations: Vec<u64> = Vec::new();
+    let mut paired_gaps: HashSet<String> = HashSet::new();
+
     for line in contents.lines() {
         let kind = extract_field(line, "kind").unwrap_or_default();
-        if kind != "gap_shipped" {
+        if !matches!(
+            kind.as_str(),
+            "gap_shipped" | "ship_landed" | "pr_merged" | "gap_done" | "gap_status_done_written"
+        ) {
             continue;
         }
-        let (Some(gap_id), Some(shipped_ts)) = (
-            extract_field(line, "gap_id"),
-            extract_field(line, "ts").and_then(|t| parse_iso8601_to_unix(&t)),
-        ) else {
+        let Some(shipped_ts) = extract_field(line, "ts").and_then(|t| parse_iso8601_to_unix(&t))
+        else {
             continue;
         };
+        let gap_id_opt = extract_field(line, "gap_id")
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                extract_pr_from_line(line).and_then(|pr| {
+                    db_facts
+                        .pr_to_gaps
+                        .get(&pr)
+                        .and_then(|gs| gs.first().cloned())
+                })
+            });
+        let Some(gap_id) = gap_id_opt else {
+            continue;
+        };
+        if kind != "gap_shipped" && paired_gaps.contains(&gap_id) {
+            continue;
+        }
         if let Some(&claim_ts) = claimed_at.get(&gap_id) {
             if shipped_ts >= claim_ts {
                 durations.push(shipped_ts - claim_ts);
+                paired_gaps.insert(gap_id);
+            }
+        }
+    }
+
+    for (gap_id, close_opt) in &db_facts.done_gaps {
+        if paired_gaps.contains(gap_id) {
+            continue;
+        }
+        let Some(shipped_ts) = *close_opt else {
+            continue;
+        };
+        if let Some(&claim_ts) = claimed_at.get(gap_id) {
+            if shipped_ts >= claim_ts {
+                durations.push(shipped_ts - claim_ts);
+                paired_gaps.insert(gap_id.clone());
             }
         }
     }
@@ -1033,6 +1154,449 @@ pub fn build_time_to_land_section(repo_root: &Path) -> TimeToLandSection {
     section.p90_seconds = percentile_u64_slice(&durations, 90);
     section.max_seconds = durations.last().copied();
     section
+}
+
+// ── Landings, Repair Rounds per Landing, and Hours per Round (CREDIBLE-1582) ─
+
+#[derive(Debug, Default)]
+struct DbShipFacts {
+    pr_to_gaps: BTreeMap<u64, Vec<String>>,
+    gap_to_prs: BTreeMap<String, Vec<u64>>,
+    gap_opened_at: BTreeMap<String, u64>,
+    done_gaps: BTreeMap<String, Option<u64>>,
+    merged_prs: BTreeMap<u64, Option<u64>>,
+}
+
+fn extract_pr_from_line(line: &str) -> Option<u64> {
+    for key in ["pr_number", "pr", "closed_pr"] {
+        if let Some(n) = extract_int_field(line, key).filter(|&n| n > 0) {
+            return Some(n);
+        }
+        if let Some(s) = extract_field(line, key) {
+            if let Ok(n) = s.trim().trim_start_matches('#').parse::<u64>() {
+                if n > 0 {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn collect_db_ship_facts(repo_root: &Path) -> DbShipFacts {
+    let db_path = repo_root.join(".chump/state.db");
+    if !db_path.is_file() {
+        return DbShipFacts::default();
+    }
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return DbShipFacts::default();
+    };
+    let mut facts = DbShipFacts::default();
+
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, status, created_at,
+                CASE WHEN typeof(closed_at)='integer' THEN closed_at ELSE NULL END,
+                closed_date,
+                CASE WHEN typeof(closed_pr)='integer' THEN closed_pr ELSE NULL END
+           FROM gaps",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1).unwrap_or_default(),
+                r.get::<_, i64>(2).unwrap_or(0),
+                r.get::<_, Option<i64>>(3).unwrap_or(None),
+                r.get::<_, String>(4).unwrap_or_default(),
+                r.get::<_, Option<i64>>(5).unwrap_or(None),
+            ))
+        }) {
+            for row in rows.flatten() {
+                let (id, status, created_at, closed_at, closed_date, closed_pr) = row;
+                if created_at > 0 {
+                    facts
+                        .gap_opened_at
+                        .entry(id.clone())
+                        .and_modify(|e| *e = (*e).min(created_at as u64))
+                        .or_insert(created_at as u64);
+                }
+                let close_ts = closed_at
+                    .filter(|&t| t > 0)
+                    .or_else(|| parse_closed_date(&closed_date))
+                    .filter(|&t| t > 0)
+                    .map(|t| t as u64);
+                if let Some(pr) = closed_pr.filter(|&p| p > 0).map(|p| p as u64) {
+                    facts.pr_to_gaps.entry(pr).or_default().push(id.clone());
+                    facts.gap_to_prs.entry(id.clone()).or_default().push(pr);
+                    if status == "done" {
+                        facts.merged_prs.insert(pr, close_ts);
+                    }
+                }
+                if status == "done" {
+                    facts.done_gaps.insert(id, close_ts);
+                }
+            }
+        }
+    }
+
+    if let Ok(mut stmt) = conn.prepare("SELECT gap_id, pr_number, opened_at, state FROM gap_prs") {
+        if let Ok(rows) = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1).unwrap_or(0),
+                r.get::<_, i64>(2).unwrap_or(0),
+                r.get::<_, String>(3).unwrap_or_default(),
+            ))
+        }) {
+            for row in rows.flatten() {
+                let (gap_id, pr_num, opened_at, state) = row;
+                if opened_at > 0 {
+                    facts
+                        .gap_opened_at
+                        .entry(gap_id.clone())
+                        .and_modify(|e| *e = (*e).min(opened_at as u64))
+                        .or_insert(opened_at as u64);
+                }
+                if pr_num > 0 {
+                    let pr = pr_num as u64;
+                    let gs = facts.pr_to_gaps.entry(pr).or_default();
+                    if !gs.contains(&gap_id) {
+                        gs.push(gap_id.clone());
+                    }
+                    let ps = facts.gap_to_prs.entry(gap_id.clone()).or_default();
+                    if !ps.contains(&pr) {
+                        ps.push(pr);
+                    }
+                    let gap_done_ts = facts.done_gaps.get(&gap_id).copied().flatten();
+                    if state == "merged" || facts.done_gaps.contains_key(&gap_id) {
+                        let ts =
+                            gap_done_ts.or_else(|| (opened_at > 0).then_some(opened_at as u64));
+                        facts.merged_prs.entry(pr).or_insert(ts);
+                        facts.done_gaps.entry(gap_id).or_insert(ts);
+                    }
+                }
+            }
+        }
+    }
+
+    facts
+}
+
+/// CREDIBLE-1582 (PHASE-R): window summary of landings, repair rounds per
+/// landing, and median wall-clock hours per round, each naming its data source.
+#[derive(Debug, Default, Clone)]
+pub struct LandingsAndRepairsSection {
+    pub window_days: u64,
+    pub landings: u64,
+    pub landings_source: String,
+    pub total_repair_rounds: u64,
+    pub repair_rounds_per_landing: f64,
+    pub repair_rounds_source: String,
+    pub median_hours_per_round: Option<f64>,
+    pub hours_per_round_source: String,
+}
+
+impl LandingsAndRepairsSection {
+    pub fn render_text(&self) -> String {
+        let median_str = self
+            .median_hours_per_round
+            .map(|h| format!("{h:.2}h"))
+            .unwrap_or_else(|| "n/a".to_string());
+        format!(
+            "═══ Landings & Repair Rounds (CREDIBLE-1582, last {}d) ═══\n  \
+             landings: {} (source: {})\n  \
+             repair rounds per landing: {:.2} ({} repair rounds / {} landings; source: {})\n  \
+             median wall-clock hours per round: {} (source: {})\n",
+            self.window_days,
+            self.landings,
+            self.landings_source,
+            self.repair_rounds_per_landing,
+            self.total_repair_rounds,
+            self.landings,
+            self.repair_rounds_source,
+            median_str,
+            self.hours_per_round_source,
+        )
+    }
+
+    pub fn render_json(&self) -> String {
+        let med = self
+            .median_hours_per_round
+            .map(|h| format!("{h:.4}"))
+            .unwrap_or_else(|| "null".to_string());
+        format!(
+            r#"{{"window_days":{},"landings":{},"landings_source":"{}","total_repair_rounds":{},"repair_rounds_per_landing":{:.4},"repair_rounds_source":"{}","median_wall_clock_hours_per_round":{},"hours_per_round_source":"{}"}}"#,
+            self.window_days,
+            self.landings,
+            json_escape(&self.landings_source),
+            self.total_repair_rounds,
+            self.repair_rounds_per_landing,
+            json_escape(&self.repair_rounds_source),
+            med,
+            json_escape(&self.hours_per_round_source),
+        )
+    }
+}
+
+pub fn build_landings_and_repairs_section(
+    repo_root: &Path,
+    window_days: u64,
+) -> LandingsAndRepairsSection {
+    build_landings_and_repairs_section_at(repo_root, window_days, current_unix())
+}
+
+pub fn build_landings_and_repairs_section_at(
+    repo_root: &Path,
+    window_days: u64,
+    now_unix: u64,
+) -> LandingsAndRepairsSection {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let ambient = repo_root.join(".chump-locks/ambient.jsonl");
+    let contents = std::fs::read_to_string(&ambient).unwrap_or_default();
+    let db_facts = collect_db_ship_facts(repo_root);
+    let window_secs = window_days.saturating_mul(86_400);
+    let cutoff = if window_days == 0 {
+        0
+    } else {
+        now_unix.saturating_sub(window_secs)
+    };
+
+    #[derive(Default)]
+    struct LandingRecord {
+        gaps: BTreeSet<String>,
+        prs: BTreeSet<u64>,
+        claim_ts: Option<u64>,
+        ship_ts: Option<u64>,
+    }
+
+    let mut records: BTreeMap<String, LandingRecord> = BTreeMap::new();
+    let mut claimed_at: BTreeMap<String, u64> = BTreeMap::new();
+    let mut repair_by_gap: BTreeMap<String, u64> = BTreeMap::new();
+    let mut repair_by_pr: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut pushes_by_gap: BTreeMap<String, u64> = BTreeMap::new();
+    let mut pushes_by_pr: BTreeMap<u64, u64> = BTreeMap::new();
+
+    for (g, &t) in &db_facts.gap_opened_at {
+        claimed_at.insert(g.clone(), t);
+    }
+
+    let canonical_key = |gap_id: Option<&str>, pr: Option<u64>| -> Option<String> {
+        if let Some(p) = pr {
+            return Some(format!("pr:{p}"));
+        }
+        let g = gap_id?;
+        if let Some(prs) = db_facts.gap_to_prs.get(g) {
+            if let Some(&first_pr) = prs.first() {
+                return Some(format!("pr:{first_pr}"));
+            }
+        }
+        Some(format!("gap:{g}"))
+    };
+
+    for line in contents.lines() {
+        let kind = extract_field(line, "kind").unwrap_or_default();
+        let ts_opt = extract_field(line, "ts").and_then(|t| parse_iso8601_to_unix(&t));
+        let gap_opt = extract_field(line, "gap_id").filter(|s| !s.is_empty());
+        let pr_opt = extract_pr_from_line(line);
+
+        if matches!(
+            kind.as_str(),
+            "gap_claimed" | "session_start" | "dispatch_started"
+        ) {
+            if let (Some(g), Some(ts)) = (gap_opt.as_ref(), ts_opt) {
+                claimed_at
+                    .entry(g.clone())
+                    .and_modify(|e| *e = (*e).min(ts))
+                    .or_insert(ts);
+            }
+            continue;
+        }
+
+        let is_repair = matches!(
+            kind.as_str(),
+            "repair_dispatch"
+                | "pr_repair_dispatched"
+                | "bot_merge_phase_failure"
+                | "ci_failure_repaired"
+                | "prepush_test_gate_failed"
+        ) || (matches!(
+            kind.as_str(),
+            "prepush_review_verdict" | "code_review_verdict"
+        ) && extract_field(line, "verdict")
+            .map(|v| {
+                matches!(
+                    v.to_ascii_lowercase().as_str(),
+                    "fail"
+                        | "failed"
+                        | "reject"
+                        | "rejected"
+                        | "changes_requested"
+                        | "blocked"
+                        | "repair"
+                )
+            })
+            .unwrap_or(false));
+        if is_repair {
+            if let Some(pr) = pr_opt {
+                *repair_by_pr.entry(pr).or_insert(0) += 1;
+            } else if let Some(g) = gap_opt.as_ref() {
+                *repair_by_gap.entry(g.clone()).or_insert(0) += 1;
+            }
+            continue;
+        }
+
+        if matches!(kind.as_str(), "prepush_duration" | "git_push" | "pr_push") {
+            if let Some(pr) = pr_opt {
+                *pushes_by_pr.entry(pr).or_insert(0) += 1;
+            } else if let Some(g) = gap_opt.as_ref() {
+                *pushes_by_gap.entry(g.clone()).or_insert(0) += 1;
+            }
+            continue;
+        }
+
+        if matches!(
+            kind.as_str(),
+            "gap_shipped" | "ship_landed" | "pr_merged" | "gap_done" | "gap_status_done_written"
+        ) {
+            if let Some(ts) = ts_opt {
+                if ts < cutoff {
+                    continue;
+                }
+            }
+            let Some(key) = canonical_key(gap_opt.as_deref(), pr_opt) else {
+                continue;
+            };
+            let rec = records.entry(key).or_default();
+            if let Some(g) = gap_opt {
+                rec.gaps.insert(g);
+            }
+            if let Some(p) = pr_opt {
+                rec.prs.insert(p);
+                if let Some(gs) = db_facts.pr_to_gaps.get(&p) {
+                    for g in gs {
+                        rec.gaps.insert(g.clone());
+                    }
+                }
+            }
+            if let Some(ts) = ts_opt {
+                rec.ship_ts = Some(rec.ship_ts.map_or(ts, |prev| prev.max(ts)));
+            }
+        }
+    }
+
+    for (&pr, &close_opt) in &db_facts.merged_prs {
+        if let Some(ts) = close_opt {
+            if ts < cutoff {
+                continue;
+            }
+        }
+        let key = format!("pr:{pr}");
+        let rec = records.entry(key).or_default();
+        rec.prs.insert(pr);
+        if let Some(gs) = db_facts.pr_to_gaps.get(&pr) {
+            for g in gs {
+                rec.gaps.insert(g.clone());
+            }
+        }
+        if let Some(ts) = close_opt {
+            rec.ship_ts = Some(rec.ship_ts.map_or(ts, |prev| prev.max(ts)));
+        }
+    }
+
+    for (gap_id, &close_opt) in &db_facts.done_gaps {
+        if let Some(ts) = close_opt {
+            if ts < cutoff {
+                continue;
+            }
+        }
+        let pr_opt = db_facts
+            .gap_to_prs
+            .get(gap_id)
+            .and_then(|ps| ps.first().copied());
+        let Some(key) = canonical_key(Some(gap_id), pr_opt) else {
+            continue;
+        };
+        let rec = records.entry(key).or_default();
+        rec.gaps.insert(gap_id.clone());
+        if let Some(p) = pr_opt {
+            rec.prs.insert(p);
+        }
+        if let Some(ts) = close_opt {
+            rec.ship_ts = Some(rec.ship_ts.map_or(ts, |prev| prev.max(ts)));
+        }
+    }
+
+    let landings = records.len() as u64;
+    let mut total_repair_rounds = 0u64;
+    let mut hours_per_round_samples: Vec<f64> = Vec::new();
+
+    for rec in records.values_mut() {
+        for g in &rec.gaps {
+            if let Some(&c_ts) = claimed_at.get(g) {
+                rec.claim_ts = Some(rec.claim_ts.map_or(c_ts, |prev| prev.min(c_ts)));
+            }
+        }
+        let mut repairs = 0u64;
+        for p in &rec.prs {
+            repairs += repair_by_pr.get(p).copied().unwrap_or(0);
+        }
+        for g in &rec.gaps {
+            repairs += repair_by_gap.get(g).copied().unwrap_or(0);
+        }
+        if repairs == 0 {
+            let mut pushes = 0u64;
+            for p in &rec.prs {
+                pushes += pushes_by_pr.get(p).copied().unwrap_or(0);
+            }
+            for g in &rec.gaps {
+                pushes += pushes_by_gap.get(g).copied().unwrap_or(0);
+            }
+            if pushes > 1 {
+                repairs = pushes - 1;
+            }
+        }
+        total_repair_rounds += repairs;
+
+        if let (Some(c_ts), Some(s_ts)) = (rec.claim_ts, rec.ship_ts) {
+            if s_ts >= c_ts {
+                let rounds = (1 + repairs) as f64;
+                let hours = ((s_ts - c_ts) as f64 / 3600.0) / rounds;
+                hours_per_round_samples.push(hours);
+            }
+        }
+    }
+
+    hours_per_round_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median_hours_per_round = if hours_per_round_samples.is_empty() {
+        None
+    } else {
+        let n = hours_per_round_samples.len();
+        if n % 2 == 1 {
+            Some(hours_per_round_samples[n / 2])
+        } else {
+            Some((hours_per_round_samples[n / 2 - 1] + hours_per_round_samples[n / 2]) / 2.0)
+        }
+    };
+
+    let repair_rounds_per_landing = if landings == 0 {
+        0.0
+    } else {
+        total_repair_rounds as f64 / landings as f64
+    };
+
+    LandingsAndRepairsSection {
+        window_days,
+        landings,
+        landings_source: ".chump/state.db (WHERE gaps.status='done' + gap_prs) + .chump-locks/ambient.jsonl (gap_shipped/pr_merged/gap_done/ship_landed)".to_string(),
+        total_repair_rounds,
+        repair_rounds_per_landing,
+        repair_rounds_source: ".chump-locks/ambient.jsonl (prepush_review_verdict/repair_dispatch/bot_merge_phase_failure/prepush_duration) + .chump/state.db (gap_prs)".to_string(),
+        median_hours_per_round,
+        hours_per_round_source: ".chump-locks/ambient.jsonl (gap_claimed->gap_shipped/pr_merged/gap_done) + .chump/state.db (gap_prs.opened_at->gaps.closed_at)".to_string(),
+    }
 }
 
 // ── Gate False-Positive Rate Section (CREDIBLE-1115, slice of CREDIBLE-272) ─
@@ -1589,6 +2153,8 @@ pub struct KpiReport {
     pub handoff_rate: HandoffRateSection,
     pub green_first_try: GreenFirstTrySection,
     pub time_to_land: TimeToLandSection,
+    /// CREDIBLE-1582: landings, repair rounds per landing, and median wall-clock hours per round.
+    pub landings_and_repairs: LandingsAndRepairsSection,
     pub gate_false_positive: GateFalsePositiveSection,
     pub shell_invariant_writers: ShellInvariantWritersSection,
     /// INFRA-8577: shell LOC under scripts/ at the first commit of each of the
@@ -1627,6 +2193,8 @@ impl KpiReport {
         out.push('\n');
         out.push_str(&self.time_to_land.render_text());
         out.push('\n');
+        out.push_str(&self.landings_and_repairs.render_text());
+        out.push('\n');
         out.push_str(&self.gate_false_positive.render_text());
         out.push('\n');
         out.push_str(&self.shell_invariant_writers.render_text());
@@ -1645,7 +2213,7 @@ impl KpiReport {
 
     pub fn render_json(&self) -> String {
         format!(
-            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"gate_false_positive":{},"shell_invariant_writers":{},"shell_loc_by_month":{},"ci_pickup":{},"ci_census":{},"admin_merges":{},"unreviewed_src_merges":{}}}"#,
+            r#"{{"ship_rate":{},"mission_history":{},"cost_savings":{},"free_tier_savings":{},"leverage":{},"tokens_per_ship":{},"handoff_rate":{},"green_first_try":{},"time_to_land":{},"landings_and_repairs":{},"gate_false_positive":{},"shell_invariant_writers":{},"shell_loc_by_month":{},"ci_pickup":{},"ci_census":{},"admin_merges":{},"unreviewed_src_merges":{}}}"#,
             self.ship_rate.render_json(),
             self.mission_history.render_json(),
             self.cost_savings.render_json(),
@@ -1655,6 +2223,7 @@ impl KpiReport {
             self.handoff_rate.render_json(),
             self.green_first_try.render_json(),
             self.time_to_land.render_json(),
+            self.landings_and_repairs.render_json(),
             self.gate_false_positive.render_json(),
             self.shell_invariant_writers.render_json(),
             self.shell_loc_by_month.render_json(),
@@ -1902,6 +2471,7 @@ pub fn build_full_report(repo_root: &Path, window_days: u64) -> KpiReport {
         handoff_rate: build_handoff_rate_section(repo_root, window_days),
         green_first_try: build_green_first_try_section(repo_root),
         time_to_land: build_time_to_land_section(repo_root),
+        landings_and_repairs: build_landings_and_repairs_section(repo_root, window_days),
         gate_false_positive: build_gate_false_positive_section(repo_root),
         shell_invariant_writers: build_shell_invariant_writers_section(repo_root),
         shell_loc_by_month: build_shell_loc_by_month_section(repo_root),
@@ -4685,6 +5255,96 @@ mod tests {
             section.render_json(),
             r#"{"unreviewed_src_merges_7d":2,"prs":[5584,5590]}"#
         );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn credible1582_landings_repairs_hours_per_round_and_ship_path_fallbacks() {
+        let tmp = tempdir();
+        let now_unix = parse_iso8601_to_unix("2026-10-24T12:00:00Z").unwrap();
+
+        // Seed state.db with gaps.status='done' + gap_prs links (NO gap_shipped
+        // event needed for CREDIBLE-1582-B — exercises the DB + pr_merged/gap_done path).
+        let store = chump_gap_store::GapStore::open(&tmp).unwrap();
+        let t_open_a = parse_iso8601_to_unix("2026-10-23T08:00:00Z").unwrap() as i64;
+        let t_close_a = parse_iso8601_to_unix("2026-10-23T10:00:00Z").unwrap() as i64; // 2h total
+        let t_open_b = parse_iso8601_to_unix("2026-10-23T12:00:00Z").unwrap() as i64;
+        let t_close_b = parse_iso8601_to_unix("2026-10-23T15:00:00Z").unwrap() as i64; // 3h total
+
+        store
+            .conn_for_test()
+            .execute(
+                "INSERT INTO gaps (id, domain, title, priority, status, created_at, closed_at, closed_date, closed_pr)
+                 VALUES ('CREDIBLE-1582-A', 'CREDIBLE', 'CREDIBLE: A', 'P2', 'done', ?1, ?2, '2026-10-23', 5601),
+                        ('CREDIBLE-1582-B', 'CREDIBLE', 'CREDIBLE: B', 'P2', 'done', ?3, ?4, '2026-10-23', 5602)",
+                rusqlite::params![t_open_a, t_close_a, t_open_b, t_close_b],
+            )
+            .unwrap();
+        store
+            .conn_for_test()
+            .execute(
+                "INSERT INTO gap_prs (gap_id, pr_number, head_sha, opened_at, state, multi_ok)
+                 VALUES ('CREDIBLE-1582-A', 5601, 'sha5601', ?1, 'merged', 0),
+                        ('CREDIBLE-1582-B', 5602, 'sha5602', ?2, 'merged', 0)",
+                rusqlite::params![t_open_a, t_open_b],
+            )
+            .unwrap();
+
+        // Seed ambient.jsonl with gap_claimed, prepush_review_verdict (changes_requested),
+        // repair_dispatch, pr_merged, and gap_done — NO legacy gap_shipped needed!
+        write_ambient_handoff(
+            &tmp,
+            &[
+                // Landing A (PR #5601): 2h total, 1 repair round (2 rounds total -> 1.0h/round)
+                r#"{"ts":"2026-10-23T08:00:00Z","kind":"gap_claimed","gap_id":"CREDIBLE-1582-A"}"#,
+                r#"{"ts":"2026-10-23T09:00:00Z","kind":"prepush_review_verdict","gap_id":"CREDIBLE-1582-A","pr":5601,"verdict":"changes_requested"}"#,
+                r#"{"ts":"2026-10-23T10:00:00Z","kind":"pr_merged","gap_id":"CREDIBLE-1582-A","pr":5601}"#,
+                // Landing B (PR #5602): 3h total, 2 repair rounds (3 rounds total -> 1.0h/round)
+                r#"{"ts":"2026-10-23T12:00:00Z","kind":"gap_claimed","gap_id":"CREDIBLE-1582-B"}"#,
+                r#"{"ts":"2026-10-23T13:00:00Z","kind":"repair_dispatch","gap_id":"CREDIBLE-1582-B","pr":5602}"#,
+                r#"{"ts":"2026-10-23T14:00:00Z","kind":"bot_merge_phase_failure","gap_id":"CREDIBLE-1582-B","step":"test"}"#,
+                r#"{"ts":"2026-10-23T15:00:00Z","kind":"gap_done","gap_id":"CREDIBLE-1582-B","closed_pr":5602}"#,
+                // Landing C (PR #5603): 1h total, 0 repair rounds (green first try -> 1.0h/round)
+                r#"{"ts":"2026-10-23T16:00:00Z","kind":"gap_claimed","gap_id":"CREDIBLE-1582-C"}"#,
+                r#"{"ts":"2026-10-23T17:00:00Z","kind":"gap_shipped","gap_id":"CREDIBLE-1582-C","pr_number":5603}"#,
+            ],
+        );
+
+        let lr = build_landings_and_repairs_section_at(&tmp, 7, now_unix);
+        assert_eq!(lr.landings, 3, "expected 3 landings");
+        assert_eq!(
+            lr.total_repair_rounds, 3,
+            "expected 3 total repair rounds (1 + 2 + 0)"
+        );
+        assert!(
+            (lr.repair_rounds_per_landing - 1.0).abs() < 1e-6,
+            "expected 1.0 repair rounds per landing, got {}",
+            lr.repair_rounds_per_landing
+        );
+        assert!(
+            (lr.median_hours_per_round.unwrap() - 1.0).abs() < 1e-6,
+            "expected median 1.0h per round, got {:?}",
+            lr.median_hours_per_round
+        );
+        let lr_text = lr.render_text();
+        assert!(
+            lr_text.contains("landings: 3 (source:")
+                && lr_text.contains("repair rounds per landing: 1.00")
+                && lr_text.contains("median wall-clock hours per round: 1.00h (source:"),
+            "unexpected text:\n{lr_text}"
+        );
+
+        let gft = build_green_first_try_section(&tmp);
+        assert_eq!(gft.total_ships, 3);
+        assert_eq!(gft.green_first_try, 1);
+        assert!(!gft.render_text().contains("No gap_shipped events found"));
+
+        let ttl = build_time_to_land_section(&tmp);
+        assert_eq!(ttl.sample_count, 3);
+        assert_eq!(ttl.p50_seconds, Some(7200));
+        assert_eq!(ttl.max_seconds, Some(10800));
+        assert!(!ttl.render_text().contains("No claim→ship pairs found"));
+
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
