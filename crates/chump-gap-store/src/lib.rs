@@ -7032,6 +7032,41 @@ pub fn acceptance_criteria_is_vague(ac_string: &str) -> bool {
     })
 }
 
+/// CREDIBLE-1575: coerce a single `acceptance_criteria` array element into its
+/// human-readable string form so items containing `: `, `#`, or a leading `-`
+/// (including unquoted YAML list items deserialized as a single-key JSON map
+/// or nested sequence) are never silently dropped when rendering `chump gap show`.
+fn json_value_to_string_item(x: &serde_json::Value) -> Option<String> {
+    match x {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Object(map) if !map.is_empty() => {
+            let parts: Vec<String> = map
+                .iter()
+                .map(|(k, v)| match v {
+                    serde_json::Value::Null => format!("{k}:"),
+                    serde_json::Value::String(s) => format!("{k}: {s}"),
+                    other => format!(
+                        "{k}: {}",
+                        json_value_to_string_item(other).unwrap_or_else(|| other.to_string())
+                    ),
+                })
+                .collect();
+            Some(parts.join(", "))
+        }
+        serde_json::Value::Array(seq) if !seq.is_empty() => {
+            let parts: Vec<String> = seq.iter().filter_map(json_value_to_string_item).collect();
+            if parts.is_empty() {
+                None
+            } else {
+                Some(format!("- {}", parts.join(", ")))
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Parse a stored JSON-string-array column back to Vec<String>. Returns None
 /// when the field is empty or unparseable.
 fn parse_json_string_list(s: &str) -> Option<Vec<String>> {
@@ -7040,11 +7075,7 @@ fn parse_json_string_list(s: &str) -> Option<Vec<String>> {
     }
     let v: serde_json::Value = serde_json::from_str(s).ok()?;
     let arr = v.as_array()?;
-    Some(
-        arr.iter()
-            .filter_map(|x| x.as_str().map(String::from))
-            .collect(),
-    )
+    Some(arr.iter().filter_map(json_value_to_string_item).collect())
 }
 
 /// Quote a YAML date scalar. Existing `docs/gaps.yaml` uses single-quoted
@@ -7081,15 +7112,7 @@ fn unix_to_iso_full(ts: i64) -> String {
 /// into a JSON string-array stored in the DB. Non-array inputs become `[]`.
 fn normalize_string_list(v: &serde_json::Value) -> String {
     let items: Vec<String> = match v {
-        serde_json::Value::Array(arr) => arr
-            .iter()
-            .filter_map(|x| match x {
-                serde_json::Value::String(s) => Some(s.clone()),
-                serde_json::Value::Number(n) => Some(n.to_string()),
-                serde_json::Value::Bool(b) => Some(b.to_string()),
-                _ => None,
-            })
-            .collect(),
+        serde_json::Value::Array(arr) => arr.iter().filter_map(json_value_to_string_item).collect(),
         serde_json::Value::Null => Vec::new(),
         _ => Vec::new(),
     };
@@ -15309,5 +15332,29 @@ esac
             .link_pr("RESILIENT-1650", 5650, "abc1234")
             .expect("canonical store without markers accepts link_pr");
         assert_eq!(store.list_prs_for_gap("RESILIENT-1650").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn credible1575_parse_json_ac_list_preserves_colon_hash_dash_and_map_items() {
+        let stored = r#"[
+            "plain criterion",
+            "test 11b: a stand-in node dir with a paused node.env is byte-identical",
+            "item with # hash comment syntax inside",
+            "- leading dash bullet item",
+            {"unquoted_yaml_key": "value after colon-space"}
+        ]"#;
+        let parsed = parse_json_ac_list(stored);
+        assert_eq!(
+            parsed.len(),
+            5,
+            "all 5 AC items must be preserved: {parsed:?}"
+        );
+        assert_eq!(
+            parsed[1],
+            "test 11b: a stand-in node dir with a paused node.env is byte-identical"
+        );
+        assert_eq!(parsed[2], "item with # hash comment syntax inside");
+        assert_eq!(parsed[3], "- leading dash bullet item");
+        assert_eq!(parsed[4], "unquoted_yaml_key: value after colon-space");
     }
 }

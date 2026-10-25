@@ -10606,8 +10606,19 @@ async fn main() -> Result<()> {
                             .filter(|value| !value.is_empty())
                             .unwrap_or_else(|| "New gap".into())
                     });
-                    let acceptance_criteria = flag("--acceptance-criteria")
-                        .map(|raw| raw.split('|').map(str::to_string).collect::<Vec<_>>());
+                    let ac_vals = collect_acceptance_criteria_flag_values(&args, 3);
+                    let acceptance_criteria = if ac_vals.is_empty() {
+                        None
+                    } else if ac_vals.len() == 1 && ac_vals[0].contains('|') {
+                        Some(
+                            ac_vals[0]
+                                .split('|')
+                                .map(str::to_string)
+                                .collect::<Vec<_>>(),
+                        )
+                    } else {
+                        Some(ac_vals)
+                    };
                     let body = gap_route::GapMutationBody {
                         op: "reserve".into(),
                         domain: Some(domain),
@@ -10666,11 +10677,8 @@ async fn main() -> Result<()> {
                         );
                         std::process::exit(2);
                     }
-                    let acceptance_values: Vec<String> = args
-                        .windows(2)
-                        .filter(|&pair| pair[0] == "--acceptance-criteria")
-                        .map(|pair| pair[1].clone())
-                        .collect();
+                    let acceptance_values: Vec<String> =
+                        collect_acceptance_criteria_flag_values(&args, 4);
                     let acceptance_criteria =
                         if acceptance_values.len() == 1 && acceptance_values[0].contains('|') {
                             Some(
@@ -11433,6 +11441,49 @@ async fn main() -> Result<()> {
                         .unwrap_or_else(|| "New gap".into())
                 });
                 let mut priority = flag("--priority").unwrap_or_else(|| "P2".into());
+                let p0_override_reason = flag("--p0-override").or_else(|| flag("--cap-override"));
+                let reserve_description = flag("--description").unwrap_or_default();
+                let all_rows_for_reserve = store.list(None).unwrap_or_default();
+
+                // ── CREDIBLE-1543 AC3: slice / sub-gap priority clamp to parent umbrella ──
+                if p0_override_reason.is_none() {
+                    if let Some((parent_id, parent_prio)) = detect_parent_slice_priority_clamp(
+                        &title,
+                        &reserve_description,
+                        &priority,
+                        &all_rows_for_reserve,
+                    ) {
+                        if !args.iter().any(|a| a == "--quiet") {
+                            eprintln!(
+                                "[reserve] CREDIBLE-1543: clamping slice priority {priority} -> {parent_prio} to match parent {parent_id} (pass --p0-override <reason> to override)"
+                            );
+                        }
+                        priority = parent_prio;
+                    }
+                }
+
+                // ── CREDIBLE-1543 AC1/AC2: open P0 budget (5) admission guard ────────────
+                let mut pending_p0_override: Option<(usize, String)> = None;
+                if priority == "P0" {
+                    let open_p0_count = count_open_manual_p0s(&all_rows_for_reserve, None);
+                    if open_p0_count >= OPEN_P0_BUDGET {
+                        match p0_override_reason.as_deref().map(str::trim) {
+                            Some(reason) if !reason.is_empty() => {
+                                pending_p0_override = Some((open_p0_count, reason.to_string()));
+                            }
+                            _ => {
+                                eprintln!(
+                                    "chump gap reserve: open P0 budget ({OPEN_P0_BUDGET}) exceeded — currently {open_p0_count} open P0 gaps (CREDIBLE-1543)."
+                                );
+                                eprintln!(
+                                    "Demote or close an existing P0 first, file at P1/P2, or pass --p0-override <reason> (audited to ambient.jsonl)."
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                }
+
                 // ── CREDIBLE-072: per-pillar weekly merge-share cap / floor ─────
                 // A NEW gap in a pillar that already holds >30% of the last 7
                 // days' merges is demoted to P2; when EFFECTIVE+CREDIBLE are
@@ -11514,14 +11565,23 @@ async fn main() -> Result<()> {
                 let json_out = args.iter().any(|a| a == "--json");
                 let why = args.iter().any(|a| a == "--why");
                 let skip_obs_acs = args.iter().any(|a| a == "--skip-obs-acs");
-                let custom_acceptance_criteria = flag("--acceptance-criteria");
+                let reserve_ac_values = collect_acceptance_criteria_flag_values(&args, 3);
+                let custom_acceptance_criteria = if reserve_ac_values.is_empty() {
+                    None
+                } else {
+                    Some(reserve_ac_values)
+                };
 
-                // INFRA-756: compute acceptance_criteria. Default to 4 obs-AC templates
+                // INFRA-756 / CREDIBLE-1558: compute acceptance_criteria. Default to 4 obs-AC templates
                 // unless --skip-obs-acs is set or --acceptance-criteria is provided.
                 let acceptance_criteria_json = match custom_acceptance_criteria {
-                    Some(raw) => {
-                        let parts: Vec<&str> = raw.split('|').collect();
-                        serde_json::to_string(&parts).unwrap_or_else(|_| "[]".into())
+                    Some(vals) => {
+                        if vals.len() == 1 && vals[0].contains('|') {
+                            let parts: Vec<&str> = vals[0].split('|').collect();
+                            serde_json::to_string(&parts).unwrap_or_else(|_| "[]".into())
+                        } else {
+                            serde_json::to_string(&vals).unwrap_or_else(|_| "[]".into())
+                        }
                     }
                     None if !skip_obs_acs => {
                         // EFFECTIVE-294: concrete, claimable default AC (no TODO
@@ -12537,6 +12597,9 @@ async fn main() -> Result<()> {
                         if !quiet {
                             eprintln!(" done {id}");
                         }
+                        if let Some((open_p0_count, ref reason)) = pending_p0_override {
+                            emit_p0_budget_override(&worktree_root, &id, open_p0_count, reason);
+                        }
 
                         // ZERO-WASTE-045 AC2: any near-match surfaced above (state.db or
                         // Almanac corpus) gets written into the new gap's notes, so a
@@ -13466,6 +13529,7 @@ async fn main() -> Result<()> {
                         std::process::exit(1);
                     }
                 }
+                return Ok(());
             }
             // CREDIBLE-1551 (Phase R R2, AC2): reverse of link-pr — print the
             // gap IDs that a typed gap_prs row links to a PR number, newest
@@ -13807,21 +13871,8 @@ async fn main() -> Result<()> {
                 //                 curator can migrate callers gradually.
                 // Backward compat: a single occurrence with no pipe is identical
                 // under both forms (one bullet either way), so no warning fires.
-                let ac_flag_values: Vec<String> = {
-                    let mut vals = Vec::new();
-                    let mut i = 0usize;
-                    while i < args_local.len() {
-                        if args_local[i] == "--acceptance-criteria" {
-                            if let Some(v) = args_local.get(i + 1) {
-                                vals.push(v.clone());
-                                i += 2;
-                                continue;
-                            }
-                        }
-                        i += 1;
-                    }
-                    vals
-                };
+                let ac_flag_values: Vec<String> =
+                    collect_acceptance_criteria_flag_values(&args_local, 4);
                 let acceptance_criteria = if ac_flag_values.is_empty() {
                     None
                 } else if ac_flag_values.len() == 1 && ac_flag_values[0].contains('|') {
@@ -13986,6 +14037,62 @@ async fn main() -> Result<()> {
                     }
                 }
                 // ── end INFRA-3689 fleet-server routing ──────────────────────────────────
+
+                // CREDIBLE-1558 AC3: Refuse to replace existing non-vague acceptance_criteria
+                // with a shorter list unless `--replace-ac` is explicitly passed.
+                let replace_ac = args_local.iter().any(|a| a == "--replace-ac");
+                if let Some(ref new_ac_json) = acceptance_criteria {
+                    if let Ok(Some(existing_gap)) = store.get(&gap_id) {
+                        let old_list =
+                            gap_store::parse_json_ac_list(&existing_gap.acceptance_criteria);
+                        let new_list = gap_store::parse_json_ac_list(new_ac_json);
+                        let old_count = old_list.len();
+                        let new_count = new_list.len();
+                        let old_is_vague = old_list.is_empty()
+                            || old_list.iter().all(|item| is_vague_ac_entry(item));
+                        if !old_is_vague && new_count < old_count && !replace_ac {
+                            eprintln!(
+                                "chump gap set: refusing to overwrite acceptance_criteria on {gap_id} with a shorter list (old count: {old_count}, new count: {new_count}) (CREDIBLE-1558). Pass --replace-ac to confirm intentional replacement or pass all bullets."
+                            );
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                // CREDIBLE-1543 AC1/AC2: Enforce open P0 budget (5) on `chump gap set --priority P0`.
+                if flag_local("--priority").as_deref() == Some("P0") {
+                    let already_p0 = store
+                        .get(&gap_id)
+                        .ok()
+                        .flatten()
+                        .map(|g| g.priority == "P0")
+                        .unwrap_or(false);
+                    if !already_p0 {
+                        let all_gaps = store.list(None).unwrap_or_default();
+                        let open_p0_count = count_open_manual_p0s(&all_gaps, Some(&gap_id));
+                        if open_p0_count >= OPEN_P0_BUDGET {
+                            match flag_local("--p0-override").as_deref().map(str::trim) {
+                                Some(reason) if !reason.is_empty() => {
+                                    emit_p0_budget_override(
+                                        &worktree_root,
+                                        &gap_id,
+                                        open_p0_count,
+                                        reason,
+                                    );
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "chump gap set: open P0 budget ({OPEN_P0_BUDGET}) exceeded — currently {open_p0_count} open P0 gaps; refusing to promote {gap_id} to P0 (CREDIBLE-1543)."
+                                    );
+                                    eprintln!(
+                                        "Demote or close an existing P0 first, or pass --p0-override <reason> (audited to ambient.jsonl)."
+                                    );
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    }
+                }
 
                 let update = gap_store::GapFieldUpdate {
                     title: flag_local("--title"),
@@ -18687,6 +18794,7 @@ async fn main() -> Result<()> {
                 std::process::exit(2);
             }
         }
+        return Ok(());
     }
 
     // `chump cost record-pr` (INFRA-405) — record per-PR cost metrics (tokens, USD, duration).
@@ -23448,8 +23556,9 @@ fn validate_gap_mutation_args(
                 "--outcome",
                 "--evidence",
                 "--artifact-type",
+                "--p0-override",
             ];
-            const BOOL_FLAGS: &[&str] = &["--json", "--quiet"];
+            const BOOL_FLAGS: &[&str] = &["--json", "--quiet", "--replace-ac"];
 
             let mut i = 1usize;
             if let Some(first_arg) = rest.get(1) {
@@ -23458,6 +23567,14 @@ fn validate_gap_mutation_args(
                         match rest.get(2) {
                             Some(val) if !val.starts_with("--") => {
                                 i = 3;
+                                if matches!(
+                                    first_arg.as_str(),
+                                    "acceptance_criteria" | "acceptance-criteria"
+                                ) {
+                                    while i < rest.len() && !rest[i].starts_with("--") {
+                                        i += 1;
+                                    }
+                                }
                             }
                             _ => {
                                 return Err(format!(
@@ -23478,6 +23595,11 @@ fn validate_gap_mutation_args(
                     match rest.get(i + 1) {
                         Some(val) if !val.starts_with("--") => {
                             i += 2;
+                            if tok == "--acceptance-criteria" {
+                                while i < rest.len() && !rest[i].starts_with("--") {
+                                    i += 1;
+                                }
+                            }
                         }
                         _ => {
                             return Err(format!(
@@ -23643,6 +23765,7 @@ fn validate_gap_mutation_args(
                 "--evidence",
                 "--external-repo",
                 "--cap-override",
+                "--p0-override",
                 "--offline-bypass-reason",
                 "--session",
                 "--stack-on",
@@ -23667,7 +23790,14 @@ fn validate_gap_mutation_args(
                 let tok = rest[i].as_str();
                 if VALUE_FLAGS.contains(&tok) {
                     match rest.get(i + 1) {
-                        Some(val) if !val.starts_with("--") => i += 2,
+                        Some(val) if !val.starts_with("--") => {
+                            i += 2;
+                            if tok == "--acceptance-criteria" {
+                                while i < rest.len() && !rest[i].starts_with("--") {
+                                    i += 1;
+                                }
+                            }
+                        }
                         _ => {
                             return Err(format!(
                                 "chump gap reserve: {tok} requires a value\n{GAP_RESERVE_USAGE}"
@@ -23687,6 +23817,117 @@ fn validate_gap_mutation_args(
             Ok(GapMutationArgCheck::Valid)
         }
         _ => Ok(GapMutationArgCheck::Valid),
+    }
+}
+
+/// Collect all acceptance criteria values following `--acceptance-criteria` flags
+/// (both repeated `--acceptance-criteria A --acceptance-criteria B` and variadic
+/// `--acceptance-criteria A B C`), preserving each non-flag argument intact (CREDIBLE-1558).
+fn collect_acceptance_criteria_flag_values(args_slice: &[String], start_idx: usize) -> Vec<String> {
+    let mut vals = Vec::new();
+    let mut i = start_idx;
+    while i < args_slice.len() {
+        if args_slice[i] == "--acceptance-criteria" {
+            i += 1;
+            while i < args_slice.len() && !args_slice[i].starts_with("--") {
+                vals.push(args_slice[i].clone());
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    vals
+}
+
+const OPEN_P0_BUDGET: usize = 5;
+
+fn count_open_manual_p0s(gaps: &[gap_store::GapRow], exclude_id: Option<&str>) -> usize {
+    gaps.iter()
+        .filter(|g| {
+            g.status == "open"
+                && g.priority == "P0"
+                && exclude_id != Some(g.id.as_str())
+                && !g.notes.contains("auto-filed by pr-triage-bot")
+        })
+        .count()
+}
+
+fn gap_priority_rank(prio: &str) -> u8 {
+    match prio {
+        "P0" => 0,
+        "P1" => 1,
+        "P2" => 2,
+        "P3" => 3,
+        _ => 2,
+    }
+}
+
+/// CREDIBLE-1543 AC3: When reserving an execution slice / sub-gap whose title or
+/// description names an existing parent/umbrella gap, clamp the requested priority
+/// to the parent's priority if the requested priority is higher than the parent's.
+fn detect_parent_slice_priority_clamp(
+    title: &str,
+    description: &str,
+    requested_priority: &str,
+    gaps: &[gap_store::GapRow],
+) -> Option<(String, String)> {
+    let combined = format!("{title} {description}");
+    let lower = combined.to_ascii_lowercase();
+    let is_slice = lower.contains("slice")
+        || lower.contains("umbrella")
+        || lower.contains("parent")
+        || lower.contains("sub-gap")
+        || lower.contains("subgap");
+    if !is_slice {
+        return None;
+    }
+    let gap_re = regex::Regex::new(r"\b([A-Z]+-\d+)\b").ok()?;
+    for cap in gap_re.captures_iter(&combined) {
+        let candidate_id = cap.get(1)?.as_str();
+        if let Some(parent) = gaps.iter().find(|g| g.id == candidate_id) {
+            if gap_priority_rank(requested_priority) < gap_priority_rank(&parent.priority) {
+                return Some((parent.id.clone(), parent.priority.clone()));
+            }
+        }
+    }
+    None
+}
+
+fn emit_p0_budget_override(
+    worktree_root: &std::path::Path,
+    gap_id: &str,
+    open_p0_count: usize,
+    reason: &str,
+) {
+    let _ = crate::ambient_emit::emit(&crate::ambient_emit::EmitArgs {
+        kind: "p0_budget_override".to_string(),
+        source: Some("chump_gap".to_string()),
+        gap: Some(gap_id.to_string()),
+        fields: vec![
+            ("open_p0_count".to_string(), open_p0_count.to_string()),
+            ("budget".to_string(), OPEN_P0_BUDGET.to_string()),
+            ("reason".to_string(), reason.to_string()),
+        ],
+        ..Default::default()
+    });
+    // Also ensure worktree_root/.chump-locks/ambient.jsonl receives the record when invoked in an isolated test repo.
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let ambient_path = worktree_root.join(".chump-locks").join("ambient.jsonl");
+    if let Some(parent) = ambient_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let safe_reason = reason.replace(['"', '\\'], "");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&ambient_path)
+    {
+        use std::io::Write;
+        let _ = writeln!(
+            f,
+            r#"{{"ts":"{ts}","kind":"p0_budget_override","gap":"{gap_id}","open_p0_count":{open_p0_count},"budget":{OPEN_P0_BUDGET},"reason":"{safe_reason}"}}"#
+        );
     }
 }
 
@@ -24184,5 +24425,84 @@ mod tests {
             ),
             Ok(super::GapMutationArgCheck::Valid)
         );
+    }
+
+    #[test]
+    fn credible_1558_gap_mutation_accepts_multi_bullet_ac_and_replace_ac() {
+        let s = |items: &[&str]| -> Vec<String> { items.iter().map(|x| x.to_string()).collect() };
+        let argv = s(&[
+            "CREDIBLE-1558",
+            "--acceptance-criteria",
+            "bullet 1: run cargo test",
+            "bullet 2: verify exit 0",
+            "bullet 3: check negative path",
+        ]);
+        assert_eq!(
+            super::validate_gap_mutation_args("set", &argv),
+            Ok(super::GapMutationArgCheck::Valid)
+        );
+        let full_args = s(&[
+            "chump",
+            "gap",
+            "set",
+            "CREDIBLE-1558",
+            "--acceptance-criteria",
+            "bullet 1: run cargo test",
+            "bullet 2: verify exit 0",
+            "bullet 3: check negative path",
+            "--replace-ac",
+        ]);
+        assert_eq!(
+            super::validate_gap_mutation_args("set", &full_args[3..]),
+            Ok(super::GapMutationArgCheck::Valid)
+        );
+        let collected = super::collect_acceptance_criteria_flag_values(&full_args, 4);
+        assert_eq!(
+            collected,
+            vec![
+                "bullet 1: run cargo test".to_string(),
+                "bullet 2: verify exit 0".to_string(),
+                "bullet 3: check negative path".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn credible_1543_slice_parent_priority_clamp_and_p0_budget_helpers() {
+        let parent: crate::gap_store::GapRow = serde_json::from_value(serde_json::json!({
+            "id": "RESILIENT-1500",
+            "domain": "RESILIENT",
+            "title": "Umbrella RESILIENT-1500",
+            "description": "",
+            "priority": "P2",
+            "effort": "m",
+            "status": "open",
+            "acceptance_criteria": "[]",
+            "depends_on": "[]",
+            "notes": "",
+            "source_doc": "",
+            "created_at": 0,
+            "closed_at": null
+        }))
+        .unwrap();
+
+        let clamped = super::detect_parent_slice_priority_clamp(
+            "Slice 1 of RESILIENT-1500: tighten retry loop",
+            "Execution slice under umbrella RESILIENT-1500",
+            "P0",
+            std::slice::from_ref(&parent),
+        );
+        assert_eq!(
+            clamped,
+            Some(("RESILIENT-1500".to_string(), "P2".to_string()))
+        );
+
+        let unclamped = super::detect_parent_slice_priority_clamp(
+            "Slice 2 of RESILIENT-1500",
+            "Sub-gap",
+            "P2",
+            std::slice::from_ref(&parent),
+        );
+        assert_eq!(unclamped, None);
     }
 }

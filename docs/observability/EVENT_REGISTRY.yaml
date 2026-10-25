@@ -14792,4 +14792,17 @@ events:
       and not already dispatched for `(pr, head_sha)`).
     consumers: [ambient, fleet-brief, ops-audit]
     fields_required: [ts, kind, pr, gap, head, reason, failed_check]
+  # ── CREDIBLE-1543: open P0 budget override on gap reserve / gap set ──────────
+  # anchor: p0_budget_override
+  - kind: p0_budget_override
+    status: active
+    effect_metric: credible
+    emitter: src/main.rs gap reserve / gap set handler (CREDIBLE-1543)
+    emitter_paths: [src/main.rs]
+    trigger: chump gap reserve --priority P0 or chump gap set <ID> --priority P0
+      was invoked while the open manual P0 budget (5) was already full, and the
+      caller explicitly passed --p0-override <reason> to proceed.
+    consumers: [ambient, fleet-brief, audit-log]
+    fields_required: [ts, kind, gap, open_p0_count, budget, reason]
+
   # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──
