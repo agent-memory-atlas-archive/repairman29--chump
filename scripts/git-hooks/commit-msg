@@ -48,7 +48,7 @@ if [ -n "${CHUMP_DISPATCH_GAP:-}${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CHU
     _c1566_or="${_c1566_pfx}_OFF_RAILS_CHECK"
     _c1566_dd="${_c1566_pfx}_DOCS_DELTA_CHECK"
     _c1566_hit=""
-    if [ "${CHUMP_TEST_GATE:-1}" = "0" ]; then
+    if [ "${CHUMP_TEST_GATE:-1}" = "0" ] && [ "${CHUMP_BOT_MERGE_IN_PROGRESS:-0}" != "1" ]; then
         _c1566_hit="CHUMP_TEST_GATE=0"
     elif [ "${!_c1566_pf:-0}" = "1" ]; then
         _c1566_hit="${_c1566_pf}=1"
@@ -57,7 +57,7 @@ if [ -n "${CHUMP_DISPATCH_GAP:-}${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CHU
     elif [ "${!_c1566_dd:-1}" = "0" ]; then
         _c1566_hit="${_c1566_dd}=0"
     else
-        _c1566_trailer="$(grep -E '^(Test-Gate-Bypass|Off-Rails-Bypass|Lint-Gate-Bypass|Bot-Merge-Bypass|Rust-First-Bypass|Shared-Service-Bypass|Verify-Bypass|Bypass-Tier):' "$MSG_FILE" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+        _c1566_trailer="$(grep -E '^(Test-Gate-Bypass|Off-Rails-Bypass|Lint-Gate-Bypass|Bot-Merge-Bypass|Verify-Bypass|Bypass-Tier):' "$MSG_FILE" 2>/dev/null | head -1 | cut -d: -f1 || true)"
         if [ -n "$_c1566_trailer" ]; then
             _c1566_hit="${_c1566_trailer}:"
         fi

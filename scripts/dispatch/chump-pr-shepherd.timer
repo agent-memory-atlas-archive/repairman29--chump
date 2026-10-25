@@ -4,6 +4,9 @@ Description=Run the Chump pr-shepherd tick every 60 seconds (pr-shepherd port)
 
 [Timer]
 OnBootSec=45s
+# RESILIENT-1511: fire 10s after timer activation so `systemctl start` triggers
+# an immediate tick even when the host has not rebooted.
+OnActiveSec=10s
 OnUnitActiveSec=60s
 # RESILIENT-1455: OnUnitInactiveSec pairs with OnUnitActiveSec so this Type=oneshot
 # timer self-perpetuates. A oneshot goes inactive after each run, leaving OnUnitActiveSec

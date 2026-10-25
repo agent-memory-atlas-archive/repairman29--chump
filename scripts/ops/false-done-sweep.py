@@ -343,7 +343,27 @@ def main():
     ap.add_argument("--grep-target-sweep", action="store_true",
                      help="CREDIBLE-1087: sweep scripts/ci for grep calls whose "
                           "target path doesn't exist; always exits 0")
+    ap.add_argument("--check-files", nargs="*", default=None,
+                     help="CREDIBLE-1410: enforce BOOKKEEPING (no-impl-files-in-diff) on a PR file list; exits 1 if 0 implementation files")
     a = ap.parse_args()
+
+    if a.check_files is not None:
+        files = [f.strip() for f in a.check_files if f and f.strip()]
+        impl_files = [f for f in files if is_implementation(f)]
+        if not impl_files:
+            print(json.dumps({
+                "status": "miss",
+                "verdict": "BOOKKEEPING",
+                "reason": "no_impl_files_in_diff",
+                "files": files,
+            }))
+            sys.exit(1)
+        print(json.dumps({
+            "status": "ok",
+            "verdict": "VERIFIED",
+            "impl_files": impl_files,
+        }))
+        sys.exit(0)
 
     if a.grep_target_sweep:
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

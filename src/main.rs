@@ -500,6 +500,27 @@ mod preflight_self_tests {
     fn absent_session_is_not_self() {
         assert!(!preflight_claim_is_self(None, "claim-anyone-3"));
     }
+
+    #[test]
+    fn credible_1569_preflight_selects_shell_tests_for_farmer_status() {
+        let paths = vec!["src/farmer_status.rs".to_string()];
+        let scripts = crate::preflight::select_shell_tests_for_paths(&paths);
+        assert_eq!(
+            scripts,
+            vec![
+                "scripts/ci/test-fleet-kill-switch.sh".to_string(),
+                "scripts/ci/test-outcome-gate.sh".to_string(),
+                "scripts/ci/test-state-db-yaml-sync.sh".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn credible_1569_preflight_selects_no_shell_tests_for_docs_only() {
+        let paths = vec!["docs/ROADMAP.md".to_string(), "README.md".to_string()];
+        let scripts = crate::preflight::select_shell_tests_for_paths(&paths);
+        assert!(scripts.is_empty());
+    }
 }
 
 use anyhow::{Context as _, Result};
@@ -17649,14 +17670,23 @@ async fn main() -> Result<()> {
 
                 let total = pickable.len();
 
-                // Classify each gap by pillar using title keyword.
+                // Classify each gap by pillar using title keyword (plus R&D inventory per CREDIBLE-238).
                 let pillars = ["EFFECTIVE", "CREDIBLE", "RESILIENT", "ZERO-WASTE"];
                 let mut counts: std::collections::HashMap<&str, Vec<String>> =
                     pillars.iter().map(|p| (*p, Vec::new())).collect();
+                let mut rnd_gaps: Vec<String> = Vec::new();
                 let mut other: Vec<String> = Vec::new();
 
                 for g in &pickable {
                     let title_up = g.title.to_uppercase();
+                    if g.domain.eq_ignore_ascii_case("RND")
+                        || g.domain.eq_ignore_ascii_case("R&D")
+                        || g.id.starts_with("RND-")
+                        || title_up.contains("R&D")
+                        || title_up.starts_with("RND:")
+                    {
+                        rnd_gaps.push(g.id.clone());
+                    }
                     let mut assigned = false;
                     for p in &pillars {
                         if title_up.contains(p) {
@@ -17728,13 +17758,15 @@ async fn main() -> Result<()> {
                     suggestions.iter().map(|(id, _, _)| id.clone()).collect();
 
                 if as_json {
-                    let counts_json: std::collections::HashMap<&str, usize> =
+                    let mut counts_json: std::collections::HashMap<&str, usize> =
                         pillars.iter().map(|p| (*p, counts[p].len())).collect();
+                    counts_json.insert("R&D", rnd_gaps.len());
                     println!(
                         "{}",
                         serde_json::json!({
                             "total_pickable": total,
                             "pillars": counts_json,
+                            "rnd": rnd_gaps.len(),
                             "other": other.len(),
                             "warnings": warnings,
                             "suggestions": suggestions_ids,
@@ -17746,6 +17778,7 @@ async fn main() -> Result<()> {
                         let n = counts[p].len();
                         println!("  {p}: {n}");
                     }
+                    println!("  R&D: {}", rnd_gaps.len());
                     println!("  OTHER: {}", other.len());
                     if warnings.is_empty() {
                         println!("✓ Balance OK");

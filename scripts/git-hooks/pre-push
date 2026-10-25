@@ -117,7 +117,10 @@ _c1610_cs="${_c1610_pfx}_CLIPPY_SKIP"
 _c1610_or="${_c1610_pfx}_OFF_RAILS_CHECK"
 if [[ -n "${CHUMP_DISPATCH_GAP:-}${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CHUMP_WORKER_TICK:-}" ]]; then
     _c1566_hit=""
-    if [[ "${CHUMP_TEST_GATE:-1}" == "0" ]]; then
+    # INFRA-8643 / INFRA-8644 / INFRA-8645: bot-merge.sh sets
+    # CHUMP_BOT_MERGE_IN_PROGRESS=1 and delegates the test gate to CI via
+    # RESILIENT-1550 below; do not treat bot-merge's own push as an agent bypass.
+    if [[ "${CHUMP_TEST_GATE:-1}" == "0" ]] && [[ "${CHUMP_BOT_MERGE_IN_PROGRESS:-0}" != "1" ]]; then
         _c1566_hit="CHUMP_TEST_GATE=0"
     elif [[ "${!_c1610_bm:-0}" == "1" ]]; then
         _c1566_hit="${_c1610_bm}=1"
@@ -133,7 +136,7 @@ if [[ -n "${CHUMP_DISPATCH_GAP:-}${CHUMP_FLEET_SESSION:-}${FLEET_AGENT_ID:-}${CH
         _c1566_hit="${_c1610_or}=0"
     else
         _c1566_head_msg="$(git log -1 --pretty=%B 2>/dev/null || true)"
-        _c1566_trailer="$(grep -E '^(Test-Gate-Bypass|Off-Rails-Bypass|Lint-Gate-Bypass|Bot-Merge-Bypass|Rust-First-Bypass|Shared-Service-Bypass|Verify-Bypass|Bypass-Tier):' <<<"$_c1566_head_msg" | head -1 | cut -d: -f1 || true)"
+        _c1566_trailer="$(grep -E '^(Test-Gate-Bypass|Off-Rails-Bypass|Lint-Gate-Bypass|Bot-Merge-Bypass|Verify-Bypass|Bypass-Tier):' <<<"$_c1566_head_msg" | head -1 | cut -d: -f1 || true)"
         if [[ -n "$_c1566_trailer" ]]; then
             _c1566_hit="${_c1566_trailer}:"
         fi
@@ -1351,8 +1354,8 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                 while IFS= read -r _tname; do
                     [[ -z "$_tname" ]] && continue
                     # Warn if entry lacks a tracking_gap (discipline check, AC 6).
-                    if ! grep -A5 "test: ${_tname}" "$_CATALOG" 2>/dev/null \
-                            | grep -q "tracking_gap:"; then
+                    _flake_ctx="$(grep -A5 "test: ${_tname}" "$_CATALOG" 2>/dev/null || true)"
+                    if ! grep -q "tracking_gap:" <<<"$_flake_ctx"; then
                         echo "[pre-push] WARN: KNOWN_FLAKES entry '${_tname}' has no tracking_gap — add one (INFRA-764)" >&2
                     fi
                     echo "[pre-push] SKIP (known flake): ${_tname}" >&2
@@ -1627,6 +1630,27 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                 >> "$_AMBIENT_LOG" 2>/dev/null || true
             echo "[pre-push] INFRA-1403: no .rs changes — test gate skipped." >&2
         fi  # end if [[ "$ANY_RS" == "1" ]]
+
+        # CREDIBLE-1569: run path-matched scripts/ci/test-*.sh suites (same triggers as ci.yml).
+        if declare -F pre_push_compute_shell_tests >/dev/null 2>&1; then # CREDIBLE-1569:SHELL-TEST-GATE
+            _SHELL_SCOPE_LINE="$(pre_push_compute_shell_tests "$_CHANGED_FILES")" # CREDIBLE-1569:SHELL-TEST-GATE
+            echo "$_SHELL_SCOPE_LINE" >&2 # CREDIBLE-1569:SHELL-TEST-GATE
+            _SHELL_SCRIPTS="$(printf '%s\n' "$_SHELL_SCOPE_LINE" | sed -nE 's/.*scripts=([^ ]+).*/\1/p')" # CREDIBLE-1569:SHELL-TEST-GATE
+            if [[ -n "$_SHELL_SCRIPTS" && "$_SHELL_SCRIPTS" != "none" ]]; then # CREDIBLE-1569:SHELL-TEST-GATE
+                IFS=',' read -ra _SEL_SHELL_TESTS <<<"$_SHELL_SCRIPTS" # CREDIBLE-1569:SHELL-TEST-GATE
+                for _st in "${_SEL_SHELL_TESTS[@]}"; do # CREDIBLE-1569:SHELL-TEST-GATE
+                    [[ -z "$_st" ]] && continue # CREDIBLE-1569:SHELL-TEST-GATE
+                    if [[ -f "$REPO_ROOT_T/$_st" ]]; then # CREDIBLE-1569:SHELL-TEST-GATE
+                        echo "[pre-push] CREDIBLE-1569: running matched CI shell test $_st..." >&2 # CREDIBLE-1569:SHELL-TEST-GATE
+                        if ! (cd "$REPO_ROOT_T" && unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE && bash "$REPO_ROOT_T/$_st"); then # CREDIBLE-1569:SHELL-TEST-GATE
+                            rm -f "$CACHE_MARKER" 2>/dev/null || true # CREDIBLE-1569:SHELL-TEST-GATE
+                            echo "[pre-push] BLOCKED (CREDIBLE-1569): matched CI shell test failed: $_st" >&2 # CREDIBLE-1569:SHELL-TEST-GATE
+                            exit 1 # CREDIBLE-1569:SHELL-TEST-GATE
+                        fi # CREDIBLE-1569:SHELL-TEST-GATE
+                    fi # CREDIBLE-1569:SHELL-TEST-GATE
+                done # CREDIBLE-1569:SHELL-TEST-GATE
+            fi # CREDIBLE-1569:SHELL-TEST-GATE
+        fi # CREDIBLE-1569:SHELL-TEST-GATE
     fi
 
     # INFRA-1372 AC-3: HEAD-drift detection — abort push if cargo test created

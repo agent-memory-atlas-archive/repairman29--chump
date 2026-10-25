@@ -214,20 +214,35 @@ printf '{"ts":"%s","kind":"mission_binary_check","repo":"%s","beast_merges_7d":%
 echo
 
 # ── ② Mission-ship ratio (24h) ──────────────────────────────────────────────
+# CREDIBLE-238: R&D is intentionally excluded from the Gate-2 mission-ship
+# ratio numerator (while remaining in pillar inventory and pillar_coverage so
+# balance_restock can still detect R&D starvation). WHY: R&D's valid output is
+# frequently a NO-GO (killing an experiment counts as a successful R&D run).
+# Counting R&D merges in the mission-ship numerator would make the 2/3 scaling
+# gate gameable — the fleet could clear Gate 2 by running and killing
+# experiments instead of shipping mission-linked outcomes. Do not "clean up"
+# this exclusion in a future refactor.
 total=0; mission=0
 while IFS= read -r t; do
   [ -z "$t" ] && continue
   total=$((total+1))
+  if grep -qiE '(^|[^A-Za-z])(R&D|RND):' <<<"$t"; then
+    continue
+  fi
   gid=$(printf '%s' "$t" | grep -oE '[A-Z]+-[0-9]+' | head -1)
   [ -z "$gid" ] && continue
+  case "$gid" in RND-*|RD-*) continue;; esac
+  _gap_json="$(chump gap show "$gid" --json 2>/dev/null || true)"
+  if grep -qiE '"(domain|pillar)":[[:space:]]*"(RND|R&D)"|"title":[[:space:]]*"(R&D|RND):' <<<"$_gap_json"; then
+    continue
+  fi
   case "$gid" in MISSION-*) mission=$((mission+1)); continue;; esac
-  if chump gap show "$gid" --json 2>/dev/null \
-       | grep -qiE "\"domain\":[[:space:]]*\"MISSION\"|$ACTIVE_MISSION|\"outcome_id\":[[:space:]]*\"[^\"]"; then
+  if grep -qiE "\"domain\":[[:space:]]*\"MISSION\"|$ACTIVE_MISSION|\"outcome_id\":[[:space:]]*\"[^\"]" <<<"$_gap_json"; then
     mission=$((mission+1))
   fi
 done < <(gh pr list --state merged --search "merged:>=$day" --json title --jq '.[].title' 2>/dev/null)
 ratio="n/a"; [ "$total" -gt 0 ] && ratio="$mission/$total"
-echo "② Mission-ship ratio (24h): $ratio   (target ≥ 2/3 — mission-linked merges ÷ total)"
+echo "② Mission-ship ratio (24h): $ratio   (target ≥ 2/3 — mission-linked merges ÷ total; R&D excluded)"
 echo
 
 # ── ③ Deploy-lag (Goal 1 / MISSION-012 proxy) ───────────────────────────────

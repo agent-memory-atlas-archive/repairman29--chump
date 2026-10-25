@@ -33,6 +33,76 @@ impl FileTestMapConfig {
     pub fn new(rules: Vec<FileTestRule>) -> Self {
         Self { rules }
     }
+
+    /// CREDIBLE-1569: Default path-to-shell-test rules mirroring `.github/workflows/ci.yml`
+    /// path-triggered test suites so `chump preflight` and `pre-push` run the same
+    /// `scripts/ci/test-*.sh` scripts locally when matching Rust or shell files change.
+    pub fn with_defaults() -> Self {
+        let defaults: &[(&str, &[&str])] = &[
+            (
+                "src/farmer_status.rs",
+                &[
+                    "scripts/ci/test-fleet-kill-switch.sh",
+                    "scripts/ci/test-outcome-gate.sh",
+                    "scripts/ci/test-state-db-yaml-sync.sh",
+                ],
+            ),
+            (
+                "src/node_pause.rs",
+                &[
+                    "scripts/ci/test-fleet-kill-switch.sh",
+                    "scripts/ci/test-outcome-gate.sh",
+                    "scripts/ci/test-state-db-yaml-sync.sh",
+                ],
+            ),
+            (
+                "src/node_mode.rs",
+                &[
+                    "scripts/ci/test-fleet-kill-switch.sh",
+                    "scripts/ci/test-outcome-gate.sh",
+                    "scripts/ci/test-state-db-yaml-sync.sh",
+                ],
+            ),
+            (
+                "scripts/ci/lib/sandbox-healthy-node.sh",
+                &[
+                    "scripts/ci/test-fleet-kill-switch.sh",
+                    "scripts/ci/test-outcome-gate.sh",
+                    "scripts/ci/test-state-db-yaml-sync.sh",
+                ],
+            ),
+            (
+                "scripts/coord/lib/test-sandbox.sh",
+                &[
+                    "scripts/ci/test-fleet-kill-switch.sh",
+                    "scripts/ci/test-outcome-gate.sh",
+                    "scripts/ci/test-state-db-yaml-sync.sh",
+                ],
+            ),
+            (
+                "scripts/coord/gap-reserve.sh",
+                &["scripts/ci/test-gap-reserve-concurrency.sh"],
+            ),
+            (
+                "src/commands/gap_reserve*.rs",
+                &["scripts/ci/test-gap-reserve-concurrency.sh"],
+            ),
+            ("src/acp.rs", &["scripts/ci/test-acp-real-clients.sh"]),
+            (
+                "src/acp_server.rs",
+                &["scripts/ci/test-acp-real-clients.sh"],
+            ),
+        ];
+        Self {
+            rules: defaults
+                .iter()
+                .map(|(pat, tests)| FileTestRule {
+                    pattern: (*pat).to_string(),
+                    tests: tests.iter().map(|t| (*t).to_string()).collect(),
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Returns the union of test identifiers whose pattern matches `file_path`.

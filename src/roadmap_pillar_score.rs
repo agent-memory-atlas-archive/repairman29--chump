@@ -248,6 +248,7 @@ Zero-Waste discipline and also zero waste practice.
             credible: 10,
             resilient: 10,
             zero_waste: 10,
+            ..Default::default()
         };
         let weights = bottleneck_weights(&coverage);
         let effective_w = weights[&Pillar::Effective];
@@ -276,6 +277,7 @@ Zero-Waste discipline and also zero waste practice.
             credible: 10,
             resilient: 10,
             zero_waste: 10,
+            ..Default::default()
         };
         let weights = bottleneck_weights(&coverage);
         let scored = score_lanes(&lanes, &weights);

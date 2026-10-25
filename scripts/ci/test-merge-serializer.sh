@@ -46,6 +46,12 @@ for u in chump-merge-serializer.service chump-merge-serializer.timer; do
 done
 grep -q "chump-merge-serializer.timer" "$ROOT/scripts/ops/organ-manifest.txt" && ok "manifest row present" || bad "no manifest row"
 
+echo "=== RESILIENT-1537 (BEHIND update-branch) & RESILIENT-1511 (shepherd timer OnActiveSec=10s) ==="
+grep -q 'pr update-branch "\$pr" --repo "\$REPO" --rebase' "$SER" && ok "RESILIENT-1537: merge-serializer calls pr update-branch --rebase on BEHIND PRs" || bad "RESILIENT-1537: missing pr update-branch --rebase in merge-serializer.sh"
+grep -q 'RESILIENT-1537' "$SER" && ok "RESILIENT-1537: annotated in merge-serializer.sh" || bad "RESILIENT-1537: missing annotation in merge-serializer.sh"
+SHEPHERD_TIMER="$ROOT/scripts/dispatch/chump-pr-shepherd.timer"
+[[ -f "$SHEPHERD_TIMER" ]] && grep -q '^OnActiveSec=10s$' "$SHEPHERD_TIMER" && ok "RESILIENT-1511: chump-pr-shepherd.timer has OnActiveSec=10s" || bad "RESILIENT-1511: chump-pr-shepherd.timer missing OnActiveSec=10s"
+
 echo
 echo "$pass ok / $fail fail"
 [[ "$fail" -eq 0 ]]

@@ -22,13 +22,16 @@ pub struct WeekOutcome {
     pub gaps: Vec<RoadmapGap>,
 }
 
-/// INFRA-1145: per-pillar count of open (pickable) gaps.
+/// INFRA-1145 / CREDIBLE-238: per-pillar count of open (pickable) gaps,
+/// including R&D so balance_restock can detect R&D starvation even though R&D
+/// is excluded from the Gate-2 mission-ship ratio numerator.
 #[derive(Debug, Default, Clone)]
 pub struct PillarCoverage {
     pub effective: usize,
     pub credible: usize,
     pub resilient: usize,
     pub zero_waste: usize,
+    pub rnd: usize,
 }
 
 /// META-1045: one outcome-table drift finding (see [`analyze_outcome_drift`]).
@@ -297,9 +300,18 @@ pub fn build_report(repo_root: &Path) -> RoadmapStatusReport {
             }
         }
 
-        // INFRA-1145: pillar_coverage — count open gaps by pillar tag in title.
+        // INFRA-1145 / CREDIBLE-238: pillar_coverage — count open gaps by pillar tag in title or R&D domain.
         for row in &all_open {
             let title = row.title.as_str();
+            let title_up = title.to_uppercase();
+            if row.domain.eq_ignore_ascii_case("RND")
+                || row.domain.eq_ignore_ascii_case("R&D")
+                || row.id.starts_with("RND-")
+                || title_up.contains("R&D")
+                || title_up.starts_with("RND:")
+            {
+                pillar_coverage.rnd += 1;
+            }
             if title.contains("EFFECTIVE") {
                 pillar_coverage.effective += 1;
             } else if title.contains("CREDIBLE") {
@@ -475,8 +487,8 @@ impl RoadmapStatusReport {
 
         let pc = &self.pillar_coverage;
         out.push_str(&format!(
-            "  Pillar coverage (open): EFFECTIVE={} CREDIBLE={} RESILIENT={} ZERO-WASTE={}\n",
-            pc.effective, pc.credible, pc.resilient, pc.zero_waste
+            "  Pillar coverage (open): EFFECTIVE={} CREDIBLE={} RESILIENT={} ZERO-WASTE={} R&D={}\n",
+            pc.effective, pc.credible, pc.resilient, pc.zero_waste, pc.rnd
         ));
 
         out.push('\n');
@@ -542,11 +554,12 @@ impl RoadmapStatusReport {
 
         let pc = &self.pillar_coverage;
         let pillar_json = format!(
-            r#"{{"effective":{e},"credible":{c},"resilient":{r},"zero_waste":{z}}}"#,
+            r#"{{"effective":{e},"credible":{c},"resilient":{r},"zero_waste":{z},"rnd":{rnd}}}"#,
             e = pc.effective,
             c = pc.credible,
             r = pc.resilient,
             z = pc.zero_waste,
+            rnd = pc.rnd,
         );
 
         let outcome_drift_json: Vec<String> = self
@@ -822,6 +835,7 @@ mod tests {
                 credible: 3,
                 resilient: 7,
                 zero_waste: 2,
+                rnd: 1,
             },
             ..Default::default()
         };
@@ -830,6 +844,7 @@ mod tests {
         assert!(json.contains(r#""credible":3"#));
         assert!(json.contains(r#""resilient":7"#));
         assert!(json.contains(r#""zero_waste":2"#));
+        assert!(json.contains(r#""rnd":1"#));
     }
 
     #[test]

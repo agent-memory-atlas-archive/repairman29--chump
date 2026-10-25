@@ -285,9 +285,6 @@ _drive_pr() {
         return 1
     fi
 
-    git fetch origin main --quiet 2>/dev/null || true
-    git fetch origin "$br" --quiet 2>/dev/null || { echo "[merge-serializer] #$pr fetch $br failed"; return 1; }
-
     if [[ "$DRY_RUN" == "1" ]]; then
         echo "[merge-serializer] (dry-run) would rebase #$pr ($br) onto origin/main, wait verified, squash-merge"
         return 1
@@ -307,20 +304,38 @@ _drive_pr() {
         return 2
     fi
     local rebase_ok=0
-    git worktree remove "$wt" --force 2>/dev/null || true
-    # -B forces local ref to the freshly-fetched remote tip so we can only ADD
-    # commits from main, never drop commits already on the remote branch (RESILIENT-350).
-    if git worktree add -B "$br" "$wt" "origin/$br" >/dev/null 2>&1; then
-        if ( cd "$wt" && git rebase origin/main >/dev/null 2>&1 \
-             && [[ -z "$(git diff --name-only --diff-filter=U 2>/dev/null)" ]] ); then
-            if ( cd "$wt" && git push origin "$br" --force-with-lease --no-verify >/dev/null 2>&1 ); then
-                rebase_ok=1
-            fi
-        else
-            ( cd "$wt" && git rebase --abort 2>/dev/null || true )
+    # RESILIENT-1537: when a candidate PR is green on checks but BEHIND main
+    # (mergeStateStatus == "BEHIND"), run `gh pr update-branch` before merging
+    # (falling back to local worktree rebase if update-branch fails).
+    if [[ "$ms" == "BEHIND" ]]; then
+        echo "[merge-serializer] #$pr mergeStateStatus=BEHIND — running gh pr update-branch before merge (RESILIENT-1537)"
+        if chump_gh pr update-branch "$pr" --repo "$REPO" --rebase >/dev/null 2>&1; then
+            rebase_ok=1
         fi
     fi
-    git worktree remove "$wt" --force 2>/dev/null || true
+    if [[ "$rebase_ok" != "1" ]]; then
+        git fetch origin main --quiet 2>/dev/null || true
+        if ! git fetch origin "$br" --quiet 2>/dev/null; then
+            _bm_lock_release
+            merge_pipeline_lock_release
+            echo "[merge-serializer] #$pr fetch $br failed"
+            return 1
+        fi
+        git worktree remove "$wt" --force 2>/dev/null || true
+        # -B forces local ref to the freshly-fetched remote tip so we can only ADD
+        # commits from main, never drop commits already on the remote branch (RESILIENT-350).
+        if git worktree add -B "$br" "$wt" "origin/$br" >/dev/null 2>&1; then
+            if ( cd "$wt" && git rebase origin/main >/dev/null 2>&1 \
+                 && [[ -z "$(git diff --name-only --diff-filter=U 2>/dev/null)" ]] ); then
+                if ( cd "$wt" && git push origin "$br" --force-with-lease --no-verify >/dev/null 2>&1 ); then
+                    rebase_ok=1
+                fi
+            else
+                ( cd "$wt" && git rebase --abort 2>/dev/null || true )
+            fi
+        fi
+        git worktree remove "$wt" --force 2>/dev/null || true
+    fi
     _bm_lock_release
     merge_pipeline_lock_release
 
@@ -359,6 +374,12 @@ _drive_pr() {
         echo "[merge-serializer] #$pr: verified green but could not acquire bot-merge.lock to merge — will retry next tick"
         merge_pipeline_lock_release
         return 2
+    fi
+    local post_ms
+    post_ms="$(chump_gh pr view "$pr" --repo "$REPO" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null || echo "")"
+    if [[ "$post_ms" == "BEHIND" ]]; then
+        echo "[merge-serializer] #$pr still BEHIND main after verified green — running gh pr update-branch before merge (RESILIENT-1537)"
+        chump_gh pr update-branch "$pr" --repo "$REPO" --rebase >/dev/null 2>&1 || true
     fi
     local merged=0
     if chump_gh pr merge "$pr" --repo "$REPO" --squash >/dev/null 2>&1; then

@@ -4188,18 +4188,17 @@ stage_start "git push $BRANCH → $REMOTE"
 # prevent the manual "git push + gh pr create" bypass that skips gap-ship-fatal.
 export CHUMP_BOT_MERGE_IN_PROGRESS=1
 
-# INFRA-1399: bot-merge delegates the cargo test gate to CI on the PR side.
-# Running the full test suite (140+ s) inside the pre-push hook creates sibling
-# contention and stalls every bot-merge for 5-15 min under fleet load.
-# CI on the PR enforces the same gate — running it twice is pure waste.
-# CHUMP_TEST_GATE=0 skips the slow phase; the fmt check remains active (< 10 s).
-# An audit event is emitted so the bypass is traceable in ambient.jsonl.
+# INFRA-1399 / INFRA-8643 / INFRA-8644 / INFRA-8645: bot-merge delegates the
+# cargo test gate to CI on the PR side via CHUMP_BOT_MERGE_IN_PROGRESS=1
+# (RESILIENT-1550 in scripts/git-hooks/pre-push). Do NOT export CHUMP_TEST_GATE=0
+# here because agent dispatch sessions (CHUMP_DISPATCH_GAP set) reject direct
+# CHUMP_TEST_GATE=0 under CREDIBLE-1610 unless CHUMP_BOT_MERGE_IN_PROGRESS=1 is
+# honored. An audit event is emitted so the delegation is traceable in ambient.jsonl.
 _BM_PUSH_TIMEOUT_S="${CHUMP_BOT_MERGE_PHASE_TIMEOUT_S:-300}"
 if [[ "${CHUMP_TEST_GATE:-1}" != "0" ]]; then
-    export CHUMP_TEST_GATE=0
     _bm_amb_path="${LOCK_DIR:-${REPO_ROOT:-.}/.chump-locks}/ambient.jsonl"
     _ambient_write "$_bm_amb_path" \
-        "$(printf '{"ts":"%s","kind":"bot_merge_test_gate_skipped","gap_id":"%s","branch":"%s","note":"INFRA-1399: test gate delegated to CI; CHUMP_TEST_GATE=0 for this push"}' \
+        "$(printf '{"ts":"%s","kind":"bot_merge_test_gate_skipped","gap_id":"%s","branch":"%s","note":"INFRA-1399: CHUMP_TEST_GATE=0 — tests validated by CI"}' \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${GAP_IDS[0]:-none}" "$BRANCH")"
 fi
 
@@ -4681,13 +4680,13 @@ if [[ $AUTO_MERGE -eq 1 ]]; then
                     # the freshness requirement from the gap spec.
                     _cg_out="$("$_cg_chump" consensus-tally --corr-id "$_cg_corr" --since 1h 2>/dev/null || true)"
                     # Output shape: "corr_id=...  ...  verdict=PASSED"
-                    if echo "$_cg_out" | grep -q "verdict=PASSED"; then
+                    if grep -q "verdict=PASSED" <<<"$_cg_out"; then
                         _cg_verdict="PASSED"
-                    elif echo "$_cg_out" | grep -q "verdict=FAILED"; then
+                    elif grep -q "verdict=FAILED" <<<"$_cg_out"; then
                         _cg_verdict="FAILED"
-                    elif echo "$_cg_out" | grep -q "verdict=EXTENDED"; then
+                    elif grep -q "verdict=EXTENDED" <<<"$_cg_out"; then
                         _cg_verdict="EXTENDED"
-                    elif echo "$_cg_out" | grep -q "verdict=NO_QUORUM"; then
+                    elif grep -q "verdict=NO_QUORUM" <<<"$_cg_out"; then
                         _cg_verdict="NO_QUORUM"
                     fi
                 else
@@ -5379,23 +5378,43 @@ except Exception:
             for _gid in "${GAP_IDS[@]}"; do
                 stage_start "auto-close gap $_gid via PR #$TARGET_PR (INFRA-154)"
 
-                # PEER-VERI-08 (INFRA-3655) AC#2: an unproven proof-AC live
-                # outcome BLOCKS the close outright when CHUMP_VERIFY_LIVE_BLOCKING=1
-                # (default off, ratchet on — see docs/process/CAPABILITY_DECISIONS.md),
-                # instead of being swallowed by the CREDIBLE-178 advisory note
-                # below. Checked BEFORE `chump gap ship` so a blocked gap never
-                # reaches status=done. Non-proof misses are unaffected — this
-                # only fires when `chump pr ac-coverage` itself decided to
-                # report "miss" under the live-blocking flag (AC#3 fail-open
-                # is unchanged for everything else).
-                if [[ "${CHUMP_VERIFY_LIVE_BLOCKING:-0}" == "1" ]] && command -v chump &>/dev/null; then
+                # CREDIBLE-1410: BOOKKEEPING (no-impl-files-in-diff) check on gap close.
+                # A closing PR whose diff touches only bookkeeping paths (docs/gaps/*,
+                # docs/audits/*, docs/archive/*, .chump/*, docs/ROADMAP.md) must be
+                # refused before `chump gap ship` can mark the gap done.
+                if [[ -f "${REPO_ROOT:-.}/scripts/ops/false-done-sweep.py" ]]; then
+                    _bm_diff_files="$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only HEAD~1..HEAD 2>/dev/null || true)"
+                    if [[ -n "$_bm_diff_files" ]]; then
+                        # shellcheck disable=SC2086
+                        if ! python3 "${REPO_ROOT:-.}/scripts/ops/false-done-sweep.py" --check-files $_bm_diff_files >/dev/null 2>&1; then
+                            red "[CREDIBLE-1410] BLOCKING: $_gid PR #$TARGET_PR diff contains only bookkeeping files (zero implementation files) — refusing to auto-close."
+                            CHUMP_REPO="$_autoclose_main_repo" CHUMP_REAL_BINARY="$_autoclose_chump" \
+                                chump gap set "$_gid" --add-note "CREDIBLE-1410: auto-close BLOCKED — PR #$TARGET_PR diff contains zero implementation files (BOOKKEEPING)." >/dev/null 2>&1 || true
+                            _bmu_amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+                            printf '{"ts":"%s","kind":"ac_coverage_live_blocking_held_close","gap_id":"%s","pr":%s}\n' \
+                                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_gid" "$TARGET_PR" \
+                                >> "$_bmu_amb" 2>/dev/null || true
+                            unset _bm_diff_files _bmu_amb
+                            continue
+                        fi
+                    fi
+                    unset _bm_diff_files
+                fi
+
+                # CREDIBLE-1409 / PEER-VERI-08 (INFRA-3655) AC#2: pr_ac_coverage is
+                # BLOCKING by default (when CHUMP_AC_GATE_ADVISORY is unset or false,
+                # or when CHUMP_VERIFY_LIVE_BLOCKING=1). Checked BEFORE `chump gap ship`
+                # so a PR that misses AC coverage never flips the gap to status=done.
+                if [[ "${CHUMP_AC_GATE_ENABLED:-true}" == "true" ]] \
+                   && [[ "${CHUMP_AC_GATE_ADVISORY:-false}" != "true" || "${CHUMP_VERIFY_LIVE_BLOCKING:-0}" == "1" ]] \
+                   && command -v chump &>/dev/null; then
                     _ac_pre="$(CHUMP_REPO="$_autoclose_main_repo" CHUMP_REAL_BINARY="$_autoclose_chump" \
                         chump pr ac-coverage "$TARGET_PR" 2>&1 || true)"
                     if grep -q '"status":"miss"' <<<"$_ac_pre"; then
                         _ac_pre_misses="$(grep -oE '"misses":\[[0-9,]*\]' <<<"$_ac_pre")"
-                        red "[PEER-VERI-08] BLOCKING: $_gid PR #$TARGET_PR has an unproven proof-AC live outcome (${_ac_pre_misses:-misses}) and CHUMP_VERIFY_LIVE_BLOCKING=1 — refusing to auto-close. Verify the live outcome, then close manually: chump gap ship $_gid --closed-pr $TARGET_PR --update-yaml"
+                        red "[CREDIBLE-1409/PEER-VERI-08] BLOCKING: $_gid PR #$TARGET_PR failed AC coverage (${_ac_pre_misses:-misses}) — refusing to auto-close. Set CHUMP_AC_GATE_ADVISORY=true to downgrade to advisory, or verify manually: chump gap ship $_gid --closed-pr $TARGET_PR --update-yaml"
                         CHUMP_REPO="$_autoclose_main_repo" CHUMP_REAL_BINARY="$_autoclose_chump" \
-                            chump gap set "$_gid" --add-note "PEER-VERI-08: auto-close BLOCKED — PR #$TARGET_PR merged but a proof AC's live outcome is unverified (${_ac_pre_misses:-}). CHUMP_VERIFY_LIVE_BLOCKING=1 held the close; verify manually then run chump gap ship." >/dev/null 2>&1 || true
+                            chump gap set "$_gid" --add-note "CREDIBLE-1409/PEER-VERI-08: auto-close BLOCKED — PR #$TARGET_PR merged with uncovered acceptance criteria (${_ac_pre_misses:-}). Verify manually then run chump gap ship." >/dev/null 2>&1 || true
                         _bmu_amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
                         printf '{"ts":"%s","kind":"ac_coverage_live_blocking_held_close","gap_id":"%s","pr":%s}\n' \
                             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_gid" "$TARGET_PR" \
@@ -5423,7 +5442,7 @@ except Exception:
                         --closed-pr "$TARGET_PR" \
                         --update-yaml > "$_tmpship" 2>&1
                 _autoclose_rc=$?
-                trap "$_BM_ERR_TRAP_CMD" ERR
+                trap "${_BM_ERR_TRAP_CMD:--}" ERR
                 set -e
                 _autoclose_err=$(cat "$_tmpship")
                 rm -f "$_tmpship"

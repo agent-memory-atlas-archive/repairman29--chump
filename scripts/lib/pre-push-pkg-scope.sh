@@ -177,6 +177,51 @@ PY
     printf '%s\n' "$_scope_out"
 }
 
+# CREDIBLE-1569: Map changed files in a push range to matching scripts/ci/test-*.sh
+# suites so path-triggered CI shell tests (e.g. farmer_status.rs ->
+# test-fleet-kill-switch.sh / test-outcome-gate.sh / test-state-db-yaml-sync.sh)
+# run locally before push instead of failing 15 minutes later on GitHub Actions.
+pre_push_compute_shell_tests() {
+    local files_raw="${1:-}"
+    local line
+    local scripts=()
+    _pp_add_shell_test() {
+        local candidate="$1"
+        local existing
+        for existing in "${scripts[@]:+"${scripts[@]}"}"; do
+            [[ "$existing" == "$candidate" ]] && return 0
+        done
+        scripts+=("$candidate")
+    }
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        case "$line" in
+            scripts/ci/test-*.sh)
+                _pp_add_shell_test "$line"
+                ;;
+            src/farmer_status.rs|src/node_pause.rs|src/node_mode.rs|scripts/ci/lib/sandbox-healthy-node.sh|scripts/coord/lib/test-sandbox.sh)
+                _pp_add_shell_test "scripts/ci/test-fleet-kill-switch.sh"
+                _pp_add_shell_test "scripts/ci/test-outcome-gate.sh"
+                _pp_add_shell_test "scripts/ci/test-state-db-yaml-sync.sh"
+                ;;
+            scripts/coord/gap-reserve.sh|src/commands/gap_reserve*.rs)
+                _pp_add_shell_test "scripts/ci/test-gap-reserve-concurrency.sh"
+                ;;
+            src/acp.rs|src/acp_server.rs)
+                _pp_add_shell_test "scripts/ci/test-acp-real-clients.sh"
+                ;;
+        esac
+    done <<<"$files_raw"
+
+    if [[ "${#scripts[@]}" -eq 0 ]]; then
+        echo "[pre-push] incremental shell test scope: scripts=none reason=no-shell-tests"
+    else
+        local joined
+        joined="$(IFS=','; echo "${scripts[*]}")"
+        echo "[pre-push] incremental shell test scope: scripts=${joined} reason=path-filter"
+    fi
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     if [[ "${1:-}" == "--files" ]]; then
         shift
@@ -191,6 +236,15 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
                 [[ -n "$_p" ]] && _args+=("-p" "$_p")
             done
             printf '%s\n' "${_args[*]}"
+        fi
+    elif [[ "${1:-}" == "--shell-tests" ]]; then
+        shift
+        _line="$(pre_push_compute_shell_tests "$@")"
+        _scripts="$(printf '%s\n' "$_line" | sed -n 's/.*scripts=\([^ ]*\).*/\1/p')"
+        if [[ "$_scripts" == "none" || -z "$_scripts" ]]; then
+            printf 'none\n'
+        else
+            printf '%s\n' "${_scripts//,/ }"
         fi
     else
         pre_push_compute_pkg_scope "$@"

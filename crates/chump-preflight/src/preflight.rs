@@ -64,6 +64,29 @@ fn step(name: &'static str, argv: &[&str], kind: GateKind) -> Step {
     }
 }
 
+/// CREDIBLE-1569: Select `scripts/ci/test-*.sh` scripts matching a set of changed
+/// relative file paths (either directly modified `scripts/ci/test-*.sh` files or
+/// mapped via `file_test_map` rules mirroring `.github/workflows/ci.yml`).
+pub fn select_shell_tests_for_paths(paths: &[String]) -> Vec<String> {
+    let cfg = crate::file_test_map::FileTestMapConfig::with_defaults();
+    let mut selected = std::collections::BTreeSet::new();
+    for p in paths {
+        let p = p.trim();
+        if p.is_empty() {
+            continue;
+        }
+        if p.starts_with("scripts/ci/test-") && p.ends_with(".sh") {
+            selected.insert(p.to_string());
+        }
+        for mapped in crate::file_test_map::match_file_to_tests(p, &cfg) {
+            if mapped.starts_with("scripts/ci/test-") && mapped.ends_with(".sh") {
+                selected.insert(mapped);
+            }
+        }
+    }
+    selected.into_iter().collect()
+}
+
 /// RESILIENT-072 / INFRA-2720: scripts/ci/cargo-test-with-rerun.sh REQUIRES
 /// `-- <cmd> [args...]`. Without the `--` separator + a real command after
 /// it, the wrapper prints `usage: ...` and exits non-zero without running a
@@ -3488,6 +3511,43 @@ pub fn run(argv: &[String]) -> i32 {
         }
     }
 
+    // CREDIBLE-1569: run path-matched scripts/ci/test-*.sh suites (same triggers
+    // as .github/workflows/ci.yml) whenever matching files changed in the diff,
+    // even if the diff is otherwise Rust-only (e.g. src/farmer_status.rs ->
+    // test-fleet-kill-switch.sh, test-outcome-gate.sh, test-state-db-yaml-sync.sh).
+    if args.with_tests || scope.includes(GateKind::Scripts) {
+        let changed_for_shell = staged_paths(&repo_root);
+        let matched_shell_tests = select_shell_tests_for_paths(&changed_for_shell);
+        if !matched_shell_tests.is_empty() {
+            let mut present: std::collections::BTreeSet<String> = steps
+                .iter()
+                .filter_map(|s| s.argv.iter().find(|a| a.contains("scripts/ci/")).cloned())
+                .collect();
+            for rel in matched_shell_tests {
+                let full = repo_root.join(&rel);
+                if !full.exists() {
+                    continue;
+                }
+                let full_str = full.to_string_lossy().into_owned();
+                if present.contains(&rel) || present.contains(&full_str) {
+                    continue;
+                }
+                present.insert(rel.clone());
+                let fname = full
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| rel.clone());
+                let name: &'static str =
+                    Box::leak(format!("path-matched: {fname}").into_boxed_str());
+                steps.push(Step {
+                    name,
+                    argv: vec!["bash".to_string(), full_str],
+                    kind: GateKind::AlwaysFast,
+                });
+            }
+        }
+    }
+
     // EFFECTIVE-318: --full — reproduce CI's audit shards by running every
     // locally-safe test script audit.yml runs that isn't already a gate above.
     if args.full && scope.includes(GateKind::Scripts) {
@@ -5350,5 +5410,25 @@ mod tests {
         // env var name must stay stable since it's the documented escape
         // hatch for CI/tests to skip the real-time defer loop.
         assert_eq!(LOAD_DEFER_DISABLE_ENV, "CHUMP_PREFLIGHT_LOAD_DEFER_DISABLE");
+    }
+
+    #[test]
+    fn credible1569_select_shell_tests_for_paths_farmer_and_docs() {
+        let farmer = vec!["src/farmer_status.rs".to_string()];
+        assert_eq!(
+            select_shell_tests_for_paths(&farmer),
+            vec![
+                "scripts/ci/test-fleet-kill-switch.sh".to_string(),
+                "scripts/ci/test-outcome-gate.sh".to_string(),
+                "scripts/ci/test-state-db-yaml-sync.sh".to_string(),
+            ]
+        );
+        let direct = vec!["scripts/ci/test-pre-push-test-gate.sh".to_string()];
+        assert_eq!(
+            select_shell_tests_for_paths(&direct),
+            vec!["scripts/ci/test-pre-push-test-gate.sh".to_string()]
+        );
+        let docs = vec!["docs/ROADMAP.md".to_string()];
+        assert!(select_shell_tests_for_paths(&docs).is_empty());
     }
 }

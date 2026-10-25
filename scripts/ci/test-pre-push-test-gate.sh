@@ -151,7 +151,7 @@ git add src/lib.rs
 git commit -qm "rs change passing"
 OUT=$(run_hook)
 RC=$?
-if [[ "$RC" -eq 0 ]] && echo "$OUT" | grep -q "full suite green"; then
+if [[ "$RC" -eq 0 ]] && grep -q "full suite green" <<<"$OUT"; then
     ok "rs-change-passing push allowed and cached"
 else
     fail "rs-change-passing should pass (rc=$RC, out=$OUT)"
@@ -169,7 +169,7 @@ fi
 echo "--- Test 3: re-push of same tree → cache hit, guard skips ---"
 OUT=$(run_hook)
 RC=$?
-if [[ "$RC" -eq 0 ]] && ! echo "$OUT" | grep -qE "running cargo (test|nextest)"; then
+if [[ "$RC" -eq 0 ]] && ! grep -qE "running cargo (test|nextest)" <<<"$OUT"; then
     ok "cache hit silently skipped re-test"
 else
     fail "cache hit should skip (rc=$RC, out=$OUT)"
@@ -183,7 +183,7 @@ git add src/lib.rs
 git commit -qm "rs change failing"
 OUT=$(CHUMP_TEST_GATE_FAKE_RC=101 run_hook)
 RC=$?
-if [[ "$RC" -ne 0 ]] && echo "$OUT" | grep -q "BLOCKED: cargo test"; then
+if [[ "$RC" -ne 0 ]] && grep -q "BLOCKED: cargo test" <<<"$OUT"; then
     ok "test failure blocks push with diagnostic"
 else
     fail "test failure should block (rc=$RC, out=$OUT)"
@@ -324,7 +324,7 @@ SECRET_HEAD="$(git rev-parse HEAD)"
 rm -f .chump-locks/ambient.jsonl
 OUT=$(run_hook_stdin "refs/heads/wip ${SECRET_HEAD} refs/stash/RESILIENT-1668-wip ${ZERO_SHA}")
 RC=$?
-if [[ "$RC" -ne 0 ]] && echo "$OUT" | grep -q "secret scan"; then
+if [[ "$RC" -ne 0 ]] && grep -q "secret scan" <<<"$OUT"; then
     ok "stash-only push with a secret is refused by the secret scan"
 else
     fail "stash-only push with a secret should be refused (rc=$RC, out=$OUT)"
@@ -423,7 +423,7 @@ chmod +x "$TMP/pre-push-mutant"
 OUT_MUT=$(PATH="$TMP/bin:$PATH" "$TMP/pre-push-mutant" origin "$TMP/origin.git" \
     <<<"HEAD ${SECRET2_HEAD} refs/stash/RESILIENT-1656-wip ${ZERO_SHA}" 2>&1)
 RC_MUT=$?
-if [[ "$RC_SEC_ZERO" -ne 0 ]] && echo "$OUT_SEC_ZERO" | grep -q "secret scan" && [[ "$RC_MUT" -eq 0 ]]; then
+if [[ "$RC_SEC_ZERO" -ne 0 ]] && grep -q "secret scan" <<<"$OUT_SEC_ZERO" && [[ "$RC_MUT" -eq 0 ]]; then
     ok "RESILIENT-1656: zero-bypass stash push with secret refused by secret scan (mutant killed)"
 else
     fail "RESILIENT-1656: secret scan or mutant check failed (rc_real=$RC_SEC_ZERO, rc_mut=$RC_MUT, out=$OUT_SEC_ZERO)"
@@ -445,7 +445,7 @@ fi
 
 # (a) One-crate change -> selects that crate + its reverse dependencies
 SCOPE_ONE="$( CHUMP_REPO_ROOT="$REPO_ROOT" bash "$PKG_SCOPE_LIB" --files $'crates/chump-cancel/src/lib.rs' )"
-if echo "$SCOPE_ONE" | grep -q -- "-p chump-cancel" && echo "$SCOPE_ONE" | grep -q -- "-p chump" && [[ "$SCOPE_ONE" != "--workspace" ]]; then
+if grep -q -- "-p chump-cancel" <<<"$SCOPE_ONE" && grep -q -- "-p chump" <<<"$SCOPE_ONE" && [[ "$SCOPE_ONE" != "--workspace" ]]; then
     ok "INFRA-8154: 1-crate change selects crate + reverse dependencies ($SCOPE_ONE)"
 else
     fail "INFRA-8154: expected -p chump-cancel and -p chump (not --workspace), got '$SCOPE_ONE'"
@@ -476,7 +476,7 @@ done
 sed '/# INFRA-8154:RDEPS-EXPANSION/d' "$PKG_SCOPE_LIB" > "$TMP/pkg-scope-mutant-no-rdeps.sh"
 chmod +x "$TMP/pkg-scope-mutant-no-rdeps.sh"
 MUT_RDEPS_OUT="$( CHUMP_REPO_ROOT="$REPO_ROOT" bash "$TMP/pkg-scope-mutant-no-rdeps.sh" --files $'crates/chump-cancel/src/lib.rs' )"
-if echo "$MUT_RDEPS_OUT" | grep -q -- "-p chump-cancel" && ! echo "$MUT_RDEPS_OUT" | grep -q -- "-p chump "; then
+if grep -q -- "-p chump-cancel" <<<"$MUT_RDEPS_OUT" && ! grep -q -- "-p chump " <<<"$MUT_RDEPS_OUT"; then
     ok "INFRA-8154: mutant dropping rdeps expansion caught (missed reverse dep 'chump': $MUT_RDEPS_OUT)"
 else
     fail "INFRA-8154: mutant dropping rdeps expansion was not caught ($MUT_RDEPS_OUT)"
@@ -519,8 +519,8 @@ VR_BAD_RC=$?
 VR_BAD_STDERR="$(cat "$TMP/vr-bad.stderr" 2>/dev/null)"
 if [[ "$VR_BAD_RC" -ne 0 ]] \
    && [[ -z "$VR_BAD_STDOUT" ]] \
-   && ! echo "$VR_BAD_STDOUT" | grep -q "madeupname" \
-   && echo "$VR_BAD_STDERR" | grep -qi "Resolution instructions"; then
+   && ! grep -q "madeupname" <<<"$VR_BAD_STDOUT" \
+   && grep -qi "Resolution instructions" <<<"$VR_BAD_STDERR"; then
     ok "INFRA-8174: vercel-resolve.sh madeupname exits non-zero ($VR_BAD_RC) with resolution instructions on stderr"
 else
     fail "INFRA-8174: vercel-resolve.sh madeupname should fail cleanly (rc=$VR_BAD_RC, stdout='$VR_BAD_STDOUT', stderr='$VR_BAD_STDERR')"
@@ -622,6 +622,75 @@ if [[ "$RESOLVED_CLAIM" == *"dispatch-infra-9999.json" ]]; then
     ok "CREDIBLE-1566: lease.sh resolves repair lease by .branch without needing chump/<gap>-claim naming or Off-Rails-Bypass:"
 else
     fail "CREDIBLE-1566: lease.sh failed to resolve repair lease by .branch (got '$RESOLVED_CLAIM')"
+fi
+
+# ── Test 17 (INFRA-8643 / INFRA-8644 / INFRA-8645): bot-merge push + legitimate architectural trailers in dispatch sessions ──
+echo "--- Test 17 (INFRA-8643/8644/8645): bot-merge push & Rust-First-Bypass in dispatch sessions ---"
+rm -f .chump-locks/ambient.jsonl .chump-locks/test-gate-cache/* 2>/dev/null || true
+git commit --amend -qm "$(printf 'rs change for INFRA-8643\n\nRust-First-Bypass: small glue script\nShared-Service-Bypass: test fixture\n')"
+export CHUMP_BOT_MERGE_IN_PROGRESS=1
+OUT_8643_BM="$(CHUMP_DISPATCH_GAP=INFRA-9999 CHUMP_TEST_GATE=0 CHUMP_TEST_GATE_FAKE_RC=0 run_hook)"
+RC_8643_BM=$?
+unset CHUMP_BOT_MERGE_IN_PROGRESS
+if [[ "$RC_8643_BM" -eq 0 ]] && ! grep -q '"kind":"agent_bypass_refused"' .chump-locks/ambient.jsonl 2>/dev/null; then
+    ok "INFRA-8643/8644/8645: bot-merge push (CHUMP_BOT_MERGE_IN_PROGRESS) and Rust-First-Bypass/Shared-Service-Bypass succeed under CHUMP_DISPATCH_GAP"
+else
+    fail "INFRA-8643/8644/8645: bot-merge push under CHUMP_DISPATCH_GAP was falsely refused (rc=$RC_8643_BM, out=$OUT_8643_BM)"
+fi
+# Commit-msg hook also permits Rust-First-Bypass and Shared-Service-Bypass under CHUMP_DISPATCH_GAP
+printf 'feat: glue script\n\nRust-First-Bypass: legitimate glue\nShared-Service-Bypass: legitimate test\n' > "$TMP/cmsg-8643.txt"
+OUT_CM_8643="$(CHUMP_DISPATCH_GAP=INFRA-9999 bash "$COMMIT_MSG_HOOK" "$TMP/cmsg-8643.txt" 2>&1)"
+RC_CM_8643=$?
+if [[ "$RC_CM_8643" -eq 0 ]]; then
+    ok "INFRA-8643/8644/8645: commit-msg allows Rust-First-Bypass and Shared-Service-Bypass under CHUMP_DISPATCH_GAP"
+else
+    fail "INFRA-8643/8645: commit-msg rejected Rust-First-Bypass/Shared-Service-Bypass under CHUMP_DISPATCH_GAP (rc=$RC_CM_8643, out=$OUT_CM_8643)"
+fi
+git commit --amend -qm "rs change for INFRA-8643"
+
+# ── Test 18 (CREDIBLE-1569): path-matched scripts/ci/test-*.sh in pre-push + mutant kill ──
+echo "--- Test 18 (CREDIBLE-1569): path-matched scripts/ci/test-*.sh in pre-push ---"
+SCOPE_HELPER="$REPO_ROOT/scripts/lib/pre-push-pkg-scope.sh"
+SHELL_FARMER="$(bash "$SCOPE_HELPER" --shell-tests $'src/farmer_status.rs')"
+SHELL_DOCS="$(bash "$SCOPE_HELPER" --shell-tests $'docs/ROADMAP.md\nREADME.md')"
+if [[ "$SHELL_FARMER" == "scripts/ci/test-fleet-kill-switch.sh scripts/ci/test-outcome-gate.sh scripts/ci/test-state-db-yaml-sync.sh" ]] \
+   && [[ "$SHELL_DOCS" == "none" ]]; then
+    ok "CREDIBLE-1569: pre-push-pkg-scope.sh --shell-tests maps src/farmer_status.rs to the 3 CI shell tests and docs-only to none"
+else
+    fail "CREDIBLE-1569: unexpected --shell-tests output (farmer='$SHELL_FARMER', docs='$SHELL_DOCS')"
+fi
+
+mkdir -p "$TMP/clone/scripts/lib" "$TMP/clone/scripts/ci"
+cp "$SCOPE_HELPER" "$TMP/clone/scripts/lib/pre-push-pkg-scope.sh"
+cat > "$TMP/clone/scripts/ci/test-fleet-kill-switch.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "simulated test-fleet-kill-switch failure" >&2
+exit 1
+EOF
+chmod +x "$TMP/clone/scripts/ci/test-fleet-kill-switch.sh"
+echo "// farmer change" >> "$TMP/clone/src/farmer_status.rs"
+git add src/farmer_status.rs scripts/ci/test-fleet-kill-switch.sh scripts/lib/pre-push-pkg-scope.sh
+git commit -qm "touch farmer_status.rs for CREDIBLE-1569"
+rm -f .chump-locks/test-gate-cache/* 2>/dev/null || true
+OUT_1569_FAIL="$(CHUMP_TEST_GATE_FAKE_RC=0 run_hook)"
+RC_1569_FAIL=$?
+if [[ "$RC_1569_FAIL" -ne 0 ]] && grep -q "BLOCKED (CREDIBLE-1569): matched CI shell test failed: scripts/ci/test-fleet-kill-switch.sh" <<<"$OUT_1569_FAIL"; then
+    ok "CREDIBLE-1569: pre-push blocks push when path-matched scripts/ci/test-fleet-kill-switch.sh fails"
+else
+    fail "CREDIBLE-1569: pre-push did not block failing path-matched shell test (rc=$RC_1569_FAIL, out=$OUT_1569_FAIL)"
+fi
+
+# Mutant check: strip CREDIBLE-1569:SHELL-TEST-GATE lines from pre-push -> mutant fails to block
+MUTANT_1569="$TMP/pre-push.mutant-1569"
+grep -v 'CREDIBLE-1569:SHELL-TEST-GATE' "$HOOK" > "$MUTANT_1569"
+chmod +x "$MUTANT_1569"
+rm -f .chump-locks/test-gate-cache/* 2>/dev/null || true
+OUT_1569_MUT="$(HOOK="$MUTANT_1569" CHUMP_TEST_GATE_FAKE_RC=0 run_hook)"
+RC_1569_MUT=$?
+if [[ "$RC_1569_MUT" -eq 0 ]]; then
+    ok "CREDIBLE-1569 (mutant killed): removing SHELL-TEST-GATE from pre-push allows broken shell test through"
+else
+    fail "CREDIBLE-1569 (mutant survived): mutant pre-push still exited non-zero (rc=$RC_1569_MUT, out=$OUT_1569_MUT)"
 fi
 
 # ── Summary ─────────────────────────────────────────────────────────────────

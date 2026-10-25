@@ -572,7 +572,10 @@ no bullets, no quotes, no preamble. ≤ 600 characters total.")
   if command -v chump &>/dev/null; then
     _pillars_data="$(chump gap list --status open --json 2>/dev/null || echo '[]')"
     _decompose_used=0  # INFRA-943: guard — at most 1 auto-decompose per run
-    for _pillar in EFFECTIVE CREDIBLE RESILIENT ZERO-WASTE; do
+    # CREDIBLE-238: R&D is included in pillar inventory / balance_restock so
+    # starvation is still detected even though R&D is excluded from the Gate-2
+    # mission-ship ratio numerator.
+    for _pillar in EFFECTIVE CREDIBLE RESILIENT ZERO-WASTE "R&D"; do
       _count=$(_to_int "$(echo "$_pillars_data" | jq --arg p "$_pillar" \
         '[.[] | select(.pillar == $p and .size | IN("xs","s","m") and (.depends_on | length) == 0)] | length' 2>/dev/null)")
       if [[ "$_count" -lt 2 ]]; then

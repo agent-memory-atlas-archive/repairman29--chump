@@ -90,11 +90,11 @@ print("with_rs_bookkeeping=%s" % is_bookkeeping_with_rs)
 PYEOF
 )"
 
-echo "$RESULT" | grep -q "^docs_only_bookkeeping=True$" \
+grep -q "^docs_only_bookkeeping=True$" <<<"$RESULT" \
   && ok "docs/gaps/*.yaml-only fixture classified BOOKKEEPING" \
   || fail "docs/gaps/*.yaml-only fixture NOT classified BOOKKEEPING"
 
-echo "$RESULT" | grep -q "^with_rs_bookkeeping=False$" \
+grep -q "^with_rs_bookkeeping=False$" <<<"$RESULT" \
   && ok "fixture with a .rs file NOT classified BOOKKEEPING" \
   || fail "fixture with a .rs file wrongly classified BOOKKEEPING"
 
@@ -160,6 +160,27 @@ assert d['bookkeeping_closed'][0]['pr'] == 1001
 print('shape_ok=True')
 " && ok "--multi-close-only --json groups by PR and reports bookkeeping tier correctly" \
   || fail "--multi-close-only --json output did not match the fixture"
+
+# ── Test 4 (CREDIBLE-1410): --check-files enforces BOOKKEEPING on gap close ──
+echo "[Test 4] CREDIBLE-1410 --check-files enforcement + bot-merge wiring"
+if python3 "$REPO_ROOT/scripts/ops/false-done-sweep.py" --check-files docs/gaps/FIX-1.yaml docs/ROADMAP.md .chump/state.sql >/dev/null 2>&1; then
+  fail "CREDIBLE-1410: --check-files should exit non-zero on bookkeeping-only diff"
+else
+  ok "CREDIBLE-1410: --check-files exits non-zero on bookkeeping-only diff"
+fi
+
+if python3 "$REPO_ROOT/scripts/ops/false-done-sweep.py" --check-files docs/gaps/FIX-1.yaml src/main.rs >/dev/null 2>&1; then
+  ok "CREDIBLE-1410: --check-files exits 0 when implementation file (src/main.rs) is present"
+else
+  fail "CREDIBLE-1410: --check-files should exit 0 when implementation file is present"
+fi
+
+if grep -q "CREDIBLE-1410" "$REPO_ROOT/scripts/coord/bot-merge.sh" \
+   && grep -q -- "--check-files" "$REPO_ROOT/scripts/coord/bot-merge.sh"; then
+  ok "CREDIBLE-1410: bot-merge.sh auto-close enforces --check-files before chump gap ship"
+else
+  fail "CREDIBLE-1410: bot-merge.sh missing --check-files enforcement before chump gap ship"
+fi
 
 echo ""
 echo "=== $PASS passed, $FAIL failed ==="

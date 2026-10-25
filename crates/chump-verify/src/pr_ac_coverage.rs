@@ -1163,7 +1163,16 @@ fn score_against_bullets(
         });
     }
 
-    // Determine status
+    // CREDIBLE-1410: a diff whose changed files are exclusively bookkeeping
+    // (docs/gaps/, docs/audits/, docs/archive/, .chump/, docs/ROADMAP.md — zero
+    // implementation files, matching scripts/ops/false-done-sweep.py BOOKKEEPING)
+    // is never allowed to close a gap as Pass.
+    if is_bookkeeping_only_diff(&diff) {
+        any_miss = true;
+    }
+
+    // Determine status (CREDIBLE-1409: blocking by default when CHUMP_AC_GATE_ADVISORY
+    // is unset or false; CHUMP_AC_GATE_ADVISORY=true opts back into advisory mode).
     let is_advisory = std::env::var("CHUMP_AC_GATE_ADVISORY").as_deref() == Ok("true");
     // PEER-VERI-08 (INFRA-3655) AC#2: an unproven live-outcome result BLOCKS
     // the close instead of being swallowed by the advisory fail-open path —
@@ -1230,6 +1239,34 @@ pub struct JudgeVerdict {
     pub index: usize,
     pub status: JudgeStatus,
     pub reason: String,
+}
+
+/// CREDIBLE-1410: Returns true when the diff has at least one `+++ b/<path>`
+/// file header and every touched file is a bookkeeping path (`docs/gaps/`,
+/// `docs/audits/`, `docs/archive/`, `.chump/`, or `docs/ROADMAP.md`) — matching
+/// `scripts/ops/false-done-sweep.py`'s `BOOKKEEPING` tier (zero implementation
+/// files in diff).
+pub fn is_bookkeeping_only_diff(diff: &str) -> bool {
+    const BOOKKEEPING_PREFIXES: &[&str] =
+        &["docs/gaps/", "docs/audits/", "docs/archive/", ".chump/"];
+    const BOOKKEEPING_EXACT: &[&str] = &["docs/ROADMAP.md"];
+
+    let mut saw_file = false;
+    for line in diff.lines() {
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            let path = path.trim();
+            if path.is_empty() || path == "/dev/null" {
+                continue;
+            }
+            saw_file = true;
+            let is_bk = BOOKKEEPING_EXACT.contains(&path)
+                || BOOKKEEPING_PREFIXES.iter().any(|p| path.starts_with(p));
+            if !is_bk {
+                return false;
+            }
+        }
+    }
+    saw_file
 }
 
 /// Parse the judge's per-criterion reply lines:
@@ -3105,6 +3142,59 @@ mod redteam {
         assert!(
             detail.starts_with("systemctl is-active"),
             "resolving to the current host must take the local (non-ssh) path: {detail}"
+        );
+    }
+
+    #[test]
+    fn credible1409_blocking_by_default_when_advisory_unset() {
+        let _guard = INFRA3652_ENV_LOCK.lock().unwrap();
+        std::env::remove_var("CHUMP_AC_GATE_ADVISORY");
+        std::env::remove_var("CHUMP_VERIFY_LIVE_BLOCKING");
+        let bullet =
+            "PROVEN-BY chump-nonexistent-unit-xyz123.service reaching active state".to_string();
+        let result = score_against_bullets(
+            1,
+            "INFRA-TEST".to_string(),
+            vec![bullet],
+            String::new(),
+            None,
+        );
+        assert_eq!(
+            result.status,
+            CoverageStatus::Miss,
+            "CREDIBLE-1409: pr_ac_coverage must return Miss (blocking) by default when CHUMP_AC_GATE_ADVISORY is unset"
+        );
+    }
+
+    #[test]
+    fn credible1410_bookkeeping_only_diff_detected() {
+        let bk_diff = concat!(
+            "diff --git a/docs/gaps/INFRA-1.yaml b/docs/gaps/INFRA-1.yaml\n",
+            "+++ b/docs/gaps/INFRA-1.yaml\n",
+            "+status: done\n",
+            "diff --git a/docs/ROADMAP.md b/docs/ROADMAP.md\n",
+            "+++ b/docs/ROADMAP.md\n",
+            "+shipped\n",
+        );
+        assert!(
+            is_bookkeeping_only_diff(bk_diff),
+            "CREDIBLE-1410: diff touching only docs/gaps/ and docs/ROADMAP.md must be flagged as bookkeeping-only"
+        );
+
+        let impl_diff = concat!(
+            "diff --git a/docs/gaps/INFRA-1.yaml b/docs/gaps/INFRA-1.yaml\n",
+            "+++ b/docs/gaps/INFRA-1.yaml\n",
+            "diff --git a/src/main.rs b/src/main.rs\n",
+            "+++ b/src/main.rs\n",
+            "+fn real_impl() {}\n",
+        );
+        assert!(
+            !is_bookkeeping_only_diff(impl_diff),
+            "CREDIBLE-1410: diff with src/main.rs is not bookkeeping-only"
+        );
+        assert!(
+            !is_bookkeeping_only_diff(""),
+            "empty diff without +++ b/ headers must not be flagged as bookkeeping-only"
         );
     }
 }

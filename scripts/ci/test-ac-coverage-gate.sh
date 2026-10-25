@@ -5,6 +5,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CHUMP="${CARGO_TARGET_DIR:-$ROOT/target}/debug/chump"
+if [[ ! -x "$CHUMP" ]] && [[ -x "/Users/jeffadkins/Projects/Chump/target/debug/chump" ]]; then
+  CHUMP="/Users/jeffadkins/Projects/Chump/target/debug/chump"
+elif [[ ! -x "$CHUMP" ]] && command -v chump >/dev/null 2>&1; then
+  CHUMP="$(command -v chump)"
+fi
 PASS=0 FAIL=0
 
 emit() { printf '[%s] %s\n' "$1" "$2"; }
@@ -17,7 +22,7 @@ fail() { emit FAIL "$1"; FAIL=$((FAIL+1)); }
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# Fake gap YAML
+# Fake gap YAML + stub chump gap show (CREDIBLE-178 reads via CHUMP_REAL_BINARY)
 mkdir -p "$TMP/docs/gaps"
 cat > "$TMP/docs/gaps/INFRA-9999.yaml" <<'YAML'
 - id: INFRA-9999
@@ -25,6 +30,12 @@ cat > "$TMP/docs/gaps/INFRA-9999.yaml" <<'YAML'
     - "File src/pr_ac_coverage.rs must exist and implement run()"
     - "Shell wrapper scripts/ci/test-pr-ac-coverage.sh must be a 3-line exec"
 YAML
+cat > "$TMP/chump-stub" <<'SH'
+#!/usr/bin/env bash
+echo '{"acceptance_criteria":"[\"File src/pr_ac_coverage.rs must exist and implement run()\",\"Shell wrapper scripts/ci/test-pr-ac-coverage.sh must be a 3-line exec\"]"}'
+SH
+chmod +x "$TMP/chump-stub"
+export CHUMP_REAL_BINARY="$TMP/chump-stub"
 
 # ─── Fixture 1: full-coverage pass ───────────────────────────────────────────
 # Add a diff that covers BOTH bullets
@@ -97,6 +108,31 @@ if grep -q '"status":"pass"' "$TMP/f3.json" 2>/dev/null; then
   pass "fixture-3: JSON status=pass (waiver)"
 else
   fail "fixture-3: JSON status=pass not found"
+fi
+
+# ─── Fixture 4 (CREDIBLE-1409): blocking by default when CHUMP_AC_GATE_ADVISORY is unset ───
+cat > "$TMP/gh" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"pr view"*)
+    echo '{"title":"INFRA-9999: test PR","body":"","commits":[{"messageHeadline":"feat","messageBody":""}]}';;
+  *"pr diff"*)
+    echo '+++ b/src/other_file.rs'
+    echo '+some unrelated code';;
+  *) echo "mock-gh: unhandled: $*" >&2; exit 1;;
+esac
+SH
+chmod +x "$TMP/gh"
+
+if (unset CHUMP_AC_GATE_ADVISORY; CHUMP_GH="$TMP/gh" CHUMP_REPO_ROOT="$TMP" "$CHUMP" pr ac-coverage 9999 > "$TMP/f4.json" 2>"$TMP/f4.err"); then
+  fail "fixture-4 (CREDIBLE-1409): missing-bullet with CHUMP_AC_GATE_ADVISORY unset should exit non-zero"
+else
+  pass "fixture-4 (CREDIBLE-1409): blocking by default when CHUMP_AC_GATE_ADVISORY is unset"
+fi
+if grep -q 'CHUMP_AC_GATE_ADVISORY:-false' "$ROOT/scripts/coord/bot-merge.sh"; then
+  pass "fixture-4b (CREDIBLE-1409): bot-merge.sh auto-close enforces pr ac-coverage blocking by default"
+else
+  fail "fixture-4b (CREDIBLE-1409): bot-merge.sh missing default blocking ac-coverage gate"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
