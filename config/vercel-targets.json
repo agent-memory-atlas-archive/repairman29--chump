@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "description": "INFRA-8174 canonical Vercel target registry. Resolves repo names, aliases, and domains to verified Vercel project metadata so deployers and health probes never guess <repo>.vercel.app.",
+  "targets": [
+    {
+      "project_id": "prj_cartpilot_olive",
+      "project_name": "cartpilot",
+      "repo": "repairman29/olive",
+      "prod_domain": "shopolive.xyz",
+      "prod_alias": "cartpilot.vercel.app",
+      "aliases": [
+        "olive",
+        "cartpilot",
+        "repairman29/olive",
+        "shopolive.xyz",
+        "www.shopolive.xyz",
+        "cartpilot.vercel.app"
+      ]
+    },
+    {
+      "project_id": "prj_getchump_web",
+      "project_name": "get-chump",
+      "repo": "repairman29/chump",
+      "prod_domain": "get-chump.vercel.app",
+      "prod_alias": "get-chump.vercel.app",
+      "aliases": [
+        "chump",
+        "get-chump",
+        "repairman29/chump",
+        "get-chump.vercel.app"
+      ]
+    },
+    {
+      "project_id": "prj_froogle_ten",
+      "project_name": "froogle-ten",
+      "repo": "repairman29/Froogle",
+      "prod_domain": "froogle-ten.vercel.app",
+      "prod_alias": "froogle-ten.vercel.app",
+      "aliases": [
+        "froogle",
+        "Froogle",
+        "froogle-ten",
+        "repairman29/Froogle",
+        "repairman29/froogle",
+        "froogle-ten.vercel.app"
+      ]
+    },
+    {
+      "project_id": "prj_wherewithal_web",
+      "project_name": "wherewithal",
+      "repo": "repairman29/wherewithal",
+      "prod_domain": "wherewithal.vercel.app",
+      "prod_alias": "wherewithal.vercel.app",
+      "aliases": [
+        "wherewithal",
+        "repairman29/wherewithal",
+        "wherewithal.vercel.app"
+      ]
+    },
+    {
+      "project_id": "prj_postsub_web",
+      "project_name": "postsub",
+      "repo": "repairman29/postsub",
+      "prod_domain": "postsub.vercel.app",
+      "prod_alias": "postsub.vercel.app",
+      "aliases": [
+        "postsub",
+        "repairman29/postsub",
+        "postsub.vercel.app"
+      ]
+    },
+    {
+      "project_id": "prj_trove_web",
+      "project_name": "trove-web",
+      "repo": "repairman29/trove",
+      "prod_domain": "trove-web.vercel.app",
+      "prod_alias": "trove-web.vercel.app",
+      "aliases": [
+        "trove",
+        "trove-web",
+        "repairman29/trove",
+        "trove-web.vercel.app"
+      ]
+    },
+    {
+      "project_id": "prj_echeo_landing",
+      "project_name": "echeo-landing",
+      "repo": "repairman29/echeo",
+      "prod_domain": "echeo-landing.vercel.app",
+      "prod_alias": "echeo-landing.vercel.app",
+      "aliases": [
+        "echeo",
+        "echeo-landing",
+        "repairman29/echeo",
+        "echeo-landing.vercel.app"
+      ]
+    }
+  ]
+}

@@ -242,6 +242,58 @@ else
   _fail "chump-pr-book.service / .timer missing or misconfigured"
 fi
 
+# ── 10. INFRA-8095: split brain/muscle hub fallback + host attribution + board-tick portability ──
+echo "[test-calibration-brier-canonical] hub fallback + host=<measured_host> attribution (INFRA-8095)"
+EMPTY_LOCAL_AMB="$TMP/local-empty-ambient.jsonl"
+: > "$EMPTY_LOCAL_AMB"
+HUB_AMB_FIX="$TMP/hub-ambient.jsonl"
+printf '{"ts":"%s","kind":"organ_success_verify_tick","verified_ok":38,"enabled_total":40,"failed_count":2}\n' "$NOW_ISO" > "$HUB_AMB_FIX"
+HUB_CAL_FIX="$TMP/hub-calibration.log"
+printf '{"ts":"%s","kind":"pr_book_calibration","brier":0.0412,"n":12,"matched":12,"unmatched":0}\n' "$NOW_ISO" > "$HUB_CAL_FIX"
+
+HUB_VS_JSON="$(
+  CHUMP_REPO_ROOT="$DATA_ROOT" REPO_ROOT="$DATA_ROOT" \
+  CHUMP_PR_BOOK_CALIB="$TMP/missing-local-calib.log" \
+  PR_BOOK_LEDGER="$TMP/missing-local-ledger.jsonl" \
+  CHUMP_AMBIENT_LOG="$EMPTY_LOCAL_AMB" \
+  CHUMP_HUB_AMBIENT_LOG="$HUB_AMB_FIX" \
+  CHUMP_HUB_CALIBRATION_LOG="$HUB_CAL_FIX" \
+  CHUMP_HUB_HOST="cuphead" \
+  CHUMP_LOCAL_HOST="h100-worker" \
+  CHUMP_NODE_ROLES="muscle" \
+  CHUMP_JOURNEY_ODDS="$TMP/no-odds.json" \
+  timeout 90 bash "$VITAL" --dry-run 2>/dev/null
+)"
+hub_vw_val="$(printf '%s' "$HUB_VS_JSON" | jq -r '.signs[] | select(.key=="verified_working") | .value')"
+hub_vw_basis="$(printf '%s' "$HUB_VS_JSON" | jq -r '.signs[] | select(.key=="verified_working") | .basis')"
+hub_cb_val="$(printf '%s' "$HUB_VS_JSON" | jq -r '.signs[] | select(.key=="calibration_brier") | .value')"
+hub_cb_basis="$(printf '%s' "$HUB_VS_JSON" | jq -r '.signs[] | select(.key=="calibration_brier") | .basis')"
+hub_mnr_basis="$(printf '%s' "$HUB_VS_JSON" | jq -r '.signs[] | select(.key=="merged_not_running") | .basis')"
+
+if [[ "$hub_vw_val" == "95" || "$hub_vw_val" == "95.0" ]] && [[ "$hub_vw_basis" == *"host=cuphead"* ]]; then
+  _ok "vital-signs falls back to CHUMP_HUB_AMBIENT_LOG for verified_working ($hub_vw_val, host=cuphead)"
+else
+  _fail "expected verified_working=95.0 with host=cuphead from hub fallback, got val='$hub_vw_val' basis='$hub_vw_basis'"
+fi
+
+if [[ "$hub_cb_val" == "0.0412" ]] && [[ "$hub_cb_basis" == *"host=cuphead"* ]]; then
+  _ok "vital-signs falls back to CHUMP_HUB_CALIBRATION_LOG for calibration_brier ($hub_cb_val, host=cuphead)"
+else
+  _fail "expected calibration_brier=0.0412 with host=cuphead from hub fallback, got val='$hub_cb_val' basis='$hub_cb_basis'"
+fi
+
+if [[ "$hub_mnr_basis" == *"host="* ]]; then
+  _ok "merged_not_running basis includes host=<measured_host> ($hub_mnr_basis)"
+else
+  _fail "expected merged_not_running basis to include host=, got '$hub_mnr_basis'"
+fi
+
+if ! grep -q '/home/jeff' "$REPO_ROOT/scripts/coord/board-tick.sh"; then
+  _ok "scripts/coord/board-tick.sh has no hardcoded /home/jeff paths"
+else
+  _fail "scripts/coord/board-tick.sh still contains hardcoded /home/jeff path"
+fi
+
 echo
 echo "[test-calibration-brier-canonical] $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]

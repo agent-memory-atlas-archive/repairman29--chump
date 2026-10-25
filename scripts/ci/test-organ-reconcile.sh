@@ -148,6 +148,7 @@ run_reconcile() {  # mode
     STATE_DIR="$STATE_DIR" CALL_LOG="$CALL_LOG" \
     ACTIVE_FILE="$ACTIVE_FILE" ENABLE_FAIL_FILE="$ENABLE_FAIL_FILE" VERIFY_FAIL_FILE="$VERIFY_FAIL_FILE" \
     CHUMP_ORGAN_RECONCILE_SYSTEMCTL_BIN="$STUB" \
+    CHUMP_ORGAN_MANIFEST_PLATFORM="${CHUMP_ORGAN_MANIFEST_PLATFORM:-systemd}" \
     CHUMP_ORGAN_RECONCILE_ALLOW_NONROOT=1 \
     CHUMP_ORGAN_RECONCILE_BACKOFF_DIR="$BACKOFF_DIR" \
     CHUMP_ORGAN_RECONCILE_BACKOFF_COOLDOWN_S=3600 \
@@ -287,6 +288,7 @@ mkdir -p "$TMP/bins"
 for bin in chump git postgrest; do
     cat > "$TMP/bins/$bin" <<'EOF'
 #!/usr/bin/env bash
+[[ "$*" == *"is-paused"* ]] && exit 1
 exit 0
 EOF
     chmod +x "$TMP/bins/$bin"
@@ -419,5 +421,68 @@ grep -q "binary_not_executable:$TMP/never-built/chump-fleet-server" "$BACKOFF_DI
     || fail "backoff record must name the exact missing binary path; got: $(cat "$BACKOFF_DIR/chump-fleet-server.service.json")"
 pass "10: unit whose ExecStart binary is missing is never enabled — backed off immediately, reason names the missing binary (RESILIENT-1513)"
 unset SYSTEMD_TEST_DIR
+
+# ── 11. INFRA-8175 + INFRA-8143: backlog-governor net-burn gauge + stale-lease healer + manifest registration ──
+GOV_SCRIPT="$REPO_ROOT/scripts/coord/backlog-governor.sh"
+REAL_MANIFEST="$REPO_ROOT/scripts/ops/organ-manifest.txt"
+[[ -f "$GOV_SCRIPT" ]] || fail "missing scripts/coord/backlog-governor.sh"
+grep -q '^enabled[[:space:]]\+chump-backlog-governor\.timer' "$REAL_MANIFEST" \
+    || fail "chump-backlog-governor.timer not registered as enabled in organ-manifest.txt"
+grep -q '^enabled[[:space:]]\+chump-plan-priority\.timer' "$REAL_MANIFEST" \
+    || fail "chump-plan-priority.timer not registered as enabled in organ-manifest.txt"
+[[ -f "$REPO_ROOT/scripts/dispatch/chump-backlog-governor.service" && -f "$REPO_ROOT/scripts/dispatch/chump-backlog-governor.timer" ]] \
+    || fail "missing chump-backlog-governor.{service,timer} in scripts/dispatch/"
+[[ -f "$REPO_ROOT/scripts/dispatch/chump-plan-priority.service" && -f "$REPO_ROOT/scripts/dispatch/chump-plan-priority.timer" ]] \
+    || fail "missing chump-plan-priority.{service,timer} in scripts/dispatch/"
+
+GOV_TMP="$TMP/backlog-gov"
+mkdir -p "$GOV_TMP/locks"
+GOV_DB="$GOV_TMP/locks/state.db"
+GOV_AMB="$GOV_TMP/locks/ambient.jsonl"
+NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+sqlite3 "$GOV_DB" <<SQL
+CREATE TABLE gaps (
+  id TEXT PRIMARY KEY,
+  priority TEXT,
+  status TEXT,
+  created_at TEXT,
+  completed_at TEXT,
+  updated_at TEXT
+);
+INSERT INTO gaps VALUES ('INFRA-B1', 'P0', 'open', '$NOW_ISO', NULL, '$NOW_ISO');
+INSERT INTO gaps VALUES ('INFRA-B2', 'P1', 'in_progress', '2020-01-01T00:00:00Z', NULL, '2020-01-01T00:00:00Z');
+INSERT INTO gaps VALUES ('INFRA-B3', 'P2', 'open', '$NOW_ISO', NULL, '$NOW_ISO');
+INSERT INTO gaps VALUES ('INFRA-B4', 'P1', 'done', '$NOW_ISO', '$NOW_ISO', '$NOW_ISO');
+INSERT INTO gaps VALUES ('INFRA-B5', 'P1', 'done', '2020-01-01T00:00:00Z', '$NOW_ISO', '$NOW_ISO');
+INSERT INTO gaps VALUES ('INFRA-B6', 'P2', 'done', '2020-01-01T00:00:00Z', '$NOW_ISO', '$NOW_ISO');
+INSERT INTO gaps VALUES ('INFRA-B7', 'P2', 'done', '2020-01-01T00:00:00Z', '$NOW_ISO', '$NOW_ISO');
+SQL
+printf '{"gap_id":"INFRA-B2","expires_at":"2020-01-01T00:00:00Z"}\n' > "$GOV_TMP/locks/claim-INFRA-B2-123-0.json"
+
+GOV_OUT="$(
+  CHUMP_STATE_DB="$GOV_DB" \
+  CHUMP_LOCKS_DIR="$GOV_TMP/locks" \
+  CHUMP_AMBIENT_LOG="$GOV_AMB" \
+  bash "$GOV_SCRIPT" --apply
+)"
+[[ "$(printf '%s' "$GOV_OUT" | jq -r '.kind')" == "backlog_governor_tick" ]] \
+    || fail "expected kind=backlog_governor_tick, got: $GOV_OUT"
+[[ "$(printf '%s' "$GOV_OUT" | jq -r '.filed_24h')" == "3" ]] \
+    || fail "expected filed_24h=3, got: $GOV_OUT"
+[[ "$(printf '%s' "$GOV_OUT" | jq -r '.shipped_24h')" == "4" ]] \
+    || fail "expected shipped_24h=4, got: $GOV_OUT"
+[[ "$(printf '%s' "$GOV_OUT" | jq -r '.net_burn_24h')" == "1" ]] \
+    || fail "expected net_burn_24h=1, got: $GOV_OUT"
+[[ "$(printf '%s' "$GOV_OUT" | jq -r '.burn_state')" == "net_burn_positive" ]] \
+    || fail "expected burn_state=net_burn_positive, got: $GOV_OUT"
+[[ "$(printf '%s' "$GOV_OUT" | jq -r '.operator_paged')" == "false" ]] \
+    || fail "expected operator_paged=false when net-burn-positive, got: $GOV_OUT"
+[[ ! -f "$GOV_TMP/locks/claim-INFRA-B2-123-0.json" ]] \
+    || fail "expected expired claim-INFRA-B2 lease to be reaped under --apply"
+[[ "$(sqlite3 "$GOV_DB" "SELECT status FROM gaps WHERE id='INFRA-B2';")" == "open" ]] \
+    || fail "expected stale in_progress INFRA-B2 to be reset to open under --apply"
+grep -q '"kind":"backlog_governor_tick"' "$GOV_AMB" \
+    || fail "expected backlog_governor_tick in ambient log"
+pass "11: backlog-governor net-burn gauge + stale-lease wedge healer + manifest registration (INFRA-8175, INFRA-8143)"
 
 echo "ALL PASS"

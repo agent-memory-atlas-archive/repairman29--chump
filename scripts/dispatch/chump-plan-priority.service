@@ -1,0 +1,22 @@
+# chump-plan-priority.service — INFRA-8143 Linux systemd unit for gap-priority ranking (INFRA-1257).
+#
+# Runs scripts/setup/install-chump-planner-launchd.sh --once to invoke chump-plan
+# and refresh .chump-locks/gap-priority.json for the fleet picker.
+#
+# Placeholders (__HOME__, __REPO_ROOT__) are substituted at install time by
+# chump-node-install.sh place_role_unit_files / organ-unit-install-lib.sh.
+
+[Unit]
+Description=Chump planner priority refresh — writes .chump-locks/gap-priority.json (INFRA-8143)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO_ROOT__
+Environment=HOME=__HOME__
+Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
+Environment=CHUMP_PLANNER_REPO_ROOT=__REPO_ROOT__
+Environment=PATH=__HOME__/.local/bin:__HOME__/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec bash __REPO_ROOT__/scripts/setup/install-chump-planner-launchd.sh --once'
+TimeoutStartSec=120

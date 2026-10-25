@@ -1159,26 +1159,48 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
         # Rebase auto-skip: same code, was tested when first pushed.
         :
     else
-        # Determine whether any .rs file changed in the push range. We read
-        # stdin (the standard pre-push protocol: lines of
-        # "<local_ref> <local_sha> <remote_ref> <remote_sha>"). If stdin is
-        # already consumed by a later guard, fall back to the diff against
-        # origin/main for a robust default.
+        # Determine incremental package scope from changed files in the push range (INFRA-8154).
+        if [[ -r "$REPO_ROOT_T/scripts/lib/pre-push-pkg-scope.sh" ]]; then
+            # shellcheck source=../lib/pre-push-pkg-scope.sh
+            source "$REPO_ROOT_T/scripts/lib/pre-push-pkg-scope.sh"
+        elif [[ -r "$REPO_ROOT/scripts/lib/pre-push-pkg-scope.sh" ]]; then
+            # shellcheck source=../lib/pre-push-pkg-scope.sh
+            source "$REPO_ROOT/scripts/lib/pre-push-pkg-scope.sh"
+        fi
+
         ANY_RS=0
+        _CHANGED_FILES=""
         if [[ -t 0 ]] || [[ -z "${CHUMP_TEST_GATE_RANGE:-}" ]]; then
             # Stdin is a terminal or unset — use origin/main fallback.
-            if git fetch origin main --quiet 2>/dev/null; then
-                if git diff --name-only origin/main...HEAD 2>/dev/null \
-                    | grep -qE '\.rs$'; then
-                    ANY_RS=1
-                fi
+            if git fetch origin main --quiet 2>/dev/null || git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+                _CHANGED_FILES="$(git diff --name-only origin/main...HEAD 2>/dev/null || git diff --name-only origin/main..HEAD 2>/dev/null || true)"
             else
-                # Offline or no main — assume Rust changed (be conservative).
-                ANY_RS=1
+                # Offline or no main — assume workspace-wide Rust change (be conservative).
+                _CHANGED_FILES="Cargo.toml"
             fi
         fi
 
+        _SCOPE_LINE="$(pre_push_compute_pkg_scope "$_CHANGED_FILES")"
+        echo "$_SCOPE_LINE" >&2
+        _SCOPE_PKGS="$(printf '%s\n' "$_SCOPE_LINE" | sed -nE 's/.*packages=([^ ]+).*/\1/p')"
+        if [[ -n "$_SCOPE_PKGS" && "$_SCOPE_PKGS" != "none" ]]; then
+            ANY_RS=1
+        fi
+
         if [[ "$ANY_RS" == "1" ]]; then
+            _PKG_ARGS=()
+            if [[ "$_SCOPE_PKGS" == "--workspace" ]]; then
+                _PKG_ARGS=(--workspace)
+            elif [[ "$_SCOPE_PKGS" == "chump" ]]; then
+                _PKG_ARGS=(-p chump --bin chump --tests)
+            else
+                IFS=',' read -ra _SEL_PKGS <<<"$_SCOPE_PKGS"
+                for _sp in "${_SEL_PKGS[@]}"; do
+                    [[ -n "$_sp" ]] && _PKG_ARGS+=(-p "$_sp")
+                done
+                _PKG_ARGS+=(--tests)
+            fi
+
             # CREDIBLE-278: cargo test threads all tests in one process, so
             # tests that touch process-global env (e.g. CHUMP_REPO) race each
             # other and false-red locally on a tree CI proves green — CI runs
@@ -1190,13 +1212,13 @@ elif [[ "${CHUMP_TEST_GATE:-1}" != "0" ]] && command -v cargo &>/dev/null; then
                 # INFRA-8042: --profile prepush (.config/nextest.toml) kills any
                 # single test still running after 4 min, so one hang fails the
                 # gate by name instead of eating the whole timeout budget.
-                echo "[pre-push] CREDIBLE-278: running cargo nextest run --profile prepush --bin chump --tests (full suite; process-isolated, matches CI; per-test timeout)..." >&2
-                _TEST_RUNNER_CMD=(cargo nextest run --profile prepush --bin chump --tests --no-fail-fast)
+                echo "[pre-push] CREDIBLE-278: running cargo nextest run --profile prepush ${_PKG_ARGS[*]} (incremental suite; process-isolated, matches CI; per-test timeout)..." >&2
+                _TEST_RUNNER_CMD=(cargo nextest run --profile prepush "${_PKG_ARGS[@]}" --no-fail-fast)
             else
                 echo "[pre-push] WARN CREDIBLE-278: cargo-nextest not found on PATH — falling back to 'cargo test -- --test-threads=1' (INFRA-8572)." >&2
                 echo "[pre-push] WARN CREDIBLE-278: cargo test runs in one process; --test-threads=1 serializes tests so process-global env does not race when nextest is absent." >&2
                 echo "[pre-push] WARN CREDIBLE-278: install for a gate that matches CI: cargo install cargo-nextest --locked" >&2
-                _TEST_RUNNER_CMD=(cargo test --bin chump --tests --no-fail-fast --quiet -- --test-threads=1)
+                _TEST_RUNNER_CMD=(cargo test "${_PKG_ARGS[@]}" --no-fail-fast --quiet -- --test-threads=1)
                 _TEST_RUNNER_HAS_DD=1
             fi
             echo "[pre-push] (one-time per tree-hash; cached at $CACHE_MARKER on green)" >&2

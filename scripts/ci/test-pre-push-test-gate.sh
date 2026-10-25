@@ -390,6 +390,101 @@ fi
 git rm -q leaked_r1656.txt
 git commit -qm "drop RESILIENT-1656 secret fixture"
 
+# ══════════════════════════════════════════════════════════════════════════
+# INFRA-8154: incremental pre-push cargo test scope (touched pkgs + rdeps)
+# ══════════════════════════════════════════════════════════════════════════
+echo "--- Test 13 (INFRA-8154): incremental package scope + rdeps + workspace triggers + mutant checks ---"
+PKG_SCOPE_LIB="$REPO_ROOT/scripts/lib/pre-push-pkg-scope.sh"
+CARGO_TARGET_LIB="$REPO_ROOT/scripts/lib/cargo-target-dir.sh"
+if [[ -f "$PKG_SCOPE_LIB" && -f "$CARGO_TARGET_LIB" ]]; then
+    ok "INFRA-8154: scripts/lib/pre-push-pkg-scope.sh and scripts/lib/cargo-target-dir.sh exist"
+else
+    fail "INFRA-8154: missing pre-push-pkg-scope.sh or cargo-target-dir.sh"
+fi
+
+# (a) One-crate change -> selects that crate + its reverse dependencies
+SCOPE_ONE="$( CHUMP_REPO_ROOT="$REPO_ROOT" bash "$PKG_SCOPE_LIB" --files $'crates/chump-cancel/src/lib.rs' )"
+if echo "$SCOPE_ONE" | grep -q -- "-p chump-cancel" && echo "$SCOPE_ONE" | grep -q -- "-p chump" && [[ "$SCOPE_ONE" != "--workspace" ]]; then
+    ok "INFRA-8154: 1-crate change selects crate + reverse dependencies ($SCOPE_ONE)"
+else
+    fail "INFRA-8154: expected -p chump-cancel and -p chump (not --workspace), got '$SCOPE_ONE'"
+fi
+
+# (b) Changes to Cargo.lock, Cargo.toml, workspace-hack/*, or scripts/git-hooks/pre-push -> --workspace
+for _wf in "Cargo.lock" "Cargo.toml" "workspace-hack/Cargo.toml" "scripts/git-hooks/pre-push"; do
+    _ws_out="$( CHUMP_REPO_ROOT="$REPO_ROOT" bash "$PKG_SCOPE_LIB" --files "$_wf" )"
+    if [[ "$_ws_out" == "--workspace" ]]; then
+        ok "INFRA-8154: '$_wf' triggers --workspace"
+    else
+        fail "INFRA-8154: expected '$_wf' to trigger --workspace, got '$_ws_out'"
+    fi
+done
+
+# (c) Docs-only or scripts-only diff -> none
+for _nf in $'docs/README.md\ndocs/ROADMAP.md' $'scripts/ops/vital-signs.sh\nscripts/coord/board-tick.sh'; do
+    _n_out="$( CHUMP_REPO_ROOT="$REPO_ROOT" bash "$PKG_SCOPE_LIB" --files "$_nf" )"
+    if [[ "$_n_out" == "none" ]]; then
+        ok "INFRA-8154: non-Rust diff (${_nf%%$'\n'*}) selects 'none'"
+    else
+        fail "INFRA-8154: expected 'none' for non-Rust diff, got '$_n_out'"
+    fi
+done
+
+# (d) Mutant checks:
+#     Mutant 1: dropping rdeps expansion (# INFRA-8154:RDEPS-EXPANSION) must fail the rdeps check
+sed '/# INFRA-8154:RDEPS-EXPANSION/d' "$PKG_SCOPE_LIB" > "$TMP/pkg-scope-mutant-no-rdeps.sh"
+chmod +x "$TMP/pkg-scope-mutant-no-rdeps.sh"
+MUT_RDEPS_OUT="$( CHUMP_REPO_ROOT="$REPO_ROOT" bash "$TMP/pkg-scope-mutant-no-rdeps.sh" --files $'crates/chump-cancel/src/lib.rs' )"
+if echo "$MUT_RDEPS_OUT" | grep -q -- "-p chump-cancel" && ! echo "$MUT_RDEPS_OUT" | grep -q -- "-p chump "; then
+    ok "INFRA-8154: mutant dropping rdeps expansion caught (missed reverse dep 'chump': $MUT_RDEPS_OUT)"
+else
+    fail "INFRA-8154: mutant dropping rdeps expansion was not caught ($MUT_RDEPS_OUT)"
+fi
+
+#     Mutant 2: dropping workspace-wide trigger (# INFRA-8154:WORKSPACE-TRIGGER) must fail the Cargo.lock check
+sed '/# INFRA-8154:WORKSPACE-TRIGGER/d' "$PKG_SCOPE_LIB" > "$TMP/pkg-scope-mutant-no-ws.sh"
+chmod +x "$TMP/pkg-scope-mutant-no-ws.sh"
+MUT_WS_OUT="$( CHUMP_REPO_ROOT="$REPO_ROOT" bash "$TMP/pkg-scope-mutant-no-ws.sh" --files "Cargo.lock" )"
+if [[ "$MUT_WS_OUT" != "--workspace" ]]; then
+    ok "INFRA-8154: mutant dropping workspace trigger caught (Cargo.lock produced '$MUT_WS_OUT' != '--workspace')"
+else
+    fail "INFRA-8154: mutant dropping workspace trigger was not caught"
+fi
+
+# ══════════════════════════════════════════════════════════════════════════
+# INFRA-8174: canonical Vercel project/domain resolver (vercel-resolve.sh)
+# ══════════════════════════════════════════════════════════════════════════
+echo "--- Test 14 (INFRA-8174): vercel-resolve.sh resolves olive -> cartpilot/shopolive.xyz and rejects madeupname ---"
+VERCEL_RESOLVE="$REPO_ROOT/scripts/ops/vercel-resolve.sh"
+VERCEL_TARGETS="$REPO_ROOT/config/vercel-targets.json"
+if [[ -f "$VERCEL_RESOLVE" && -f "$VERCEL_TARGETS" ]]; then
+    ok "INFRA-8174: scripts/ops/vercel-resolve.sh and config/vercel-targets.json exist"
+else
+    fail "INFRA-8174: missing vercel-resolve.sh or config/vercel-targets.json"
+fi
+
+VR_OLIVE_OUT="$( CHUMP_VERCEL_RESOLVE_OFFLINE=1 bash "$VERCEL_RESOLVE" --json olive 2>&1 )"
+VR_OLIVE_RC=$?
+if [[ "$VR_OLIVE_RC" -eq 0 ]] \
+   && [[ "$(printf '%s' "$VR_OLIVE_OUT" | jq -r '.project_name // empty')" == "cartpilot" ]] \
+   && [[ "$(printf '%s' "$VR_OLIVE_OUT" | jq -r '.prod_domain // empty')" == "shopolive.xyz" ]]; then
+    ok "INFRA-8174: vercel-resolve.sh olive -> cartpilot + shopolive.xyz (rc=0)"
+else
+    fail "INFRA-8174: vercel-resolve.sh olive failed (rc=$VR_OLIVE_RC, out=$VR_OLIVE_OUT)"
+fi
+
+VR_BAD_STDOUT="$( CHUMP_VERCEL_RESOLVE_OFFLINE=1 bash "$VERCEL_RESOLVE" madeupname 2>"$TMP/vr-bad.stderr" )"
+VR_BAD_RC=$?
+VR_BAD_STDERR="$(cat "$TMP/vr-bad.stderr" 2>/dev/null)"
+if [[ "$VR_BAD_RC" -ne 0 ]] \
+   && [[ -z "$VR_BAD_STDOUT" ]] \
+   && ! echo "$VR_BAD_STDOUT" | grep -q "madeupname" \
+   && echo "$VR_BAD_STDERR" | grep -qi "Resolution instructions"; then
+    ok "INFRA-8174: vercel-resolve.sh madeupname exits non-zero ($VR_BAD_RC) with resolution instructions on stderr"
+else
+    fail "INFRA-8174: vercel-resolve.sh madeupname should fail cleanly (rc=$VR_BAD_RC, stdout='$VR_BAD_STDOUT', stderr='$VR_BAD_STDERR')"
+fi
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo
 echo "=== Results: $PASS passed, $FAIL failed ==="

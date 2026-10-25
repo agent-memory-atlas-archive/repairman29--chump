@@ -116,6 +116,20 @@ GH_REPO="${CHUMP_GH_REPO:-repairman29/chump}"
 JOURNEY_ODDS="${CHUMP_JOURNEY_ODDS:-$REAL_HOME/.chump/journey-odds.json}"
 PR_BOOK_CALIB="${CHUMP_PR_BOOK_CALIB:-$REAL_HOME/.chump/pr-book-calibration.log}"
 MANIFEST="$REPO_ROOT/scripts/ops/organ-manifest.txt"
+# INFRA-8095: host attribution + hub fallback for split brain/muscle topology.
+LOCAL_HOST="${CHUMP_LOCAL_HOST:-$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo unknown)}"
+HUB_HOST="${CHUMP_HUB_HOST:-cuphead}"
+HUB_STATE_DIR="${CHUMP_HUB_STATE_DIR:-$REAL_HOME/.chump/hub}"
+NODE_ROLES="${CHUMP_NODE_ROLES:-}"
+if [[ -z "$NODE_ROLES" && -f "$REAL_HOME/.chump/node.env" ]]; then
+  NODE_ROLES="$(grep -E '^CHUMP_NODE_ROLES=' "$REAL_HOME/.chump/node.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"'\''')"
+fi
+HUB_AMBIENT_LOG="${CHUMP_HUB_AMBIENT_LOG:-}"
+[[ -z "$HUB_AMBIENT_LOG" && -f "$HUB_STATE_DIR/ambient.jsonl" ]] && HUB_AMBIENT_LOG="$HUB_STATE_DIR/ambient.jsonl"
+HUB_CALIBRATION_LOG="${CHUMP_HUB_CALIBRATION_LOG:-}"
+[[ -z "$HUB_CALIBRATION_LOG" && -f "$HUB_STATE_DIR/pr-book-calibration.log" ]] && HUB_CALIBRATION_LOG="$HUB_STATE_DIR/pr-book-calibration.log"
+HUB_VITAL_SIGNS_JSON="${CHUMP_HUB_VITAL_SIGNS_JSON:-}"
+[[ -z "$HUB_VITAL_SIGNS_JSON" && -f "$HUB_STATE_DIR/vital-signs.json" ]] && HUB_VITAL_SIGNS_JSON="$HUB_STATE_DIR/vital-signs.json"
 # ROBUSTNESS (2026-08-22): a stale or wrong REPO_ROOT / CHUMP_REPO_ROOT env once
 # made the collector PERSIST a false "uninstrumented" null for merged_not_running
 # (manifest not found at the env-derived path) even though the manifest sits
@@ -266,36 +280,55 @@ fi
 # 4 · merged_not_running  (quality / leading)  — organs active / manifest %.
 #     The "merged != running" disease made observable: is what we built LIVE?
 # ════════════════════════════════════════════════════════════════════════════
-if [[ -f "$MANIFEST" ]] && command -v systemctl >/dev/null 2>&1; then
-  org_tot=0; org_act=0; org_down=""
-  while read -r _ unit _; do
-    [[ -z "$unit" ]] && continue
-    org_tot=$((org_tot+1))
-    if [[ "$(systemctl is-active "$unit" 2>/dev/null)" == active ]]; then
-      org_act=$((org_act+1))
-    else
-      org_down="${org_down}${org_down:+,}${unit}"
-    fi
-  done < <(grep -E '^enabled' "$MANIFEST")
-  if (( org_tot > 0 )); then
-    org_pct="$(awk -v a="$org_act" -v t="$org_tot" 'BEGIN{printf "%.1f", 100*a/t}')"
-    s="$(status_hi "$org_pct" "$CFG_ORGAN_GREEN" "$CFG_ORGAN_AMBER")"
+merged_host="$LOCAL_HOST"
+merged_recorded=0
+if [[ "$NODE_ROLES" == *muscle* && "$NODE_ROLES" != *brain* && -n "$HUB_VITAL_SIGNS_JSON" && -s "$HUB_VITAL_SIGNS_JSON" ]]; then
+  hub_mnr_val="$(jq -r '.signs[]? | select(.key=="merged_not_running") | .value // empty' "$HUB_VITAL_SIGNS_JSON" 2>/dev/null)"
+  if [[ "$hub_mnr_val" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    merged_host="$HUB_HOST"
+    s="$(status_hi "$hub_mnr_val" "$CFG_ORGAN_GREEN" "$CFG_ORGAN_AMBER")"
+    hub_mnr_basis="$(jq -r '.signs[]? | select(.key=="merged_not_running") | .basis // "hub vital-signs.json"' "$HUB_VITAL_SIGNS_JSON" 2>/dev/null)"
+    [[ "$hub_mnr_basis" == *"host="* ]] || hub_mnr_basis="$hub_mnr_basis (host=$merged_host)"
     SIGNS+=("$(mksign merged_not_running "Merged-not-Running" quality leading \
-      "$(jnum "$org_pct")" "percent-organs-active" "$s" \
+      "$(jnum "$hub_mnr_val")" "percent-organs-active" "$s" \
       "roll-call + revive the dead organ" \
-      "$org_act/$org_tot manifest organs systemctl is-active${org_down:+ (down: $org_down)}" \
+      "$hub_mnr_basis" \
       "{\"green\":\">$CFG_ORGAN_GREEN\",\"amber\":\"$CFG_ORGAN_AMBER-$CFG_ORGAN_GREEN\",\"red_desc\":\"<$CFG_ORGAN_AMBER% active\"}")")
+    merged_recorded=1
+  fi
+fi
+if (( merged_recorded == 0 )); then
+  if [[ -f "$MANIFEST" ]] && command -v systemctl >/dev/null 2>&1; then
+    org_tot=0; org_act=0; org_down=""
+    while read -r _ unit _; do
+      [[ -z "$unit" ]] && continue
+      org_tot=$((org_tot+1))
+      if [[ "$(systemctl is-active "$unit" 2>/dev/null)" == active ]]; then
+        org_act=$((org_act+1))
+      else
+        org_down="${org_down}${org_down:+,}${unit}"
+      fi
+    done < <(grep -E '^enabled' "$MANIFEST")
+    if (( org_tot > 0 )); then
+      org_pct="$(awk -v a="$org_act" -v t="$org_tot" 'BEGIN{printf "%.1f", 100*a/t}')"
+      s="$(status_hi "$org_pct" "$CFG_ORGAN_GREEN" "$CFG_ORGAN_AMBER")"
+      SIGNS+=("$(mksign merged_not_running "Merged-not-Running" quality leading \
+        "$(jnum "$org_pct")" "percent-organs-active" "$s" \
+        "roll-call + revive the dead organ" \
+        "$org_act/$org_tot manifest organs systemctl is-active${org_down:+ (down: $org_down)} (host=$merged_host)" \
+        "{\"green\":\">$CFG_ORGAN_GREEN\",\"amber\":\"$CFG_ORGAN_AMBER-$CFG_ORGAN_GREEN\",\"red_desc\":\"<$CFG_ORGAN_AMBER% active\"}")")
+    else
+      SIGNS+=("$(mksign merged_not_running "Merged-not-Running" quality leading \
+        null "percent-organs-active" "unknown" "roll-call + revive the dead organ" \
+        "uninstrumented: no 'enabled' rows in organ-manifest.txt (host=$merged_host)" \
+        "{\"green\":\">$CFG_ORGAN_GREEN\",\"amber\":\"$CFG_ORGAN_AMBER-$CFG_ORGAN_GREEN\",\"red_desc\":\"<$CFG_ORGAN_AMBER% active\"}")")
+    fi
   else
     SIGNS+=("$(mksign merged_not_running "Merged-not-Running" quality leading \
       null "percent-organs-active" "unknown" "roll-call + revive the dead organ" \
-      "uninstrumented: no 'enabled' rows in organ-manifest.txt" \
+      "uninstrumented: organ-manifest.txt or systemctl unavailable on this host (host=$merged_host)" \
       "{\"green\":\">$CFG_ORGAN_GREEN\",\"amber\":\"$CFG_ORGAN_AMBER-$CFG_ORGAN_GREEN\",\"red_desc\":\"<$CFG_ORGAN_AMBER% active\"}")")
   fi
-else
-  SIGNS+=("$(mksign merged_not_running "Merged-not-Running" quality leading \
-    null "percent-organs-active" "unknown" "roll-call + revive the dead organ" \
-    "uninstrumented: organ-manifest.txt or systemctl unavailable on this host" \
-    "{\"green\":\">$CFG_ORGAN_GREEN\",\"amber\":\"$CFG_ORGAN_AMBER-$CFG_ORGAN_GREEN\",\"red_desc\":\"<$CFG_ORGAN_AMBER% active\"}")")
 fi
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -308,9 +341,22 @@ fi
 #     and #4 alone would report 100% while every run failed. unknown/uninstrumented
 #     when no tick has ever been emitted (verifier not installed/run yet on this host).
 # ════════════════════════════════════════════════════════════════════════════
+verified_host="$LOCAL_HOST"
+verified_source_log="$AMBIENT_LOG"
+if [[ "$NODE_ROLES" == *muscle* && "$NODE_ROLES" != *brain* && -n "$HUB_AMBIENT_LOG" && -f "$HUB_AMBIENT_LOG" ]]; then
+  verified_source_log="$HUB_AMBIENT_LOG"
+  verified_host="$HUB_HOST"
+fi
 verified_tick=""
-if [[ -f "$AMBIENT_LOG" ]]; then
-  verified_tick="$(grep '"kind":"organ_success_verify_tick"' "$AMBIENT_LOG" 2>/dev/null | tail -n1)"
+if [[ -f "$verified_source_log" ]]; then
+  verified_tick="$(grep '"kind":"organ_success_verify_tick"' "$verified_source_log" 2>/dev/null | tail -n1)"
+fi
+if [[ -z "$verified_tick" && -n "$HUB_AMBIENT_LOG" && -f "$HUB_AMBIENT_LOG" && "$verified_source_log" != "$HUB_AMBIENT_LOG" ]]; then
+  verified_tick="$(grep '"kind":"organ_success_verify_tick"' "$HUB_AMBIENT_LOG" 2>/dev/null | tail -n1)"
+  if [[ -n "$verified_tick" ]]; then
+    verified_source_log="$HUB_AMBIENT_LOG"
+    verified_host="$HUB_HOST"
+  fi
 fi
 verified_ok=""
 enabled_total=""
@@ -324,13 +370,13 @@ if [[ "$verified_ok" =~ ^[0-9]+$ && "$enabled_total" =~ ^[0-9]+$ && "$enabled_to
   SIGNS+=("$(mksign verified_working "Verified Working" quality leading \
     "$(jnum "$verified_pct")" "percent-organs-verified-ok" "$s" \
     "diagnose the FAILED organ's last run (organ-success-verifier)" \
-    "$verified_ok/$enabled_total enabled organs verified-ok on last run (latest organ_success_verify_tick)" \
+    "$verified_ok/$enabled_total enabled organs verified-ok on last run (latest organ_success_verify_tick) (host=$verified_host)" \
     "{\"green\":\">$CFG_VERIFIED_GREEN\",\"amber\":\"$CFG_VERIFIED_AMBER-$CFG_VERIFIED_GREEN\",\"red_desc\":\"<$CFG_VERIFIED_AMBER% verified-ok\"}")")
 else
   SIGNS+=("$(mksign verified_working "Verified Working" quality leading \
     null "percent-organs-verified-ok" "unknown" \
     "diagnose the FAILED organ's last run (organ-success-verifier)" \
-    "uninstrumented: no organ_success_verify_tick event found in $AMBIENT_LOG (organ-success-verifier.sh not yet run on this host)" \
+    "uninstrumented: no organ_success_verify_tick event found in $verified_source_log (organ-success-verifier.sh not yet run on this host) (host=$verified_host)" \
     "{\"green\":\">$CFG_VERIFIED_GREEN\",\"amber\":\"$CFG_VERIFIED_AMBER-$CFG_VERIFIED_GREEN\",\"red_desc\":\"<$CFG_VERIFIED_AMBER% verified-ok\"}")")
 fi
 
@@ -389,7 +435,13 @@ fi
 #     number is exactly the drift this gap closes (see faculty-collector.sh
 #     which already reads the same trailing row the same way).
 # ════════════════════════════════════════════════════════════════════════════
-PR_BOOK_LEDGER_FILE="${PR_BOOK_LEDGER:-$(dirname "$PR_BOOK_CALIB")/pr-book-ledger.jsonl}"
+calib_host="$LOCAL_HOST"
+ACTIVE_CALIB="$PR_BOOK_CALIB"
+if ([[ ! -s "$ACTIVE_CALIB" ]] || [[ "$NODE_ROLES" == *muscle* && "$NODE_ROLES" != *brain* ]]) && [[ -n "$HUB_CALIBRATION_LOG" && -s "$HUB_CALIBRATION_LOG" ]]; then
+  ACTIVE_CALIB="$HUB_CALIBRATION_LOG"
+  calib_host="$HUB_HOST"
+fi
+PR_BOOK_LEDGER_FILE="${PR_BOOK_LEDGER:-$(dirname "$ACTIVE_CALIB")/pr-book-ledger.jsonl}"
 brier=""
 brier_null_basis=""
 cal_summary=""
@@ -399,15 +451,15 @@ led_ts=""
 if [[ -s "$PR_BOOK_LEDGER_FILE" ]]; then
   led_ts="$(tail -n1 "$PR_BOOK_LEDGER_FILE" 2>/dev/null | jq -r '.ts // empty' 2>/dev/null)"
 fi
-if [[ ! -e "$PR_BOOK_CALIB" ]]; then
-  brier_null_basis="missing_log: no calibration log at $PR_BOOK_CALIB"
-elif [[ ! -s "$PR_BOOK_CALIB" ]]; then
-  brier_null_basis="empty_crashed_log: calibration log at $PR_BOOK_CALIB is 0 bytes (settler crashed)"
+if [[ ! -e "$ACTIVE_CALIB" ]]; then
+  brier_null_basis="missing_log: no calibration log at $ACTIVE_CALIB"
+elif [[ ! -s "$ACTIVE_CALIB" ]]; then
+  brier_null_basis="empty_crashed_log: calibration log at $ACTIVE_CALIB is 0 bytes (settler crashed)"
 else
-  cal_summary="$(tail -n1 "$PR_BOOK_CALIB" 2>/dev/null | \
+  cal_summary="$(tail -n1 "$ACTIVE_CALIB" 2>/dev/null | \
     jq -c 'select(.kind=="pr_book_calibration")' 2>/dev/null)"
   if [[ -z "$cal_summary" ]]; then
-    brier_null_basis="empty_crashed_log: $PR_BOOK_CALIB lacks a trailing pr_book_calibration summary row"
+    brier_null_basis="empty_crashed_log: $ACTIVE_CALIB lacks a trailing pr_book_calibration summary row"
   else
     cal_ts="$(printf '%s' "$cal_summary" | jq -r '.ts // empty' 2>/dev/null)"
     cal_n="$(printf '%s' "$cal_summary" | jq -r '.n // 0' 2>/dev/null)"
@@ -417,9 +469,20 @@ else
       brier_null_basis="stale_ledger: latest prediction in $PR_BOOK_LEDGER_FILE is at $led_ts (< $CUT_24H; pr-book pricing organ not running)"
     elif [[ -n "$cal_ts" && "$cal_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T && "$cal_ts" < "$CUT_24H" ]]; then
       brier=""
-      brier_null_basis="stale_summary: trailing pr_book_calibration summary in $PR_BOOK_CALIB is at $cal_ts (< $CUT_24H)"
+      brier_null_basis="stale_summary: trailing pr_book_calibration summary in $ACTIVE_CALIB is at $cal_ts (< $CUT_24H)"
     elif [[ ! "$brier" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-      brier_null_basis="n=0_unresolved: pr_book_calibration summary in $PR_BOOK_CALIB has n=${cal_n:-0} resolved predictions (brier=null)"
+      brier_null_basis="n=0_unresolved: pr_book_calibration summary in $ACTIVE_CALIB has n=${cal_n:-0} resolved predictions (brier=null)"
+    fi
+  fi
+fi
+if [[ ! "$brier" =~ ^[0-9]+([.][0-9]+)?$ && -n "$HUB_AMBIENT_LOG" && -s "$HUB_AMBIENT_LOG" ]]; then
+  hub_cal_row="$(jq -c 'select(.kind=="pr_book_calibration")' "$HUB_AMBIENT_LOG" 2>/dev/null | tail -n1)"
+  if [[ -n "$hub_cal_row" ]]; then
+    hub_brier="$(printf '%s' "$hub_cal_row" | jq -r '.brier // empty' 2>/dev/null)"
+    if [[ "$hub_brier" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      brier="$hub_brier"
+      ACTIVE_CALIB="$HUB_AMBIENT_LOG"
+      calib_host="$HUB_HOST"
     fi
   fi
 fi
@@ -429,13 +492,13 @@ if [[ "$brier" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
   SIGNS+=("$(mksign calibration_brier "Calibration (Brier)" trust meta \
     "$(jnum "$brier_r")" "brier-score" "$s" \
     "audit pricing model — the board may be lying" \
-    "Brier over scored predictions in $PR_BOOK_CALIB" \
+    "Brier over scored predictions in $ACTIVE_CALIB (host=$calib_host)" \
     "{\"green\":\"<$CFG_BRIER_GREEN\",\"amber\":\"$CFG_BRIER_GREEN-$CFG_BRIER_AMBER\",\"red_desc\":\">$CFG_BRIER_AMBER\"}")")
 else
   SIGNS+=("$(mksign calibration_brier "Calibration (Brier)" trust meta \
     null "brier-score" "unknown" \
     "audit pricing model — the board may be lying" \
-    "${brier_null_basis:-missing_log: no scored-outcome log at $PR_BOOK_CALIB}" \
+    "${brier_null_basis:-missing_log: no scored-outcome log at $ACTIVE_CALIB} (host=$calib_host)" \
     "{\"green\":\"<$CFG_BRIER_GREEN\",\"amber\":\"$CFG_BRIER_GREEN-$CFG_BRIER_AMBER\",\"red_desc\":\">$CFG_BRIER_AMBER\"}")")
 fi
 

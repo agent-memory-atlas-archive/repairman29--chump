@@ -1,0 +1,16 @@
+# chump-backlog-governor.timer — INFRA-8175 15-minute cadence for chump-backlog-governor.service.
+# RESILIENT-1455: OnUnitInactiveSec alongside OnUnitActiveSec so oneshot timers self-perpetuate.
+
+[Unit]
+Description=Run Chump backlog governor every 15 minutes (INFRA-8175)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+OnUnitInactiveSec=15min
+AccuracySec=30s
+Persistent=true
+Unit=chump-backlog-governor.service
+
+[Install]
+WantedBy=timers.target

@@ -14805,4 +14805,18 @@ events:
     consumers: [ambient, fleet-brief, audit-log]
     fields_required: [ts, kind, gap, open_p0_count, budget, reason]
 
+  # ── INFRA-8175: backlog governor net-burn gauge + wedge healer ───────────────
+  - kind: backlog_governor_tick
+    status: active
+    effect_metric: zero_waste
+    emitter: scripts/coord/backlog-governor.sh (INFRA-8175)
+    emitter_paths: [scripts/coord/backlog-governor.sh]
+    trigger: >
+      Periodic backlog-governor organ tick computing open gaps by priority (P0..P3),
+      24h filed vs shipped net burn (shipped_24h - filed_24h), wedge detection
+      (starved P0/P1 tiers, stale in_progress claims, expired .chump-locks leases),
+      and autonomous stale-lease/stale-in_progress healing under --apply.
+    consumers: [ambient, fleet-brief, vital-signs]
+    fields_required: [ts, kind, open_total, open_p0, open_p1, open_p2, open_p3, filed_24h, shipped_24h, net_burn_24h, wedges, healed_leases]
+
   # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──

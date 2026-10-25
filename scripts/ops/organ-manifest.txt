@@ -717,6 +717,8 @@ enabled     chump-pr-stuck-cluster-detector.service  role=brain requires=file:~/
 # PHASE-R R3 (RESILIENT-1644): queue-duplicating organs retired at both system and
 # user scopes — retired: done by the GitHub merge queue (PHASE-R R3).
 enabled     chump-armed-pr-rebaser.timer    role=brain requires=bin:chump,bin:gh platforms=systemd,launchd  # INFRA-8144: re-enabled on Linux+launchd with CHUMP_REBASER_MAX_PER_CYCLE=3 throttle (scripts/dispatch/chump-armed-pr-rebaser.{service,timer} -> scripts/coord/armed-pr-rebaser.sh every 20min), placed+host-rewritten by place_role_unit_files.
+enabled     chump-backlog-governor.timer    role=brain requires=bin:python3,bin:sqlite3 platforms=systemd,launchd  # INFRA-8175: 15-min backlog governor computing open gap counts by priority + 24h net burn and healing expired .chump-locks leases / stale in_progress claims (scripts/dispatch/chump-backlog-governor.{service,timer} -> scripts/coord/backlog-governor.sh --apply).
+enabled     chump-plan-priority.timer       role=data  requires=bin:chump-plan platforms=systemd,launchd  # INFRA-8143: 30-min gap-priority.json writer on Linux+launchd (scripts/dispatch/chump-plan-priority.{service,timer} -> scripts/setup/install-chump-planner-launchd.sh --once).
 retired     chump-pr-auto-rebase.timer      role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
 retired     chump-pr-auto-rebase.service    role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
 retired     chump-rot-reaper.service        role=brain  # retired: done by the GitHub merge queue (PHASE-R R3)
