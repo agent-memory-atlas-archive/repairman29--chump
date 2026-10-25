@@ -22,7 +22,7 @@
 //!   registered kinds: `worker_exit` (on child exit), `worker_stuck`
 //!   (on every exit-without-ship path).
 
-use crate::worker::capability::WorkerCapability;
+use crate::worker::capability::{has_external_repo_tag, WorkerCapability};
 use crate::worker::worktree::{create_worktree, remove_worktree, worktree_dir_for};
 use anyhow::{Context, Result};
 use chump_ambient_cli::ambient_emit::{emit, EmitArgs};
@@ -253,12 +253,38 @@ pub fn pick_eligible_gap(store: &GapStore, cap: &WorkerCapability) -> Result<Opt
         // P0 < P1 < P2 < P3 alphabetically — good enough for Phase 1.
         a.priority.cmp(&b.priority).then(a.id.cmp(&b.id))
     });
+    let blocked_external = if cap.external_repo_enabled {
+        0
+    } else {
+        rows.iter().filter(|r| has_external_repo_tag(r)).count()
+    };
+    let mut skipped_external = 0usize;
+    let mut picked = None;
     for row in rows {
+        if !cap.external_repo_enabled && has_external_repo_tag(&row) {
+            skipped_external += 1;
+            continue;
+        }
         if cap.matches(&row) {
-            return Ok(Some(row));
+            picked = Some(row);
+            break;
         }
     }
-    Ok(None)
+    if cap.external_repo_enabled {
+        eprintln!("[chump-worker] external_repo gate: open");
+    } else {
+        if skipped_external > 0 {
+            eprintln!(
+                "[chump-worker] {} external gaps skipped: gate closed",
+                skipped_external
+            );
+        }
+        eprintln!(
+            "[chump-worker] external_repo gate: closed ({} gaps blocked)",
+            blocked_external
+        );
+    }
+    Ok(picked)
 }
 
 /// Spawn the child with a timeout. Returns:

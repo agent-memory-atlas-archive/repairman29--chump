@@ -73,6 +73,11 @@ pub struct FleetPulse {
     /// `last_admin_merges` (which caps at 5 and drops the count once >5
     /// events land in the window).
     pub admin_merge_count: usize,
+    /// INFRA-8603: Whether the external_repo gate (`CHUMP_EXTERNAL_REPO_PICK_OK`)
+    /// is open (`"open"`) or closed (`"closed"`).
+    pub external_repo_gate: String,
+    /// INFRA-8603: Aggregated count of skipped external gaps across workers.
+    pub skipped_external_gaps: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,6 +102,8 @@ pub fn build(repo_root: &Path) -> FleetPulse {
         .find(|c| c.kind == "admin_merge_executed")
         .map(|c| c.count)
         .unwrap_or(0);
+    let (external_repo_gate, skipped_external_gaps) =
+        scan_external_repo_skipped(repo_root, &ambient);
 
     FleetPulse {
         generated_at: now_rfc3339(),
@@ -108,7 +115,75 @@ pub fn build(repo_root: &Path) -> FleetPulse {
         last_alerts,
         last_clusters,
         admin_merge_count,
+        external_repo_gate,
+        skipped_external_gaps,
     }
+}
+
+/// INFRA-8603: Aggregate skipped external gaps count across workers and
+/// report external_repo gate status (`"open"` or `"closed"`).
+fn scan_external_repo_skipped(repo_root: &Path, ambient: &Path) -> (String, usize) {
+    let mut gate_open = std::env::var("CHUMP_EXTERNAL_REPO_PICK_OK")
+        .ok()
+        .map(|v| {
+            let t = v.trim();
+            t == "1" || t.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false);
+
+    let dir = repo_root.join(".chump-locks").join("external-repo-skipped");
+    let mut total_skipped: usize = 0;
+    let mut found_worker_files = false;
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(content) = fs::read_to_string(&path) {
+                found_worker_files = true;
+                if let Some(n) = extract_json_usize(&content, "skipped_external_gaps") {
+                    total_skipped += n;
+                }
+                if extract_json_string(&content, "external_repo_gate").as_deref() == Some("open") {
+                    gate_open = true;
+                }
+            }
+        }
+    }
+
+    if !found_worker_files {
+        if let Ok(file) = fs::File::open(ambient) {
+            let reader = BufReader::new(file);
+            for line in reader.lines().map_while(Result::ok) {
+                if let Some(n) = extract_json_usize(&line, "skipped_external_gaps") {
+                    total_skipped += n;
+                } else if let Some(n) = extract_json_usize(&line, "external_repo_gate_closed") {
+                    total_skipped += n;
+                }
+            }
+        }
+    }
+
+    let gate_str = if gate_open {
+        "open".to_string()
+    } else {
+        "closed".to_string()
+    };
+    (gate_str, total_skipped)
+}
+
+fn extract_json_usize(s: &str, key: &str) -> Option<usize> {
+    let needle = format!("\"{}\":", key);
+    let start = s.find(&needle)? + needle.len();
+    let rest = s[start..].trim_start();
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    if end == 0 {
+        return None;
+    }
+    rest[..end].parse::<usize>().ok()
 }
 
 /// Read .chump-locks/fleet-hold.txt (written by INFRA-2004 cluster-detector).
@@ -287,6 +362,17 @@ pub fn render_text(p: &FleetPulse) -> String {
         ));
     }
     out.push('\n');
+    if p.external_repo_gate == "open" {
+        out.push_str(&format!(
+            "external_repo gate: open (skipped across workers: {})\n\n",
+            p.skipped_external_gaps
+        ));
+    } else {
+        out.push_str(&format!(
+            "external_repo gate: closed ({} gaps blocked, {} external gaps skipped: gate closed)\n\n",
+            p.skipped_external_gaps, p.skipped_external_gaps
+        ));
+    }
     out.push_str(&format!("Last {} wedge detections:\n", p.last_wedges.len()));
     for e in &p.last_wedges {
         out.push_str(&format!("  [{}] {}: {}\n", e.ts, e.kind, e.summary));
@@ -462,7 +548,35 @@ mod tests {
         assert!(text.contains("Floor temperature"));
         assert!(text.contains("Fleet HOLD"));
         assert!(text.contains("Active leases"));
+        assert!(text.contains("external_repo gate:"));
         assert!(text.contains("admin-merges"));
+        std::env::remove_var("CHUMP_AMBIENT_LOG");
+    }
+
+    #[test]
+    #[serial_test::serial(ambient_env)]
+    fn aggregates_skipped_external_gaps_across_workers() {
+        let dir = tempdir().unwrap();
+        let locks = dir.path().join(".chump-locks");
+        let skipped_dir = locks.join("external-repo-skipped");
+        std::fs::create_dir_all(&skipped_dir).unwrap();
+        std::fs::write(
+            skipped_dir.join("w1.json"),
+            r#"{"worker_id":"1","external_repo_gate":"closed","skipped_external_gaps":3}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            skipped_dir.join("w2.json"),
+            r#"{"worker_id":"2","external_repo_gate":"closed","skipped_external_gaps":4}"#,
+        )
+        .unwrap();
+        std::env::remove_var("CHUMP_EXTERNAL_REPO_PICK_OK");
+        std::env::set_var("CHUMP_AMBIENT_LOG", locks.join("ambient.jsonl"));
+        let p = build(dir.path());
+        assert_eq!(p.external_repo_gate, "closed");
+        assert_eq!(p.skipped_external_gaps, 7);
+        let text = render_text(&p);
+        assert!(text.contains("external_repo gate: closed (7 gaps blocked"));
         std::env::remove_var("CHUMP_AMBIENT_LOG");
     }
 }

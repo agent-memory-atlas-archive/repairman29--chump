@@ -74,6 +74,7 @@ fn fixture(
         started_at: now,
         heartbeat_at,
         ttl_seconds: DEFAULT_TTL_SECONDS,
+        external_repo_enabled: false,
     }
 }
 
@@ -225,6 +226,7 @@ async fn file_audit_trail_written_on_publish() {
         started_at: Utc::now(),
         heartbeat_at: Utc::now(),
         ttl_seconds: DEFAULT_TTL_SECONDS,
+        external_repo_enabled: false,
     };
 
     // Publish twice (startup + one heartbeat).
@@ -337,6 +339,7 @@ fn route_by_skill_returns_correct_session() {
         started_at: now,
         heartbeat_at: now,
         ttl_seconds: 300,
+        external_repo_enabled: false,
     };
 
     let m1 = make("s-shell-only", vec!["shell", "docs"]);

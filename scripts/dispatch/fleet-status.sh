@@ -224,6 +224,37 @@ print("stale lease files: %d%s" % (
     echo "stale lease files: ${#leases[@]}"
   fi
 
+  # INFRA-8603: aggregate skipped external gaps across workers
+  local ext_gate="closed"
+  if [[ "${CHUMP_EXTERNAL_REPO_PICK_OK:-0}" == "1" || "${CHUMP_EXTERNAL_REPO_PICK_OK:-0}" == "true" ]]; then
+    ext_gate="open"
+  fi
+  local ext_skipped=0
+  if [[ -d "$LOCK_DIR/external-repo-skipped" ]] && command -v "$PY" >/dev/null 2>&1; then
+    ext_skipped=$("$PY" - "$LOCK_DIR/external-repo-skipped" <<'PY' 2>/dev/null || echo 0
+import json, os, sys
+d = sys.argv[1]
+total = 0
+for fn in os.listdir(d):
+    if fn.endswith(".json"):
+        try:
+            with open(os.path.join(d, fn)) as fh:
+                total += int(json.load(fh).get("skipped_external_gaps", 0))
+        except Exception:
+            pass
+print(total)
+PY
+)
+  fi
+  if [[ "$ext_gate" == "open" ]]; then
+    echo "external_repo gate: open (skipped across workers: ${ext_skipped})"
+  else
+    echo "external_repo gate: closed (${ext_skipped} gaps blocked)"
+    if [[ "$ext_skipped" -gt 0 ]]; then
+      echo "${ext_skipped} external gaps skipped: gate closed"
+    fi
+  fi
+
   echo "----"
   echo "linked worktrees:"
   # INFRA-1211: use shared scanner
@@ -639,12 +670,28 @@ except Exception:
     # fallback: count lease files vs open gaps heuristic
     pickable_count = -1  # unknown
 
+# INFRA-8603: aggregate skipped external gaps across workers
+ext_skipped_dir = os.path.join(lock_dir, "external-repo-skipped")
+skipped_external_gaps = 0
+if os.path.isdir(ext_skipped_dir):
+    for fn in os.listdir(ext_skipped_dir):
+        if fn.endswith(".json"):
+            try:
+                with open(os.path.join(ext_skipped_dir, fn)) as fh:
+                    skipped_external_gaps += int(json.load(fh).get("skipped_external_gaps", 0))
+            except Exception:
+                pass
+ext_gate_env = os.environ.get("CHUMP_EXTERNAL_REPO_PICK_OK", "").strip().lower()
+external_repo_gate = "open" if ext_gate_env in ("1", "true") else "closed"
+
 out = {
     "active_leases": active_leases,
     "ships_24h": ships_24h,
     "pickable_count": pickable_count,
     "waste_30m": waste_30m,
     "fleet_workers_alive": fleet_workers_alive,
+    "external_repo_gate": external_repo_gate,
+    "skipped_external_gaps": skipped_external_gaps,
     "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
 }
 

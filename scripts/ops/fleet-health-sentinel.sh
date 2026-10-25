@@ -211,6 +211,8 @@ while [[ $# -gt 0 ]]; do
         --local) MODE="local" ;;
         --fleet) MODE="fleet" ;;
         --report-json) MODE="report-json" ;;
+        --check-sites) MODE="check-sites" ;;
+        --check-product-trunks) MODE="check-product-trunks" ;;
         --dry-run) DRY=1 ;;
         --loop) LOOP=1 ;;
         --cadence-min) CADENCE_MIN="$2"; shift ;;
@@ -548,12 +550,87 @@ snapshot_json() {
 
 do_local_pass() {
     scan_and_heal_local
+    if [[ "${CHUMP_SENTINEL_CHECK_SITES:-0}" == "1" ]]; then
+        check_vercel_insights
+    fi
+    if [[ "${CHUMP_SENTINEL_CHECK_PRODUCT_TRUNKS:-0}" == "1" ]]; then
+        check_product_trunks
+    fi
     write_heartbeat
     local tick_state="active"
     _sentinel_node_paused && tick_state="paused_expected"
     emit "fleet_health_sentinel_tick" mode=local state="$tick_state" failed="$SNAP_FAILED" \
         healed="$SNAP_HEALED" unhealed="$SNAP_UNHEALED" healers_down="$SNAP_HEALERS_DOWN" race_active="$SNAP_RACE_ACTIVE"
     log "local pass: state=$tick_state failed=$SNAP_FAILED healed=$SNAP_HEALED unhealed=$SNAP_UNHEALED healers_down=$SNAP_HEALERS_DOWN healers_fixed=$SNAP_HEALERS_FIXED race_active=$SNAP_RACE_ACTIVE"
+}
+
+# ── PRODUCT-376: daily Vercel Web Analytics check ────────────────────────────
+# Verifies /_vercel/insights/script.js returns HTTP 200 on every live site in
+# SITES.md (and checks webAnalytics.enabledAt when VERCEL_TOKEN is set).
+# Remediation recipe when disabled:
+#   vercel api '/web/insights/toggle?projectId=...&teamId=' -X POST -F value=true && vercel redeploy
+INSIGHTS_SITES="${CHUMP_SENTINEL_INSIGHTS_SITES:-jeffadkins.dev jeffadkins.me chooseotherwise.org beast-mode.dev echeo.ai playsmuggler.com peakvinyl.club shopolive.xyz}"
+CURL_BIN="${CHUMP_CURL:-curl}"
+GH_BIN="${CHUMP_GH:-gh}"
+PRODUCT_REPOS="${CHUMP_SENTINEL_PRODUCT_REPOS:-repairman29/olive}"
+
+check_vercel_insights() {
+    local site code proj_json enabled_at
+    for site in $INSIGHTS_SITES; do
+        [[ -z "$site" ]] && continue
+        code="$($CURL_BIN -sS -o /dev/null -w '%{http_code}' -m 10 "https://${site}/_vercel/insights/script.js" 2>/dev/null || echo "000")"
+        if [[ "$code" != "200" ]]; then
+            log "VERCEL INSIGHTS MISSING: ${site} returned HTTP ${code} on /_vercel/insights/script.js"
+            if [[ $DRY -eq 0 ]]; then
+                page "vercel_insights_missing: ${site} /_vercel/insights/script.js returned HTTP ${code} (expected 200; fix: vercel api '/web/insights/toggle?projectId=...&teamId=' -X POST -F value=true && vercel redeploy)" \
+                     "fleet_health_unit_failed"
+            fi
+            continue
+        fi
+        if [[ -n "${VERCEL_TOKEN:-}" ]]; then
+            proj_json="$($CURL_BIN -fsS -m 10 -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com/v9/projects/${site}" 2>/dev/null || echo "")"
+            if [[ -n "$proj_json" ]]; then
+                enabled_at="$(printf '%s' "$proj_json" | grep -oE '"enabledAt":[0-9]+' | head -1 || true)"
+                if [[ -z "$enabled_at" ]]; then
+                    log "VERCEL INSIGHTS DISABLED: ${site} webAnalytics.enabledAt missing"
+                    if [[ $DRY -eq 0 ]]; then
+                        page "vercel_insights_missing: ${site} webAnalytics.enabledAt is unset (fix: vercel api '/web/insights/toggle?projectId=...&teamId=' -X POST -F value=true && vercel redeploy)" \
+                             "fleet_health_unit_failed"
+                    fi
+                    continue
+                fi
+            fi
+        fi
+        log "vercel insights ok: ${site} (HTTP 200)"
+    done
+}
+
+# ── PRODUCT-380 AC3: product-repo trunk CI check (repairman29/olive main) ───
+# Checks the latest completed workflow run on main for each repo in
+# CHUMP_SENTINEL_PRODUCT_REPOS (default: repairman29/olive) and pages within
+# one hour when main is red, matching Chump trunk-red alerting.
+check_product_trunks() {
+    local repo raw conclusion sha url
+    for repo in $PRODUCT_REPOS; do
+        [[ -z "$repo" ]] && continue
+        raw="$($GH_BIN run list --repo "$repo" --branch main --limit 1 --json conclusion,headSha,url 2>/dev/null || echo "")"
+        [[ -z "$raw" ]] && continue
+        conclusion="$(printf '%s' "$raw" | grep -oE '"conclusion":"[^"]*"' | head -1 | cut -d'"' -f4)"
+        sha="$(printf '%s' "$raw" | grep -oE '"headSha":"[^"]*"' | head -1 | cut -d'"' -f4)"
+        url="$(printf '%s' "$raw" | grep -oE '"url":"[^"]*"' | head -1 | cut -d'"' -f4)"
+        case "$conclusion" in
+            failure|timed_out|startup_failure|action_required)
+                log "PRODUCT TRUNK RED: ${repo} main conclusion=${conclusion} sha=${sha}"
+                if [[ $DRY -eq 0 ]]; then
+                    page "product_trunk_red: ${repo} main branch CI is RED (conclusion=${conclusion} sha=${sha} url=${url})" \
+                         "fleet_health_unit_failed"
+                fi
+                ;;
+            *)
+                log "product trunk ok: ${repo} main (conclusion=${conclusion:-in_progress} sha=${sha})"
+                ;;
+        esac
+    done
 }
 
 # ── FLEET: cross-node grade (the sentinel-is-watched-too closure) ────────────
@@ -633,9 +710,11 @@ do_fleet_pass() {
 # ── main ─────────────────────────────────────────────────────────────────────
 run_once() {
     case "$MODE" in
-        local)       do_local_pass ;;
-        fleet)       do_fleet_pass ;;
-        report-json) scan_and_heal_local >/dev/null 2>&1; snapshot_json ;;
+        local)                do_local_pass ;;
+        fleet)                do_fleet_pass ;;
+        report-json)          scan_and_heal_local >/dev/null 2>&1; snapshot_json ;;
+        check-sites)          check_vercel_insights ;;
+        check-product-trunks) check_product_trunks ;;
     esac
 }
 

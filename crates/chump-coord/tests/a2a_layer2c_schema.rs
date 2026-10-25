@@ -39,6 +39,7 @@ fn json_round_trip_full_fields() {
         started_at: now,
         heartbeat_at: now,
         ttl_seconds: DEFAULT_TTL_SECONDS,
+        external_repo_enabled: false,
     };
 
     let json = serde_json::to_string(&m).expect("serialize");
@@ -68,6 +69,7 @@ fn json_round_trip_minimal_fields() {
         started_at: now,
         heartbeat_at: now,
         ttl_seconds: 60,
+        external_repo_enabled: false,
     };
     let json = serde_json::to_string(&m).expect("serialize");
     let back: CapabilityManifest = serde_json::from_str(&json).expect("deserialize");
@@ -128,6 +130,7 @@ fn is_alive_respects_ttl() {
         started_at: t0,
         heartbeat_at: t0,
         ttl_seconds: 300,
+        external_repo_enabled: false,
     };
     assert!(m.is_alive(t0));
     assert!(m.is_alive(t0 + Duration::seconds(299)));

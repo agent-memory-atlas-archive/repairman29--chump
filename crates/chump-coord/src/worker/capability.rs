@@ -32,19 +32,37 @@ use std::env;
 
 /// Prefix used in `skills_required` to tag a gap as external-repo demo work.
 ///
-/// Format: `external_repo:<owner>/<repo>` (e.g. `external_repo:ehippy/derelict`).
-/// When present the picker skips the gap unless `CHUMP_EXTERNAL_REPO_PICK_OK=1`.
+/// Format: `external_repo:<owner>/<repo>` (e.g. `external_repo:ehippy/derelict`)
+/// or bare `external_repo`.
+/// When present the picker skips the gap unless `WorkerCapability::external_repo_enabled`
+/// is `true` (`CHUMP_EXTERNAL_REPO_PICK_OK=1` or `true`).
 /// Picked gaps are routed through `ExternalRepoContract` (INFRA-2111) instead
 /// of the standard internal worker path.
 pub const EXTERNAL_REPO_SKILL_PREFIX: &str = "external_repo:";
+pub const EXTERNAL_REPO_SKILL_TAG: &str = "external_repo";
 
-/// Returns `true` if any entry in `skills_required` starts with
-/// [`EXTERNAL_REPO_SKILL_PREFIX`], indicating this gap targets an external
-/// repository rather than the Chump codebase itself.
+fn is_external_repo_skill(s: &str) -> bool {
+    let t = s.trim();
+    t == EXTERNAL_REPO_SKILL_TAG || t.starts_with(EXTERNAL_REPO_SKILL_PREFIX)
+}
+
+/// Returns `true` if any entry in `skills_required` equals [`EXTERNAL_REPO_SKILL_TAG`]
+/// or starts with [`EXTERNAL_REPO_SKILL_PREFIX`], indicating this gap targets an
+/// external repository rather than the Chump codebase itself.
 pub fn has_external_repo_tag(gap: &GapRow) -> bool {
-    gap.skills_required
-        .split(',')
-        .any(|s| s.trim().starts_with(EXTERNAL_REPO_SKILL_PREFIX))
+    gap.skills_required.split(',').any(is_external_repo_skill)
+}
+
+/// Parse `CHUMP_EXTERNAL_REPO_PICK_OK` from environment (`"1"` or `"true"` -> `true`,
+/// everything else -> `false`).
+pub fn external_repo_pick_ok_from_env() -> bool {
+    env::var("CHUMP_EXTERNAL_REPO_PICK_OK")
+        .ok()
+        .map(|v| {
+            let trimmed = v.trim();
+            trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false)
 }
 
 /// Extract the `owner/repo` portion from the first `external_repo:<owner>/<repo>`
@@ -99,6 +117,12 @@ pub struct WorkerCapability {
     pub backend: Option<String>,
     /// Session ID this capability is attached to (for manifest publish).
     pub session_id: String,
+    /// INFRA-8602: First-class declared capability indicating whether this
+    /// worker can pick external-repo gaps (`external_repo` or `external_repo:*`).
+    /// Sourced from `CHUMP_EXTERNAL_REPO_PICK_OK` (`"1"` or `"true"` -> `true`,
+    /// default `false`).
+    #[serde(default)]
+    pub external_repo_enabled: bool,
 }
 
 impl WorkerCapability {
@@ -106,7 +130,8 @@ impl WorkerCapability {
     ///
     /// Falls back to "no filter" (empty skills, no machine, no backend) when
     /// env vars are absent — which matches the legacy `worker.sh` behavior of
-    /// claiming any pickable gap.
+    /// claiming any pickable gap, except `external_repo_enabled` defaults to
+    /// `false` unless `CHUMP_EXTERNAL_REPO_PICK_OK` is `"1"` or `"true"`.
     pub fn from_env(session_id: impl Into<String>) -> Self {
         let skills = env::var("WORKER_SKILLS")
             .ok()
@@ -123,17 +148,21 @@ impl WorkerCapability {
         let backend = env::var("WORKER_BACKEND")
             .ok()
             .filter(|s| !s.is_empty() && s != "any");
+        let external_repo_enabled = external_repo_pick_ok_from_env();
         Self {
             skills,
             machine,
             backend,
             session_id: session_id.into(),
+            external_repo_enabled,
         }
     }
 
     /// Picker filter: does this worker match the gap's preferred routing?
     ///
     /// Match rules (all must hold):
+    /// - If the gap is tagged `external_repo` or `external_repo:*`,
+    ///   `self.external_repo_enabled` must be `true`.
     /// - If `gap.skills_required` is non-empty, at least one skill in
     ///   `self.skills` must appear in the gap's required list. If the
     ///   worker has no skills configured, the gap must also have no skill
@@ -143,17 +172,13 @@ impl WorkerCapability {
     /// - If `gap.preferred_backend` is set, it must equal `self.backend`
     ///   (or be `"any"`).
     pub fn matches(&self, gap: &GapRow) -> bool {
-        // External-repo gate (INFRA-2113): gaps tagged `external_repo:<owner>/<repo>`
-        // are only pickable when CHUMP_EXTERNAL_REPO_PICK_OK=1. Standard fleet
-        // workers skip them; the target curator opts-in explicitly. When picked,
-        // the dispatch path must route through ExternalRepoContract (INFRA-2111).
-        if has_external_repo_tag(gap) {
-            let pick_ok = env::var("CHUMP_EXTERNAL_REPO_PICK_OK")
-                .map(|v| v.trim() == "1")
-                .unwrap_or(false);
-            if !pick_ok {
-                return false;
-            }
+        // External-repo gate (INFRA-2113 / INFRA-8602): gaps tagged `external_repo`
+        // or `external_repo:<owner>/<repo>` are only pickable when this worker
+        // declares `external_repo_enabled: true` (via `CHUMP_EXTERNAL_REPO_PICK_OK=1|true`).
+        // Standard fleet workers skip them; the target curator opts-in explicitly.
+        // When picked, the dispatch path must route through ExternalRepoContract (INFRA-2111).
+        if has_external_repo_tag(gap) && !self.external_repo_enabled {
+            return false;
         }
 
         // Workspace-scope gate (RESILIENT-292): gaps tagged `workspace_scope`
@@ -180,7 +205,7 @@ impl WorkerCapability {
             // External-repo tags are routing hints, not skill requirements —
             // strip them before the standard skill-match logic so they do not
             // cause unrelated workers to be filtered out when the env gate is open.
-            .filter(|s| !s.starts_with(EXTERNAL_REPO_SKILL_PREFIX))
+            .filter(|s| !is_external_repo_skill(s))
             // Workspace-scope tag is likewise a routing hint, not a skill
             // requirement — strip it so it doesn't filter out ATC/operator
             // workers that opted in via the env gate above but have no
@@ -235,6 +260,201 @@ impl WorkerCapability {
             started_at: now,
             heartbeat_at: now,
             ttl_seconds: DEFAULT_TTL_SECONDS,
+            external_repo_enabled: self.external_repo_enabled,
+        }
+    }
+}
+
+/// Resolve the path to `~/.chump/node.env` (or `$CHUMP_STATE_DIR/node.env`).
+pub fn resolve_node_env_path() -> std::path::PathBuf {
+    if let Ok(sd) = env::var("CHUMP_STATE_DIR") {
+        let trimmed = sd.trim();
+        if !trimmed.is_empty() {
+            return std::path::PathBuf::from(trimmed).join("node.env");
+        }
+    }
+    let home = env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    std::path::PathBuf::from(home)
+        .join(".chump")
+        .join("node.env")
+}
+
+/// Read `CHUMP_EXTERNAL_REPO_PICK_OK` from `node.env` if present, falling back
+/// to the process environment. Returns `(is_open, raw_val_or_unset)`.
+pub fn read_external_repo_gate_state(node_env_path: &std::path::Path) -> (bool, String) {
+    if let Ok(content) = std::fs::read_to_string(node_env_path) {
+        let mut last_val: Option<String> = None;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let stripped = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim();
+            if let Some(rest) = stripped.strip_prefix("CHUMP_EXTERNAL_REPO_PICK_OK=") {
+                let v = rest.trim().trim_matches('"').trim_matches('\'').to_string();
+                last_val = Some(v);
+            }
+        }
+        if let Some(v) = last_val {
+            let open = v == "1" || v.eq_ignore_ascii_case("true");
+            return (open, v);
+        }
+    }
+    match env::var("CHUMP_EXTERNAL_REPO_PICK_OK") {
+        Ok(v) => {
+            let t = v.trim();
+            let open = t == "1" || t.eq_ignore_ascii_case("true");
+            (open, t.to_string())
+        }
+        Err(_) => (false, "0".to_string()),
+    }
+}
+
+/// Write `CHUMP_EXTERNAL_REPO_PICK_OK=<val>` to `node.env` in plain `KEY=VALUE`
+/// format (no `export ` prefix, per INFRA-8588 / INFRA-8604).
+pub fn write_external_repo_gate_node_env(
+    node_env_path: &std::path::Path,
+    enabled: bool,
+) -> std::io::Result<()> {
+    if let Some(parent) = node_env_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let val = if enabled { "1" } else { "0" };
+    let new_line = format!("CHUMP_EXTERNAL_REPO_PICK_OK={}", val);
+    let existing = std::fs::read_to_string(node_env_path).unwrap_or_default();
+    let mut out_lines: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for line in existing.lines() {
+        let trimmed = line.trim();
+        let stripped = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim();
+        if stripped.starts_with("CHUMP_EXTERNAL_REPO_PICK_OK=") {
+            if !replaced {
+                out_lines.push(new_line.clone());
+                replaced = true;
+            }
+        } else {
+            out_lines.push(line.to_string());
+        }
+    }
+    if !replaced {
+        out_lines.push(new_line);
+    }
+    let mut body = out_lines.join("\n");
+    body.push('\n');
+    std::fs::write(node_env_path, body)
+}
+
+/// CLI handler for `chump fleet external-repo <status|enable|disable> [--json]` (INFRA-8604).
+/// Returns `Ok(exit_code)`.
+pub fn handle_fleet_external_repo(args: &[String], repo_root: &std::path::Path) -> i32 {
+    let action = args.first().map(String::as_str).unwrap_or("help");
+    let json_out = args.iter().any(|a| a == "--json");
+    let node_env_path = resolve_node_env_path();
+
+    match action {
+        "enable" => {
+            if let Err(e) = write_external_repo_gate_node_env(&node_env_path, true) {
+                eprintln!(
+                    "[fleet external-repo] failed to write {}: {}",
+                    node_env_path.display(),
+                    e
+                );
+                return 1;
+            }
+            println!(
+                "external_repo gate: open (CHUMP_EXTERNAL_REPO_PICK_OK=1 in {})",
+                node_env_path.display()
+            );
+            0
+        }
+        "disable" => {
+            if let Err(e) = write_external_repo_gate_node_env(&node_env_path, false) {
+                eprintln!(
+                    "[fleet external-repo] failed to write {}: {}",
+                    node_env_path.display(),
+                    e
+                );
+                return 1;
+            }
+            println!(
+                "external_repo gate: closed (CHUMP_EXTERNAL_REPO_PICK_OK=0 in {})",
+                node_env_path.display()
+            );
+            0
+        }
+        "status" => {
+            let (open, raw_val) = read_external_repo_gate_state(&node_env_path);
+            let gate_str = if open { "open" } else { "closed" };
+            let local_node = env::var("WORKER_MACHINE")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .or_else(crate::capability::hostname_or_label)
+                .unwrap_or_else(|| "local".to_string());
+
+            let mut node_states: Vec<(String, bool)> = vec![(local_node.clone(), open)];
+            let cap_dir = repo_root.join(".chump-locks").join("capabilities");
+            if let Ok(entries) = std::fs::read_dir(&cap_dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                        continue;
+                    }
+                    if let Ok(content) = std::fs::read_to_string(&p) {
+                        if let Some(last_line) =
+                            content.lines().rev().find(|l| !l.trim().is_empty())
+                        {
+                            if let Ok(m) =
+                                serde_json::from_str::<CapabilityManifest>(last_line.trim())
+                            {
+                                let label = m.machine.unwrap_or(m.session_id);
+                                if !node_states.iter().any(|(n, _)| n == &label) {
+                                    node_states.push((label, m.external_repo_enabled));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if json_out {
+                let nodes_json: Vec<serde_json::Value> = node_states
+                    .iter()
+                    .map(|(n, en)| {
+                        serde_json::json!({
+                            "node": n,
+                            "external_repo_enabled": en,
+                        })
+                    })
+                    .collect();
+                let payload = serde_json::json!({
+                    "external_repo_gate": gate_str,
+                    "external_repo_enabled": open,
+                    "chump_external_repo_pick_ok": raw_val,
+                    "node_env": node_env_path.display().to_string(),
+                    "nodes": nodes_json,
+                });
+                println!("{}", payload);
+            } else {
+                println!("external_repo gate: {}", gate_str);
+                println!(
+                    "node.env: {} (CHUMP_EXTERNAL_REPO_PICK_OK={})",
+                    node_env_path.display(),
+                    raw_val
+                );
+                println!("per-node external_repo capability:");
+                for (node, en) in &node_states {
+                    println!(
+                        "  {}: external_repo_enabled={}",
+                        node,
+                        if *en { "true" } else { "false" }
+                    );
+                }
+            }
+            0
+        }
+        _ => {
+            eprintln!("Usage: chump fleet external-repo <status|enable|disable> [--json]");
+            2
         }
     }
 }
@@ -281,6 +501,7 @@ mod tests {
             machine: None,
             backend: None,
             session_id: "s".to_string(),
+            external_repo_enabled: false,
         };
         let g = gap_with("", "", "");
         assert!(w.matches(&g));
@@ -293,6 +514,7 @@ mod tests {
             machine: None,
             backend: None,
             session_id: "s".to_string(),
+            external_repo_enabled: false,
         };
         let g = gap_with("rust", "", "");
         assert!(
@@ -308,6 +530,7 @@ mod tests {
             machine: None,
             backend: None,
             session_id: "s".to_string(),
+            external_repo_enabled: false,
         };
         let g = gap_with("rust", "", "");
         assert!(!w.matches(&g), "python worker must not match rust gap");
@@ -325,6 +548,7 @@ mod tests {
             machine: Some("macbook".to_string()),
             backend: None,
             session_id: "s".to_string(),
+            external_repo_enabled: false,
         };
         let g = gap_with("", "rpi", "");
         assert!(!w.matches(&g));
@@ -340,6 +564,7 @@ mod tests {
         std::env::set_var("WORKER_SKILLS", "rust, shell , python");
         std::env::set_var("WORKER_MACHINE", "rpi");
         std::env::remove_var("WORKER_BACKEND");
+        std::env::remove_var("CHUMP_EXTERNAL_REPO_PICK_OK");
         let w = WorkerCapability::from_env("s1");
         assert_eq!(
             w.skills,
@@ -351,6 +576,7 @@ mod tests {
         );
         assert_eq!(w.machine.as_deref(), Some("rpi"));
         assert_eq!(w.backend, None);
+        assert!(!w.external_repo_enabled);
         std::env::remove_var("WORKER_SKILLS");
         std::env::remove_var("WORKER_MACHINE");
     }
@@ -362,15 +588,17 @@ mod tests {
             machine: Some("m".to_string()),
             backend: None,
             session_id: "sess-1".to_string(),
+            external_repo_enabled: true,
         };
         let m = w.to_manifest();
         assert_eq!(m.schema_version, CAPABILITY_SCHEMA_VERSION);
         assert_eq!(m.session_id, "sess-1");
         assert_eq!(m.skills, vec!["rust".to_string()]);
         assert_eq!(m.machine.as_deref(), Some("m"));
+        assert!(m.external_repo_enabled);
     }
 
-    // ── external_repo tag tests (INFRA-2113) ─────────────────────────────────
+    // ── external_repo tag tests (INFRA-2113 / INFRA-8602) ────────────────────
     // These tests mutate CHUMP_EXTERNAL_REPO_PICK_OK, so they must run serially
     // to avoid races with other tests that read the same env var.
 
@@ -379,16 +607,17 @@ mod tests {
     fn external_repo_gap_skipped_by_default() {
         // Gap has external_repo tag; env var NOT set — must be skipped.
         std::env::remove_var("CHUMP_EXTERNAL_REPO_PICK_OK");
-        let w = WorkerCapability {
-            skills: vec![],
-            machine: None,
-            backend: None,
-            session_id: "s".to_string(),
-        };
+        let w = WorkerCapability::from_env("s");
+        assert!(!w.external_repo_enabled);
         let g = gap_with("external_repo:ehippy/derelict", "", "");
         assert!(
             !w.matches(&g),
             "external-repo gap must be skipped when CHUMP_EXTERNAL_REPO_PICK_OK is unset"
+        );
+        let g_bare = gap_with("external_repo", "", "");
+        assert!(
+            !w.matches(&g_bare),
+            "bare external_repo gap must be skipped when external_repo_enabled is false"
         );
     }
 
@@ -397,17 +626,40 @@ mod tests {
     fn external_repo_gap_picked_when_opt_in() {
         // Gap has external_repo tag; env var IS set to 1 — must match.
         std::env::set_var("CHUMP_EXTERNAL_REPO_PICK_OK", "1");
-        let w = WorkerCapability {
-            skills: vec![],
-            machine: None,
-            backend: None,
-            session_id: "s".to_string(),
-        };
+        let w = WorkerCapability::from_env("s");
+        assert!(w.external_repo_enabled);
         let g = gap_with("external_repo:ehippy/derelict", "", "");
         assert!(
             w.matches(&g),
             "external-repo gap must be picked when CHUMP_EXTERNAL_REPO_PICK_OK=1"
         );
+        let g_bare = gap_with("external_repo", "", "");
+        assert!(
+            w.matches(&g_bare),
+            "bare external_repo gap must be picked when external_repo_enabled is true"
+        );
+        std::env::remove_var("CHUMP_EXTERNAL_REPO_PICK_OK");
+    }
+
+    #[test]
+    #[serial]
+    fn from_env_accepts_true_and_rejects_false_or_zero() {
+        std::env::set_var("CHUMP_EXTERNAL_REPO_PICK_OK", "true");
+        let w_true = WorkerCapability::from_env("s");
+        assert!(w_true.external_repo_enabled);
+        assert!(w_true.to_manifest().external_repo_enabled);
+
+        std::env::set_var("CHUMP_EXTERNAL_REPO_PICK_OK", "TRUE");
+        assert!(WorkerCapability::from_env("s").external_repo_enabled);
+
+        std::env::set_var("CHUMP_EXTERNAL_REPO_PICK_OK", "0");
+        let w_zero = WorkerCapability::from_env("s");
+        assert!(!w_zero.external_repo_enabled);
+        assert!(!w_zero.to_manifest().external_repo_enabled);
+
+        std::env::set_var("CHUMP_EXTERNAL_REPO_PICK_OK", "false");
+        assert!(!WorkerCapability::from_env("s").external_repo_enabled);
+
         std::env::remove_var("CHUMP_EXTERNAL_REPO_PICK_OK");
     }
 
@@ -418,12 +670,7 @@ mod tests {
         // match a worker with no WORKER_SKILLS — the tag is a routing hint,
         // not a skill requirement.
         std::env::set_var("CHUMP_EXTERNAL_REPO_PICK_OK", "1");
-        let w = WorkerCapability {
-            skills: vec![],
-            machine: None,
-            backend: None,
-            session_id: "s".to_string(),
-        };
+        let w = WorkerCapability::from_env("s");
         let g = gap_with("external_repo:ehippy/derelict", "", "");
         assert!(
             w.matches(&g),
@@ -443,6 +690,7 @@ mod tests {
             machine: None,
             backend: None,
             session_id: "s".to_string(),
+            external_repo_enabled: true,
         };
         let g = gap_with("external_repo:ehippy/derelict,rust", "", "");
         assert!(
@@ -456,6 +704,7 @@ mod tests {
             machine: None,
             backend: None,
             session_id: "s".to_string(),
+            external_repo_enabled: true,
         };
         assert!(
             !w2.matches(&g),
@@ -467,9 +716,11 @@ mod tests {
     #[test]
     fn has_external_repo_tag_detects_prefix() {
         let g_yes = gap_with("external_repo:ehippy/derelict", "", "");
+        let g_bare = gap_with("external_repo", "", "");
         let g_no = gap_with("rust,python", "", "");
         let g_empty = gap_with("", "", "");
         assert!(has_external_repo_tag(&g_yes));
+        assert!(has_external_repo_tag(&g_bare));
         assert!(!has_external_repo_tag(&g_no));
         assert!(!has_external_repo_tag(&g_empty));
     }
@@ -501,6 +752,7 @@ mod tests {
             machine: None,
             backend: None,
             session_id: "s".to_string(),
+            external_repo_enabled: false,
         };
         let g = gap_with("workspace_scope", "", "");
         assert!(
@@ -520,6 +772,7 @@ mod tests {
             machine: None,
             backend: None,
             session_id: "atc".to_string(),
+            external_repo_enabled: false,
         };
         let g = gap_with("workspace_scope", "", "");
         assert!(
@@ -539,6 +792,7 @@ mod tests {
             machine: None,
             backend: None,
             session_id: "s".to_string(),
+            external_repo_enabled: false,
         };
         let g = gap_with("workspace_scope", "", "");
         assert!(

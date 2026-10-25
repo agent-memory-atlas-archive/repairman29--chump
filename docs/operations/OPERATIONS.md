@@ -520,3 +520,20 @@ Set `OPENAI_MODEL` in `.env` to the same model name so Chump uses it.
 - **SQLite missing:** Memory uses JSON fallback; state/episode/task/schedule need `sessions/` writable.
 - **Pause:** Create `logs/pause` or set `CHUMP_PAUSED=1`; bot replies "I'm paused."
 - **"Blocked: cannot proceed with deleting clone directory under repos/":** Chump tried to remove a repo dir (e.g. to fix a broken clone) but `run_cli` blocks `rm` under `repos/` for safety. You can fix it: from the Chump repo root run `rm -rf repos/owner_name` (e.g. `rm -rf repos/repairman29_chump-chassis`). Then tell Chump to re-clone or continue; it can run `github_clone_or_pull` again.
+
+---
+
+## Vercel Web Analytics & Product-Repo Trunk Sentinel Checks (`PRODUCT-376`, `PRODUCT-380`)
+
+`scripts/ops/fleet-health-sentinel.sh` includes two product-surface monitors:
+
+1. **Daily Vercel Web Analytics check (`PRODUCT-376`, `--check-sites` / `CHUMP_SENTINEL_CHECK_SITES=1`):**
+   - Hits `https://<site>/_vercel/insights/script.js` on every live Vercel Analytics site in `SITES.md` (`jeffadkins.dev`, `jeffadkins.me`, `chooseotherwise.org`, `beast-mode.dev`, `echeo.ai`, `playsmuggler.com`, `peakvinyl.club`, `shopolive.xyz`; configurable via `CHUMP_SENTINEL_INSIGHTS_SITES`) and asserts HTTP `200`.
+   - When `VERCEL_TOKEN` is set, also queries `https://api.vercel.com/v9/projects/<site>` and verifies `webAnalytics.enabledAt` is populated.
+   - If a site returns `404` or `webAnalytics.enabledAt` is unset, the sentinel pages the operator with the exact one-line remediation recipe:
+     ```bash
+     vercel api '/web/insights/toggle?projectId=...&teamId=' -X POST -F value=true && vercel redeploy
+     ```
+2. **Product-repo trunk CI monitor (`PRODUCT-380` AC3, `--check-product-trunks` / `CHUMP_SENTINEL_CHECK_PRODUCT_TRUNKS=1`):**
+   - Checks the latest `main` branch workflow run for `repairman29/olive` (configurable via `CHUMP_SENTINEL_PRODUCT_REPOS`) via `gh run list --repo repairman29/olive --branch main --limit 1 --json conclusion,headSha,url`.
+   - Emits a halt-severity board page (`product_trunk_red`) within one hour whenever `repairman29/olive` `main` goes red (`conclusion=failure|timed_out|startup_failure|action_required`), matching Chump's own trunk-red alerting.

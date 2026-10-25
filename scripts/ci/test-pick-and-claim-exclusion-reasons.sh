@@ -81,6 +81,29 @@ echo "$err" | grep -q '"total_gaps": 4' \
     && pass "total_gaps reflects full input size" \
     || fail "total_gaps missing/wrong: $err"
 
+# INFRA-8603: verify external_repo gate cycle logging when gate is closed vs open
+cat > "$TMP/gaps.json" <<JSON
+[
+  {"id":"INFRA-400","status":"open","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]","skills_required":"external_repo:repairman29/olive","acceptance_criteria":"$AC"},
+  {"id":"INFRA-401","status":"open","priority":"P1","effort":"s","domain":"INFRA","depends_on":"[]","skills_required":"external_repo","acceptance_criteria":"$AC"}
+]
+JSON
+
+stderr_ext_closed="$TMP/stderr-ext-closed"
+out_ext_closed="$(CHUMP_EXTERNAL_REPO_PICK_OK=0 run 2>"$stderr_ext_closed" || true)"
+err_ext_closed="$(cat "$stderr_ext_closed")"
+
+[[ -z "$out_ext_closed" ]] && pass "INFRA-8603: external_repo gaps skipped when gate closed" \
+    || fail "INFRA-8603: expected no pick when gate closed, got '$out_ext_closed'"
+
+echo "$err_ext_closed" | grep -q "2 external gaps skipped: gate closed" \
+    && pass "INFRA-8603: logs '2 external gaps skipped: gate closed'" \
+    || fail "INFRA-8603: missing '2 external gaps skipped: gate closed' in: $err_ext_closed"
+
+echo "$err_ext_closed" | grep -q "external_repo gate: closed (2 gaps blocked)" \
+    && pass "INFRA-8603: logs 'external_repo gate: closed (2 gaps blocked)'" \
+    || fail "INFRA-8603: missing 'external_repo gate: closed (2 gaps blocked)' in: $err_ext_closed"
+
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

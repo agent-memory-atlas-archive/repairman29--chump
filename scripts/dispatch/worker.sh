@@ -1284,6 +1284,17 @@ PY
         if [ -n "$_pick_stderr" ]; then
             log "claimer stderr: $_pick_stderr"
         fi
+        # INFRA-8603: ensure cycle output always includes external_repo gate one-liner
+        case "$_pick_stderr" in
+            *"external_repo gate:"*) ;;
+            *)
+                if [ "${CHUMP_EXTERNAL_REPO_PICK_OK:-0}" = "1" ] || [ "${CHUMP_EXTERNAL_REPO_PICK_OK:-0}" = "true" ]; then
+                    log "external_repo gate: open"
+                else
+                    log "external_repo gate: closed (0 gaps blocked)"
+                fi
+                ;;
+        esac
     fi
 
     if [ -z "$pick" ]; then

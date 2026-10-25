@@ -10388,9 +10388,19 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
+            // ── chump fleet external-repo <status|enable|disable> [--json] (INFRA-8604) ──
+            "external-repo" => {
+                let rest: Vec<String> = args.iter().skip(3).cloned().collect();
+                let rc =
+                    chump_coord::worker::capability::handle_fleet_external_repo(&rest, &repo_root);
+                if rc != 0 {
+                    std::process::exit(rc);
+                }
+                return Ok(());
+            }
             _ => {
                 eprintln!(
-                    "Usage: chump fleet <up|down|status|scale|start|stop|level|snapshot|restore|restart|audit-pids|brief|auto-widen|auto-scale|auto-resize|prune-worktrees|daemon|whoworkson|canary|doctor|autopilot|plan|apply|spec-status|view|curator-status>"
+                    "Usage: chump fleet <up|down|status|scale|start|stop|level|snapshot|restore|restart|audit-pids|brief|auto-widen|auto-scale|auto-resize|prune-worktrees|daemon|whoworkson|canary|doctor|autopilot|plan|apply|spec-status|view|curator-status|external-repo>"
                 );
                 eprintln!("Kill switch (RESILIENT-073):");
                 eprintln!(

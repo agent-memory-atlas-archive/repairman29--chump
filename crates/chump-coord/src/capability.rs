@@ -89,6 +89,10 @@ pub struct CapabilityManifest {
     /// Seconds after `heartbeat_at` before this manifest is treated as
     /// stale. Default `DEFAULT_TTL_SECONDS` (300).
     pub ttl_seconds: u32,
+    /// INFRA-8602: Whether this worker is opted into picking external-repo
+    /// gaps (`CHUMP_EXTERNAL_REPO_PICK_OK=1` or `true`). Defaults to `false`.
+    #[serde(default)]
+    pub external_repo_enabled: bool,
 }
 
 impl CapabilityManifest {
@@ -132,6 +136,13 @@ pub fn current_manifest(skills: Vec<String>) -> CapabilityManifest {
     } else {
         (None, None)
     };
+    let external_repo_enabled = std::env::var("CHUMP_EXTERNAL_REPO_PICK_OK")
+        .ok()
+        .map(|v| {
+            let trimmed = v.trim();
+            trimmed == "1" || trimmed.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false);
 
     CapabilityManifest {
         schema_version: CAPABILITY_SCHEMA_VERSION.to_string(),
@@ -145,6 +156,7 @@ pub fn current_manifest(skills: Vec<String>) -> CapabilityManifest {
         started_at: now,
         heartbeat_at: now,
         ttl_seconds: DEFAULT_TTL_SECONDS,
+        external_repo_enabled,
     }
 }
 
@@ -409,6 +421,7 @@ mod tests {
             started_at: Utc::now(),
             heartbeat_at: Utc::now(),
             ttl_seconds: DEFAULT_TTL_SECONDS,
+            external_repo_enabled: false,
         };
         let json = serde_json::to_string(&m).expect("serialize");
         let back: CapabilityManifest = serde_json::from_str(&json).expect("deserialize");
@@ -430,6 +443,7 @@ mod tests {
             started_at: now,
             heartbeat_at: now,
             ttl_seconds: 300,
+            external_repo_enabled: false,
         };
         assert!(m.is_alive(now));
         let later = now + chrono::Duration::seconds(200);
@@ -478,6 +492,7 @@ mod tests {
             started_at: now,
             heartbeat_at: now,
             ttl_seconds: 300,
+            external_repo_enabled: false,
         };
         let m1 = make("s1", vec!["shell", "docs"]);
         let m2 = make("s2", vec!["rust", "ci-mirror"]);
@@ -505,6 +520,7 @@ mod tests {
             started_at: Utc::now(),
             heartbeat_at: Utc::now(),
             ttl_seconds: DEFAULT_TTL_SECONDS,
+            external_repo_enabled: false,
         };
         append_file_audit(&m).expect("write audit");
         append_file_audit(&m).expect("write audit second time");

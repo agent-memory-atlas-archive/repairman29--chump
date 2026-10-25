@@ -1,6 +1,6 @@
 # External-repo execution — design of record (INFRA-3474)
 
-**Status:** design agreed 2026-07-28 (operator + Chump). Implementation pending.
+**Status:** design agreed 2026-07-28 (operator + Chump). Phase 1 proven as of 2026-10-10 (`INFRA-8607`).
 **Why:** the outward flywheel (MISSION-010 — improving *other* repos) has exactly one
 execution path, `chump improve → claude CLI`, and it's non-functional where the
 claude CLI isn't installed. Closing the almanac link (comprehend-uat convergence,
@@ -109,15 +109,33 @@ state.db, where the gap isn't). So it's a refactor.
 
 ## Build plan
 
-**Phase 1 — single-machine substrate (no NATS; this is the near-term build):**
+**Phase 1 — single-machine substrate (no NATS; proven as of 2026-10-10):**
 1. **Shared clone + worktrees:** maintain `~/.chump/external/<owner>/<repo>/clone`;
    a claiming agent gets a linked worktree off it (mirror the internal
    claim→worktree flow). `improve --gap` must ensure the clone exists (scout is skipped).
-2. **Decouple gap-source from file-root in `execute_gap`** (the blocker): read the gap
+   - **Proven receipts on `cuphead`:** `~/.chump/external/` clones for `upshift-cli` and
+     `olive` (`repairman29/olive`) work end-to-end on `cuphead` (proven 2026-10-07 /
+     2026-10-24).
+2. **First-class capability & operator gate (`INFRA-8602`, `INFRA-8603`, `INFRA-8604`):**
+   - **Node capability declaration (`WorkerCapability`):** `WorkerCapability` declares
+     `pub external_repo_enabled: bool` (sourced from `CHUMP_EXTERNAL_REPO_PICK_OK=1|true`,
+     default `false`) and exposes `external_repo_enabled` in `CapabilityManifest`. When
+     `external_repo_enabled` is `false`, `WorkerCapability::matches()` and
+     `_pick_and_claim_gap.py` skip `external_repo` / `external_repo:*` gaps and log
+     `N external gaps skipped: gate closed` plus `external_repo gate: closed (N gaps blocked)`
+     (or `external_repo gate: open`).
+   - **Operator CLI (`chump fleet external-repo`):**
+     - `chump fleet external-repo status [--json]` — displays gate state (`open` or `closed`)
+       and per-node `external_repo_enabled` capability state.
+     - `chump fleet external-repo enable` — writes `CHUMP_EXTERNAL_REPO_PICK_OK=1` (plain
+       `KEY=VALUE`, no `export ` prefix) to `~/.chump/node.env`.
+     - `chump fleet external-repo disable` — writes `CHUMP_EXTERNAL_REPO_PICK_OK=0` to
+       `~/.chump/node.env`.
+3. **Decouple gap-source from file-root in `execute_gap`** (the blocker): read the gap
    from chump's canonical `state.db` regardless of the file-root; root the agent's
    file tools at the worktree. New env/param, e.g. `CHUMP_GAP_SOURCE_ROOT` (chump) vs
    `CHUMP_REPO` (worktree).
-3. **chump-local runtime, claude opt-in:** `improve` gets `CHUMP_IMPROVE_BACKEND`
+4. **chump-local runtime, claude opt-in:** `improve` gets `CHUMP_IMPROVE_BACKEND`
    (default `chump-local`). The chump-local path runs the OS's own agent in the
    worktree; claude CLI becomes `CHUMP_IMPROVE_BACKEND=claude`.
    - Recommended primitive: a `chump agent-run --prompt-file <f> [--cwd <dir>]`
@@ -125,8 +143,8 @@ state.db, where the gap isn't). So it's a refactor.
      incl. `git_push`/`gh`) on an ad-hoc prompt in `cwd` — **no gap lookup, so no
      conflation.** `improve` swaps `claude -p` for it and reuses its ExternalRepoContract
      prompt + `pr_url` extraction verbatim. (Alternative: teach `execute_gap` external
-     awareness per (2) and orchestrate push/PR in `improve`.)
-4. **Edit-only mode (already prototyped):** `CHUMP_EXECUTE_GAP_NO_SHIP=1` skips
+     awareness per (3) and orchestrate push/PR in `improve`.)
+5. **Edit-only mode (already prototyped):** `CHUMP_EXECUTE_GAP_NO_SHIP=1` skips
    `execute_gap`'s internal bot-merge so an external caller owns commit/push/PR —
    keep for the `execute_gap`-based path.
 

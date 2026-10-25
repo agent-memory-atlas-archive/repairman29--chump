@@ -136,6 +136,34 @@ CHUMP_SENTINEL_CADENCE_MIN=5 CHUMP_SENTINEL_STALE_MULT=3 \
   bash "$SENTINEL" --fleet --nodes "$NODES" >/dev/null 2>&1 || true
 [ ! -s "$CHUMP_SENTINEL_PAGE_SINK" ] && ok "no page on fresh heartbeat" || bad "false page on fresh heartbeat"
 
+echo "== case 6: PRODUCT-376 --check-sites pages on 404 for /_vercel/insights/script.js =="
+cat > "$FAKE_BIN/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+url="${!#}"
+if [[ "$url" == *"shopolive.xyz/_vercel/insights/script.js"* ]]; then
+  printf '404'
+else
+  printf '200'
+fi
+FAKECURL
+chmod +x "$FAKE_BIN/curl"
+: > "$CHUMP_AMBIENT_LOG"; : > "$CHUMP_SENTINEL_PAGE_SINK"
+CHUMP_CURL="$FAKE_BIN/curl" CHUMP_SENTINEL_INSIGHTS_SITES="jeffadkins.dev shopolive.xyz" \
+  bash "$SENTINEL" --check-sites >/dev/null 2>&1 || true
+has "vercel_insights_missing.*shopolive.xyz" "$CHUMP_SENTINEL_PAGE_SINK" && ok "PAGED missing vercel insights on shopolive.xyz" || bad "did not page shopolive.xyz 404"
+has "jeffadkins.dev" "$CHUMP_SENTINEL_PAGE_SINK" && bad "false page on healthy jeffadkins.dev" || ok "healthy site not paged"
+
+echo "== case 7: PRODUCT-380 AC3 --check-product-trunks pages on red repairman29/olive main =="
+cat > "$FAKE_BIN/gh" <<'FAKEGH'
+#!/usr/bin/env bash
+echo '[{"conclusion":"failure","headSha":"deadbeef1234","url":"https://github.com/repairman29/olive/actions/runs/1"}]'
+FAKEGH
+chmod +x "$FAKE_BIN/gh"
+: > "$CHUMP_AMBIENT_LOG"; : > "$CHUMP_SENTINEL_PAGE_SINK"
+CHUMP_GH="$FAKE_BIN/gh" CHUMP_SENTINEL_PRODUCT_REPOS="repairman29/olive" \
+  bash "$SENTINEL" --check-product-trunks >/dev/null 2>&1 || true
+has "product_trunk_red: repairman29/olive main branch CI is RED" "$CHUMP_SENTINEL_PAGE_SINK" && ok "PAGED red main on repairman29/olive" || bad "did not page red repairman29/olive main"
+
 echo ""
 if [ "$FAILS" -eq 0 ]; then echo "PASS: all fleet-health-sentinel assertions"; exit 0
 else echo "FAIL: $FAILS assertion(s) failed"; exit 1; fi

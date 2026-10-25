@@ -987,6 +987,75 @@ def _load_planner_priority(
     return out, "ok"
 
 
+def _parse_skills_required(raw) -> list[str]:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(s).strip() for s in raw if str(s).strip()]
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if str(x).strip()]
+            except Exception:
+                pass
+        return [t.strip() for t in s.split(",") if t.strip()]
+    return []
+
+
+def _is_external_repo_skill(s: str) -> bool:
+    sl = s.strip().lower()
+    return sl == "external_repo" or sl.startswith("external_repo:")
+
+
+def _has_external_repo_tag(g: dict) -> bool:
+    return any(_is_external_repo_skill(s) for s in _parse_skills_required(g.get("skills_required", "")))
+
+
+def _record_external_repo_cycle(
+    gate_open: bool, skipped_count: int, blocked_count: int, lock_dir: str | None
+) -> None:
+    if not gate_open:
+        if skipped_count > 0:
+            sys.stderr.write(f"{skipped_count} external gaps skipped: gate closed\n")
+        sys.stderr.write(f"external_repo gate: closed ({blocked_count} gaps blocked)\n")
+    else:
+        sys.stderr.write("external_repo gate: open\n")
+
+    target_lock_dir = lock_dir or os.environ.get("CHUMP_LOCK_DIR")
+    if not target_lock_dir:
+        repo_root = os.environ.get("CHUMP_REPO") or os.environ.get("REPO_ROOT")
+        if repo_root:
+            target_lock_dir = os.path.join(repo_root, ".chump-locks")
+    if not target_lock_dir:
+        return
+    try:
+        sub = os.path.join(target_lock_dir, "external-repo-skipped")
+        os.makedirs(sub, exist_ok=True)
+        wid = (
+            os.environ.get("WORKER_ID")
+            or os.environ.get("AGENT_ID")
+            or os.environ.get("CHUMP_SESSION_ID")
+            or "default"
+        )
+        safe_wid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(wid))
+        rec = {
+            "worker_id": str(wid),
+            "external_repo_gate": "open" if gate_open else "closed",
+            "skipped_external_gaps": skipped_count,
+            "blocked_external_gaps": blocked_count,
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        with open(os.path.join(sub, f"{safe_wid}.json"), "w") as f:
+            json.dump(rec, f)
+    except Exception:
+        pass
+
+
 def main() -> int:
     # INFRA-8224: CLI flags for the no-claim (preview/ranking) path that the
     # _pick_gap.py shim and curator-jit-scheduler call.
@@ -1181,6 +1250,10 @@ def main() -> int:
     # noticed" apart. worker.sh dumps this dict (via --dump-reasons / stderr)
     # on every empty cycle so the operator/curator can see WHY.
     reasons: Counter[str] = Counter()
+    external_repo_gate_open = os.environ.get(
+        "CHUMP_EXTERNAL_REPO_PICK_OK", ""
+    ).strip().lower() in ("1", "true")
+    skipped_external_gaps = 0
 
     candidates = []
     for g in gaps:
@@ -1212,6 +1285,12 @@ def main() -> int:
             continue
         if not _is_pickable_open(g):
             reasons["not_pickable_status"] += 1
+            continue
+        # INFRA-8602 / INFRA-8603: external_repo gate. Skip external_repo-tagged
+        # gaps when CHUMP_EXTERNAL_REPO_PICK_OK is not enabled ("1" or "true").
+        if _has_external_repo_tag(g) and not external_repo_gate_open:
+            reasons["external_repo_gate_closed"] += 1
+            skipped_external_gaps += 1
             continue
         # INFRA-1259 (ported, INFRA-8224): skip vague / TODO-only AC gaps.
         # curator_mode ONLY (mirrors the old _pick_gap.py). The worker claim /
@@ -1301,23 +1380,11 @@ def main() -> int:
         # INFRA-314: Extract affinity metadata (only when affinity is enabled).
         affinity_score = 0
         if affinity_enabled:
-            skills_required_raw = g.get("skills_required", "")
-            if isinstance(skills_required_raw, str):
-                try:
-                    skills_required = (
-                        json.loads(skills_required_raw)
-                        if skills_required_raw.strip()
-                        else []
-                    )
-                except json.JSONDecodeError:
-                    skills_required = []
-            elif isinstance(skills_required_raw, list):
-                skills_required = skills_required_raw
-            else:
-                skills_required = []
-
-            # Normalize to lowercase for comparison.
-            skills_required = {s.lower() for s in skills_required}
+            skills_required = {
+                s.lower()
+                for s in _parse_skills_required(g.get("skills_required", ""))
+                if not _is_external_repo_skill(s)
+            }
 
             preferred_backend = (g.get("preferred_backend") or "").lower()
             preferred_machine = (g.get("preferred_machine") or "").lower()
@@ -1425,6 +1492,13 @@ def main() -> int:
         for c in candidates:
             print(c[5])
         return 0
+
+    _record_external_repo_cycle(
+        external_repo_gate_open,
+        skipped_external_gaps,
+        skipped_external_gaps,
+        lock_dir,
+    )
 
     if candidates:
         # Try to claim candidates in priority order. Return the first one we
@@ -1604,6 +1678,8 @@ def main() -> int:
                 "pick_empty_cycle": True,
                 "total_gaps": len(gaps),
                 "candidates": len(candidates),
+                "skipped_external_gaps": skipped_external_gaps,
+                "external_repo_gate": "open" if external_repo_gate_open else "closed",
                 "exclusion_reasons": dict(reasons),
             }
         )

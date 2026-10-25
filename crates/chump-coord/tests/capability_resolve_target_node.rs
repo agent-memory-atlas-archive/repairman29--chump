@@ -30,6 +30,7 @@ fn make_manifest(session_id: &str, machine: Option<&str>, ttl_seconds: u32) -> C
         started_at: now,
         heartbeat_at: now,
         ttl_seconds,
+        external_repo_enabled: false,
     }
 }
 

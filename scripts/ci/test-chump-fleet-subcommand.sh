@@ -23,6 +23,7 @@ if [[ -z "$CHUMP_BIN" ]]; then
     for candidate in \
         "${CARGO_TARGET_DIR:-$REPO_ROOT/target}/debug/chump" \
         "$REPO_ROOT/target/release/chump" \
+        "${HOME:-/tmp}/.cargo/chump-shared-target/debug/chump" \
         "$(command -v chump 2>/dev/null || true)"
     do
         if [[ -x "$candidate" ]]; then
@@ -99,7 +100,7 @@ assert_output_contains() {
     local label="$1"
     local pattern="$2"
     local actual="$3"
-    if echo "$actual" | grep -qF "$pattern"; then
+    if echo "$actual" | grep -qF -- "$pattern"; then
         echo "  PASS: $label"
         (( PASS++ )) || true
     else
@@ -180,6 +181,42 @@ else
     echo "  FAIL: expected non-zero for unknown subcommand"
     (( FAIL++ )) || true
 fi
+
+# ── Test 9: INFRA-8604 — chump fleet external-repo status|enable|disable ─────
+echo "=== Test 9: chump fleet external-repo status|enable|disable (INFRA-8604) ==="
+out9_init=$(env -u CHUMP_EXTERNAL_REPO_PICK_OK "${_env[@]}" "$CHUMP_BIN" fleet external-repo status 2>&1 || true)
+assert_output_contains "initial external-repo status is closed" "external_repo gate: closed" "$out9_init"
+
+out9_en=$(env "${_env[@]}" "$CHUMP_BIN" fleet external-repo enable 2>&1 || true)
+assert_output_contains "enable reports gate open" "external_repo gate: open" "$out9_en"
+
+node_env_file="${_env[1]#HOME=}/.chump/node.env"
+if [[ -f "$node_env_file" ]] && grep -qx "CHUMP_EXTERNAL_REPO_PICK_OK=1" "$node_env_file" && ! grep -q "^export " "$node_env_file"; then
+    echo "  PASS: node.env written with plain CHUMP_EXTERNAL_REPO_PICK_OK=1 (no export prefix)"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: node.env missing or malformed: $(cat "$node_env_file" 2>/dev/null || echo 'no file')"
+    (( FAIL++ )) || true
+fi
+
+out9_st_open=$(env -u CHUMP_EXTERNAL_REPO_PICK_OK "${_env[@]}" "$CHUMP_BIN" fleet external-repo status 2>&1 || true)
+assert_output_contains "status after enable is open" "external_repo gate: open" "$out9_st_open"
+assert_output_contains "status shows per-node capability enabled" "external_repo_enabled=true" "$out9_st_open"
+
+out9_dis=$(env "${_env[@]}" "$CHUMP_BIN" fleet external-repo disable 2>&1 || true)
+assert_output_contains "disable reports gate closed" "external_repo gate: closed" "$out9_dis"
+
+if [[ -f "$node_env_file" ]] && grep -qx "CHUMP_EXTERNAL_REPO_PICK_OK=0" "$node_env_file"; then
+    echo "  PASS: node.env updated to CHUMP_EXTERNAL_REPO_PICK_OK=0 on disable"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: node.env not updated to 0 on disable: $(cat "$node_env_file" 2>/dev/null || echo 'no file')"
+    (( FAIL++ )) || true
+fi
+
+out9_st_closed=$(env -u CHUMP_EXTERNAL_REPO_PICK_OK "${_env[@]}" "$CHUMP_BIN" fleet external-repo status 2>&1 || true)
+assert_output_contains "status after disable is closed" "external_repo gate: closed" "$out9_st_closed"
+assert_output_contains "status shows per-node capability disabled" "external_repo_enabled=false" "$out9_st_closed"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
