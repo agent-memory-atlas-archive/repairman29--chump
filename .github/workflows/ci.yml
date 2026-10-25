@@ -727,6 +727,14 @@ jobs:
       # AdminMergeProposal consensus_result (grep gate + stubbed-gh fixtures).
       - name: admin-merge consensus gate (CREDIBLE-1524)
         run: bash scripts/ci/test-admin-merge-consensus-gate.sh
+      # INFRA-8594: refuse PRs whose title lacks a leading/conventional gap ID
+      # or equals/derives from its head branch name (e.g. 'claude/infra 8588').
+      - name: PR title gap-ID and branch-name guard (INFRA-8594)
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: bash scripts/ci/test-pr-title-gap-id.sh
 
       # RESILIENT-1055 / RESILIENT-1102: the shared organ-unit host-rewriter +
       # role-roster placement. Locks the byte-for-byte rewrite contract both

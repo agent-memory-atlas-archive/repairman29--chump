@@ -250,16 +250,30 @@ wt_branch_merged_in_cache() {
         local row
         # Support both the live schema (merged_at / head_sha / raw_payload_json)
         # and synthetic test schemas that define a state column.
-        row="$(sqlite3 "$cache_db" "SELECT head_sha, COALESCE(merged_at, ''), COALESCE(raw_payload_json, '') FROM pr_state WHERE head_ref = '$branch' ORDER BY number DESC LIMIT 1;" 2>/dev/null || true)"
+        # CREDIBLE-1574: evaluate PR closed/merged state via SQLite json_extract
+        # rather than regex/LIKE over raw_payload_json.
+        local safe_branch="${branch//\'/\'\'}"
+        row="$(sqlite3 "$cache_db" "
+            SELECT head_sha,
+                   CASE
+                       WHEN merged_at IS NOT NULL AND merged_at != '' THEN 1
+                       WHEN json_valid(raw_payload_json)
+                            AND (json_extract(raw_payload_json, '$.merged') = 1
+                                 OR json_extract(raw_payload_json, '$.pull_request.merged') = 1
+                                 OR lower(COALESCE(
+                                     json_extract(raw_payload_json, '$.state'),
+                                     json_extract(raw_payload_json, '$.pull_request.state'),
+                                     ''
+                                 )) IN ('closed', 'merged')) THEN 1
+                       ELSE 0
+                   END
+            FROM pr_state
+            WHERE head_ref = '$safe_branch'
+            ORDER BY number DESC LIMIT 1;
+        " 2>/dev/null || true)"
         if [[ -n "$row" ]]; then
-            local pr_sha pr_merged pr_json
-            IFS='|' read -r pr_sha pr_merged pr_json <<<"$row"
-            local is_merged_or_closed=0
-            if [[ -n "$pr_merged" ]]; then
-                is_merged_or_closed=1
-            elif printf '%s' "$pr_json" | grep -qiE '"merged"[[:space:]]*:[[:space:]]*true|"state"[[:space:]]*:[[:space:]]*"(MERGED|CLOSED|closed)"'; then
-                is_merged_or_closed=1
-            fi
+            local pr_sha is_merged_or_closed
+            IFS='|' read -r pr_sha is_merged_or_closed <<<"$row"
             if [[ "$is_merged_or_closed" -eq 1 ]]; then
                 if [[ -z "$pr_sha" || -z "$head_sha" || "$pr_sha" == "$head_sha" ]]; then
                     return 0

@@ -26,12 +26,18 @@
 # CHUMP_LOCK_DIR overrides LOCK_DIR (used by tests).
 
 # Worktree root (or pwd if not in a git repo — tests, bootstrap).
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# CREDIBLE-1584: honor CHUMP_REPO_ROOT when tests override the target repo so
+# scripts invoked from a developer checkout never leak into the caller's git tree.
+if [[ -n "${CHUMP_REPO_ROOT:-}" ]]; then
+    REPO_ROOT="$CHUMP_REPO_ROOT"
+else
+    REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+fi
 
 # Resolve main-repo root via --git-common-dir. In the main checkout this
 # returns ".git"; in a linked worktree it returns the absolute path to
 # the main repo's .git. Either way, MAIN_REPO is the .git's parent.
-_GIT_COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null || echo ".git")"
+_GIT_COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || echo ".git")"
 if [[ "$_GIT_COMMON_DIR" == ".git" ]]; then
     MAIN_REPO="$REPO_ROOT"
 else

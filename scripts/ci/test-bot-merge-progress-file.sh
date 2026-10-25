@@ -72,7 +72,17 @@ fi
 TMP_LOG="$(mktemp -t bot-merge-progress-test.XXXXXX)"
 # Invoke with --dry-run to short-circuit before any push/lease work, and
 # --gap none to avoid needing a real gap registry.
-if bash "$BM" --gap none --dry-run --progress-file "$TMP_LOG" >/dev/null 2>&1; then
+# CREDIBLE-1584: run bot-merge.sh inside an isolated temp git repo (1 commit ahead of origin/main).
+TMP_BM_REPO="$(mktemp -d)"
+mkdir -p "$TMP_BM_REPO/.chump-locks"
+git -C "$TMP_BM_REPO" init -q -b main
+git -C "$TMP_BM_REPO" config user.email "t@chump.local"
+git -C "$TMP_BM_REPO" config user.name "t"
+git -C "$TMP_BM_REPO" commit -q --allow-empty -m "base" --no-verify
+git -C "$TMP_BM_REPO" update-ref refs/remotes/origin/main HEAD
+git -C "$TMP_BM_REPO" checkout -q -b claude/progress-probe
+git -C "$TMP_BM_REPO" commit -q --allow-empty -m "INFRA-2673: progress probe" --no-verify
+if (cd "$TMP_BM_REPO" && CHUMP_REPO_ROOT="$TMP_BM_REPO" bash "$BM" --gap none --dry-run --progress-file "$TMP_LOG" >/dev/null 2>&1); then
     ok "bot-merge.sh --gap none --dry-run --progress-file accepted"
 else
     rc=$?
@@ -85,7 +95,7 @@ else
         fail "bot-merge.sh --progress-file dry-run failed with exit $rc"
     fi
 fi
-rm -f "$TMP_LOG" 2>/dev/null || true
+rm -rf "$TMP_LOG" "$TMP_BM_REPO" 2>/dev/null || true
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo

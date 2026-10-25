@@ -860,7 +860,18 @@ process_worktree() {
                 local cache_db="$REPO_ROOT/.chump/github_cache.db"
                 if [[ -f "$cache_db" ]] && command -v sqlite3 >/dev/null 2>&1; then
                     local pr_state
+                    # CREDIBLE-1574: support both synthetic test `state` column and live `merged_at`/`raw_payload_json` via json_extract.
                     pr_state=$(sqlite3 "$cache_db" \
+                        "SELECT CASE \
+                            WHEN merged_at IS NOT NULL AND merged_at != '' THEN 'MERGED' \
+                            WHEN json_valid(raw_payload_json) AND lower(COALESCE(json_extract(raw_payload_json, '$.state'), json_extract(raw_payload_json, '$.pull_request.state'), '')) IN ('closed', 'merged') THEN 'CLOSED' \
+                            ELSE '' \
+                         END FROM pr_state \
+                         WHERE LOWER(title) LIKE LOWER('%$gap_id%') \
+                           AND ((merged_at IS NOT NULL AND merged_at != '') \
+                                OR (json_valid(raw_payload_json) AND lower(COALESCE(json_extract(raw_payload_json, '$.state'), json_extract(raw_payload_json, '$.pull_request.state'), '')) IN ('closed', 'merged'))) \
+                         LIMIT 1" \
+                        2>/dev/null || sqlite3 "$cache_db" \
                         "SELECT state FROM pr_state WHERE LOWER(title) LIKE LOWER('%$gap_id%') AND state IN ('MERGED','CLOSED') LIMIT 1" \
                         2>/dev/null || true)
                     if [[ -n "$pr_state" ]]; then

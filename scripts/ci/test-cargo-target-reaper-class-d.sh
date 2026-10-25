@@ -358,4 +358,89 @@ for p in want_paths:
 PY
 pass "RESILIENT-1641: emits one kind=cargo_target_reaped event per dir with bytes_freed > 0"
 
+# ----------------------------------------------------------------------------
+# Test 8 (CREDIBLE-1574): json_extract PR state classification (compact vs
+# spaced Python json.dumps vs nested webhook vs unknown state) + mutant check
+# ----------------------------------------------------------------------------
+echo "--- Test 8 (CREDIBLE-1574): json_extract PR state classification ---"
+
+# AC1/AC4 static check: no LIKE '%"state":"closed"%' remains in github_cache.sh,
+# cargo-target-reaper.sh, worktree-iter.sh, or stale-worktree-reaper.sh.
+for f in \
+    "$REPO_ROOT/scripts/coord/lib/github_cache.sh" \
+    "$REPO_ROOT/scripts/ops/cargo-target-reaper.sh" \
+    "$REPO_ROOT/scripts/lib/worktree-iter.sh" \
+    "$REPO_ROOT/scripts/ops/stale-worktree-reaper.sh"; do
+    if grep -n 'LIKE.*"state":"closed"' "$f" >/dev/null 2>&1; then
+        fail "CREDIBLE-1574: whitespace-fragile LIKE \"state\":\"closed\" still present in $f"
+    fi
+done
+pass "CREDIBLE-1574 AC1/AC4: no whitespace-fragile LIKE \"state\":\"closed\" in cache/reaper helpers"
+
+C1574_DB="$TMP/credible-1574-cache.db"
+sqlite3 "$C1574_DB" <<'SQL'
+CREATE TABLE pr_state (
+    number INTEGER PRIMARY KEY,
+    title TEXT,
+    head_ref TEXT,
+    head_sha TEXT,
+    merge_state_status TEXT,
+    mergeable TEXT,
+    is_draft INTEGER,
+    review_decision TEXT,
+    merged_at TEXT,
+    updated_at TEXT,
+    fetched_at_local INTEGER,
+    raw_payload_json TEXT
+);
+INSERT INTO pr_state (number, title, head_ref, merged_at, raw_payload_json) VALUES
+  (701, 'compact closed', 'claude/c1574-compact', NULL, '{"state":"closed","closed_at":"2026-10-24T00:00:00Z"}'),
+  (702, 'spaced closed (python json.dumps)', 'claude/c1574-spaced', NULL, '{"state": "closed", "closed_at": "2026-10-24T01:00:00Z"}'),
+  (703, 'webhook spaced closed', 'claude/c1574-webhook', NULL, '{"pull_request": {"state": "closed", "closed_at": "2026-10-24T02:00:00Z"}}'),
+  (704, 'unknown state payload', 'claude/c1574-unknown', NULL, '{"unexpected": "shape"}');
+SQL
+
+# Verify cache_lookup_pr_state_by_branch and cache_query_closed_prs
+C1574_OUT="$(
+    CHUMP_CACHE_DB="$C1574_DB" CHUMP_AMBIENT_LOG="$AMBIENT" bash -c "
+        source \"$REPO_ROOT/scripts/coord/lib/github_cache.sh\"
+        s_compact=\$(cache_lookup_pr_state_by_branch claude/c1574-compact | cut -f2)
+        s_spaced=\$(cache_lookup_pr_state_by_branch claude/c1574-spaced | cut -f2)
+        s_webhook=\$(cache_lookup_pr_state_by_branch claude/c1574-webhook | cut -f2)
+        s_unknown=\$(cache_lookup_pr_state_by_branch claude/c1574-unknown | cut -f2)
+        echo \"STATES=\$s_compact,\$s_spaced,\$s_webhook,\$s_unknown\"
+        echo \"CLOSED_PRS:\$(cache_query_closed_prs | cut -f1 | tr '\n' ',')\"
+    "
+)"
+echo "$C1574_OUT" | sed 's/^/    /'
+[[ "$C1574_OUT" == *"STATES=closed,closed,closed,unknown"* ]] \
+    || fail "CREDIBLE-1574 AC2/AC3: expected STATES=closed,closed,closed,unknown, got: $C1574_OUT"
+[[ "$C1574_OUT" == *"CLOSED_PRS:703,702,701,"* ]] \
+    || fail "CREDIBLE-1574 AC2: cache_query_closed_prs missed spaced/webhook closed PR rows: $C1574_OUT"
+pass "CREDIBLE-1574 AC2/AC3: compact, spaced (json.dumps), and webhook closed rows all classify as closed; unknown state maps to unknown (kept)"
+
+# Mutant check: restoring LIKE '%"state":"closed"%' in a copy of github_cache.sh
+# MUST fail to return row 702 ("state": "closed").
+MUTANT_GH_CACHE="$TMP/mutant-github-cache.sh"
+python3 - "$REPO_ROOT/scripts/coord/lib/github_cache.sh" "$MUTANT_GH_CACHE" <<'PYMUT'
+import sys
+from pathlib import Path
+src = Path(sys.argv[1]).read_text()
+old_where = "OR (json_valid(raw_payload_json) \\\n                AND lower(COALESCE(json_extract(raw_payload_json, '$.state'), json_extract(raw_payload_json, '$.pull_request.state'), '')) IN ('closed', 'merged'))"
+new_where = 'OR raw_payload_json LIKE \'%"state":"closed"%\''
+assert old_where in src, "expected json_extract WHERE clause in github_cache.sh"
+Path(sys.argv[2]).write_text(src.replace(old_where, new_where, 1))
+PYMUT
+MUTANT_CLOSED="$(
+    CHUMP_CACHE_DB="$C1574_DB" CHUMP_AMBIENT_LOG="$AMBIENT" bash -c "
+        source \"$MUTANT_GH_CACHE\"
+        cache_query_closed_prs | cut -f1 | tr '\n' ','
+    "
+)"
+if [[ "$MUTANT_CLOSED" == *"702"* ]]; then
+    fail "CREDIBLE-1574 mutant check: LIKE mutant unexpectedly matched spaced row 702 ($MUTANT_CLOSED)"
+fi
+pass "CREDIBLE-1574 mutant killed: restoring LIKE '%\"state\":\"closed\"%' misses spaced row 702 ($MUTANT_CLOSED)"
+
 echo "=== all Class-D tests passed ==="
+

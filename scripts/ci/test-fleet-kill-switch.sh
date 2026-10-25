@@ -155,10 +155,18 @@ else
     ok "Test 4: AUTONOMY_LEVEL=5 → kill-switch gate passed"
 fi
 
+# CREDIBLE-1584: isolated temp git repo for bot-merge kill-switch tests
+BM_KS_REPO="$FAKE_HOME/bm-ks-repo"
+mkdir -p "$BM_KS_REPO"
+git -C "$BM_KS_REPO" init -q -b main
+git -C "$BM_KS_REPO" config user.email "t@chump.local"
+git -C "$BM_KS_REPO" config user.name "t"
+git -C "$BM_KS_REPO" commit -q --allow-empty -m "init" --no-verify
+
 # ── Test 5: bot-merge AUTONOMY_LEVEL=0 → exit 10 ────────────────────────────
 echo "0" > "$AL_FILE"
 _rc=0
-HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" \
+HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" CHUMP_REPO_ROOT="$BM_KS_REPO" \
     bash "$REPO_ROOT/scripts/coord/bot-merge.sh" --gap FAKE-999 --dry-run 2>/dev/null \
     || _rc=$?
 if [[ "$_rc" -eq 10 ]]; then
@@ -170,7 +178,7 @@ fi
 # ── Test 6: bot-merge file missing → exit 10 (fail-closed) ──────────────────
 rm -f "$AL_FILE"
 _rc=0
-HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" \
+HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" CHUMP_REPO_ROOT="$BM_KS_REPO" \
     bash "$REPO_ROOT/scripts/coord/bot-merge.sh" --gap FAKE-999 --dry-run 2>/dev/null \
     || _rc=$?
 if [[ "$_rc" -eq 10 ]]; then
@@ -183,7 +191,7 @@ fi
 # bot-merge will fail later (no real git repo / gh setup) but must NOT exit 10.
 echo "5" > "$AL_FILE"
 _rc=0
-HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" \
+HOME="$FAKE_HOME" CHUMP_AMBIENT_LOG="$FAKE_AMBIENT" CHUMP_REPO_ROOT="$BM_KS_REPO" \
     bash "$REPO_ROOT/scripts/coord/bot-merge.sh" --gap FAKE-999 --dry-run 2>/dev/null \
     || _rc=$?
 if [[ "$_rc" -eq 10 ]]; then

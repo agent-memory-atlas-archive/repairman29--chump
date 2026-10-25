@@ -164,6 +164,56 @@ if [[ -n "$FN" ]]; then
     fi
 fi
 
+# ── T5: CREDIBLE-1584 — dirty worktree byte-identical invariant + mutant check ──
+DIRTY_WT="$TMP/dirty-caller-repo"
+mkdir -p "$DIRTY_WT/src" "$DIRTY_WT/scripts"
+git -C "$DIRTY_WT" init -q -b claude/c1584-dirty-probe
+git -C "$DIRTY_WT" config user.email "t@chump.local"
+git -C "$DIRTY_WT" config user.name "t"
+printf ".chump/\n.chump-locks/\n" > "$DIRTY_WT/.gitignore"
+echo "pub fn clean() {}" > "$DIRTY_WT/src/lib.rs"
+git -C "$DIRTY_WT" add .gitignore src/lib.rs
+git -C "$DIRTY_WT" commit -q -m "initial" --no-verify
+git -C "$DIRTY_WT" update-ref refs/remotes/origin/main HEAD
+# Leave both a modified tracked file under src/ and an untracked file under src/
+echo "pub fn dirty_uncommitted_edit() {}" >> "$DIRTY_WT/src/lib.rs"
+echo "pub fn untracked_edit() {}" > "$DIRTY_WT/src/untracked_probe.rs"
+HEAD_BEFORE="$(git -C "$DIRTY_WT" rev-parse HEAD)"
+STATUS_BEFORE="$(git -C "$DIRTY_WT" status --porcelain)"
+
+# Run bot-merge.sh --dry-run with cwd inside $DIRTY_WT
+(
+    cd "$DIRTY_WT"
+    CHUMP_DRY_RUN=1 \
+    CHUMP_AMBIENT_LOG="$TMP/c1584-ambient.jsonl" \
+    CHUMP_LOCK_DIR="$TMP/c1584-locks" \
+    bash "$REPO_ROOT/scripts/coord/bot-merge.sh" --gap CREDIBLE-1584-T5 --dry-run >/dev/null 2>&1 || true
+)
+HEAD_AFTER="$(git -C "$DIRTY_WT" rev-parse HEAD)"
+STATUS_AFTER="$(git -C "$DIRTY_WT" status --porcelain)"
+if [[ "$HEAD_BEFORE" == "$HEAD_AFTER" && "$STATUS_BEFORE" == "$STATUS_AFTER" ]]; then
+    ok "CREDIBLE-1584 AC2: dirty worktree HEAD and git status --porcelain are byte-identical after bot-merge.sh --dry-run"
+else
+    fail "CREDIBLE-1584 AC2: dirty worktree mutated! head: $HEAD_BEFORE -> $HEAD_AFTER; status: [$STATUS_BEFORE] -> [$STATUS_AFTER]"
+fi
+
+# Mutant check: if a test runs INFRA-404/472 pre-rebase staging directly against $DIRTY_WT without DRY_RUN guard or temp-repo isolation, git status --porcelain changes
+MUTANT_WT="$TMP/mutant-caller-repo"
+cp -R "$DIRTY_WT" "$MUTANT_WT"
+MUTANT_STATUS_BEFORE="$(git -C "$MUTANT_WT" status --porcelain)"
+(
+    cd "$MUTANT_WT"
+    git add src/lib.rs src/untracked_probe.rs
+    git commit -q -m "auto: bot-merge pre-rebase staging (INFRA-472)" --no-verify
+)
+MUTANT_STATUS_AFTER="$(git -C "$MUTANT_WT" status --porcelain)"
+if [[ "$MUTANT_STATUS_BEFORE" != "$MUTANT_STATUS_AFTER" ]]; then
+    ok "CREDIBLE-1584 mutant killed: unisolated INFRA-472 pre-rebase staging mutates git status --porcelain and is caught"
+else
+    fail "CREDIBLE-1584 mutant survived: expected git status --porcelain to differ"
+fi
+
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [[ "$FAIL" -eq 0 ]]
+

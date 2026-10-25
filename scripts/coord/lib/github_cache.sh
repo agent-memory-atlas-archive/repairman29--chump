@@ -366,11 +366,17 @@ cache_query_closed_prs() {
         return 0
     fi
     local result
-    # INFRA-697: Extract closed_at from raw_payload_json if merged_at is null
+    # INFRA-697 + CREDIBLE-1574: Extract closed_at and state via json_extract
+    # so both compact JSON ("state":"closed") and Python json.dumps default
+    # ("state": "closed") as well as nested webhook payloads ($.pull_request.state)
+    # match identically without whitespace-fragile LIKE patterns.
     result="$(sqlite3 -separator $'\t' "$db" \
         "SELECT number, COALESCE(title,''), COALESCE(head_ref,''), \
-                COALESCE(merged_at, json_extract(raw_payload_json, '$.closed_at')) \
-         FROM pr_state WHERE merged_at IS NOT NULL OR raw_payload_json LIKE '%\"state\":\"closed\"%' \
+                COALESCE(merged_at, json_extract(raw_payload_json, '$.closed_at'), json_extract(raw_payload_json, '$.pull_request.closed_at')) \
+         FROM pr_state \
+         WHERE (merged_at IS NOT NULL AND merged_at != '') \
+            OR (json_valid(raw_payload_json) \
+                AND lower(COALESCE(json_extract(raw_payload_json, '$.state'), json_extract(raw_payload_json, '$.pull_request.state'), '')) IN ('closed', 'merged')) \
          ORDER BY number DESC LIMIT 500" 2>/dev/null || true)"
     if [[ -z "$result" ]]; then
         printf '{"ts":"%s","kind":"cache_miss","helper":"cache_query_closed_prs","target":"closed_prs","reason":"no_rows"}\n' \

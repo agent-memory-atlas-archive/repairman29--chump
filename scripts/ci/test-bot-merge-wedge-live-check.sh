@@ -59,6 +59,11 @@ TMP1="$(mktemp -d)"
 trap 'rm -rf "$TMP1"' EXIT
 
 mkdir -p "$TMP1/.chump-locks" "$TMP1/bin"
+# CREDIBLE-1584: initialize isolated temp git repo so bot-merge never touches caller checkout
+git -C "$TMP1" init -q -b feat/wedge-probe
+git -C "$TMP1" config user.email "t@chump.local"
+git -C "$TMP1" config user.name "t"
+git -C "$TMP1" commit -q --allow-empty -m "init" --no-verify
 printf '{"ts":"%s","kind":"graphql_exhausted","source":"test","remaining":0}\n' "$NOW_TS" \
     > "$TMP1/.chump-locks/ambient.jsonl"
 make_fake_gh "$TMP1/bin" "4234"
@@ -72,7 +77,7 @@ PATH="$TMP1/bin:$PATH" \
 
 # Must emit bot_merge_graphql_wedge_cleared with stale-event-cleared
 if grep -q '"bot_merge_graphql_wedge_cleared"' "$TMP1/.chump-locks/ambient.jsonl" 2>/dev/null \
-        && grep -q '"stale-event-cleared"' "$TMP1/.chump-locks/ambient.jsonl" 2>/dev/null; then
+        && grep -q 'stale-event-cleared' "$TMP1/.chump-locks/ambient.jsonl" 2>/dev/null; then
     ok "Test 1: ambient contains bot_merge_graphql_wedge_cleared with note=stale-event-cleared"
 else
     fail "Test 1: ambient missing bot_merge_graphql_wedge_cleared or note=stale-event-cleared"
@@ -104,6 +109,11 @@ fi
 # ── Test 2: recent graphql_exhausted + live remaining=50 → real exhaustion, aborts ──
 TMP2="$(mktemp -d)"
 mkdir -p "$TMP2/.chump-locks" "$TMP2/bin"
+# CREDIBLE-1584: initialize isolated temp git repo so bot-merge never touches caller checkout
+git -C "$TMP2" init -q -b feat/wedge-probe
+git -C "$TMP2" config user.email "t@chump.local"
+git -C "$TMP2" config user.name "t"
+git -C "$TMP2" commit -q --allow-empty -m "init" --no-verify
 printf '{"ts":"%s","kind":"graphql_exhausted","source":"test","remaining":0}\n' "$NOW_TS" \
     > "$TMP2/.chump-locks/ambient.jsonl"
 make_fake_gh "$TMP2/bin" "50"
@@ -141,6 +151,11 @@ fi
 # We also confirm no WEDGE: message on stderr.
 TMP3="$(mktemp -d)"
 mkdir -p "$TMP3/.chump-locks" "$TMP3/bin"
+# CREDIBLE-1584: initialize isolated temp git repo so bot-merge never touches caller checkout
+git -C "$TMP3" init -q -b feat/wedge-probe
+git -C "$TMP3" config user.email "t@chump.local"
+git -C "$TMP3" config user.name "t"
+git -C "$TMP3" commit -q --allow-empty -m "init" --no-verify
 touch "$TMP3/.chump-locks/ambient.jsonl"
 # Fake gh returns 50 — if live-check fires unnecessarily, it WOULD cause a false wedge.
 # We verify it doesn't by checking no wedge_aborted is emitted.

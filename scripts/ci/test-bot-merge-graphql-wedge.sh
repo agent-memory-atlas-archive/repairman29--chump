@@ -28,6 +28,11 @@ TMP1="$(mktemp -d)"
 trap 'rm -rf "$TMP1"' EXIT
 
 mkdir -p "$TMP1/.chump-locks" "$TMP1/bin"
+# CREDIBLE-1584: initialize isolated temp git repo so bot-merge never touches caller checkout
+git -C "$TMP1" init -q -b feat/wedge-probe
+git -C "$TMP1" config user.email "t@chump.local"
+git -C "$TMP1" config user.name "t"
+git -C "$TMP1" commit -q --allow-empty -m "init" --no-verify
 NOW_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Write a graphql_exhausted event with ts = now (clearly within 30min window)
 printf '{"ts":"%s","kind":"graphql_exhausted","source":"test","remaining":0}\n' "$NOW_TS" \
@@ -79,6 +84,11 @@ fi
 # --- Test 2: old graphql_exhausted (> 30min) → bot-merge proceeds past guard ---
 TMP2="$(mktemp -d)"
 mkdir -p "$TMP2/.chump-locks"
+# CREDIBLE-1584: initialize isolated temp git repo so bot-merge never touches caller checkout
+git -C "$TMP2" init -q -b feat/wedge-probe
+git -C "$TMP2" config user.email "t@chump.local"
+git -C "$TMP2" config user.name "t"
+git -C "$TMP2" commit -q --allow-empty -m "init" --no-verify
 # 2 hours ago
 if date -u -v-2H +%Y-%m-%dT%H:%M:%SZ >/dev/null 2>&1; then
     OLD_TS="$(date -u -v-2H +%Y-%m-%dT%H:%M:%SZ)"
@@ -104,6 +114,11 @@ fi
 # --- Test 3: no graphql_exhausted at all → guard inactive ---
 TMP3="$(mktemp -d)"
 mkdir -p "$TMP3/.chump-locks"
+# CREDIBLE-1584: initialize isolated temp git repo so bot-merge never touches caller checkout
+git -C "$TMP3" init -q -b feat/wedge-probe
+git -C "$TMP3" config user.email "t@chump.local"
+git -C "$TMP3" config user.name "t"
+git -C "$TMP3" commit -q --allow-empty -m "init" --no-verify
 touch "$TMP3/.chump-locks/ambient.jsonl"
 
 CHUMP_AMBIENT_LOG="$TMP3/.chump-locks/ambient.jsonl" \
@@ -120,6 +135,11 @@ fi
 # --- Test 4: bypass env var disables guard ---
 TMP4="$(mktemp -d)"
 mkdir -p "$TMP4/.chump-locks"
+# CREDIBLE-1584: initialize isolated temp git repo so bot-merge never touches caller checkout
+git -C "$TMP4" init -q -b feat/wedge-probe
+git -C "$TMP4" config user.email "t@chump.local"
+git -C "$TMP4" config user.name "t"
+git -C "$TMP4" commit -q --allow-empty -m "init" --no-verify
 printf '{"ts":"%s","kind":"graphql_exhausted","source":"test","remaining":0}\n' "$NOW_TS" \
     > "$TMP4/.chump-locks/ambient.jsonl"
 

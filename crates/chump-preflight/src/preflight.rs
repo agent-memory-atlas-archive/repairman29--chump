@@ -3445,6 +3445,14 @@ pub fn run(argv: &[String]) -> i32 {
             GateKind::Scripts,
         ));
 
+        // INFRA-8594: PR title gap-ID and branch-name guard (hermetic fixture
+        // matrix + live PR_TITLE check when set). Mirrors ci.yml pr-hygiene.
+        steps.push(step(
+            "pr-title-gap-id",
+            &["bash", "scripts/ci/test-pr-title-gap-id.sh"],
+            GateKind::Scripts,
+        ));
+
         // INFRA-5000 (META-070/INFRA-3373 slice): cli_observability_misc
         // gate — mirrors the 41 remaining cli-observability-misc cluster
         // scripts from docs/process/AUDIT_JOB_DECOMPOSITION.md.

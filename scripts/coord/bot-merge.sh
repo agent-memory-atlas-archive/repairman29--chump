@@ -2707,7 +2707,8 @@ fi
 #   (c) Refuse (exit 4 leaving git index untouched) when the remaining untracked
 #       file count exceeds ${CHUMP_BOT_MERGE_MAX_UNTRACKED:-50}.
 _bm_substep "untracked-auto-add"
-if [[ "${CHUMP_BOT_MERGE_ALLOW_UNTRACKED:-1}" != "0" ]]; then
+# CREDIBLE-1584: never stage untracked files in the caller checkout during --dry-run.
+if [[ "${DRY_RUN:-0}" != "1" && "${CHUMP_BOT_MERGE_ALLOW_UNTRACKED:-1}" != "0" ]]; then
     if ! _bm_autostage_untracked; then
         exit 4
     fi
@@ -2731,7 +2732,8 @@ fi
 # manually — useful for partial-stage scenarios where M files are
 # intentionally not part of this PR).
 _bm_substep "auto-commit"
-if [[ "${CHUMP_BOT_MERGE_AUTO_COMMIT_M:-1}" != "0" ]]; then
+# CREDIBLE-1584: never stage or auto-commit modified files in the caller checkout during --dry-run.
+if [[ "${DRY_RUN:-0}" != "1" && "${CHUMP_BOT_MERGE_AUTO_COMMIT_M:-1}" != "0" ]]; then
     modified=$(git diff --name-only -- src/ crates/ scripts/ docs/ 2>/dev/null)
     if [[ -n "$modified" ]]; then
         yellow "INFRA-472: Modified files found — auto-staging:"

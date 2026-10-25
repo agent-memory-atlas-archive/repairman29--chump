@@ -85,7 +85,17 @@ smoke_bot_merge_dry_run() {
     fi
     # Run with a dummy gap so the script does not attempt a real git push.
     local out
-    out=$(bash "$bot_merge" --dry-run --gap INFRA-000 2>&1 || true)
+    # CREDIBLE-1584: isolate bot-merge.sh in a temp git repo so it never touches the caller checkout.
+    local _bm_iso; _bm_iso="$(mktemp -d)"
+    git -C "$_bm_iso" init -q -b main
+    git -C "$_bm_iso" config user.email "t@chump.local"
+    git -C "$_bm_iso" config user.name "t"
+    git -C "$_bm_iso" commit -q --allow-empty -m "base" --no-verify
+    git -C "$_bm_iso" update-ref refs/remotes/origin/main HEAD
+    git -C "$_bm_iso" checkout -q -b feat/smoke-dry-run
+    git -C "$_bm_iso" commit -q --allow-empty -m "INFRA-000: smoke" --no-verify
+    out=$(cd "$_bm_iso" && CHUMP_REPO_ROOT="$_bm_iso" bash "$bot_merge" --dry-run --gap none 2>&1 || true)
+    rm -rf "$_bm_iso"
     # Key stages that must appear regardless of git state:
     local required_stages=("git fetch" "git push")
     for stage in "${required_stages[@]}"; do

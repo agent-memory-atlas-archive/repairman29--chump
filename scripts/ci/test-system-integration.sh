@@ -308,9 +308,12 @@ echo "--- Assertion 3: bot-merge.sh --dry-run logs gh pr create ---"
         # bot-merge.sh --dry-run never actually calls gh; it prints "[dry-run] gh pr create …"
         # We verify it at least reaches the PR-create phase without aborting.
         BM_RC=0
+        # CREDIBLE-1584: run bot-merge.sh in $FAKE_REPO (isolated temp git repo), never $REPO_ROOT
         BM_OUT=$(
+            cd "$FAKE_REPO" && \
             PATH="$TMP/bin:$PATH" \
-            CHUMP_REPO="$REPO_ROOT" \
+            CHUMP_REPO="$FAKE_REPO" \
+            CHUMP_REPO_ROOT="$FAKE_REPO" \
             CHUMP_INTEGRATION_TEST=1 \
             GIT_AUTHOR_NAME="Integration Test" \
             GIT_AUTHOR_EMAIL="test@integration.local" \
