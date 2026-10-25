@@ -6626,6 +6626,9 @@ async fn main() -> Result<()> {
         // CHUMP_CLAIM_ALLOW_DUPLICATE_PR env default) is what admits the dispatch
         // as a REPAIR onto the PR head branch via the gate below.
         let repair_flag = args.iter().any(|a| a == "--repair");
+        if args.iter().any(|a| a == "--dry-run") {
+            std::env::set_var("CHUMP_DISPATCH_EXTERNAL_DRY_RUN", "1");
+        }
         let paths = args
             .iter()
             .position(|a| a == "--paths")
@@ -6675,7 +6678,15 @@ async fn main() -> Result<()> {
         // `--print-prompt` prints the resolved mode + prompt and exits 0
         // without spawning anything (operator preview; CI fixture surface).
         let print_prompt = args.iter().any(|a| a == "--print-prompt");
-        let spawns_work = backend != "interactive" && backend != "claude";
+        let is_external_gap = !repair_flag
+            && dispatch_repair::load_canonical_gap(&repo_root, &gap_id)
+                .ok()
+                .and_then(|row| {
+                    dispatch::external_repo_target_from_skills(&row.skills_required)
+                        .or_else(|| dispatch::external_repo_target_from_skills(&row.notes))
+                })
+                .is_some();
+        let spawns_work = backend != "interactive" && backend != "claude" && !is_external_gap;
         let open_pr = if spawns_work {
             match dispatch_repair::open_pr_gate(&repo_root, &gap_id, repair_flag) {
                 Ok(pr) => pr,

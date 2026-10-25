@@ -342,3 +342,54 @@ _bm_preserve_and_drop_collisions() {
     fi
     _bm_emit_dispatch_paths_overflow "$gap_id" "$collisions" "$stash_sha"
 }
+
+# _bm_autostage_untracked (INFRA-8083)
+#   Auto-stages untracked files under src/ crates/ scripts/ docs/ with three guards:
+#   (a) Never stages docs/gaps/*.yaml (state.db is canonical post-INFRA-498).
+#   (b) When a dispatch lease declares explicit `paths`, filters to those paths.
+#   (c) Refuses (returns 4 without touching git index) when remaining untracked
+#       count exceeds ${CHUMP_BOT_MERGE_MAX_UNTRACKED:-50}.
+_bm_autostage_untracked() {
+    local raw_untracked untracked
+    raw_untracked=$(git ls-files --others --exclude-standard src/ crates/ scripts/ docs/ 2>/dev/null || true)
+    untracked=$(printf '%s\n' "$raw_untracked" | grep -v '^$' | grep -vE '^docs/gaps/.*\.yaml$' || true)
+    if [[ -n "$untracked" ]]; then
+        local _bm_u_lease_file _bm_u_lease_paths _bm_u_filtered="" _bm_u_f
+        _bm_u_lease_file="$(_bm_resolve_lease_file 2>/dev/null || true)"
+        _bm_u_lease_paths="$(_bm_lease_paths "$_bm_u_lease_file" 2>/dev/null || true)"
+        if [[ -n "$_bm_u_lease_paths" ]]; then
+            while IFS= read -r _bm_u_f; do
+                [[ -z "$_bm_u_f" ]] && continue
+                if _bm_path_covered_by "$_bm_u_f" "$_bm_u_lease_paths"; then
+                    _bm_u_filtered="${_bm_u_filtered:+${_bm_u_filtered}$'\n'}${_bm_u_f}"
+                fi
+            done <<< "$untracked"
+            untracked="$_bm_u_filtered"
+        fi
+    fi
+    if [[ -z "$untracked" ]]; then
+        return 0
+    fi
+    local _bm_max_untracked="${CHUMP_BOT_MERGE_MAX_UNTRACKED:-50}"
+    local _bm_untracked_count
+    _bm_untracked_count=$(printf '%s\n' "$untracked" | grep -c . || echo 0)
+    if [[ "$_bm_untracked_count" -gt "$_bm_max_untracked" ]]; then
+        local _err_msg="[bot-merge] ERROR (INFRA-8083): refusing to auto-stage ${_bm_untracked_count} untracked files (exceeds CHUMP_BOT_MERGE_MAX_UNTRACKED=${_bm_max_untracked})"
+        if declare -F red >/dev/null 2>&1; then
+            red "$_err_msg"
+        else
+            printf '%s\n' "$_err_msg" >&2
+        fi
+        return 4
+    fi
+    if declare -F yellow >/dev/null 2>&1; then
+        yellow "INFRA-404: Untracked files found — auto-adding with explicit warning:"
+    fi
+    printf '%s\n' "$untracked" | sed 's/^/  + /'
+    # shellcheck disable=SC2086
+    git add $untracked
+    if declare -F green >/dev/null 2>&1; then
+        green "Auto-added ${_bm_untracked_count} untracked file(s)"
+    fi
+    return 0
+}

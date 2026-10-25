@@ -1558,8 +1558,37 @@ print('1' if (p == 'P0' and dom == 'MISSION' and e in ('m', 'l', 'xl')) else '0'
     _cycle_pr_hwm="${_cycle_pr_hwm:-0}"
     log "picked gap $GAP_ID"
 
+    # INFRA-8083: extract external_repo:<owner>/<repo> tag from gap metadata.
+    _ext_owner_repo="$(printf '%s' "${gap_json:-}" | python3 -c "
+import sys, json, re
+try:
+    d = json.load(sys.stdin)
+    gs = d.get('gaps', []) if isinstance(d, dict) and 'gaps' in d else (d if isinstance(d, list) else [d])
+    g = next((x for x in gs if isinstance(x, dict) and x.get('id') == '$GAP_ID'), {})
+    raw = ' '.join(str(g.get(k) or '') for k in ('skills_required', 'notes'))
+    for tok in re.split(r'[,\s]+', raw):
+        tok = tok.strip().strip('\"\'')
+        if tok.startswith('external_repo:'):
+            val = tok[len('external_repo:'):]
+            if '/' in val and '<' not in val and '>' not in val:
+                print(val)
+                break
+except Exception:
+    pass
+" 2>/dev/null || true)"
+    if [ -z "$_ext_owner_repo" ]; then
+        _ext_owner_repo="$(chump gap show "$GAP_ID" 2>/dev/null \
+            | grep -oE 'external_repo:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' \
+            | head -1 | sed 's/^external_repo://' || true)"
+    fi
+
     # INFRA-569: dry-run mode — preview without committing resources.
     if [ "$DRY_RUN" = "1" ]; then
+        if [ -n "$_ext_owner_repo" ]; then
+            printf 'WOULD route %s (external_repo:%s) to chump improve %s --gap %s --apply\n' \
+                "$GAP_ID" "$_ext_owner_repo" "$_ext_owner_repo" "$GAP_ID"
+            exit 0
+        fi
         sid="$(date +%Y%m%d-%H%M%S)"
         gap_lower="$(printf '%s' "$GAP_ID" | tr '[:upper:]' '[:lower:]')"
         wt_name="${gap_lower}-fleet-${AGENT_ID}-${sid}"
@@ -1636,6 +1665,63 @@ print('1' if (p == 'P0' and dom == 'MISSION' and e in ('m', 'l', 'xl')) else '0'
         # INFRA-544: release gap lock on pivot so siblings can pick.
         rm -f "${CHUMP_REPO:-$REPO_ROOT}/.chump-locks/.gap-${GAP_ID}.lock" 2>/dev/null || true
         _emit_worker_stuck "gap_already_done: gap=$GAP_ID done on origin/main"
+        continue
+    fi
+
+    # ── INFRA-8083: External-repo gap routing ─────────────────────────────
+    # When external_repo:<owner>/<repo> is present on $GAP_ID, do NOT create a
+    # $REPO_ROOT (chump) worktree or run cargo check / bot-merge.sh; route to
+    # `chump improve <owner>/<repo> --gap <ID> --apply` and record the cycle.
+    if [ -n "${_ext_owner_repo:-}" ]; then
+        mkdir -p "$FLEET_LOG_DIR"
+        cycle_log="$FLEET_LOG_DIR/agent-${AGENT_ID}-cycle${cycle}-${GAP_ID}.log"
+        _gap_effort="$(printf '%s' "$gap_json" | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); gs=d if isinstance(d,list) else [d]; g=next((x for x in gs if x.get('id')=='$GAP_ID'),{}); print(g.get('effort','') or '')" \
+            2>/dev/null || true)"
+        if command -v compute_scaled_timeout >/dev/null 2>&1; then
+            _scaled_timeout="$(compute_scaled_timeout "${FLEET_TIMEOUT_BASE_S:-$FLEET_TIMEOUT_S}" "${_gap_effort:-s}")"
+        else
+            _scaled_timeout="${FLEET_TIMEOUT_BASE_S:-$FLEET_TIMEOUT_S}"
+        fi
+        FLEET_TIMEOUT_S="$_scaled_timeout"
+        TO="$(build_timeout_prefix "$FLEET_TIMEOUT_S")"
+        log "INFRA-8083: gap $GAP_ID is tagged external_repo:$_ext_owner_repo — routing to chump improve $_ext_owner_repo --gap $GAP_ID --apply"
+        # shellcheck disable=SC2086
+        $TO chump improve "$_ext_owner_repo" --gap "$GAP_ID" --apply >"$cycle_log" 2>&1
+        rc=$?
+        _cycle_log_size=0
+        if [ -f "$cycle_log" ]; then
+            _cycle_log_size="$(wc -c < "$cycle_log" 2>/dev/null | tr -d ' ' || echo 0)"
+        fi
+        _outcome="abandoned"
+        _cycle_kind="failed"
+        if [ "$rc" -eq 0 ]; then
+            _outcome="shipped"
+            _cycle_kind="shipped"
+            _dispatch_fail_count=0
+            chump gap strike "$GAP_ID" --reset >/dev/null 2>&1 || true
+        elif [ "$rc" -eq 124 ]; then
+            _outcome="starved"
+            _cycle_kind="timeout"
+            _dispatch_fail_count=$((_dispatch_fail_count + 1))
+        else
+            _dispatch_fail_count=$((_dispatch_fail_count + 1))
+        fi
+        chump session-track --end "$GAP_ID" --outcome "$_outcome" >/dev/null 2>&1 || true
+        _cycle_end_s=$(date +%s)
+        _cycle_elapsed=$(( _cycle_end_s - ${_cycle_start_s:-_cycle_end_s} ))
+        _amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+        printf '{"event":"cycle_end","ts":"%s","agent":"%s","gap_id":"%s","elapsed_s":%d,"rc":%d,"kind":"%s","model":"%s","cycle_log_bytes":%d,"external_repo":"%s"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "$AGENT_ID" "$GAP_ID" "$_cycle_elapsed" "$rc" \
+            "$_cycle_kind" "${FLEET_MODEL:-default}" "${_cycle_log_size:-0}" "$_ext_owner_repo" \
+            >> "$_amb" 2>/dev/null || true
+        log "cycle_end (external_repo=$_ext_owner_repo): elapsed=${_cycle_elapsed}s rc=$rc kind=$_cycle_kind"
+        if [[ -n "${CHUMP_SESSION_ID:-}" ]]; then
+            rm -f "$REPO_ROOT/.chump-locks/${CHUMP_SESSION_ID}.json" 2>/dev/null || true
+        fi
+        rm -f "$REPO_ROOT/.chump-locks/"*"${GAP_ID}"*.json 2>/dev/null || true
+        rm -f "$REPO_ROOT/.chump-locks/.gap-${GAP_ID}.lock" 2>/dev/null || true
         continue
     fi
 

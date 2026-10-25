@@ -2695,18 +2695,21 @@ if [[ "${CHUMP_BOT_MERGE_SHADOW_PLAN:-1}" == "1" ]]; then
     _bm_shadow_plan || true   # best-effort: never block main flow
 fi
 
-# ── 0a. Untracked-files handler (INFRA-404) ──────────────────────────────────
+# ── 0a. Untracked-files handler (INFRA-404 / INFRA-8083) ─────────────────────
 # Instead of aborting when untracked files exist, auto-add them with an
 # explicit warning. This closes the "partial-ship hazard" where bot-merge
 # aborts before pushing, leaving the PR incomplete. Bypass: CHUMP_BOT_MERGE_ALLOW_UNTRACKED=0
+#
+# INFRA-8083 guards (implemented in _bm_autostage_untracked in lib/bot-merge-autocommit.sh):
+#   (a) NEVER auto-stage docs/gaps/*.yaml (^docs/gaps/.*\.yaml$).
+#   (b) If a dispatch lease declares explicit `paths`, stage only untracked files
+#       matching those declared paths.
+#   (c) Refuse (exit 4 leaving git index untouched) when the remaining untracked
+#       file count exceeds ${CHUMP_BOT_MERGE_MAX_UNTRACKED:-50}.
 _bm_substep "untracked-auto-add"
 if [[ "${CHUMP_BOT_MERGE_ALLOW_UNTRACKED:-1}" != "0" ]]; then
-    untracked=$(git ls-files --others --exclude-standard src/ crates/ scripts/ docs/ 2>/dev/null)
-    if [[ -n "$untracked" ]]; then
-        yellow "INFRA-404: Untracked files found — auto-adding with explicit warning:"
-        echo "$untracked" | sed 's/^/  + /'
-        git add $untracked
-        green "Auto-added $(echo "$untracked" | wc -l) untracked file(s)"
+    if ! _bm_autostage_untracked; then
+        exit 4
     fi
 fi
 

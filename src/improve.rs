@@ -2130,6 +2130,36 @@ fn work_dir_has_real_edits(work_dir: &Path) -> bool {
     }
 }
 
+/// If an agent tool (`git_commit`) advanced `HEAD` ahead of `origin/<base_branch>`,
+/// soft-reset `HEAD` back to `origin/<base_branch>` so the agent's committed
+/// changes return to the index/working tree for `work_dir_has_real_edits` and
+/// `guarded_stage_and_commit` (which strips `.chump`/`sessions`/`logs/chump.log`
+/// and commits with the `Chump-Agent` trailer).
+fn uncommit_agent_commits_onto_base(work_dir: &Path, base_branch: &str) {
+    let base_ref = format!("origin/{base_branch}");
+    let range = format!("{base_ref}..HEAD");
+    if let Ok(out) = Command::new("git")
+        .arg("-C")
+        .arg(work_dir)
+        .args(["rev-list", "--count", &range])
+        .output()
+    {
+        if out.status.success() {
+            let count = String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(0);
+            if count > 0 {
+                let _ = Command::new("git")
+                    .arg("-C")
+                    .arg(work_dir)
+                    .args(["reset", "--soft", &base_ref])
+                    .status();
+            }
+        }
+    }
+}
+
 fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<String> {
     use chump_handoff::contracts::{ExternalRepoContract, ExternalRepoInput};
     use chump_handoff::HandoffContract;
@@ -2178,7 +2208,7 @@ fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<Str
         external_repo: opts.owner_repo.clone(),
         repo_local_path: work_dir.to_string_lossy().to_string(),
         proposed_gap_description: gap_description,
-        base_branch,
+        base_branch: base_branch.clone(),
         fork_owner,
     };
 
@@ -2242,6 +2272,7 @@ fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<Str
         );
         let mut c = Command::new(&chump_bin);
         c.arg("agent-run")
+            .arg("--slim")
             .arg("--prompt-file")
             .arg(&prompt_file)
             .arg("--cwd")
@@ -2271,6 +2302,7 @@ fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<Str
     // apply it now with str_replace" nudge is the constraint-safe lift before escalating
     // to a stronger (paid/Claude) provider. Gated off the claude backend (its own path
     // applies edits) and skippable via CHUMP_IMPLEMENT_FORCE_EDIT_TRIES=0.
+    uncommit_agent_commits_onto_base(&work_dir, &base_branch);
     if backend != "claude" {
         let tries: u32 = std::env::var("CHUMP_IMPLEMENT_FORCE_EDIT_TRIES")
             .ok()
@@ -2302,6 +2334,7 @@ fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<Str
                 .unwrap_or_else(|_| "chump".to_string());
             let mut c = Command::new(&chump_bin);
             c.arg("agent-run")
+                .arg("--slim")
                 .arg("--prompt-file")
                 .arg(&pf)
                 .arg("--cwd")
@@ -2319,6 +2352,7 @@ fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<Str
                 }
             }
             let _ = std::fs::remove_file(&pf);
+            uncommit_agent_commits_onto_base(&work_dir, &base_branch);
         }
     }
 
@@ -2336,6 +2370,7 @@ fn implement_gap(opts: &Opts, clone_dir: &Path, gap: &ProposedGap) -> Result<Str
     // A landed-but-rejected edit is a failed attempt exactly like landing no edit: without
     // this, `deterministic_ship` below just bails RC=1 and the whole run fails instead of
     // giving the next-stronger model a shot at fixing it.
+    uncommit_agent_commits_onto_base(&work_dir, &base_branch);
     let landed_no_edit = !work_dir_has_real_edits(&work_dir);
     let landed_broken_edit = !landed_no_edit && working_tree_edit_is_broken(&work_dir);
     // EFFECTIVE-1934: on BYOK-primary nodes without Claude credentials (and no test
@@ -3262,6 +3297,7 @@ fn fix_pr_dispatch(
             .unwrap_or_else(|_| "chump".to_string());
         let mut c = Command::new(&chump_bin);
         c.arg("agent-run")
+            .arg("--slim")
             .arg("--prompt-file")
             .arg(&prompt_file)
             .arg("--cwd")

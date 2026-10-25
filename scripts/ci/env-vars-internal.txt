@@ -3720,3 +3720,6 @@ CHUMP_ARM_POLICY_REQUIRE_REVIEW_APPROVE
 # RESILIENT-1633: CI-red repair per-(PR, head-sha) stamp directory and flake catalogue override
 CHUMP_CI_REPAIR_STAMP_DIR
 CHUMP_CI_FLAKE_CATALOGUE
+# INFRA-8083: bot-merge untracked auto-stage ceiling and dispatch external_repo dry-run fixture flag
+CHUMP_BOT_MERGE_MAX_UNTRACKED
+CHUMP_DISPATCH_EXTERNAL_DRY_RUN

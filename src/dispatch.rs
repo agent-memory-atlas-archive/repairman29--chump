@@ -306,6 +306,17 @@ fn collect_branch_diff_files(dir: &Path) -> Vec<String> {
     }
 }
 
+/// INFRA-8083 / MISSION-046: extract `OWNER/REPO` from a gap's `skills_required`
+/// (or `notes` tag list) if it carries an `external_repo:OWNER/REPO` tag (single
+/// tag or comma/space/tab/newline-separated list).
+pub fn external_repo_target_from_skills(skills: &str) -> Option<String> {
+    skills
+        .split([',', ' ', '\t', '\n', '\r'])
+        .find_map(|tok| tok.trim().strip_prefix("external_repo:"))
+        .map(|s| s.trim_matches(|c: char| c == '"' || c == '\'').to_string())
+        .filter(|s| !s.is_empty() && s.contains('/') && !s.contains('<') && !s.contains('>'))
+}
+
 /// Emit `kind=dispatch_auto_merge_refused` to `<repo_root>/.chump-locks/ambient.jsonl`
 /// (CREDIBLE-1577 / CREDIBLE-1526 AC5).
 // scanner-anchor: "kind":"dispatch_auto_merge_refused"
@@ -738,18 +749,76 @@ pub fn run(opts: DispatchOptions) -> Result<DispatchOutcome> {
         );
     }
 
-    // RESILIENT-1494: Resolve the gap from the CANONICAL store before creating
-    // a worktree or spawning an agent; fail loud if the gap cannot be loaded so
-    // we never spawn `claude -p` on an empty/fallback prompt.
-    if opts.mode == DispatchMode::Work && !matches!(opts.work, WorkBackend::Interactive) {
-        let row = crate::dispatch_repair::load_canonical_gap(&opts.repo_root, opts.gap_id)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        if std::env::var_os("CHUMP_SUBAGENT_BUDGET_S").is_none()
-            && std::env::var_os("CHUMP_DISPATCH_TIMEOUT_SECS").is_none()
-            && std::env::var_os("CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S").is_none()
-        {
-            let effort_budget = budget_secs_for_effort(&row.effort);
-            std::env::set_var("CHUMP_SUBAGENT_BUDGET_S", effort_budget.to_string());
+    // INFRA-8083: When not repairing an in-repo PR, resolve the gap from the
+    // canonical store before creating a chump worktree or running bot-merge.sh.
+    // If the gap carries `external_repo:<owner>/<repo>` in `skills_required`
+    // (or `notes`), route directly to `chump improve <owner>/<repo> --gap <ID>
+    // --apply` so external-repo gaps never create a chump worktree or invoke
+    // in-repo bot-merge.sh.
+    if !matches!(opts.mode, DispatchMode::Repair { .. }) {
+        let canonical_row =
+            crate::dispatch_repair::load_canonical_gap(&opts.repo_root, opts.gap_id);
+        if let Ok(ref row) = canonical_row {
+            let ext_target = external_repo_target_from_skills(&row.skills_required)
+                .or_else(|| external_repo_target_from_skills(&row.notes));
+            if let Some(owner_repo) = ext_target {
+                eprintln!(
+                    "[dispatch] INFRA-8083: gap {} is tagged external_repo:{} — routing to chump improve {} --gap {} --apply",
+                    opts.gap_id, owner_repo, owner_repo, opts.gap_id
+                );
+                let dry_run =
+                    std::env::var("CHUMP_DISPATCH_EXTERNAL_DRY_RUN").as_deref() == Ok("1");
+                if dry_run {
+                    println!("chump improve {} --gap {} --apply", owner_repo, opts.gap_id);
+                    return Ok(DispatchOutcome {
+                        gap_id: opts.gap_id.to_string(),
+                        branch: format!("external:{owner_repo}"),
+                        result: ShipResult::Shipped { pr_number: 0 },
+                        duration_secs: started.elapsed().as_secs(),
+                    });
+                }
+                let improve_args = vec![
+                    owner_repo.clone(),
+                    "--gap".to_string(),
+                    opts.gap_id.to_string(),
+                    "--apply".to_string(),
+                ];
+                let rc = crate::improve::run(&improve_args);
+                let duration_secs = started.elapsed().as_secs();
+                if rc == 0 {
+                    return Ok(DispatchOutcome {
+                        gap_id: opts.gap_id.to_string(),
+                        branch: format!("external:{owner_repo}"),
+                        result: ShipResult::Shipped { pr_number: 0 },
+                        duration_secs,
+                    });
+                } else {
+                    return Ok(DispatchOutcome {
+                        gap_id: opts.gap_id.to_string(),
+                        branch: format!("external:{owner_repo}"),
+                        result: ShipResult::Aborted {
+                            error: format!(
+                                "chump improve {} --gap {} --apply exited {}",
+                                owner_repo, opts.gap_id, rc
+                            ),
+                        },
+                        duration_secs,
+                    });
+                }
+            }
+        }
+        // RESILIENT-1494: Resolve the gap from the CANONICAL store before creating
+        // a worktree or spawning an agent; fail loud if the gap cannot be loaded so
+        // we never spawn `claude -p` on an empty/fallback prompt.
+        if opts.mode == DispatchMode::Work && !matches!(opts.work, WorkBackend::Interactive) {
+            let row = canonical_row.map_err(|e| anyhow::anyhow!("{e}"))?;
+            if std::env::var_os("CHUMP_SUBAGENT_BUDGET_S").is_none()
+                && std::env::var_os("CHUMP_DISPATCH_TIMEOUT_SECS").is_none()
+                && std::env::var_os("CHUMP_SUBAGENT_BOT_MERGE_BUDGET_S").is_none()
+            {
+                let effort_budget = budget_secs_for_effort(&row.effort);
+                std::env::set_var("CHUMP_SUBAGENT_BUDGET_S", effort_budget.to_string());
+            }
         }
     }
 
@@ -1015,6 +1084,34 @@ fn kill_process_group(pid: u32, sig: libc::c_int) {
     unsafe {
         libc::kill(-(pid as libc::pid_t), sig);
     }
+}
+
+/// INFRA-8083: Terminate a child process and its entire process group (`-pgid`,
+/// where `pgid == child.id()` from `process_group(0)`). Sends `SIGTERM` first,
+/// polls briefly for exit, then sends `SIGKILL` to the group, calls
+/// `child.kill()`, and reaps `child.wait()`.
+#[cfg(unix)]
+pub fn kill_child_process_group(child: &mut Child) {
+    let pid = child.id();
+    if pid > 1 {
+        kill_process_group(pid, libc::SIGTERM);
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_millis(200) {
+            if let Ok(Some(_)) = child.try_wait() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        kill_process_group(pid, libc::SIGKILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+pub fn kill_child_process_group(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Internal bundle of `(DispatchOptions, working_dir)` so step functions
@@ -2314,8 +2411,7 @@ fn wait_with_hang_detection_cfg(
                         use std::os::unix::process::ExitStatusExt as _;
                         return Ok(std::process::ExitStatus::from_raw(0));
                     }
-                    kill_process_group(child_pid, libc::SIGKILL);
-                    let _ = child.wait();
+                    kill_child_process_group(&mut child);
                     bail!(
                         "{} showed no worktree activity for {} secs (hang timeout {} secs) \
                          for gap {}; sent SIGKILL",
@@ -2925,10 +3021,25 @@ fn ship(ws: &Workspace) -> Result<ShipResult> {
     // `git rev-parse --abbrev-ref HEAD` — it MUST run inside the
     // dispatch's fresh worktree, not the main checkout, or it pushes
     // (and force-arms auto-merge on) the wrong branch.
-    let status = cmd
-        .current_dir(ws.working_dir())
-        .status()
-        .context("invoke bot-merge.sh")?;
+    // INFRA-8083: spawn bot-merge.sh in its own process group (`process_group(0)`)
+    // so terminating or dropping the dispatch also terminates all bot-merge
+    // descendants.
+    cmd.current_dir(ws.working_dir());
+    configure_child_lifetime(&mut cmd);
+    let mut child = cmd.spawn().context("invoke bot-merge.sh")?;
+    let child_pid = child.id();
+    let mut group_guard = ChildGroupGuard::new(child_pid, opts.gap_id);
+    let status = match child.wait() {
+        Ok(s) => {
+            group_guard.release();
+            s
+        }
+        Err(e) => {
+            kill_child_process_group(&mut child);
+            group_guard.release();
+            return Err(e).context("wait for bot-merge.sh");
+        }
+    };
 
     // CREDIBLE-1506: bot-merge.sh's exit code is advisory, not authoritative.
     // bot-merge arms GitHub auto-merge and THEN runs the INFRA-154 post-arm
@@ -5125,5 +5236,128 @@ mod tests {
                 None => std::env::remove_var(k),
             }
         }
+    }
+
+    #[test]
+    #[serial_test::serial(cargo_target_env)]
+    fn infra_8083_dispatch_external_repo_routes_to_improve_without_bot_merge() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main_repo = tmp.path().join("main-repo");
+        std::fs::create_dir_all(main_repo.join("scripts/coord")).unwrap();
+        git(&main_repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(main_repo.join("README.md"), "init\n").unwrap();
+        git(&main_repo, &["add", "README.md"]);
+        git(&main_repo, &["commit", "-qm", "init"]);
+
+        // Write a poison bot-merge.sh that writes a marker file if executed.
+        let marker = tmp.path().join("bot-merge-ran.marker");
+        let bot_merge_script = main_repo.join("scripts/coord/bot-merge.sh");
+        std::fs::write(
+            &bot_merge_script,
+            format!(
+                "#!/usr/bin/env bash\necho ran > '{}'\nexit 1\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&bot_merge_script).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&bot_merge_script, perms).unwrap();
+        }
+
+        // Seed an external_repo gap in the canonical GapStore.
+        let store = chump_gap_store::GapStore::open(&main_repo).expect("open canonical store");
+        let gap_id = store
+            .reserve("INFRA", "INFRA-8083 external routing fixture", "P1", "s")
+            .expect("reserve gap");
+        store
+            .set_fields(
+                &gap_id,
+                chump_gap_store::GapFieldUpdate {
+                    skills_required: Some("external_repo:repairman29/upshift-cli".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect("set skills_required");
+        drop(store);
+
+        let prev_dry = std::env::var("CHUMP_DISPATCH_EXTERNAL_DRY_RUN").ok();
+        std::env::set_var("CHUMP_DISPATCH_EXTERNAL_DRY_RUN", "1");
+
+        let opts = DispatchOptions {
+            gap_id: &gap_id,
+            work: WorkBackend::Interactive,
+            auto_merge: false,
+            skip_tests: true,
+            paths: None,
+            repo_root: main_repo.clone(),
+            mode: DispatchMode::Work,
+        };
+        let outcome = run(opts).expect("dispatch on external_repo gap should succeed");
+
+        match prev_dry {
+            Some(v) => std::env::set_var("CHUMP_DISPATCH_EXTERNAL_DRY_RUN", v),
+            None => std::env::remove_var("CHUMP_DISPATCH_EXTERNAL_DRY_RUN"),
+        }
+
+        assert_eq!(outcome.branch, "external:repairman29/upshift-cli");
+        assert_eq!(outcome.result, ShipResult::Shipped { pr_number: 0 });
+        assert!(
+            !marker.exists(),
+            "in-repo bot-merge.sh must NEVER run for an external_repo gap"
+        );
+        assert!(
+            !main_repo.join(".claude/worktrees").exists(),
+            "in-repo worktree must not be created for an external_repo gap"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn infra_8083_kill_child_process_group_terminates_grandchild() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pid_file = tmp.path().join("grandchild.pid");
+        let script = format!("sleep 300 &\necho $! > '{}'\nwait\n", pid_file.display());
+        let mut child = spawn_sh(tmp.path(), &script);
+
+        // Wait up to 3s for the grandchild PID file to appear.
+        let mut grandchild_pid: Option<u32> = None;
+        let start = std::time::Instant::now();
+        while start.elapsed() < Duration::from_secs(3) {
+            if let Ok(raw) = std::fs::read_to_string(&pid_file) {
+                if let Ok(p) = raw.trim().parse::<u32>() {
+                    if p > 1 {
+                        grandchild_pid = Some(p);
+                        break;
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let gpid = grandchild_pid.expect("grandchild sleep pid must be recorded");
+        assert!(
+            child_is_alive(gpid),
+            "grandchild pid {gpid} should be alive before kill_child_process_group"
+        );
+
+        kill_child_process_group(&mut child);
+
+        // Poll briefly in case reaping takes a few ms.
+        let mut dead = false;
+        let wait_start = std::time::Instant::now();
+        while wait_start.elapsed() < Duration::from_secs(2) {
+            if !child_is_alive(gpid) {
+                dead = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(
+            dead,
+            "grandchild pid {gpid} must be terminated by kill_child_process_group"
+        );
     }
 }
