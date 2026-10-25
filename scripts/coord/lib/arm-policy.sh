@@ -67,6 +67,10 @@ ARM_POLICY_HOLD_LABEL="no-auto-merge"
 # is scripts/coord/lib/review-hold.sh review_hold_allows, used by the organ's
 # own head-pinned arm; wiring it into the other armers is a filed follow-up.)
 ARM_POLICY_HOLD_LABELS="no-auto-merge hold do-not-merge CHUMP_HOLD review-held review-needs-mutants"
+# CREDIBLE-1587: canonical trusted login of the independent review organ when
+# arm_policy_require_review_approve (or arm_policy_allows with
+# CHUMP_ARM_POLICY_REQUIRE_REVIEW_APPROVE=1) checks review_hold_allows.
+ARM_POLICY_REVIEW_ORGAN_LOGIN="repairman29"
 
 _arm_policy_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -168,10 +172,18 @@ _arm_policy_audit_rearm() { # <pr> <armer> <repo>
     return 0
 }
 
-# arm_policy_allows <pr-number> [armer-name] [owner/repo]
+# arm_policy_allows <pr-number> [armer-name] [owner/repo] [head-sha] [trusted-author]
 arm_policy_allows() {
-    local pr="${1:-}" armer="${2:-${CHUMP_GH_SCRIPT:-$(basename "${0:-unknown}")}}" repo="${3:-}"
+    local pr="${1:-}" armer="${2:-${CHUMP_GH_SCRIPT:-$(basename "${0:-unknown}")}}" repo="${3:-}" head_arg="${4:-}" trusted_arg="${5:-}"
+    local require_approve=0
+    if [[ "${CHUMP_ARM_POLICY_REQUIRE_REVIEW_APPROVE:-0}" == "1" || -n "$head_arg" || -n "$trusted_arg" ]]; then
+        require_approve=1
+    fi
     if [[ ! "$pr" =~ ^[0-9]+$ ]]; then
+        if [[ "$require_approve" -eq 1 ]]; then
+            echo "[arm-policy] WARN: arm_policy_allows called without a PR number ('$pr') — HELD (fail closed)" >&2
+            return 1
+        fi
         echo "[arm-policy] WARN: arm_policy_allows called without a PR number ('$pr') — allowing" >&2
         return 0
     fi
@@ -209,6 +221,14 @@ arm_policy_allows() {
         reason="$(_arm_policy_hold_reason "$payload" 2>/dev/null)" && rc=0 || rc=$?
     fi
     if [[ "$rc" -ne 0 ]]; then
+        if [[ "$require_approve" -eq 1 ]]; then
+            if ! declare -F review_hold_allows >/dev/null 2>&1; then
+                # shellcheck source=scripts/coord/lib/review-hold.sh
+                source "${_arm_policy_lib_dir}/review-hold.sh" || return 1
+            fi
+            review_hold_allows "$pr" "${head_arg:-0000000}" "$repo" "$armer" "${trusted_arg:-${ARM_POLICY_REVIEW_ORGAN_LOGIN}}"
+            return 1
+        fi
         echo "[arm-policy] WARN: PR #${pr}: could not read labels/body/comments — failing open" >&2
         return 0
     fi
@@ -218,8 +238,30 @@ arm_policy_allows() {
         return 1
     fi
 
+    if [[ "$require_approve" -eq 1 ]]; then
+        if ! declare -F review_hold_allows >/dev/null 2>&1; then
+            # shellcheck source=scripts/coord/lib/review-hold.sh
+            source "${_arm_policy_lib_dir}/review-hold.sh" || return 1
+        fi
+        local resolved_head="$head_arg"
+        if [[ -z "$resolved_head" ]]; then
+            resolved_head="$(CHUMP_GH_CALL_CRITICALITY=background _arm_policy_gh pr view "$pr" ${_ap_repo_arg[@]+"${_ap_repo_arg[@]}"} \
+                --json headRefOid --jq '.headRefOid' 2>/dev/null || true)"
+        fi
+        review_hold_allows "$pr" "$resolved_head" "$repo" "$armer" "${trusted_arg:-${ARM_POLICY_REVIEW_ORGAN_LOGIN}}" || return 1
+    fi
+
     _arm_policy_audit_rearm "$pr" "$armer" "$repo"
     return 0
+}
+
+# arm_policy_require_review_approve <pr-number> [head-sha] [armer-name] [owner/repo] [trusted-author]
+#   CREDIBLE-1587: fail-CLOSED wrapper for armers that require both deliberate-hold
+#   clearance (arm_policy_allows) AND an independent-review-organ VERDICT: APPROVE
+#   for the PR's current head SHA (review_hold_allows from review-hold.sh).
+arm_policy_require_review_approve() {
+    local pr="${1:-}" head="${2:-}" armer="${3:-${CHUMP_GH_SCRIPT:-$(basename "${0:-unknown}")}}" repo="${4:-}" trusted="${5:-${ARM_POLICY_REVIEW_ORGAN_LOGIN}}"
+    CHUMP_ARM_POLICY_REQUIRE_REVIEW_APPROVE=1 arm_policy_allows "$pr" "$armer" "$repo" "$head" "$trusted"
 }
 
 

@@ -69,22 +69,23 @@ CLAUDE_BIN="claude"
 CHECKOUT="$HOME/chump"
 SELF_LOGIN=""          # own-lane skip: a PR authored by this login is not reviewed
 REPO=""                # owner/repo; empty = current checkout's repo
-# CREDIBLE-1589 (AC3): the CHANGES-REQUIRED repair dispatch path is OFF by
-# default (a constant switch, below). --enable-repair is the test seam that
-# flips it on; the systemd unit never passes it, so production stays OFF until
-# the lane-1 Rust slice teaches `chump dispatch` the explicit --repair flag.
-ENABLE_REPAIR=0
+# CREDIBLE-1589 / CREDIBLE-1596 (AC3): the lane-1 Rust slice (`chump dispatch
+# --repair`) is wired, so the repair dispatch path is ON by default.
+# --disable-repair (and --enable-repair) are test seams that the systemd unit
+# never passes.
+ENABLE_REPAIR=1
 declare -a ONLY_PRS=()
 while (( $# )); do
     case "$1" in
-        --claude-bin)    CLAUDE_BIN="${2:-}"; shift 2 ;;
-        --checkout)      CHECKOUT="${2:-}"; shift 2 ;;
-        --self-login)    SELF_LOGIN="${2:-}"; shift 2 ;;
-        --repo)          REPO="${2:-}"; shift 2 ;;
-        --pr)            ONLY_PRS+=("${2:-}"); shift 2 ;;
-        --enable-repair) ENABLE_REPAIR=1; shift ;;
-        -h|--help)       sed -n '2,45p' "$0"; exit 0 ;;
-        *)               echo "[review-organ] unknown argument '$1'" >&2; exit 2 ;;
+        --claude-bin)     CLAUDE_BIN="${2:-}"; shift 2 ;;
+        --checkout)       CHECKOUT="${2:-}"; shift 2 ;;
+        --self-login)     SELF_LOGIN="${2:-}"; shift 2 ;;
+        --repo)           REPO="${2:-}"; shift 2 ;;
+        --pr)             ONLY_PRS+=("${2:-}"); shift 2 ;;
+        --enable-repair)  ENABLE_REPAIR=1; shift ;;
+        --disable-repair) ENABLE_REPAIR=0; shift ;;
+        -h|--help)        sed -n '2,45p' "$0"; exit 0 ;;
+        *)                echo "[review-organ] unknown argument '$1'" >&2; exit 2 ;;
     esac
 done
 
@@ -176,6 +177,7 @@ emit() { printf '%s\n' "$1" >> "$AMBIENT" 2>/dev/null || true; }
 # scanner-anchor: "kind":"review_organ_label_error"
 # scanner-anchor: "kind":"review_organ_gap_store_miss"
 # scanner-anchor: "kind":"review_organ_gap_ship_failed"
+# scanner-anchor: "kind":"pr_repair_dispatched"
 
 REVIEWED=0; APPROVED=0; CHANGES=0; HELD_MUTANTS=0; ARMED=0; DISPATCHED=0; SKIPPED=0
 # CREDIBLE-1602: set to 1 when the post-merge gap step hits a loud failure (a
@@ -383,7 +385,11 @@ derive_gap_from_branch() {
 dispatch_repair() {
     local pr="$1" head="$2" branch gap
     if [[ "$REPAIR_DISPATCH_ENABLED" != 1 ]]; then
-        log "PR #$pr: CHANGES REQUIRED — repair dispatch path OFF (constant switch; awaiting lane-1 'chump dispatch --repair'); no repair dispatched"
+        log "PR #$pr: CHANGES REQUIRED — repair dispatch path OFF (--disable-repair); no repair dispatched"
+        return 0
+    fi
+    if (( DISPATCHED >= 1 )); then
+        log "PR #$pr: CHANGES REQUIRED — repair cap (1 per tick) already reached; skipping repair dispatch"
         return 0
     fi
     branch="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json headRefName --jq '.headRefName' 2>/dev/null || true)"
@@ -394,6 +400,131 @@ dispatch_repair() {
     fi
     log "PR #$pr: CHANGES REQUIRED → dispatching one repair for $gap onto the PR head branch (--repair, no auto-merge)"
     chump dispatch "$gap" --backend headless --repair >/dev/null 2>&1 || log "WARN: repair dispatch for $gap failed"
+    emit "$(printf '{"ts":"%s","kind":"pr_repair_dispatched","pr":%s,"gap":"%s","head":"%s","reason":"changes_required","failed_check":""}' \
+        "$(ts)" "$pr" "$(json_str "$gap")" "$(json_str "$head")")"
+    DISPATCHED=$((DISPATCHED + 1))
+}
+
+# maybe_dispatch_ci_red_repair <pr> <head> — RESILIENT-1633 (PHASE-R R6):
+# When an open PR has at least one required check (cargo-check, cargo-test-shard,
+# fast-checks, verified) in COMPLETED/FAILURE state on its current head SHA:
+#   - Ignore checks matching docs/ci-flake-catalogue.md or
+#     docs/process/KNOWN_FLAKES.yaml (check_flakes), CANCELLED checks, and
+#     non-required/advisory checks (INFRA-849).
+#   - Never run on a PR carrying `pr-cut` or any hold label
+#     (no-auto-merge, hold, do-not-merge, CHUMP_HOLD).
+#   - Enforce at most 1 repair dispatch per tick (DISPATCHED < 1) and
+#     idempotency per (pr, head_sha) via a stamp file under
+#     ${CHUMP_CI_REPAIR_STAMP_DIR:-$CHECKOUT/.chump-locks/ci-repair-dispatched}.
+#   - Ensure `review-held` is applied so the repaired head still requires a
+#     fresh VERDICT: APPROVE from the review organ.
+#   - Invoke `chump dispatch "$gap" --backend headless --repair` (never
+#     --auto-merge) and emit kind=pr_repair_dispatched.
+maybe_dispatch_ci_red_repair() {
+    local pr="$1" head="$2"
+    if [[ "$REPAIR_DISPATCH_ENABLED" != 1 ]]; then
+        return 0
+    fi
+    if (( DISPATCHED >= 1 )); then
+        log "PR #$pr: CI-red repair skipped — per-tick repair cap (1) already reached"
+        return 0
+    fi
+    local labels_payload blocked_lbl
+    labels_payload="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} \
+        --json labels,comments 2>/dev/null || true)"
+    if [[ -n "$labels_payload" ]]; then
+        blocked_lbl="$(python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(0)
+blocked = {"pr-cut", "no-auto-merge", "hold", "do-not-merge", "chump_hold"}
+for l in d.get("labels") or []:
+    name = (l.get("name", "") if isinstance(l, dict) else str(l)).strip()
+    if name.lower() in blocked:
+        print(name)
+        sys.exit(0)
+' "$labels_payload" 2>/dev/null || true)"
+        if [[ -n "$blocked_lbl" ]]; then
+            log "PR #$pr: carries '$blocked_lbl' label — skipping CI-red repair dispatch"
+            return 0
+        fi
+    fi
+
+    local roll failed_check
+    roll="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} \
+        --json statusCheckRollup,headRefOid 2>/dev/null || true)"
+    [[ -n "$roll" ]] || return 0
+    failed_check="$(HEAD_SHA="$head" \
+        FLAKE_MD="${CHUMP_CI_FLAKE_CATALOGUE:-$REPO_ROOT/docs/ci-flake-catalogue.md}" \
+        FLAKE_YAML="${CHUMP_KNOWN_FLAKES_FILE:-$REPO_ROOT/docs/process/KNOWN_FLAKES.yaml}" \
+        python3 -c '
+import json, os, pathlib, re, sys
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(1)
+if (d.get("headRefOid") or "").lower() != (os.environ.get("HEAD_SHA") or "").lower():
+    sys.exit(1)
+flakes = set()
+for p_env in ("FLAKE_MD", "FLAKE_YAML"):
+    p = os.environ.get(p_env) or ""
+    if p and pathlib.Path(p).is_file():
+        txt = pathlib.Path(p).read_text(errors="replace")
+        for m in re.finditer(r"check_name:\s*[\"'\''`]?([^\"'\''`\n#]+)", txt):
+            flakes.add(m.group(1).strip().lower())
+        if p.endswith(".md"):
+            for m in re.finditer(r"`([^`\n]+)`", txt):
+                flakes.add(m.group(1).strip().lower())
+            for raw_line in txt.splitlines():
+                cleaned = re.sub(r"^[-*#\s]+", "", raw_line).strip().strip("`").lower()
+                if cleaned:
+                    flakes.add(cleaned)
+required = {"cargo-check", "cargo-test-shard", "fast-checks", "verified"}
+for c in d.get("statusCheckRollup") or []:
+    status = (c.get("status") or "").upper()
+    concl = (c.get("conclusion") or "").upper()
+    name = (c.get("name") or "").strip()
+    if status and status != "COMPLETED":
+        continue
+    if concl != "FAILURE":
+        continue
+    nl = name.lower()
+    if nl in flakes:
+        continue
+    if nl in required or nl.startswith("cargo-test-shard ("):
+        print(name)
+        sys.exit(0)
+sys.exit(1)
+' "$roll" 2>/dev/null || true)"
+    [[ -n "$failed_check" ]] || return 0
+
+    # Keep/apply review-held so the repaired head requires a fresh VERDICT: APPROVE.
+    label_add "$pr" "$REVIEW_HOLD_LABEL"
+
+    local stamp_dir stamp_file
+    stamp_dir="${CHUMP_CI_REPAIR_STAMP_DIR:-$CHECKOUT/.chump-locks/ci-repair-dispatched}"
+    mkdir -p "$stamp_dir" 2>/dev/null || true
+    stamp_file="$stamp_dir/${pr}-${head}"
+    if [[ -f "$stamp_file" ]]; then
+        log "PR #$pr: CI-red repair already dispatched for head ${head:0:12} ($failed_check) — skipping (idempotent)"
+        return 0
+    fi
+
+    local branch gap
+    branch="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json headRefName --jq '.headRefName' 2>/dev/null || true)"
+    gap="$(derive_gap_from_branch "$branch")"
+    if [[ -z "$gap" ]]; then
+        log "PR #$pr: deterministic CI-red ($failed_check) but no gap id in branch '$branch' — no repair dispatched"
+        return 0
+    fi
+
+    printf '%s\n' "$failed_check" > "$stamp_file" 2>/dev/null || true
+    log "PR #$pr: deterministic CI-red on required check '$failed_check' for head ${head:0:12} → dispatching repair for $gap (--repair, no auto-merge)"
+    chump dispatch "$gap" --backend headless --repair >/dev/null 2>&1 || log "WARN: CI-red repair dispatch for $gap failed"
+    emit "$(printf '{"ts":"%s","kind":"pr_repair_dispatched","pr":%s,"gap":"%s","head":"%s","reason":"ci_red","failed_check":"%s"}' \
+        "$(ts)" "$pr" "$(json_str "$gap")" "$(json_str "$head")" "$(json_str "$failed_check")")"
     DISPATCHED=$((DISPATCHED + 1))
 }
 
@@ -837,7 +968,9 @@ maybe_arm() {
             return 0 ;;
     esac
     if ! verified_green "$pr" "$head"; then
-        log "PR #$pr: not verified-green for head ${head:0:12} — not arming (head may have moved)"; return 0
+        log "PR #$pr: not verified-green for head ${head:0:12} — not arming (head may have moved)"
+        maybe_dispatch_ci_red_repair "$pr" "$head"
+        return 0
     fi
     log "PR #$pr: APPROVE for head ${head:0:12} + verified green → head-pinned squash merge (no auto-merge)"
     GH pr merge "$pr" ${REPO:+--repo "$REPO"} --squash --match-head-commit "$head" >/dev/null 2>&1 \

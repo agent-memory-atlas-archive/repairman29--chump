@@ -641,4 +641,35 @@ mod tests {
         assert!(ev.contains("\"kind\":\"pr_arm_skipped_hold\""), "{ev}");
         assert!(ev.contains("chump-ship(manual_ship)"), "{ev}");
     }
+
+    /// CREDIBLE-1583: `ManualShipPath::arm_auto_merge` refuses when `review-held`
+    /// is present AND fails closed when `gh pr view` errors.
+    #[tokio::test]
+    async fn arm_auto_merge_refuses_review_held_and_fails_closed_on_read_error() {
+        let tmp = TempDir::new().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        let session = unique_session_id("credible-1583");
+        let intent = ShipIntent::owned("CREDIBLE-1583", "b", "main", "msg", session);
+        let shipper = ManualShipPath::new(intent, tmp.path(), false).expect("bind");
+        {
+            let fake = crate::arm_policy::testing::FakeFetcher::held_by_label("review-held");
+            let _g = crate::arm_policy::override_for_tests(fake.clone(), &amb);
+            let armed = shipper.arm_auto_merge(4242).await.expect("non-fatal");
+            assert!(!armed, "review-held PR must not be armed");
+            assert_eq!(fake.calls.get(), 1);
+        }
+        {
+            let broken = crate::arm_policy::testing::FakeFetcher::read_error("gh pr view failed");
+            let _g = crate::arm_policy::override_for_tests(broken.clone(), &amb);
+            let armed = shipper.arm_auto_merge(4242).await.expect("non-fatal");
+            assert!(
+                !armed,
+                "unreadable PR must fail closed and not be armed by manual_ship"
+            );
+            assert_eq!(broken.calls.get(), 1);
+        }
+        let ev = std::fs::read_to_string(&amb).unwrap();
+        assert!(ev.contains("label:review-held"), "{ev}");
+        assert!(ev.contains("read_error:gh pr view failed"), "{ev}");
+    }
 }

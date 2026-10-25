@@ -612,7 +612,12 @@ case "$1 $2" in
 import json,os,sys
 body=open(sys.argv[1]).read()
 author=os.environ.get("ORGAN_SELF","organbot")
-json.dump({"labels":[],"comments":[{"body":body,"author":{"login":author},"createdAt":"2026-10-20T00:00:00Z"}]},open(sys.argv[2],"w"))
+try:
+    prev=json.load(open(sys.argv[2]))
+    labels=prev.get("labels",[])
+except Exception:
+    labels=[]
+json.dump({"labels":labels,"comments":[{"body":body,"author":{"login":author},"createdAt":"2026-10-20T00:00:00Z"}]},open(sys.argv[2],"w"))
 PY
     exit 0;;
   "label create") printf 'LABELCREATE %s\n' "$a" >>"$ORGLOG.labels"; exit 0;;
@@ -687,6 +692,7 @@ mkdir -p "$D/checkout"; git init -q "$D/checkout" >/dev/null 2>&1
 export ORGLOG="$D/org.log" ORGCMT="$D/cmt.json"
 organ_run() { # <pr> [extra args...]
     : >"$ORGLOG.merges"; : >"$ORGLOG.chump"; : >"$ORGLOG.edits"; : >"$ORGLOG.store"; : >"$ORGLOG.repo"; : >"$D/amb.jsonl"
+    rm -rf "$D/checkout/.chump-locks/ci-repair-dispatched"
     echo '{"labels":[],"comments":[]}' >"$ORGCMT"
     ( export PATH="$D/bin:$PATH" CHUMP_AMBIENT_LOG="$D/amb.jsonl"
       bash "$ORGAN" --claude-bin "$D/bin/claude" --checkout "$D/checkout" "$@" ) >/dev/null 2>&1 || true
@@ -984,29 +990,30 @@ for spec in \
 done
 unset ORG_ROLLUP
 
-# AC4 + CREDIBLE-1589 (AC3): the repair dispatch path is a CONSTANT switch, OFF
-# by default. With no --enable-repair, a CHANGES REQUIRED verdict posts the
-# verdict + holds the PR but dispatches NO repair (a plain `chump dispatch` on a
-# gap that already has an open PR is refused by claim gate 7, so dispatching
-# today only burns a guaranteed-refused cycle). MUTANT (killed here): drop the
-# `REPAIR_DISPATCH_ENABLED != 1` early-return in dispatch_repair → a repair fires
-# with the switch off → ndisp becomes 1 → this `== 0` assertion fails.
-organ_run --pr 204
+# AC4 + CREDIBLE-1589 (AC3) + CREDIBLE-1596 (AC3): with --disable-repair, a
+# CHANGES REQUIRED verdict posts the verdict + holds the PR but dispatches NO
+# repair. By default (ENABLE_REPAIR=1, CREDIBLE-1596 AC3), or with explicit
+# --enable-repair, a CHANGES REQUIRED verdict dispatches a headless --repair.
+organ_run --pr 204 --disable-repair
 ndisp_off="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp_off="${ndisp_off:-0}"
-[[ "$ndisp_off" == 0 ]] && ok "organ CREDIBLE-1589 AC3: repair path OFF by default → no dispatch (constant switch)" \
-    || bad "organ CREDIBLE-1589 AC3: repair dispatched with the switch off, got $ndisp_off ($(cat "$ORGLOG.chump"))"
+[[ "$ndisp_off" == 0 ]] && ok "organ CREDIBLE-1589 AC3: repair path OFF with --disable-repair → no dispatch" \
+    || bad "organ CREDIBLE-1589 AC3: repair dispatched with --disable-repair, got $ndisp_off ($(cat "$ORGLOG.chump"))"
 [[ -s "$ORGLOG.merges" ]] && bad "organ AC4: a CHANGES REQUIRED PR was merged (switch off)" || ok "organ AC4: CHANGES REQUIRED PR not merged (switch off)"
 [[ "$(sed -n '1p' "$ORGLOG.cmt.204")" == "VERDICT: CHANGES REQUIRED" ]] && ok "organ AC1: CHANGES comment first line exact" \
     || bad "organ AC1: CHANGES comment first line wrong"
 
-# CREDIBLE-1589 AC1/AC4: with the repair path ENABLED (--enable-repair, the test
-# seam the systemd unit never passes), a CHANGES REQUIRED verdict dispatches
-# exactly ONE repair that carries the explicit --repair flag — so the work lands
-# on the EXISTING PR head branch (DispatchMode::Repair) through a CLI flag, never
-# an ambient env default (no CHUMP_CLAIM_ALLOW_DUPLICATE_PR) — and never with
-# --auto-merge, and never merges the PR. MUTANT (killed here): drop `--repair`
-# from the `chump dispatch` line in dispatch_repair → the --repair assertion
-# below fails.
+# CREDIBLE-1596 AC3 + CREDIBLE-1589 AC1/AC4: with the repair path ENABLED by
+# default (ENABLE_REPAIR=1, and also with explicit --enable-repair), a CHANGES
+# REQUIRED verdict dispatches exactly ONE repair that carries the explicit
+# --repair flag — so the work lands on the EXISTING PR head branch
+# (DispatchMode::Repair) through a CLI flag, never an ambient env default (no
+# CHUMP_CLAIM_ALLOW_DUPLICATE_PR) — and never with --auto-merge, and never
+# merges the PR. MUTANT (killed here): drop `--repair` from the `chump dispatch`
+# line in dispatch_repair → the --repair assertion below fails.
+organ_run --pr 204
+ndisp_def="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp_def="${ndisp_def:-0}"
+[[ "$ndisp_def" == 1 ]] && ok "organ CREDIBLE-1596 AC3: repair path ON by default (ENABLE_REPAIR=1) → 1 repair dispatch" \
+    || bad "organ CREDIBLE-1596 AC3: expected 1 repair dispatch by default, got $ndisp_def ($(cat "$ORGLOG.chump"))"
 organ_run --pr 204 --enable-repair
 ndisp="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp="${ndisp:-0}"
 [[ "$ndisp" == 1 ]] && ok "organ CREDIBLE-1589 AC4: --enable-repair → exactly one repair dispatch" \
@@ -1685,12 +1692,21 @@ echo '{"labels":[],"comments":[]}' >"$ORGCMT"  # restore clean state for later b
 
 # Structural arm-site gate: the organ's arm path is guarded by the fail-closed
 # predicate and is head-pinned; it must NOT contain a `gh pr merge … --auto`.
+# CREDIBLE-1587 AC4: strip `#.*` comments BEFORE matching so an inline `# never`
+# or `# NEVER` comment on an executable `gh pr merge … --auto` line cannot mask it.
+organ_has_auto_merge_call() {
+    sed 's/#.*//' "$1" | grep -niE '(chump_)?gh[[:space:]]+pr[[:space:]]+merge[^|;]*--auto([[:space:]]|$|")'
+}
 grep -q 'review_hold_allows' "$ORGAN" && ok "organ: arm path calls review_hold_allows (fail-closed guard)" \
     || bad "organ: arm path does not call review_hold_allows"
 grep -q 'verified_green' "$ORGAN" && ok "organ: arm path checks verified_green" || bad "organ: arm path missing verified_green"
 grep -q -- '--match-head-commit' "$ORGAN" && ok "organ: arm is head-pinned (--match-head-commit)" || bad "organ: arm not head-pinned"
-grep -nE '(chump_)?gh pr merge[^|;#]*--auto([[:space:]]|$|")' "$ORGAN" | grep -vE '#|never|NEVER' \
+organ_has_auto_merge_call "$ORGAN" >/dev/null 2>&1 \
     && bad "organ: contains a gh pr merge --auto arm site" || ok "organ: never enables auto-merge (no gh pr merge --auto)"
+printf 'gh pr merge 1 --auto # NEVER\n' > "$D/synth-auto-never.sh"
+organ_has_auto_merge_call "$D/synth-auto-never.sh" >/dev/null 2>&1 \
+    && ok "CREDIBLE-1587 AC4: comment-stripped --auto detector flags 'gh pr merge 1 --auto # NEVER'" \
+    || bad "CREDIBLE-1587 AC4: comment-stripped --auto detector was masked by trailing '# NEVER'"
 
 # arm-policy.sh: the review organ's hold labels are honored fleet-wide.
 for lbl in review-held review-needs-mutants; do
@@ -1810,6 +1826,180 @@ if [[ -z "$direct_main_pushes" ]]; then
 else
     bad "CREDIBLE-1564: workflows still push main directly: $direct_main_pushes"
 fi
+
+# ── CREDIBLE-1583: Rust gh pr merge --auto callers are gated by chump-ship arm_policy ──
+echo "--- CREDIBLE-1583: Rust gh pr merge --auto callers gated by arm_policy ---"
+rust_unguarded=""
+while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    f="${line%%:*}"
+    rel="${f#"$REPO_ROOT"/}"
+    case "$rel" in
+        crates/chump-ship/src/lib.rs|crates/chump-ship/src/manual_ship.rs|crates/chump-integrator/src/daemon.rs) ;;
+        crates/chump-ship/src/arm_policy.rs|*/tests/*) ;;
+        *)
+            code="${line#*:}"; code="${code#*:}"
+            # ignore pure rust comments/doc-comments
+            if [[ ! "$code" =~ ^[[:space:]]*(//|/\*|\*) ]]; then
+                rust_unguarded+="$rel: $code"$'\n'
+            fi
+            ;;
+    esac
+done < <(grep -rnE '"merge"[^;\n]*"--auto"|gh pr merge[^"\n]*--auto' "$REPO_ROOT/crates/" 2>/dev/null || true)
+if [[ -z "$rust_unguarded" ]]; then
+    ok "CREDIBLE-1583: no unguarded gh pr merge --auto sites in crates/ outside the 3 gated callers"
+else
+    bad "CREDIBLE-1583: unguarded Rust gh pr merge --auto sites: $rust_unguarded"
+fi
+for rf in \
+    "crates/chump-ship/src/lib.rs" \
+    "crates/chump-ship/src/manual_ship.rs" \
+    "crates/chump-integrator/src/daemon.rs" \
+  ; do
+    grep -q 'arm_policy::require_allowed' "$REPO_ROOT/$rf" \
+        && ok "CREDIBLE-1583: $rf gates auto-merge via arm_policy::require_allowed" \
+        || bad "CREDIBLE-1583: $rf missing arm_policy::require_allowed"
+done
+for lbl in review-held review-needs-mutants; do
+    grep -q "\"$lbl\"" "$REPO_ROOT/crates/chump-ship/src/arm_policy.rs" \
+        && ok "CREDIBLE-1583: crates/chump-ship/src/arm_policy.rs HOLD_LABELS includes $lbl" \
+        || bad "CREDIBLE-1583: crates/chump-ship/src/arm_policy.rs missing $lbl"
+done
+
+# ── CREDIBLE-1587: systemd unit passes --self-login repairman29 + arm_policy_require_review_approve ──
+echo "--- CREDIBLE-1587: chump-review-organ.service --self-login + arm_policy_require_review_approve ---"
+grep -qE 'ExecStart=.*review-organ-tick\.sh.*--self-login[[:space:]]+repairman29' "$REPO_ROOT/scripts/dispatch/chump-review-organ.service" \
+    && ok "CREDIBLE-1587 AC1: chump-review-organ.service passes --self-login repairman29" \
+    || bad "CREDIBLE-1587 AC1: chump-review-organ.service missing --self-login repairman29"
+
+C1587_DIR="$D/c1587"
+mkdir -p "$C1587_DIR/bin"
+cat > "$C1587_DIR/bin/gh" <<'STUB1587'
+#!/usr/bin/env bash
+if [[ -n "${C1587_GH_FAIL:-}" ]]; then exit 1; fi
+if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
+    if [[ "$*" == *"labels,comments"* ]]; then
+        cat "${C1587_CMT_FILE}"
+        exit 0
+    fi
+    if [[ "$*" == *"headRefOid"* ]]; then
+        printf '%s\n' "${C1587_HEAD:-deadbeef1234567890abcdef1234567890abcdef}"
+        exit 0
+    fi
+    cat "${C1587_VIEW_FILE}"
+    exit 0
+fi
+exit 0
+STUB1587
+chmod +x "$C1587_DIR/bin/gh"
+
+C1587_SHA="deadbeef1234567890abcdef1234567890abcdef"
+printf '{"labels":[],"title":"feat: clean","body":"Closes: CREDIBLE-1587"}' > "$C1587_DIR/view.json"
+printf '{"labels":[],"comments":[{"author":{"login":"repairman29"},"createdAt":"2026-10-24T00:00:00Z","body":"VERDICT: APPROVE\\nhead: %s\\nVERDICT: APPROVE"}]}' "$C1587_SHA" > "$C1587_DIR/cmt.json"
+
+if PATH="$C1587_DIR/bin:$PATH" C1587_VIEW_FILE="$C1587_DIR/view.json" C1587_CMT_FILE="$C1587_DIR/cmt.json" C1587_HEAD="$C1587_SHA" \
+    bash -c "source '$LIB'; arm_policy_require_review_approve 601 '$C1587_SHA' test-armer repairman29/chump repairman29" >/dev/null 2>&1; then
+    ok "CREDIBLE-1587 AC2: arm_policy_require_review_approve ALLOWS PR with current-head repairman29 VERDICT: APPROVE"
+else
+    bad "CREDIBLE-1587 AC2: arm_policy_require_review_approve refused valid current-head repairman29 APPROVE"
+fi
+
+if PATH="$C1587_DIR/bin:$PATH" C1587_VIEW_FILE="$C1587_DIR/view.json" C1587_CMT_FILE="$C1587_DIR/cmt.json" C1587_HEAD="$C1587_SHA" \
+    CHUMP_ARM_POLICY_REQUIRE_REVIEW_APPROVE=1 \
+    bash -c "source '$LIB'; arm_policy_allows 601 test-armer repairman29/chump" >/dev/null 2>&1; then
+    ok "CREDIBLE-1587 AC2: CHUMP_ARM_POLICY_REQUIRE_REVIEW_APPROVE=1 arm_policy_allows ALLOWS approved PR"
+else
+    bad "CREDIBLE-1587 AC2: CHUMP_ARM_POLICY_REQUIRE_REVIEW_APPROVE=1 arm_policy_allows refused approved PR"
+fi
+
+# Refuses when no verdict comment is present
+printf '{"labels":[],"comments":[]}' > "$C1587_DIR/cmt.json"
+if PATH="$C1587_DIR/bin:$PATH" C1587_VIEW_FILE="$C1587_DIR/view.json" C1587_CMT_FILE="$C1587_DIR/cmt.json" C1587_HEAD="$C1587_SHA" \
+    bash -c "source '$LIB'; arm_policy_require_review_approve 601 '$C1587_SHA' test-armer repairman29/chump repairman29" >/dev/null 2>&1; then
+    bad "CREDIBLE-1587 AC2: arm_policy_require_review_approve allowed PR with no verdict comment"
+else
+    ok "CREDIBLE-1587 AC2: arm_policy_require_review_approve REFUSES PR with no verdict comment"
+fi
+
+# Refuses when verdict is from an untrusted author
+printf '{"labels":[],"comments":[{"author":{"login":"impostor"},"createdAt":"2026-10-24T00:00:00Z","body":"VERDICT: APPROVE\\nhead: %s\\nVERDICT: APPROVE"}]}' "$C1587_SHA" > "$C1587_DIR/cmt.json"
+if PATH="$C1587_DIR/bin:$PATH" C1587_VIEW_FILE="$C1587_DIR/view.json" C1587_CMT_FILE="$C1587_DIR/cmt.json" C1587_HEAD="$C1587_SHA" \
+    bash -c "source '$LIB'; arm_policy_require_review_approve 601 '$C1587_SHA' test-armer repairman29/chump repairman29" >/dev/null 2>&1; then
+    bad "CREDIBLE-1587 AC2: arm_policy_require_review_approve allowed untrusted verdict author"
+else
+    ok "CREDIBLE-1587 AC2: arm_policy_require_review_approve REFUSES untrusted verdict author"
+fi
+
+# Refuses when gh fails (fail-closed)
+if PATH="$C1587_DIR/bin:$PATH" C1587_GH_FAIL=1 \
+    bash -c "source '$LIB'; arm_policy_require_review_approve 601 '$C1587_SHA' test-armer repairman29/chump repairman29" >/dev/null 2>&1; then
+    bad "CREDIBLE-1587 AC2: arm_policy_require_review_approve allowed PR on gh failure"
+else
+    ok "CREDIBLE-1587 AC2: arm_policy_require_review_approve FAILS CLOSED on gh failure"
+fi
+
+# ── RESILIENT-1633: review organ dispatches CI-red repair for deterministic required-check FAILURE ──
+echo "--- RESILIENT-1633: deterministic CI-red required check dispatches headless --repair once per head ---"
+R1633_HEAD="deadbeef1234567890abcdef1234567890abcdef"
+# (1) Deterministic required check FAILURE (fast-checks) on an approved PR → dispatches repair once, holds PR, emits pr_repair_dispatched
+export ORG_ROLLUP='{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE","name":"fast-checks"},{"status":"COMPLETED","conclusion":"FAILURE","name":"verified"}],"headRefOid":"'"$R1633_HEAD"'"}'
+organ_run --pr 203
+grep -qE '^chump dispatch CREDIBLE-9203 --backend headless --repair$' "$ORGLOG.chump" \
+    && ok "RESILIENT-1633 AC1: deterministic required-check FAILURE dispatches 'chump dispatch CREDIBLE-9203 --backend headless --repair'" \
+    || bad "RESILIENT-1633 AC1: expected headless --repair dispatch on CI-red PR 203 (chump: $(cat "$ORGLOG.chump"))"
+grep -q '"kind":"pr_repair_dispatched"' "$D/amb.jsonl" \
+    && ok "RESILIENT-1633 AC4: emits kind=pr_repair_dispatched to ambient" \
+    || bad "RESILIENT-1633 AC4: missing pr_repair_dispatched in ambient ($(cat "$D/amb.jsonl"))"
+grep -q '"failed_check":"fast-checks"' "$D/amb.jsonl" \
+    && ok "RESILIENT-1633 AC4: pr_repair_dispatched records failed_check=fast-checks" \
+    || bad "RESILIENT-1633 AC4: pr_repair_dispatched missing failed_check=fast-checks ($(cat "$D/amb.jsonl"))"
+grep -q -- '--add-label review-held' "$ORGLOG.edits" \
+    && ok "RESILIENT-1633 AC1: CI-red repair applies review-held label" \
+    || bad "RESILIENT-1633 AC1: CI-red repair did not apply review-held ($(cat "$ORGLOG.edits"))"
+
+# (2) Second tick on the SAME (PR, head-sha) without clearing the stamp dir does NOT re-dispatch
+: >"$ORGLOG.chump"; : >"$D/amb.jsonl"
+( export PATH="$D/bin:$PATH" CHUMP_AMBIENT_LOG="$D/amb.jsonl"
+  bash "$ORGAN" --claude-bin "$D/bin/claude" --checkout "$D/checkout" --pr 203 ) >/dev/null 2>&1 || true
+ndisp_repeat="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp_repeat="${ndisp_repeat:-0}"
+[[ "$ndisp_repeat" == 0 ]] \
+    && ok "RESILIENT-1633 AC2: once-per-(PR,head-sha) stamp prevents duplicate CI-red repair dispatch" \
+    || bad "RESILIENT-1633 AC2: duplicate CI-red repair dispatched on same head ($ndisp_repeat)"
+
+# (3) CANCELLED check does NOT dispatch repair
+export ORG_ROLLUP='{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"CANCELLED","name":"fast-checks"},{"status":"COMPLETED","conclusion":"CANCELLED","name":"verified"}],"headRefOid":"'"$R1633_HEAD"'"}'
+organ_run --pr 203
+ndisp_cancel="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp_cancel="${ndisp_cancel:-0}"
+[[ "$ndisp_cancel" == 0 ]] \
+    && ok "RESILIENT-1633 AC2: CANCELLED check does NOT dispatch CI-red repair" \
+    || bad "RESILIENT-1633 AC2: CANCELLED check dispatched repair ($ndisp_cancel)"
+
+# (4) Flake-catalogued check does NOT dispatch repair
+printf 'fast-checks\n' > "$D/flake-catalogue.md"
+export ORG_ROLLUP='{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"FAILURE","name":"fast-checks"}],"headRefOid":"'"$R1633_HEAD"'"}'
+rm -rf "$D/checkout/.chump-locks/ci-repair-dispatched"
+: >"$ORGLOG.chump"
+echo '{"labels":[],"comments":[]}' >"$ORGCMT"
+( export PATH="$D/bin:$PATH" CHUMP_AMBIENT_LOG="$D/amb.jsonl" CHUMP_CI_FLAKE_CATALOGUE="$D/flake-catalogue.md"
+  bash "$ORGAN" --claude-bin "$D/bin/claude" --checkout "$D/checkout" --pr 203 ) >/dev/null 2>&1 || true
+ndisp_flake="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp_flake="${ndisp_flake:-0}"
+[[ "$ndisp_flake" == 0 ]] \
+    && ok "RESILIENT-1633 AC2: flake-catalogued check does NOT dispatch CI-red repair" \
+    || bad "RESILIENT-1633 AC2: flake-catalogued check dispatched repair ($ndisp_flake)"
+
+# (5) pr-cut or no-auto-merge labeled PR does NOT dispatch CI-red repair
+for hold_lbl in pr-cut no-auto-merge; do
+    rm -rf "$D/checkout/.chump-locks/ci-repair-dispatched"
+    : >"$ORGLOG.chump"
+    printf '{"labels":[{"name":"%s"}],"comments":[]}' "$hold_lbl" >"$ORGCMT"
+    ( export PATH="$D/bin:$PATH" CHUMP_AMBIENT_LOG="$D/amb.jsonl"
+      bash "$ORGAN" --claude-bin "$D/bin/claude" --checkout "$D/checkout" --pr 203 ) >/dev/null 2>&1 || true
+    ndisp_lbl="$(grep -c 'chump dispatch' "$ORGLOG.chump" 2>/dev/null || true)"; ndisp_lbl="${ndisp_lbl:-0}"
+    [[ "$ndisp_lbl" == 0 ]] \
+        && ok "RESILIENT-1633 AC2: PR labeled $hold_lbl does NOT dispatch CI-red repair" \
+        || bad "RESILIENT-1633 AC2: PR labeled $hold_lbl dispatched repair ($ndisp_lbl)"
+done
+unset ORG_ROLLUP
 
 echo
 echo "=== test-arm-policy: $PASS passed, $FAIL failed ==="

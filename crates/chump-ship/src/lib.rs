@@ -1161,4 +1161,39 @@ mod tests {
         assert!(gate_plan(&done, "b", "o/r", "x").is_ok());
         assert_eq!(fake.calls.get(), 2, "no read for a plan that touches no PR");
     }
+
+    /// CREDIBLE-1583: `gate_plan` for `ArmAutoMerge` refuses when `review-held`
+    /// is present AND fails closed when `gh pr view` errors.
+    #[test]
+    fn gate_plan_refuses_review_held_and_fails_closed_on_read_error() {
+        let arm = ShipPlan::ArmAutoMerge {
+            pr: 4242,
+            reason: String::new(),
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        {
+            let fake = arm_policy::testing::FakeFetcher::held_by_label("review-held");
+            let _g = arm_policy::override_for_tests(fake.clone(), &amb);
+            let held = gate_plan(&arm, "b", "o/r", "chump ship execute").unwrap_err();
+            assert_eq!(
+                held.reason,
+                arm_policy::HoldReason::Label("review-held".into())
+            );
+            assert_eq!(fake.calls.get(), 1);
+        }
+        {
+            let broken = arm_policy::testing::FakeFetcher::read_error("gh pr view failed");
+            let _g = arm_policy::override_for_tests(broken.clone(), &amb);
+            let held = gate_plan(&arm, "b", "o/r", "chump ship execute").unwrap_err();
+            assert_eq!(
+                held.reason,
+                arm_policy::HoldReason::ReadError("gh pr view failed".into())
+            );
+            assert_eq!(broken.calls.get(), 1);
+        }
+        let ev = std::fs::read_to_string(&amb).unwrap();
+        assert!(ev.contains("label:review-held"), "{ev}");
+        assert!(ev.contains("read_error:gh pr view failed"), "{ev}");
+    }
 }

@@ -149,3 +149,19 @@ Gate-file PRs land exclusively via the independent review organ
 (`chump-review-organ.service`), which labels unapproved PRs `review-held`
 and `review-needs-mutants` and merges head-pinned only after a written
 `VERDICT: APPROVE` with mutant-kill receipts.
+
+### Rust auto-merge policy (`CREDIBLE-1583`)
+
+Every Rust caller that invokes `gh pr merge ... --auto` (`crates/chump-ship/src/lib.rs`,
+`crates/chump-ship/src/manual_ship.rs`, and `crates/chump-integrator/src/daemon.rs`)
+gates the arm through `chump_ship::arm_policy::require_allowed_at` with
+`GateAction::Arm`:
+- `HOLD_LABELS` includes `review-held` and `review-needs-mutants` alongside
+  `no-auto-merge`, `hold`, `do-not-merge`, and `CHUMP_HOLD` (case-insensitive).
+- When `action == GateAction::Arm` and `gh pr view` or JSON parsing fails,
+  `require_allowed_at` **fails closed** (`HoldReason::ReadError`), emitting
+  `kind=pr_arm_skipped_hold` with `reason="read_error:<msg>"` and refusing to
+  arm auto-merge. (`GateAction::Touch` retains fail-open semantics on transient
+  read errors.)
+- `scripts/ci/test-arm-policy.sh` enforces that no executable `gh pr merge ... --auto`
+  call appears in `crates/` outside those three gated call sites.

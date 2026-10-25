@@ -7,8 +7,10 @@
 //! # The contract
 //!
 //! A PR is HELD when ANY of these is true:
-//!   * it carries the label `no-auto-merge` (canonical) or one of the legacy
-//!     hold labels `hold`, `do-not-merge`, `CHUMP_HOLD` (case-insensitive);
+//!   * it carries the label `no-auto-merge` (canonical), one of the legacy
+//!     hold labels `hold`, `do-not-merge`, `CHUMP_HOLD`, or one of the
+//!     independent-review-organ hold labels `review-held`,
+//!     `review-needs-mutants` (case-insensitive, CREDIBLE-1583);
 //!   * its body, or ANY of its comments, has a line matching
 //!     `^[ \t]*Auto-merge:[ \t]*hold\b` (case-insensitive).
 //!
@@ -20,9 +22,10 @@
 //! # Read path
 //!
 //! `gh pr view <sel> [--repo R] --json number,labels,body,comments` (the only
-//! source of comments), tagged `CHUMP_GH_CALL_CRITICALITY=background`. Fails
-//! OPEN when gh cannot be read: a transient API error must not freeze every
-//! arm in the fleet (same as the shell policy).
+//! source of comments), tagged `CHUMP_GH_CALL_CRITICALITY=background`.
+//! `GateAction::Arm` fails CLOSED (`HoldReason::ReadError`) when `gh` cannot
+//! be read so an unreadable API never bypasses `review-held` (CREDIBLE-1583);
+//! `GateAction::Touch` fails OPEN on transient read errors.
 //!
 //! # Testing
 //!
@@ -39,10 +42,17 @@ use std::rc::Rc;
 
 use serde_json::Value;
 
-/// Canonical hold label; the legacy ones follow it in [`HOLD_LABELS`].
+/// Canonical hold label; the legacy and review-organ ones follow it in [`HOLD_LABELS`].
 pub const HOLD_LABEL: &str = "no-auto-merge";
 /// Every label that holds a PR (compared case-insensitively).
-pub const HOLD_LABELS: [&str; 4] = ["no-auto-merge", "hold", "do-not-merge", "CHUMP_HOLD"];
+pub const HOLD_LABELS: [&str; 6] = [
+    "no-auto-merge",
+    "hold",
+    "do-not-merge",
+    "CHUMP_HOLD",
+    "review-held",
+    "review-needs-mutants",
+];
 
 /// Why a PR is held.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +63,8 @@ pub enum HoldReason {
     BodyMarker,
     /// An `Auto-merge: hold` line in a PR comment.
     CommentMarker,
+    /// `gh pr view` or payload parsing failed during a fail-closed arm gate (CREDIBLE-1583).
+    ReadError(String),
 }
 
 impl fmt::Display for HoldReason {
@@ -61,6 +73,7 @@ impl fmt::Display for HoldReason {
             HoldReason::Label(l) => write!(f, "label:{l}"),
             HoldReason::BodyMarker => write!(f, "marker:body"),
             HoldReason::CommentMarker => write!(f, "marker:comment"),
+            HoldReason::ReadError(msg) => write!(f, "read_error:{msg}"),
         }
     }
 }
@@ -396,24 +409,39 @@ pub fn require_allowed_at(
             .clone()
             .unwrap_or_else(default_ambient_path)
     };
-    let payload = match fetcher.fetch(selector, repo) {
-        Ok(v) => v,
+    let (pr_label, status) = match fetcher.fetch(selector, repo) {
+        Ok(payload) => {
+            let pr_label = payload
+                .get("number")
+                .and_then(Value::as_u64)
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| selector.to_string());
+            match hold_status_from_json(&payload) {
+                Ok(s) => (pr_label, s),
+                Err(e) => {
+                    if action == GateAction::Arm {
+                        (pr_label, HoldStatus::Held(HoldReason::ReadError(e.0)))
+                    } else {
+                        eprintln!("[arm-policy] WARN: PR {selector}: {e}; failing open");
+                        return Ok(());
+                    }
+                }
+            }
+        }
         Err(e) => {
-            eprintln!("[arm-policy] WARN: PR {selector}: could not read labels/body/comments ({e}); failing open");
-            return Ok(());
+            if action == GateAction::Arm {
+                (
+                    selector.to_string(),
+                    HoldStatus::Held(HoldReason::ReadError(e)),
+                )
+            } else {
+                eprintln!("[arm-policy] WARN: PR {selector}: could not read labels/body/comments ({e}); failing open");
+                return Ok(());
+            }
         }
     };
-    let pr_label = payload
-        .get("number")
-        .and_then(Value::as_u64)
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| selector.to_string());
-    match hold_status_from_json(&payload) {
-        Err(e) => {
-            eprintln!("[arm-policy] WARN: PR {selector}: {e}; failing open");
-            Ok(())
-        }
-        Ok(HoldStatus::Held(reason)) => {
+    match status {
+        HoldStatus::Held(reason) => {
             // Literal kind for the event-registry scanner (serde_json::json! below
             // formats it with a space):
             // scanner-anchor: "kind":"pr_arm_skipped_hold" (registered in docs/observability/EVENT_REGISTRY.yaml, RESILIENT-1613 / INFRA-8221)
@@ -434,7 +462,7 @@ pub fn require_allowed_at(
             eprintln!("[arm-policy] {held}");
             Err(held)
         }
-        Ok(HoldStatus::NotHeld) => {
+        HoldStatus::NotHeld => {
             if action == GateAction::Arm
                 && std::env::var("CHUMP_ARM_POLICY_REARM_AUDIT").as_deref() != Ok("0")
             {
@@ -497,6 +525,13 @@ pub mod testing {
                 calls: Cell::new(0),
             })
         }
+        pub fn read_error(msg: &str) -> Rc<Self> {
+            Rc::new(Self {
+                payload: Err(msg.to_string()),
+                last_event: None,
+                calls: Cell::new(0),
+            })
+        }
     }
 
     impl PrHoldFetcher for FakeFetcher {
@@ -531,6 +566,10 @@ mod tests {
             "do-not-merge",
             "CHUMP_HOLD",
             "chump_hold",
+            "review-held",
+            "REVIEW-HELD",
+            "review-needs-mutants",
+            "REVIEW-NEEDS-MUTANTS",
         ] {
             assert_eq!(
                 status(json!({"labels": [{"name": "pr:parallel-safe"}, {"name": l}], "body": ""})),
@@ -624,20 +663,28 @@ mod tests {
             assert!(require_arm_allowed(1, "", "a").is_ok());
             assert!(require_touch_allowed(1, "", "a").is_ok());
         }
+        assert!(!amb.exists(), "no event for allowed clean arms");
         {
-            let broken = Rc::new(FakeFetcher {
-                payload: Err("gh down".into()),
-                last_event: None,
-                calls: Cell::new(0),
-            });
+            let broken = FakeFetcher::read_error("gh down");
             let _g = override_for_tests(broken, &amb);
             assert!(
-                require_arm_allowed(1, "", "a").is_ok(),
-                "read failure must fail open"
+                require_touch_allowed(1, "", "a").is_ok(),
+                "Touch read failure must fail open"
             );
+            assert!(
+                !amb.exists(),
+                "no event when Touch fails open on read error"
+            );
+            let err = require_arm_allowed(1, "", "a")
+                .expect_err("CREDIBLE-1583: Arm read failure must fail closed");
+            assert_eq!(err.reason, HoldReason::ReadError("gh down".into()));
+            assert_eq!(err.reason.to_string(), "read_error:gh down");
+            let text = std::fs::read_to_string(&amb).unwrap();
+            let ev: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+            assert_eq!(ev["kind"], "pr_arm_skipped_hold");
+            assert_eq!(ev["reason"], "read_error:gh down");
             assert!(pr_is_held(1, "").is_err());
         }
-        assert!(!amb.exists(), "no event for allowed / fail-open arms");
     }
 
     #[test]

@@ -632,7 +632,7 @@ pub const DEADMAN_MAX_AGE_SECS: u64 = 300;
 
 /// CREDIBLE-1568: pure evaluator for `deadman_tick` freshness (`<= 300s`).
 /// When `active_host` is false (non-Linux/non-systemd and
-/// `CHUMP_DOCTOR_CHECK_DEADMAN` is not `"1"`), returns `CheckStatus::Skip`.
+/// `CHUMP_DOCTOR_PROBE_DEADMAN` is not `"1"`), returns `CheckStatus::Skip`.
 pub fn check_load_aware_deadman_at(
     ambient_path: &Path,
     now_unix: u64,
@@ -641,7 +641,7 @@ pub fn check_load_aware_deadman_at(
     if !active_host {
         return CheckResult::skip(
             "load-aware-deadman",
-            "not a Linux systemd host (set CHUMP_DOCTOR_CHECK_DEADMAN=1 to force check)",
+            "not a Linux systemd host (set CHUMP_DOCTOR_PROBE_DEADMAN=1 to force check)",
         );
     }
     let Ok(contents) = std::fs::read_to_string(ambient_path) else {
@@ -716,7 +716,7 @@ pub fn check_load_aware_deadman_at(
 }
 
 pub fn check_load_aware_deadman() -> CheckResult {
-    let forced = std::env::var("CHUMP_DOCTOR_CHECK_DEADMAN")
+    let forced = std::env::var("CHUMP_DOCTOR_PROBE_DEADMAN")
         .map(|v| v.trim() == "1")
         .unwrap_or(false);
     let is_linux_systemd = cfg!(target_os = "linux") && Path::new("/run/systemd/system").exists();
@@ -978,17 +978,17 @@ mod tests {
             r_301.message
         );
 
-        // 5. Env-wired check_load_aware_deadman() honors CHUMP_DOCTOR_CHECK_DEADMAN=1.
-        let prev_force = std::env::var("CHUMP_DOCTOR_CHECK_DEADMAN").ok();
+        // 5. Env-wired check_load_aware_deadman() honors CHUMP_DOCTOR_PROBE_DEADMAN=1.
+        let prev_force = std::env::var("CHUMP_DOCTOR_PROBE_DEADMAN").ok();
         let prev_amb = std::env::var("CHUMP_AMBIENT_LOG").ok();
-        std::env::set_var("CHUMP_DOCTOR_CHECK_DEADMAN", "1");
+        std::env::set_var("CHUMP_DOCTOR_PROBE_DEADMAN", "1");
         std::env::set_var("CHUMP_AMBIENT_LOG", &amb);
         let r_env_stale = check_load_aware_deadman();
         assert_eq!(r_env_stale.status, CheckStatus::Fail);
 
         match prev_force {
-            Some(v) => std::env::set_var("CHUMP_DOCTOR_CHECK_DEADMAN", v),
-            None => std::env::remove_var("CHUMP_DOCTOR_CHECK_DEADMAN"),
+            Some(v) => std::env::set_var("CHUMP_DOCTOR_PROBE_DEADMAN", v),
+            None => std::env::remove_var("CHUMP_DOCTOR_PROBE_DEADMAN"),
         }
         match prev_amb {
             Some(v) => std::env::set_var("CHUMP_AMBIENT_LOG", v),

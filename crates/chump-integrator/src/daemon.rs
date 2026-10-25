@@ -1156,4 +1156,33 @@ mod tests {
         assert!(ev.contains("\"armer\":\"chump-integrator\""), "{ev}");
         assert!(ev.contains("label:do-not-merge"), "{ev}");
     }
+
+    /// CREDIBLE-1583: `arm_integration_pr` refuses when `review-held` is present
+    /// AND fails closed when `gh pr view` errors.
+    #[tokio::test]
+    async fn arm_integration_pr_refuses_review_held_and_fails_closed_on_read_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let amb = tmp.path().join("ambient.jsonl");
+        {
+            let fake = chump_ship::arm_policy::testing::FakeFetcher::held_by_label("review-held");
+            let _g = chump_ship::arm_policy::override_for_tests(fake.clone(), &amb);
+            let armed = arm_integration_pr(4242, tmp.path()).await.unwrap();
+            assert!(!armed, "review-held integration PR must not be armed");
+            assert_eq!(fake.calls.get(), 1);
+        }
+        {
+            let broken =
+                chump_ship::arm_policy::testing::FakeFetcher::read_error("gh pr view failed");
+            let _g = chump_ship::arm_policy::override_for_tests(broken.clone(), &amb);
+            let armed = arm_integration_pr(4242, tmp.path()).await.unwrap();
+            assert!(
+                !armed,
+                "unreadable integration PR must fail closed and not be armed"
+            );
+            assert_eq!(broken.calls.get(), 1);
+        }
+        let ev = std::fs::read_to_string(&amb).unwrap();
+        assert!(ev.contains("label:review-held"), "{ev}");
+        assert!(ev.contains("read_error:gh pr view failed"), "{ev}");
+    }
 }

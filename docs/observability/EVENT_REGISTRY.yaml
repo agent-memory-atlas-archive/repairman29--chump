@@ -14779,4 +14779,17 @@ events:
       lease unreadable / unwritable, fail closed).
     consumers: [ambient, fleet-brief]
     fields_required: [ts, kind, outcome, rollup_done, rollup_total]
+
+  # ── RESILIENT-1633: review organ CI-red / review-changes repair dispatch ────
+  - kind: pr_repair_dispatched
+    status: active
+    effect_metric: resilient
+    emitter: scripts/dispatch/review-organ-tick.sh (RESILIENT-1633, CREDIBLE-1596)
+    emitter_paths: [scripts/dispatch/review-organ-tick.sh]
+    trigger: the review organ dispatched a headless repair (`chump dispatch <GAP> --backend headless --repair`)
+      for an open PR after either a CHANGES REQUIRED verdict or a deterministic required-check
+      CI failure (`conclusion == FAILURE`, not in flake catalogue, not `pr-cut`/`no-auto-merge`,
+      and not already dispatched for `(pr, head_sha)`).
+    consumers: [ambient, fleet-brief, ops-audit]
+    fields_required: [ts, kind, pr, gap, head, reason, failed_check]
   # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──

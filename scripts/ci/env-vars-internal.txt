@@ -3714,3 +3714,9 @@ CHUMP_DISPATCH_RESUME
 CHUMP_DISPATCH_TIMEOUT_SECS
 # INFRA-8580: speculative lease flag read in chump claim --lease-only (crates/chump-atomic-claim/src/atomic_claim.rs, scripts/dispatch/_pick_and_claim_gap.py)
 CHUMP_SPECULATIVE
+
+# CREDIBLE-1587: require review_hold_allows current-head trusted VERDICT: APPROVE in arm_policy_allows
+CHUMP_ARM_POLICY_REQUIRE_REVIEW_APPROVE
+# RESILIENT-1633: CI-red repair per-(PR, head-sha) stamp directory and flake catalogue override
+CHUMP_CI_REPAIR_STAMP_DIR
+CHUMP_CI_FLAKE_CATALOGUE
