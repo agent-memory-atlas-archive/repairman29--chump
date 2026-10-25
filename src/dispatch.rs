@@ -1645,8 +1645,69 @@ fn headless_prompt(prompt: &str) -> String {
 /// (with `-p` given no value) clears arg parsing cleanly — this is the
 /// documented `cat file | claude -p` pattern. Callers must write the prompt
 /// to `child.stdin` after spawning and close it (EOF) to signal completion.
+/// CREDIBLE-1585 (PHASE-R): allowlist predicate for environment variables
+/// passed into headless `claude -p` agent subprocesses.
+///
+/// Explicitly excludes database, cloud, billing, and service-role secrets
+/// (`SUPABASE_SERVICE_ROLE_KEY`, `POSTGRES_PASSWORD`, `OCI_*`,
+/// `AWS_SECRET_ACCESS_KEY`, `STRIPE_*`, `CHUMP_SUBSTRATE_DB_PASSWORD`, etc.).
+pub fn is_allowlisted_headless_env_key(key: &str) -> bool {
+    if matches!(
+        key,
+        "PATH"
+            | "HOME"
+            | "USER"
+            | "LOGNAME"
+            | "SHELL"
+            | "LANG"
+            | "LC_ALL"
+            | "TERM"
+            | "TMPDIR"
+            | "CARGO_TARGET_DIR"
+            | "CARGO_HOME"
+            | "RUSTUP_HOME"
+            | "ANTHROPIC_API_KEY"
+            | "ANTHROPIC_DEFAULT_SONNET_MODEL"
+            | "ANTHROPIC_DEFAULT_HAIKU_MODEL"
+            | "ANTHROPIC_DEFAULT_OPUS_MODEL"
+            | "CLAUDE_CODE_OAUTH_TOKEN"
+            | "OPENAI_API_KEY"
+            | "GEMINI_API_KEY"
+            | "GOOGLE_API_KEY"
+            | "OPENROUTER_API_KEY"
+            | "GH_TOKEN"
+            | "GITHUB_TOKEN"
+            | "IS_SANDBOX"
+            | "CLAUDE_SESSION_ID"
+    ) {
+        return true;
+    }
+    if key.starts_with("CHUMP_") {
+        let upper = key.to_ascii_uppercase();
+        if upper.contains("PASSWORD") || upper.contains("SECRET") || upper.contains("SERVICE_ROLE")
+        {
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
+/// CREDIBLE-1585 (PHASE-R): clear the child `Command` environment and populate
+/// only allowlisted variables from the parent environment.
+pub fn scrub_headless_claude_env(cmd: &mut Command) {
+    cmd.env_clear();
+    for (k, v) in std::env::vars() {
+        if is_allowlisted_headless_env_key(&k) {
+            cmd.env(k, v);
+        }
+    }
+}
+
 fn headless_command_skeleton(model: &str) -> Command {
     let mut cmd = Command::new("claude");
+    // CREDIBLE-1585: scrub non-allowlisted secrets from headless claude spawns.
+    scrub_headless_claude_env(&mut cmd);
     cmd.arg("-p").arg("--dangerously-skip-permissions");
     // INFRA-8203: in `claude -p` nothing fires a wakeup — ending the turn
     // ends the process — so the tools that end a turn to "wait" are removed.
@@ -4992,6 +5053,77 @@ mod tests {
         match prev {
             Some(v) => std::env::set_var("CARGO_TARGET_DIR", v),
             None => std::env::remove_var("CARGO_TARGET_DIR"),
+        }
+    }
+
+    #[test]
+    #[serial_test::serial(cargo_target_env)]
+    fn credible_1585_headless_command_skeleton_scrubs_non_allowlisted_secrets() {
+        let forbidden = [
+            ("SUPABASE_SERVICE_ROLE_KEY", "fake-secret"),
+            ("POSTGRES_PASSWORD", "fake-db-pass"),
+            ("OCI_CLI_KEY_CONTENT", "fake-oci-key"),
+            ("AWS_SECRET_ACCESS_KEY", "fake-aws-secret"),
+            ("STRIPE_SECRET_KEY", "fake-stripe-key"),
+            ("CHUMP_SUBSTRATE_DB_PASSWORD", "fake-substrate-db-pass"),
+        ];
+        let allowed = [
+            ("ANTHROPIC_API_KEY", "fake-anthropic-key"),
+            ("GH_TOKEN", "fake-gh-token"),
+            ("CHUMP_SESSION_ID", "test-credible-1585-sess"),
+        ];
+        let mut prev: Vec<(&str, Option<String>)> = Vec::new();
+        for &(k, v) in forbidden.iter().chain(allowed.iter()) {
+            prev.push((k, std::env::var(k).ok()));
+            std::env::set_var(k, v);
+        }
+
+        let skel = headless_command_skeleton("claude-sonnet-4-6");
+        let skel_envs: std::collections::BTreeMap<String, String> = skel
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+
+        for &(bad_k, _) in &forbidden {
+            assert!(
+                !skel_envs.contains_key(bad_k),
+                "CREDIBLE-1585: forbidden secret {bad_k} leaked into headless_command_skeleton env"
+            );
+        }
+        for &(ok_k, ok_v) in &allowed {
+            assert_eq!(
+                skel_envs.get(ok_k).map(String::as_str),
+                Some(ok_v),
+                "CREDIBLE-1585: allowlisted {ok_k} missing from headless_command_skeleton env"
+            );
+        }
+
+        // Also verify a real spawned child process sees the scrubbed environment.
+        let mut child_cmd = Command::new("env");
+        scrub_headless_claude_env(&mut child_cmd);
+        let out = child_cmd.output().expect("spawn env");
+        assert!(out.status.success());
+        let child_stdout = String::from_utf8_lossy(&out.stdout);
+        for &(bad_k, _) in &forbidden {
+            assert!(
+                !child_stdout
+                    .lines()
+                    .any(|l| l.starts_with(&format!("{bad_k}="))),
+                "CREDIBLE-1585: spawned child inherited forbidden secret {bad_k}"
+            );
+        }
+        for &(ok_k, ok_v) in &allowed {
+            assert!(
+                child_stdout.lines().any(|l| l == format!("{ok_k}={ok_v}")),
+                "CREDIBLE-1585: spawned child missing allowlisted {ok_k}={ok_v}"
+            );
+        }
+
+        for (k, old) in prev {
+            match old {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
         }
     }
 }

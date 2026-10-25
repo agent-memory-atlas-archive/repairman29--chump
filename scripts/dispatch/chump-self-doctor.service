@@ -16,5 +16,5 @@ Environment=HOME=__HOME__
 # Source providers.env (export-format creds) then exec the organ — same pattern
 # as chump-pr-lander.service. Non-login shell so the host-rewriter's injected
 # Environment=PATH (with the run-user's ~/.cargo/bin) stays authoritative.
-ExecStart=/bin/bash -c 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec chump fleet doctor --heal --json'
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec chump fleet doctor --heal --json'
 TimeoutStartSec=300

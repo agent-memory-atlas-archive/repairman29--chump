@@ -74,7 +74,10 @@ log()  { printf '[chump-farmer-run %s] %s\n' "$(_ts)" "$*"; }
 # source (it would abort the whole runner on the first unbound expansion — the
 # retired bridge sourced with -u off and 2>/dev/null for the same reason).
 # shellcheck disable=SC1090
-if [[ -f "$PROVIDERS_ENV" ]]; then set +u; set -a; source "$PROVIDERS_ENV" 2>/dev/null || true; set +a; set -u; fi
+if [[ -f "$PROVIDERS_ENV" && -f "$_FARMER_SCRIPT_DIR/lib/load-provider-auth.env" ]]; then
+    # shellcheck disable=SC1091
+    source "$_FARMER_SCRIPT_DIR/lib/load-provider-auth.env" "$PROVIDERS_ENV" 2>/dev/null || true
+fi
 
 # 2. Stale-lease hygiene — a >Nmin claim-*.json lease is dead work holding a slot.
 if [[ -d "$LOCK_DIR" ]]; then

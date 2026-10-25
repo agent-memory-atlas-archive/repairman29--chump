@@ -43,10 +43,9 @@ pick_decompose_provider() {
   # Keys live in providers.env / cj.env. Source if none are loaded yet (callers
   # usually source already; this makes the helper self-sufficient in a subshell).
   if [ -z "${OPENROUTER_API_KEY:-}${GROQ_API_KEY:-}${GOOGLE_API_KEY:-}" ]; then
-    set -a
-    [ -f "$HOME/.chump/providers.env" ] && source "$HOME/.chump/providers.env" 2>/dev/null
-    [ -f "$HOME/.chump/cj.env" ] && source "$HOME/.chump/cj.env" 2>/dev/null
-    set +a
+    local _dp_dir
+    _dp_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    [ -f "$_dp_dir/load-provider-auth.env" ] && source "$_dp_dir/load-provider-auth.env" "$HOME/.chump/providers.env" "$HOME/.chump/cj.env" 2>/dev/null
   fi
 
   local drain_model="${CHUMP_DRAIN_MODEL:-deepseek/deepseek-v4-pro}"

@@ -39,5 +39,5 @@ WorkingDirectory=__REPO_ROOT__
 # per-node config). The consumer makes no LLM call — it reads the already-
 # computed NBA board and issues systemctl (reset-failed/restart/start) via the
 # sudo -n elevation the watchdog uses on owned nodes — so it is cheap.
-ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; source __HOME__/.chump/cj.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/coord/nba-dispatch-beat.sh'
+ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env __HOME__/.chump/cj.env 2>/dev/null; cd __REPO_ROOT__; exec bash scripts/coord/nba-dispatch-beat.sh'
 TimeoutStartSec=300

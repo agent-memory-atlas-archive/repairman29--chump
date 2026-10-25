@@ -62,15 +62,50 @@ NODE_ENV="$STATE_DIR/node.env"
 echo "=== muscle-role-rollout.sh (RESILIENT-1090) — role=$ROLE apply=$APPLY ==="
 
 # ── step 1: seed node.env's CHUMP_NODE_ROLE (idempotent) ────────────────────
-# INFRA-8588: write bare KEY=VALUE (no `export`) — systemd EnvironmentFile units
-# reject `export` lines. Match an existing line in EITHER form so a pre-migration
-# file is rewritten to the bare form in place.
+# INFRA-8588 / RESILIENT-1684 / INFRA-8104: write bare KEY=VALUE (no `export`)
+# on EVERY assignment line so systemd EnvironmentFile= units and shell callers
+# see identical values, and only keep CHUMP_STORE_BACKEND / CHUMP_TEAM_URL /
+# CHUMP_TEAM_API_KEY when a store actually listens at CHUMP_TEAM_URL.
 mkdir -p "$STATE_DIR"
 touch "$NODE_ENV"
-if grep -qE '^(export )?CHUMP_NODE_ROLE=' "$NODE_ENV" 2>/dev/null; then
-  sed -i -E "s/^(export )?CHUMP_NODE_ROLE=.*/CHUMP_NODE_ROLE=$ROLE/" "$NODE_ENV"
+_mrr_tmp="$(mktemp "${NODE_ENV}.XXXXXX")"
+if grep -qE '^[[:space:]]*(export[[:space:]]+)?CHUMP_NODE_ROLE=' "$NODE_ENV" 2>/dev/null; then
+  sed -E "s/^[[:space:]]*(export[[:space:]]+)?CHUMP_NODE_ROLE=.*/CHUMP_NODE_ROLE=$ROLE/" "$NODE_ENV" > "$_mrr_tmp" && mv -f "$_mrr_tmp" "$NODE_ENV"
 else
+  rm -f "$_mrr_tmp"
   printf 'CHUMP_NODE_ROLE=%s\n' "$ROLE" >> "$NODE_ENV"
+fi
+# Strip any remaining `export ` prefixes across node.env.
+_mrr_tmp="$(mktemp "${NODE_ENV}.XXXXXX")"
+sed -E 's/^[[:space:]]*export[[:space:]]+([A-Za-z_][A-Za-z0-9_]*=)/\1/' "$NODE_ENV" > "$_mrr_tmp" && mv -f "$_mrr_tmp" "$NODE_ENV"
+# Gate team-store keys on a live listener at CHUMP_TEAM_URL (never flipped blind).
+_mrr_team_url="$(grep -E '^CHUMP_TEAM_URL=' "$NODE_ENV" 2>/dev/null | tail -1 | sed -E 's/^CHUMP_TEAM_URL=//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/' || true)"
+_mrr_store_ok=0
+if [[ "${CHUMP_TEAM_STORE_LISTENING:-}" == "1" ]]; then
+  _mrr_store_ok=1
+elif [[ "${CHUMP_TEAM_STORE_LISTENING:-}" == "0" ]]; then
+  _mrr_store_ok=0
+elif [[ -n "$_mrr_team_url" ]]; then
+  if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 2 "${_mrr_team_url%/}/health" >/dev/null 2>&1; then
+    _mrr_store_ok=1
+  elif command -v python3 >/dev/null 2>&1 && python3 - "$_mrr_team_url" <<'PY' >/dev/null 2>&1
+import socket, sys, urllib.parse
+u = urllib.parse.urlparse(sys.argv[1] if "://" in sys.argv[1] else "http://" + sys.argv[1])
+host = u.hostname or ""
+port = u.port or (443 if u.scheme == "https" else 80)
+if not host:
+    sys.exit(1)
+with socket.create_connection((host, port), timeout=1.0):
+    pass
+PY
+  then
+    _mrr_store_ok=1
+  fi
+fi
+if [[ "$_mrr_store_ok" -ne 1 ]]; then
+  _mrr_tmp="$(mktemp "${NODE_ENV}.XXXXXX")"
+  grep -vE '^(CHUMP_STORE_BACKEND|CHUMP_TEAM_URL|CHUMP_TEAM_API_KEY)=' "$NODE_ENV" > "$_mrr_tmp" || true
+  mv -f "$_mrr_tmp" "$NODE_ENV"
 fi
 echo "step 1/4: $NODE_ENV now carries CHUMP_NODE_ROLE=$ROLE"
 

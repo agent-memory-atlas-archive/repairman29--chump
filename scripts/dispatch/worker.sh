@@ -2523,10 +2523,7 @@ Operator or sibling worker can rescue this branch via:
         # EFFECTIVE-512: pin openrouter + deepseek-v4-pro exactly as
         # gap-drain.sh:38-40 does, scoped to THIS decompose call via a subshell
         # so the surrounding worker loop env is untouched.
-        if ( set -a
-             [ -f "$HOME/.chump/providers.env" ] && source "$HOME/.chump/providers.env" 2>/dev/null
-             [ -f "$HOME/.chump/cj.env" ] && source "$HOME/.chump/cj.env" 2>/dev/null
-             set +a
+        if ( [ -f "${BASH_SOURCE[0]%/*}/lib/load-provider-auth.env" ] && source "${BASH_SOURCE[0]%/*}/lib/load-provider-auth.env" "$HOME/.chump/providers.env" "$HOME/.chump/cj.env" 2>/dev/null
              # EFFECTIVE-512 + INFRA: pin the capable planner (OpenRouter
              # deepseek-v4-pro) but fall to a capable FREE tier when OpenRouter
              # credits are exhausted (402 on full requests). SAME selector

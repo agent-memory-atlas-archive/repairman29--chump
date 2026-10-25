@@ -48,6 +48,8 @@
 #
 # Off-switch: CHUMP_REVIEW_ORGAN_ENABLED=0 (default on).
 set -uo pipefail
+# CREDIBLE-1585: scrub non-allowlisted cloud/DB secrets from the review organ.
+unset SUPABASE_SERVICE_ROLE_KEY POSTGRES_PASSWORD AWS_SECRET_ACCESS_KEY STRIPE_SECRET_KEY CHUMP_SUBSTRATE_DB_PASSWORD
 
 [[ "${CHUMP_REVIEW_ORGAN_ENABLED:-1}" == "0" ]] && { echo "[review-organ] disabled via CHUMP_REVIEW_ORGAN_ENABLED=0 — exit"; exit 0; }
 

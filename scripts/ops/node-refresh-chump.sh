@@ -226,7 +226,83 @@ if [[ -z "${CHUMP_NODE_ROLE:-}" ]]; then
     [[ -z "${CHUMP_NODE_ROLE:-}" ]] && unset CHUMP_NODE_ROLE
 fi
 NODE_ROLE="${CHUMP_NODE_ROLE:-muscle}"
+_sanitize_node_env() {
+    local ne="${1:-${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/node.env}"
+    [[ -f "$ne" ]] || return 0
+    local team_url=""
+    team_url="$(grep -E '^[[:space:]]*(export[[:space:]]+)?CHUMP_TEAM_URL=' "$ne" 2>/dev/null \
+        | tail -1 \
+        | sed -E 's/^[[:space:]]*(export[[:space:]]+)?CHUMP_TEAM_URL=//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/' || true)"
+    [[ -z "$team_url" && -n "${CHUMP_TEAM_URL:-}" ]] && team_url="$CHUMP_TEAM_URL"
+    local store_ok=0
+    if [[ "${CHUMP_TEAM_STORE_LISTENING:-}" == "1" ]]; then
+        store_ok=1
+    elif [[ "${CHUMP_TEAM_STORE_LISTENING:-}" == "0" ]]; then
+        store_ok=0
+    elif [[ -n "$team_url" ]]; then
+        if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 2 "${team_url%/}/health" >/dev/null 2>&1; then
+            store_ok=1
+        elif command -v python3 >/dev/null 2>&1 && python3 - "$team_url" <<'PY' >/dev/null 2>&1
+import socket, sys, urllib.parse
+raw = sys.argv[1].strip()
+u = urllib.parse.urlparse(raw if "://" in raw else "http://" + raw)
+host = u.hostname or ""
+port = u.port or (443 if u.scheme == "https" else 80)
+if not host:
+    sys.exit(1)
+with socket.create_connection((host, port), timeout=1.0):
+    pass
+PY
+        then
+            store_ok=1
+        fi
+    fi
+    local tmp
+    tmp="$(mktemp "${ne}.XXXXXX")" || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]]; then
+            printf '%s\n' "$line" >> "$tmp"
+            continue
+        fi
+        local clean="$line"
+        clean="$(printf '%s' "$clean" | sed -E 's/^[[:space:]]*export[[:space:]]+//; s/^[[:space:]]+//')"
+        if [[ "$clean" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            local k="${BASH_REMATCH[1]}"
+            local v="${BASH_REMATCH[2]}"
+            v="$(printf '%s' "$v" | sed -E 's/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/')"
+            case "$k" in
+                CHUMP_STORE_BACKEND|CHUMP_TEAM_URL|CHUMP_TEAM_API_KEY)
+                    [[ "$store_ok" -eq 1 ]] || continue
+                    ;;
+            esac
+            printf '%s=%s\n' "$k" "$v" >> "$tmp"
+        else
+            printf '%s\n' "$line" >> "$tmp"
+        fi
+    done < "$ne"
+    chmod 0600 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$ne"
+    return 0
+}
+
+_converge_worker_launchers() {
+    local candidate tmp
+    for candidate in "${HOME:-/root}"/node*-worker-run.sh "${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/organs/worker.sh"; do
+        [[ -f "$candidate" ]] || continue
+        if grep -vE '^[[:space:]]*#' "$candidate" | grep -qE '(^|[[:space:];])(export[[:space:]]+)?(CHUMP_TEST_GATE=0|CHUMP_PREFLIGHT_[S]KIP=1|CHUMP_[A-Z0-9_]*_SKIP=|CHUMP_[A-Z0-9_]*_NO_[A-Z0-9_]*=)'; then
+            tmp="$(mktemp "${candidate}.XXXXXX")" || continue
+            grep -vE '^[[:space:]]*(export[[:space:]]+)?(CHUMP_TEST_GATE=0|CHUMP_PREFLIGHT_[S]KIP=1|CHUMP_[A-Z0-9_]*_SKIP=|CHUMP_[A-Z0-9_]*_NO_[A-Z0-9_]*=)' "$candidate" > "$tmp" || true
+            chmod +x "$tmp" 2>/dev/null || true
+            mv -f "$tmp" "$candidate"
+            log "RESILIENT-1682: scrubbed bypass env assignment(s) from worker launcher $candidate"
+        fi
+    done
+    return 0
+}
+
 _reconcile_role_organs() {
+    _sanitize_node_env
+    _converge_worker_launchers
     local installer="$REPO_ROOT/scripts/setup/chump-node-install.sh"
     if [[ ! -f "$installer" ]]; then
         log "WARN: $installer not found; skipping role-organ reconcile"
@@ -240,6 +316,8 @@ _reconcile_role_organs() {
         log "WARN: chump-node-install.sh --reconcile-organs-only exited non-zero (non-fatal, role=$NODE_ROLE)"
         emit node_organs_reconcile_failed "\"role\":\"$NODE_ROLE\""
     fi
+    _sanitize_node_env
+    _converge_worker_launchers
 }
 
 # --- atomic install helper (INFRA-3677) --------------------------------------

@@ -20,5 +20,5 @@ Environment=HOME=__HOME__
 Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
 Environment=CHUMP_PEER_EXECUTE=1
 Environment=CHUMP_PEER_MODEL=opus
-ExecStart=/bin/bash -lc "set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/coord/duty-officer-loop.sh judgment-tick"
+ExecStart=/bin/bash -lc "source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; cd __REPO_ROOT__; exec bash scripts/coord/duty-officer-loop.sh judgment-tick"
 TimeoutStartSec=360

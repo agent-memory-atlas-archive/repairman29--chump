@@ -3,4 +3,4 @@ Description=Chump production back-pressure controller (halt/resume workers on ja
 [Service]
 Type=oneshot
 Environment=HOME=__HOME__
-ExecStart=/bin/bash -lc "set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/ops/back-pressure-controller.sh"
+ExecStart=/bin/bash -lc "source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; cd __REPO_ROOT__; exec bash scripts/ops/back-pressure-controller.sh"

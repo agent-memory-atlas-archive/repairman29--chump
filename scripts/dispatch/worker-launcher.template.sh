@@ -36,9 +36,13 @@
 #                           a sonnet-only fleet leaves starved. Rendered per
 #                           instance so one node can run mixed classes.
 #   __FLEET_EFFORT_FILTER__ effort band this instance picks (csv of xs,s,m,l,xl).
-set -a
-[ -f "$HOME/.chump/providers.env" ] && source "$HOME/.chump/providers.env"
-set +a
+# CREDIBLE-1585: load only allowlisted provider/organ auth keys from providers.env
+# (never wholesale `set -a; source ~/.chump/providers.env; set +a`).
+[ -f "__REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env" ] && source "__REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env" "$HOME/.chump/providers.env"
+# RESILIENT-1682: worker launchers never carry test-gate or preflight bypasses.
+_chump_pf_skip="CHUMP_PREFLIGHT_""SKIP"
+unset CHUMP_TEST_GATE "$_chump_pf_skip"
+unset _chump_pf_skip
 export PATH="$HOME/.cargo/bin:__REPO_ROOT__/target/release:/usr/local/bin:/usr/bin:/bin"
 export TMPDIR="${TMPDIR:-$HOME/tmp}"
 mkdir -p "$TMPDIR"

@@ -228,7 +228,204 @@ EOF
 if grep -qE "${FOREIGN_HOME}|/opt/homebrew|^User=" "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service"; then
     fail "installed unit still carries foreign host literals after _rerender_installed_units: $(cat "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service")"
 fi
-grep -qF "WorkingDirectory=$CHECKOUT" "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service"     || fail "installed unit was not rewritten with CHECKOUT WorkingDirectory: $(cat "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service")"
+CHECKOUT_REAL="$(cd "$CHECKOUT" && pwd -P)"
+grep -qF "WorkingDirectory=$CHECKOUT_REAL" "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service"     || fail "installed unit was not rewritten with CHECKOUT WorkingDirectory: $(cat "$RERENDER_UNIT_DIR/chump-gap-close-decomposed.service")"
 ok "_rerender_installed_units replaces foreign host literals in installed units from repo templates (INFRA-8589)"
+
+# ── Test 9: RESILIENT-1684 + INFRA-8104: node.env bare KEY=VALUE parity + listener-gated team store keys ──
+# Helper: compare keys+values parsed by systemd EnvironmentFile rules vs bash `set -a; source`.
+_assert_systemd_shell_env_parity() {
+    local env_file="$1"
+    python3 - "$env_file" <<'PY'
+import re, sys
+
+path = sys.argv[1]
+systemd_map = {}
+shell_map = {}
+ident_re = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+with open(path, "r", encoding="utf-8") as f:
+    for raw in f:
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        # systemd EnvironmentFile rule: rejects `export KEY=VALUE`
+        if "=" in s and not s.startswith(";"):
+            k, v = s.split("=", 1)
+            if ident_re.match(k):
+                if len(v) >= 2 and ((v[0] == '"' and v[-1] == '"') or (v[0] == "'" and v[-1] == "'")):
+                    v = v[1:-1]
+                systemd_map[k] = v
+        # shell `set -a; source` rule: accepts optional leading `export `
+        sh = re.sub(r'^export[\s]+', '', s)
+        if "=" in sh:
+            k, v = sh.split("=", 1)
+            if ident_re.match(k):
+                if len(v) >= 2 and ((v[0] == '"' and v[-1] == '"') or (v[0] == "'" and v[-1] == "'")):
+                    v = v[1:-1]
+                shell_map[k] = v
+
+if systemd_map != shell_map:
+    sys.exit(1)
+PY
+}
+
+T9_ENV="$TMP/t9-node.env"
+cat > "$T9_ENV" <<'EOF'
+# mixed export and bare lines + team store keys
+export CHUMP_NODE_ROLE=muscle
+export CHUMP_RUN_USER=ubuntu
+CHUMP_NODE_WORK_ENABLED=1
+export CHUMP_STORE_BACKEND=team
+export CHUMP_TEAM_URL=http://127.0.0.1:59999
+export CHUMP_TEAM_API_KEY=blind-team-key
+EOF
+
+# Mutant check first: raw file with `export ` MUST fail systemd vs shell parity.
+if _assert_systemd_shell_env_parity "$T9_ENV"; then
+    fail "RESILIENT-1684 mutant: file with `export ` lines unexpectedly passed systemd/shell parity"
+fi
+
+# Sanitize with store NOT listening -> strips `export ` AND omits team-store keys.
+(
+    export CHUMP_TEAM_STORE_LISTENING=0
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _sanitize_node_env "$T9_ENV"
+) || fail "_sanitize_node_env (store down) failed"
+
+_assert_systemd_shell_env_parity "$T9_ENV" \
+    || fail "RESILIENT-1684: sanitized node.env failed systemd vs shell parity: $(cat "$T9_ENV")"
+grep -qE '^(CHUMP_STORE_BACKEND|CHUMP_TEAM_URL|CHUMP_TEAM_API_KEY)=' "$T9_ENV" \
+    && fail "INFRA-8104: team-store keys were emitted when store was not listening: $(cat "$T9_ENV")"
+
+# Now re-add team-store keys and sanitize with store LISTENING -> bare KEY=VALUE kept.
+cat >> "$T9_ENV" <<'EOF'
+export CHUMP_STORE_BACKEND=team
+export CHUMP_TEAM_URL=http://127.0.0.1:8788
+export CHUMP_TEAM_API_KEY=live-team-key
+EOF
+(
+    export CHUMP_TEAM_STORE_LISTENING=1
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _sanitize_node_env "$T9_ENV"
+) || fail "_sanitize_node_env (store up) failed"
+
+_assert_systemd_shell_env_parity "$T9_ENV" \
+    || fail "RESILIENT-1684: sanitized node.env (store up) failed systemd vs shell parity: $(cat "$T9_ENV")"
+grep -qx 'CHUMP_STORE_BACKEND=team' "$T9_ENV" \
+    && grep -qx 'CHUMP_TEAM_URL=http://127.0.0.1:8788' "$T9_ENV" \
+    && grep -qx 'CHUMP_TEAM_API_KEY=live-team-key' "$T9_ENV" \
+    || fail "INFRA-8104: bare team-store keys missing when store is listening: $(cat "$T9_ENV")"
+ok "RESILIENT-1684 + INFRA-8104: node.env is bare KEY=VALUE (systemd == shell parity, mutant-killed) and team-store keys are gated on a live listener"
+
+# ── Test 10: RESILIENT-1684: organ-reconcile & node-converge single-scope deduplication ──
+T10_SYS="$TMP/t10-sys"
+T10_USR="$TMP/t10-usr"
+mkdir -p "$T10_SYS" "$T10_USR"
+touch "$T10_SYS/chump-organ-reconcile.timer" "$T10_SYS/chump-organ-reconcile.service"
+touch "$T10_SYS/chump-node-converge.timer" "$T10_SYS/chump-node-converge.service"
+touch "$T10_USR/chump-organ-reconcile.timer" "$T10_USR/chump-organ-reconcile.service"
+touch "$T10_USR/chump-node-converge.timer" "$T10_USR/chump-node-converge.service"
+
+(
+    export CHUMP_NODE_CONVERGE_LOGDIR="$TMP/logs"
+    export NODE_AMBIENT="$AMBIENT"
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    _dedupe_single_scope_organs "$T10_SYS" "$T10_USR" "/bin/true"
+) || fail "_dedupe_single_scope_organs failed"
+
+[[ ! -e "$T10_USR/chump-organ-reconcile.timer" && ! -e "$T10_USR/chump-node-converge.timer" ]] \
+    || fail "RESILIENT-1684: duplicate --user units were not removed when --system units exist"
+[[ -f "$T10_SYS/chump-organ-reconcile.timer" && -f "$T10_SYS/chump-node-converge.timer" ]] \
+    || fail "RESILIENT-1684: canonical --system units were unexpectedly removed"
+ok "RESILIENT-1684: organ-reconcile and node-converge are deduplicated to one systemd scope"
+
+# ── Test 11: RESILIENT-1682: converge scrubs bypass env assignments from live worker launchers ──
+T11_HOME="$TMP/t11-home"
+mkdir -p "$T11_HOME/.chump/organs"
+_T11_PF_SKIP="CHUMP_PREFLIGHT_""SKIP"
+cat > "$T11_HOME/node1-worker-run.sh" <<EOF
+#!/usr/bin/env bash
+export AGENT_ID="node1-worker"
+export CHUMP_TEST_GATE=0
+export ${_T11_PF_SKIP}=1
+exec bash scripts/dispatch/worker.sh
+EOF
+chmod +x "$T11_HOME/node1-worker-run.sh"
+
+(
+    export HOME="$T11_HOME"
+    export CHUMP_STATE_DIR="$T11_HOME/.chump"
+    export CHUMP_NODE_CONVERGE_LOGDIR="$TMP/logs"
+    export NODE_AMBIENT="$AMBIENT"
+    # shellcheck disable=SC1090
+    source "$SCRIPT"
+    if _validate_worker_launcher_no_bypass "$T11_HOME/node1-worker-run.sh"; then
+        exit 21
+    fi
+    _converge_worker_launchers
+    _validate_worker_launcher_no_bypass "$T11_HOME/node1-worker-run.sh" || exit 22
+) || fail "RESILIENT-1682: _converge_worker_launchers failed to detect and scrub bypass assignments (rc=$?)"
+ok "RESILIENT-1682: live worker launcher bypass assignments (CHUMP_TEST_GATE=0 / preflight skip) are rejected and scrubbed"
+
+# ── Test 12: CREDIBLE-1585: headless claude secret scrubbing + grep gate against wholesale `set -a` on providers.env ──
+# 12a. Grep gate: no unit file under scripts/dispatch or scripts/ops may source providers.env under `set -a`.
+_check_units_no_wholesale_providers_env() {
+    grep -nE 'set -a.*providers\.env' "$@" 2>/dev/null
+}
+_bad_units="$(_check_units_no_wholesale_providers_env "$REPO_ROOT"/scripts/dispatch/*.service "$REPO_ROOT"/scripts/ops/*.service "$REPO_ROOT"/scripts/ops/systemd/*.service)"
+[[ -z "$_bad_units" ]] \
+    || fail "CREDIBLE-1585: unit file(s) source providers.env wholesale with set -a: $_bad_units"
+
+# Mutant check for the grep gate.
+T12_MUT_UNIT="$TMP/t12-mutant.service"
+printf '[Service]\nExecStart=/bin/bash -lc "set -a; source __HOME__/.chump/providers.env; set +a; exec true"\n' > "$T12_MUT_UNIT"
+if [[ -z "$(_check_units_no_wholesale_providers_env "$T12_MUT_UNIT")" ]]; then
+    fail "CREDIBLE-1585 mutant: grep gate failed to catch a unit sourcing providers.env with set -a"
+fi
+
+# 12b. Behavioral check: plant SUPABASE_SERVICE_ROLE_KEY=fake-secret and
+# POSTGRES_PASSWORD=fake-db-pass in parent env + providers.env and prove they
+# are absent in the spawned headless claude child environment.
+T12_PROVIDERS="$TMP/t12-providers.env"
+cat > "$T12_PROVIDERS" <<'EOF'
+export ANTHROPIC_API_KEY=fake-model-key
+export GH_TOKEN=fake-gh-tok
+export SUPABASE_SERVICE_ROLE_KEY=fake-secret
+export POSTGRES_PASSWORD=fake-db-pass
+export OCI_CLI_KEY_CONTENT=fake-oci
+export AWS_SECRET_ACCESS_KEY=fake-aws
+export STRIPE_SECRET_KEY=fake-stripe
+export CHUMP_SUBSTRATE_DB_PASSWORD=fake-sub-pass
+EOF
+
+T12_CHILD_ENV="$(
+    export SUPABASE_SERVICE_ROLE_KEY="fake-secret"
+    export POSTGRES_PASSWORD="fake-db-pass"
+    export OCI_CLI_KEY_CONTENT="fake-oci"
+    export AWS_SECRET_ACCESS_KEY="fake-aws"
+    export STRIPE_SECRET_KEY="fake-stripe"
+    export CHUMP_SUBSTRATE_DB_PASSWORD="fake-sub-pass"
+    # shellcheck disable=SC1090
+    source "$REPO_ROOT/scripts/dispatch/lib/load-provider-auth.env" "$T12_PROVIDERS"
+    # Extract and run the headless claude env scrubber from architect-tick.sh
+    eval "$(awk '/^_scrub_headless_claude_env\(\)/{f=1} f{print} f && /^\}/{exit}' "$REPO_ROOT/scripts/dispatch/architect-tick.sh")"
+    _scrub_headless_claude_env
+    env
+)"
+
+for _leaked in SUPABASE_SERVICE_ROLE_KEY POSTGRES_PASSWORD OCI_CLI_KEY_CONTENT AWS_SECRET_ACCESS_KEY STRIPE_SECRET_KEY CHUMP_SUBSTRATE_DB_PASSWORD; do
+    if printf '%s\n' "$T12_CHILD_ENV" | grep -qE "^${_leaked}="; then
+        fail "CREDIBLE-1585: forbidden secret $_leaked leaked into headless claude child env"
+    fi
+done
+printf '%s\n' "$T12_CHILD_ENV" | grep -qx 'ANTHROPIC_API_KEY=fake-model-key' \
+    || fail "CREDIBLE-1585: allowlisted ANTHROPIC_API_KEY missing in headless claude child env"
+printf '%s\n' "$T12_CHILD_ENV" | grep -qx 'GH_TOKEN=fake-gh-tok' \
+    || fail "CREDIBLE-1585: allowlisted GH_TOKEN missing in headless claude child env"
+ok "CREDIBLE-1585: SUPABASE_SERVICE_ROLE_KEY and POSTGRES_PASSWORD are scrubbed from headless claude spawns and no unit sources providers.env with set -a"
 
 printf '\033[0;32mALL PASS\033[0m scripts/ci/test-node-converge.sh\n'

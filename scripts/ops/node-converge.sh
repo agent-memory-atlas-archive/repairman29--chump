@@ -237,7 +237,135 @@ _rerender_installed_units() {
     return 0
 }
 
+# RESILIENT-1684 + INFRA-8104: probe whether a team gap store actually listens
+# at <team_url> before emitting CHUMP_STORE_BACKEND / CHUMP_TEAM_URL /
+# CHUMP_TEAM_API_KEY into node.env.
+_probe_team_store_listening() {
+    local team_url="${1:-}"
+    if [[ "${CHUMP_TEAM_STORE_LISTENING:-}" == "1" ]]; then
+        return 0
+    elif [[ "${CHUMP_TEAM_STORE_LISTENING:-}" == "0" ]]; then
+        return 1
+    fi
+    [[ -n "$team_url" ]] || return 1
+    if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 2 "${team_url%/}/health" >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$team_url" <<'PY' >/dev/null 2>&1 && return 0
+import socket, sys, urllib.parse
+raw = sys.argv[1].strip()
+u = urllib.parse.urlparse(raw if "://" in raw else "http://" + raw)
+host = u.hostname or ""
+port = u.port or (443 if u.scheme == "https" else 80)
+if not host:
+    sys.exit(1)
+with socket.create_connection((host, port), timeout=1.0):
+    pass
+PY
+    fi
+    return 1
+}
+
+# RESILIENT-1684 + INFRA-8104: normalize node.env into plain KEY=VALUE lines
+# (no `export ` prefix) so systemd EnvironmentFile= units and shell callers see
+# identical keys, and only emit CHUMP_STORE_BACKEND / CHUMP_TEAM_URL /
+# CHUMP_TEAM_API_KEY when a store actually listens at CHUMP_TEAM_URL.
+_sanitize_node_env() {
+    local ne="${1:-${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/node.env}"
+    [[ -f "$ne" ]] || return 0
+    local team_url=""
+    team_url="$(grep -E '^[[:space:]]*(export[[:space:]]+)?CHUMP_TEAM_URL=' "$ne" 2>/dev/null \
+        | tail -1 \
+        | sed -E 's/^[[:space:]]*(export[[:space:]]+)?CHUMP_TEAM_URL=//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/' || true)"
+    [[ -z "$team_url" && -n "${CHUMP_TEAM_URL:-}" ]] && team_url="$CHUMP_TEAM_URL"
+    local store_ok=0
+    if _probe_team_store_listening "$team_url"; then
+        store_ok=1
+    fi
+    local tmp
+    tmp="$(mktemp "${ne}.XXXXXX")" || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]]; then
+            printf '%s\n' "$line" >> "$tmp"
+            continue
+        fi
+        local clean="$line"
+        clean="$(printf '%s' "$clean" | sed -E 's/^[[:space:]]*export[[:space:]]+//; s/^[[:space:]]+//')"
+        if [[ "$clean" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+            local k="${BASH_REMATCH[1]}"
+            local v="${BASH_REMATCH[2]}"
+            v="$(printf '%s' "$v" | sed -E 's/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/')"
+            case "$k" in
+                CHUMP_STORE_BACKEND|CHUMP_TEAM_URL|CHUMP_TEAM_API_KEY)
+                    [[ "$store_ok" -eq 1 ]] || continue
+                    ;;
+            esac
+            printf '%s=%s\n' "$k" "$v" >> "$tmp"
+        else
+            printf '%s\n' "$line" >> "$tmp"
+        fi
+    done < "$ne"
+    chmod 0600 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$ne"
+    return 0
+}
+
+# RESILIENT-1684: ensure chump-organ-reconcile and chump-node-converge are only
+# enabled in ONE systemd scope (no duplicate --user + --system registration on CJ).
+_dedupe_single_scope_organs() {
+    local sys_dir="${1:-${CHUMP_SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}}"
+    local usr_dir="${2:-${CHUMP_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/systemd/user}}"
+    local sctl="${3:-${CHUMP_SYSTEMCTL_BIN:-systemctl}}"
+    local base
+    for base in chump-organ-reconcile chump-node-converge; do
+        local sys_present=0
+        if [[ -f "$sys_dir/${base}.timer" || -f "$sys_dir/${base}.service" ]]; then
+            sys_present=1
+        fi
+        if [[ "$sys_present" -eq 1 ]] && [[ -f "$usr_dir/${base}.timer" || -f "$usr_dir/${base}.service" ]]; then
+            command -v "$sctl" >/dev/null 2>&1 && "$sctl" --user disable --now "${base}.timer" "${base}.service" >>"$LOG" 2>&1 || true
+            rm -f "$usr_dir/${base}.timer" "$usr_dir/${base}.service" 2>/dev/null || true
+            log "RESILIENT-1684: removed duplicate --user registration for $base (already in --system scope)"
+            emit organ_scope_deduped "\"organ\":\"$base\",\"kept_scope\":\"system\",\"removed_scope\":\"user\""
+        fi
+    done
+    return 0
+}
+
+# RESILIENT-1682: validate that a worker launcher script contains no test-gate
+# or preflight bypass assignment (CHUMP_TEST_GATE=0, CHUMP_PREFLIGHT_SKIP=1,
+# CHUMP_*_SKIP=*, CHUMP_*_NO_*=*).
+_validate_worker_launcher_no_bypass() {
+    local f="${1:?}"
+    [[ -f "$f" ]] || return 1
+    if grep -vE '^[[:space:]]*#' "$f" | grep -qE '(^|[[:space:];])(export[[:space:]]+)?(CHUMP_TEST_GATE=0|CHUMP_PREFLIGHT_[S]KIP=1|CHUMP_[A-Z0-9_]*_SKIP=|CHUMP_[A-Z0-9_]*_NO_[A-Z0-9_]*=)'; then
+        return 1
+    fi
+    return 0
+}
+
+# RESILIENT-1682: scrub bypass assignments from any live worker launcher on node.
+_converge_worker_launchers() {
+    local candidate tmp
+    for candidate in "${HOME:-/root}"/node*-worker-run.sh "${CHUMP_STATE_DIR:-${HOME:-/root}/.chump}/organs/worker.sh"; do
+        [[ -f "$candidate" ]] || continue
+        if ! _validate_worker_launcher_no_bypass "$candidate"; then
+            tmp="$(mktemp "${candidate}.XXXXXX")" || continue
+            grep -vE '^[[:space:]]*(export[[:space:]]+)?(CHUMP_TEST_GATE=0|CHUMP_PREFLIGHT_[S]KIP=1|CHUMP_[A-Z0-9_]*_SKIP=|CHUMP_[A-Z0-9_]*_NO_[A-Z0-9_]*=)' "$candidate" > "$tmp" || true
+            chmod +x "$tmp" 2>/dev/null || true
+            mv -f "$tmp" "$candidate"
+            log "RESILIENT-1682: scrubbed bypass env assignment(s) from worker launcher $candidate"
+            emit worker_launcher_bypass_scrubbed "\"launcher\":\"$candidate\""
+        fi
+    done
+    return 0
+}
+
 _reconcile_role_organs() {
+    _sanitize_node_env
+    _dedupe_single_scope_organs
+    _converge_worker_launchers
     local installer="$REPO_ROOT/scripts/setup/chump-node-install.sh"
     if [[ ! -f "$installer" ]]; then
         log "WARN: $installer not found; skipping role-organ reconcile"
@@ -275,6 +403,9 @@ _reconcile_role_organs() {
     _ensure_cargo_nextest
     _check_toolkit_roster
     _rerender_installed_units
+    _sanitize_node_env
+    _dedupe_single_scope_organs
+    _converge_worker_launchers
 }
 
 emit() {
@@ -553,6 +684,9 @@ if [[ "$HEAD_SHA" == "$TARGET_SHA" && "$BEHIND" -eq 0 && "$TARGET_SHA" != "unkno
         _ensure_cargo_nextest
         _check_toolkit_roster
         _rerender_installed_units
+        _sanitize_node_env
+        _dedupe_single_scope_organs
+        _converge_worker_launchers
     fi
     _maybe_restart_stale_workers ""
     # Prune old logs (keep last 24) even on the fast path.

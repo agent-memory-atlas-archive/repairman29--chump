@@ -6,7 +6,7 @@ Description=Chump no-ship loop + service crash-loop detector (RESILIENT-1573)
 Type=oneshot
 Environment=HOME=__HOME__
 ExecStartPre=/bin/mkdir -p __HOME__/.chump/logs
-ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/coord/no-ship-loop-detector.sh'
+ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; cd __REPO_ROOT__; exec bash scripts/coord/no-ship-loop-detector.sh'
 TimeoutStartSec=300
 StandardOutput=append:__HOME__/.chump/logs/no-ship-loop-detector.out
 StandardError=append:__HOME__/.chump/logs/no-ship-loop-detector.err

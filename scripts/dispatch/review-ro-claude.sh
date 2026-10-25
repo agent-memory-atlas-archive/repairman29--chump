@@ -141,10 +141,12 @@ sys.stdout.write(data)
 '; else cat; fi; }
 }
 
-# MINIMAL ENV (repair item 5): spawn claude with env -i and only the few
-# variables it needs — HOME (for its config/cache), PATH, TERM, and the
-# subscription OAuth token / API key if present. providers.env is NEVER sourced
-# here, so no extra secrets ride into the reviewer process.
+# MINIMAL ENV (repair item 5 / CREDIBLE-1585): spawn claude with env -i and only
+# the allowlisted variables it needs — HOME (for its config/cache), PATH, TERM,
+# and the subscription OAuth token / API key if present. Non-allowlisted secrets
+# (SUPABASE_SERVICE_ROLE_KEY, POSTGRES_PASSWORD, OCI_*, AWS_SECRET_ACCESS_KEY,
+# STRIPE_*, CHUMP_SUBSTRATE_DB_PASSWORD) are explicitly scrubbed and never passed.
+unset SUPABASE_SERVICE_ROLE_KEY POSTGRES_PASSWORD AWS_SECRET_ACCESS_KEY STRIPE_SECRET_KEY CHUMP_SUBSTRATE_DB_PASSWORD
 run_minimal() {
     local -a env_kv=(
         "HOME=${HOME:-/tmp}"

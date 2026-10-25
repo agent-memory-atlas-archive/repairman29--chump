@@ -16,7 +16,7 @@ Type=simple
 Environment=HOME=__HOME__
 # chump-coord is a distinct binary (not the chump symlink on PATH), so reference
 # it by its in-repo release path — host-rewritten to this node's real checkout.
-ExecStart=/bin/bash -c 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/target/release/chump-coord assign'
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec __REPO_ROOT__/target/release/chump-coord assign'
 Restart=on-failure
 RestartSec=30
 

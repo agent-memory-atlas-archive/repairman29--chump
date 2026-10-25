@@ -134,6 +134,49 @@ else
   fail "fallback launcher path failed to produce an executable worker.sh"
 fi
 
+# ── 6. RESILIENT-1682 + CREDIBLE-1585: no bypass vars & no wholesale set -a ─
+CONVERGE_SH="$REPO_ROOT/scripts/ops/node-converge.sh"
+WORKER_RUN_SH="$REPO_ROOT/scripts/dispatch/worker-run.sh"
+# shellcheck disable=SC1090
+source "$CONVERGE_SH"
+
+# Re-render the real template for inspection.
+CHUMP_NODE_REPO="$FAKE_REPO" DRY=0 render_worker_launcher
+
+for lf in "$TEMPLATE" "$WORKER_RUN_SH" "$RENDERED"; do
+  if _validate_worker_launcher_no_bypass "$lf"; then
+    pass "RESILIENT-1682: $(basename "$lf") carries no test-gate/preflight bypass assignment"
+  else
+    fail "RESILIENT-1682: $(basename "$lf") carries a forbidden bypass assignment"
+  fi
+done
+
+for lf in "$TEMPLATE" "$WORKER_RUN_SH"; do
+  grep -q 'unset CHUMP_TEST_GATE "\$_chump_pf_skip"' "$lf" \
+    && pass "RESILIENT-1682: $(basename "$lf") explicitly unsets CHUMP_TEST_GATE + preflight skip" \
+    || fail "RESILIENT-1682: $(basename "$lf") missing explicit unset of CHUMP_TEST_GATE + preflight skip"
+done
+
+# Mutant check: a launcher with CHUMP_PREFLIGHT_SKIP=1 or CHUMP_TEST_GATE=0 MUST fail.
+_PF_SKIP_NAME="CHUMP_PREFLIGHT_""SKIP"
+MUT_SKIP="$TMP/mutant-preflight-skip.sh"
+cp "$RENDERED" "$MUT_SKIP"
+printf '\nexport %s=1\n' "$_PF_SKIP_NAME" >> "$MUT_SKIP"
+if _validate_worker_launcher_no_bypass "$MUT_SKIP"; then
+  fail "RESILIENT-1682 mutant: preflight skip assignment was not caught by validator"
+else
+  pass "RESILIENT-1682 mutant killed: validator rejects preflight skip assignment"
+fi
+
+MUT_GATE="$TMP/mutant-test-gate.sh"
+cp "$RENDERED" "$MUT_GATE"
+printf '\nCHUMP_TEST_GATE=0\n' >> "$MUT_GATE"
+if _validate_worker_launcher_no_bypass "$MUT_GATE"; then
+  fail "RESILIENT-1682 mutant: CHUMP_TEST_GATE=0 was not caught by validator"
+else
+  pass "RESILIENT-1682 mutant killed: validator rejects CHUMP_TEST_GATE=0"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then
   echo "PASS: worker-launcher-template ($((0)) failures)"

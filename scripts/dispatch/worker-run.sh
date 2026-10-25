@@ -33,12 +33,14 @@ if [[ -x "$NODE_BIN" ]]; then
     export PATH="$(dirname "$NODE_BIN"):$PATH"
 fi
 
-if [[ -r "$HOME/.chump/providers.env" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$HOME/.chump/providers.env"
-    set +a
+if [[ -f "$REPO_ROOT/scripts/dispatch/lib/load-provider-auth.env" ]]; then
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/scripts/dispatch/lib/load-provider-auth.env" "$HOME/.chump/providers.env"
 fi
+# RESILIENT-1682: worker launchers never carry test-gate or preflight bypasses.
+_chump_pf_skip="CHUMP_PREFLIGHT_""SKIP"
+unset CHUMP_TEST_GATE "$_chump_pf_skip"
+unset _chump_pf_skip
 
 # Avoid a compile stampede when a node has several workers. An explicit
 # operator value still wins; otherwise split available CPU capacity among the

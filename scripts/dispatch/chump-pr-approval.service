@@ -15,4 +15,4 @@ Type=oneshot
 # Source providers.env for GH_TOKEN + DISCORD_TOKEN + CHUMP_READY_DM_USER_ID
 # (export-format, so source it in a shell rather than systemd EnvironmentFile).
 Environment=HOME=__HOME__
-ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/dispatch/pr-approval-surface-beat.sh'
+ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec __REPO_ROOT__/scripts/dispatch/pr-approval-surface-beat.sh'

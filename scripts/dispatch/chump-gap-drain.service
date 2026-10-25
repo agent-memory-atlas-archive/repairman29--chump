@@ -23,7 +23,7 @@ WorkingDirectory=__REPO_ROOT__
 # organs; the drain script pins OPENAI_API_BASE->openrouter/deepseek-v4-pro from
 # OPENROUTER_API_KEY itself, so the cheap floor — not local ollama — serves the
 # enrich/decompose calls.
-ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; source __HOME__/.chump/cj.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/dispatch/gap-drain.sh'
+ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env __HOME__/.chump/cj.env 2>/dev/null; cd __REPO_ROOT__; exec bash scripts/dispatch/gap-drain.sh'
 # Enrichment is ~55s/gap (deepseek-v4-pro w/ reasoning); a full tick of 6 enrich
 # + 2 decompose fits well under this ceiling.
 TimeoutStartSec=1800

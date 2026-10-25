@@ -776,6 +776,23 @@ if [[ -n "$ROLE_FILTER" ]]; then
   done < <(discover_live_chump_units)
 fi
 
+# 4) RESILIENT-1684: ensure chump-organ-reconcile and chump-node-converge are only
+#    enabled in one systemd scope (if present in --system, disable/remove any
+#    duplicate --user registration).
+_DEDUPE_SYS_DIR="${CHUMP_SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
+_DEDUPE_USR_DIR="${CHUMP_SYSTEMD_USER_DIR:-}"
+if [[ -n "$_DEDUPE_USR_DIR" && -d "$_DEDUPE_USR_DIR" ]]; then
+  for _base in chump-organ-reconcile chump-node-converge; do
+    if [[ -f "$_DEDUPE_SYS_DIR/${_base}.timer" || -f "$_DEDUPE_SYS_DIR/${_base}.service" ]]; then
+      if [[ -f "$_DEDUPE_USR_DIR/${_base}.timer" || -f "$_DEDUPE_USR_DIR/${_base}.service" ]]; then
+        "$SYSTEMCTL_BIN" --user disable --now "${_base}.timer" "${_base}.service" 2>/dev/null || true
+        rm -f "$_DEDUPE_USR_DIR/${_base}.timer" "$_DEDUPE_USR_DIR/${_base}.service" 2>/dev/null || true
+        CHANGED+=("deduped-user-scope:${_base}")
+      fi
+    fi
+  done
+fi
+
 # ── report ───────────────────────────────────────────────────────────────────
 if [[ "${#CHANGED[@]}" -gt 0 ]]; then
   changed_json="$(printf '"%s",' "${CHANGED[@]}")"

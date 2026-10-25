@@ -10,4 +10,4 @@ Environment=HOME=__HOME__
 StandardOutput=journal
 StandardError=journal
 # Load Posse environment and execute portfolio scan
-ExecStart=/bin/bash -lc "set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __HOME__/Projects/posse && npm run scan"
+ExecStart=/bin/bash -lc "source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; cd __HOME__/Projects/posse && npm run scan"

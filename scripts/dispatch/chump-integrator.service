@@ -37,7 +37,7 @@ ExecStartPre=/bin/mkdir -p __HOME__/.chump/logs
 # NATS is OPTIONAL — the daemon falls back to an advisory file lock + state.db
 # when the bus is absent. --once runs a single cycle then exits (launchd handled
 # cadence via StartInterval; here the paired .timer does).
-ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec __HOME__/.cargo/bin/chump-integrator --once'
+ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; cd __REPO_ROOT__; exec __HOME__/.cargo/bin/chump-integrator --once'
 # Preflight can take up to CHUMP_INTEGRATOR_PREFLIGHT_TIMEOUT_S (default 480s)
 # plus branch-build time; give a generous ceiling so a cycle is never killed
 # mid-preflight. Still well under the 15-min timer cadence for the common case.

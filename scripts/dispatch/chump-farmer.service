@@ -32,5 +32,5 @@ Environment=HOME=__HOME__
 # reset by a login profile. The host-rewriter turns /root into the run-user's home,
 # so the glob resolves to the run-user's ~/.chump on every host. Kept short so it
 # always completes well inside the 30s timer cadence.
-ExecStart=/bin/bash -c 'set -a; for e in __HOME__/.chump/*.env; do source "$e" 2>/dev/null; done; set +a; exec __REPO_ROOT__/scripts/dispatch/chump-farmer-run.sh'
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/*.env 2>/dev/null; exec __REPO_ROOT__/scripts/dispatch/chump-farmer-run.sh'
 TimeoutStartSec=120

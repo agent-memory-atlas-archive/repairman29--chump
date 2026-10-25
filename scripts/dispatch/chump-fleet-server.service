@@ -34,7 +34,7 @@ Environment=RUST_LOG=info
 WorkingDirectory=__REPO_ROOT__
 # Source provider + node creds (GH_TOKEN for the count_today_ships gh fallback).
 # set -a exports the bare (non-export) CLAUDE_CODE_OAUTH_TOKEN line in cj.env too.
-ExecStart=/bin/bash -c 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; source __HOME__/.chump/cj.env 2>/dev/null; set +a; exec __REPO_ROOT__/target/release/chump-fleet-server'
+ExecStart=/bin/bash -c 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env __HOME__/.chump/cj.env 2>/dev/null; exec __REPO_ROOT__/target/release/chump-fleet-server'
 Restart=always
 RestartSec=10
 

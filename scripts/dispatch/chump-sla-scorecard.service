@@ -25,4 +25,4 @@ Type=oneshot
 Environment=HOME=__HOME__
 Environment=CHUMP_REPO_ROOT=__REPO_ROOT__
 WorkingDirectory=__REPO_ROOT__
-ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/coord/merge-sla-scorecard.sh --apply'
+ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec __REPO_ROOT__/scripts/coord/merge-sla-scorecard.sh --apply'

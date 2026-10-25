@@ -33,5 +33,5 @@ WorkingDirectory=__REPO_ROOT__
 # per-node config). The NBA router itself makes no LLM call — it only reads
 # already-computed fleet state (pr-book, faculty, gaps, failed organs) — so it
 # is cheap and cannot contend the model cascade.
-ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; source __HOME__/.chump/cj.env 2>/dev/null; set +a; cd __REPO_ROOT__; exec bash scripts/coord/next-best-action.sh'
+ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env __HOME__/.chump/cj.env 2>/dev/null; cd __REPO_ROOT__; exec bash scripts/coord/next-best-action.sh'
 TimeoutStartSec=300

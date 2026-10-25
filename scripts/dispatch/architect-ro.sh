@@ -21,6 +21,15 @@
 #   cache-age          newest fetched_at_local in the GitHub cache
 set -uo pipefail
 
+# CREDIBLE-1585: scrub non-allowlisted cloud/DB secrets at entry.
+unset SUPABASE_SERVICE_ROLE_KEY POSTGRES_PASSWORD AWS_SECRET_ACCESS_KEY STRIPE_SECRET_KEY CHUMP_SUBSTRATE_DB_PASSWORD
+while IFS='=' read -r _ro_k _; do
+    case "$_ro_k" in
+        OCI_*|*PASSWORD*|*SERVICE_ROLE*|*SECRET*) unset "$_ro_k" 2>/dev/null || true ;;
+    esac
+done < <(env)
+unset _ro_k
+
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SELF_DIR/../.." && pwd)"
 cd "$REPO_ROOT" || exit 1

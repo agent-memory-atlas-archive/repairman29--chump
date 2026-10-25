@@ -412,8 +412,29 @@ CLAUDE_ARGS=(-p "$ARCH_PROMPT"
 # cannot inject unfiltered "drive them to merge" text into the headless agent.
 # All three are pinned in scripts/ci/test-architect-tick.sh's argv audit.
 
+# CREDIBLE-1585: scrub non-allowlisted secrets (SUPABASE_SERVICE_ROLE_KEY,
+# POSTGRES_PASSWORD, OCI_*, AWS_SECRET_ACCESS_KEY, STRIPE_*,
+# CHUMP_SUBSTRATE_DB_PASSWORD, etc.) from the headless claude child environment.
+_scrub_headless_claude_env() {
+    local _k
+    while IFS= read -r _k; do
+        case "$_k" in
+            PATH|HOME|USER|LOGNAME|SHELL|LANG|LC_ALL|TERM|TMPDIR|CARGO_TARGET_DIR|CARGO_HOME|RUSTUP_HOME|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|OPENAI_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|OPENROUTER_API_KEY|GH_TOKEN|GITHUB_TOKEN|IS_SANDBOX|ARCH_STUB_*)
+                ;;
+            CHUMP_*)
+                case "$_k" in
+                    *PASSWORD*|*SECRET*|*SERVICE_ROLE*) unset "$_k" 2>/dev/null || true ;;
+                esac
+                ;;
+            *)
+                unset "$_k" 2>/dev/null || true
+                ;;
+        esac
+    done < <(compgen -e)
+}
+
 if command -v "$CLAUDE_BIN" >/dev/null 2>&1; then
-    cycle_output="$(bounded "$TIMEOUT_S" "$CLAUDE_BIN" "${CLAUDE_ARGS[@]}" 2>&1)"
+    cycle_output="$(_scrub_headless_claude_env; bounded "$TIMEOUT_S" "$CLAUDE_BIN" "${CLAUDE_ARGS[@]}" 2>&1)"
     cycle_rc=$?
 else
     log "WARN: claude binary '$CLAUDE_BIN' not on PATH — recording a no-agent tick"

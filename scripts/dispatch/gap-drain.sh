@@ -28,12 +28,8 @@ REPO_ROOT="${CHUMP_REPO_ROOT:-$(cd "$(dirname "$0")/../.." && pwd -P)}"
 cd "$REPO_ROOT" || exit 1
 
 # ── provider wiring: pin deepseek-v4-pro as cascade slot 0 ───────────────────
-# providers.env carries OPENROUTER_API_KEY + CHUMP_MODEL_ESCALATION_LADDER; it is
-# sourced by the systemd unit, but source here too for hand-runs.
-set -a
-[ -f "$HOME/.chump/providers.env" ] && source "$HOME/.chump/providers.env" 2>/dev/null
-[ -f "$HOME/.chump/cj.env" ] && source "$HOME/.chump/cj.env" 2>/dev/null
-set +a
+# Load only allowlisted provider/organ keys from providers.env / cj.env (CREDIBLE-1585).
+[ -f "$(dirname "$0")/lib/load-provider-auth.env" ] && source "$(dirname "$0")/lib/load-provider-auth.env" "$HOME/.chump/providers.env" "$HOME/.chump/cj.env" 2>/dev/null
 # INFRA: pick the decompose/enrich provider. Prefer OpenRouter deepseek-v4-pro,
 # but fall to a capable FREE tier (Google gemini-3.6-flash, then Groq
 # gpt-oss-120b) when OpenRouter credits are exhausted (402 on full requests) —

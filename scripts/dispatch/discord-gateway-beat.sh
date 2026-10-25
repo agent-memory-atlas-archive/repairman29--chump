@@ -68,7 +68,7 @@ echo $$ > "$PIDFILE"
 # beat also works when creds live in the repo .env (notify-operator.sh's
 # convention) or when run by hand. Never echo the values.
 if [[ -z "${DISCORD_TOKEN:-}" || -z "${CHUMP_READY_DM_USER_ID:-}" ]]; then
-  [[ -f "$HOME/.chump/providers.env" ]] && { set -a; source "$HOME/.chump/providers.env" 2>/dev/null || true; set +a; }
+  [[ -f "$REPO_ROOT/scripts/dispatch/lib/load-provider-auth.env" ]] && source "$REPO_ROOT/scripts/dispatch/lib/load-provider-auth.env" "$HOME/.chump/providers.env" 2>/dev/null || true
 fi
 if [[ -z "${DISCORD_TOKEN:-}" || -z "${CHUMP_READY_DM_USER_ID:-}" ]]; then
   if [[ -f "$REPO_ROOT/scripts/coord/lib/resolve-env.sh" ]]; then

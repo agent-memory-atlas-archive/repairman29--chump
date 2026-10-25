@@ -20,5 +20,5 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 Nice=10
-ExecStart=/bin/bash -c 'set -a; . "$$HOME/.chump/providers.env" 2>/dev/null; set +a; exec chump calibrate'
+ExecStart=/bin/bash -c '. scripts/dispatch/lib/load-provider-auth.env "$$HOME/.chump/providers.env" 2>/dev/null; exec chump calibrate'
 TimeoutStartSec=1800

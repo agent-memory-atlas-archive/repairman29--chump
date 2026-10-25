@@ -213,7 +213,7 @@ Description=ChumpOS organ $name
 # providers.env accepts both KEY=value and `export KEY=value`; source it via
 # bash so every installer-supported form reaches the organ without writing a
 # secret value into the unit file.
-ExecStart=/bin/bash -c 'set -a; [ -r "$CREDS" ] && . "$CREDS"; set +a; exec "$cmd"'
+ExecStart=/bin/bash -c 'if [ -r "$NODE_DIR/repo/scripts/dispatch/lib/load-provider-auth.env" ]; then . "$NODE_DIR/repo/scripts/dispatch/lib/load-provider-auth.env" "$CREDS"; fi; exec "$cmd"'
 Restart=always
 Environment=CHUMP_NODE_DIR=$NODE_DIR
 [Install]

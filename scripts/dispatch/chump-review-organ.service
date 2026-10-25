@@ -29,4 +29,4 @@ TimeoutStartSec=1800
 # user-scope manager resolves ~/.chump. The review subprocess itself is spawned
 # under a MINIMAL env by review-ro-claude.sh (it does NOT inherit providers.env).
 Environment=HOME=__HOME__
-ExecStart=/bin/bash -lc 'set -a; source __HOME__/.chump/providers.env 2>/dev/null; set +a; exec __REPO_ROOT__/scripts/dispatch/review-organ-tick.sh'
+ExecStart=/bin/bash -lc 'source __REPO_ROOT__/scripts/dispatch/lib/load-provider-auth.env __HOME__/.chump/providers.env 2>/dev/null; exec __REPO_ROOT__/scripts/dispatch/review-organ-tick.sh'
