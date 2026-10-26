@@ -14985,4 +14985,108 @@ events:
     consumers: [ambient, fleet-brief, ops-audit]
     fields_required: [ts, kind, hook, gap_id, bypass]
 
-  # ── INFRA-8218 / CREDIBLE-1509: invariant-boundary gate reading (Phase R R6) ──
+  # ── Wave 19: CREDIBLE-081 / RESILIENT-009 / 037 / 128 / 130 / 1559 / 1576 ──
+  - kind: fleet_wire_zero_consumer
+    status: active
+    effect_metric: self
+    emitter: scripts/dev/fleet-wire-leaderboard.sh (CREDIBLE-081)
+    emitter_paths: [scripts/dev/fleet-wire-leaderboard.sh]
+    trigger: >
+      Emitted when fleet-wire-leaderboard.sh is run with CHUMP_FLEET_WIRE_ALERT_EMIT=1
+      and detects a fleet-wire / broadcast / inbox message type with published_count > 10
+      and zero consumers/acks in the window.
+    consumers: [scripts/ops/vital-signs.sh, scripts/coord/fleet-doctor-strict.sh]
+    fields_required: [ts, kind, subject_or_kind, published_count, consumer_count, window]
+
+  - kind: worktree_gitdir_repaired_postadd
+    status: active
+    effect_metric: self
+    emitter: crates/chump-atomic-claim/src/atomic_claim.rs + scripts/coord/gap-claim.sh (RESILIENT-009)
+    emitter_paths: [crates/chump-atomic-claim/src/atomic_claim.rs, scripts/coord/gap-claim.sh]
+    trigger: >
+      Emitted immediately after git worktree add when post-add verification
+      (git -C <wt_dir> rev-parse --show-toplevel) detects and repairs a dangling or
+      mismatched .git pointer.
+    consumers: [scripts/ci/test-infra-779-gitdir-repair.sh, scripts/ops/vital-signs.sh]
+    fields_required: [ts, kind, worktree, gap_id, repaired_from, repaired_to]
+
+  - kind: session_idle_standby
+    status: active
+    effect_metric: self
+    emitter: AGENTS.md (RESILIENT-037)
+    emitter_paths: [AGENTS.md]
+    trigger: >
+      Emitted once when an agent session finds no open unblocked gaps matching its
+      role and enters legitimate standby rather than performing cargo-cult busyness.
+    consumers: [scripts/ops/vital-signs.sh]
+    fields_required: [ts, kind, session]
+
+  - kind: vague_ac_bypass_used
+    status: active
+    effect_metric: self
+    emitter: scripts/git-hooks/pre-commit-gap-quality.sh (RESILIENT-037)
+    emitter_paths: [scripts/git-hooks/pre-commit-gap-quality.sh]
+    trigger: >
+      Emitted when a commit bypasses the pre-commit-gap-quality.sh gate via the
+      Vague-AC-Bypass commit trailer.
+    consumers: [scripts/ops/vital-signs.sh]
+    fields_required: [ts, kind, files, reason]
+
+  - kind: worktree_reaped_prunable
+    status: active
+    effect_metric: self
+    emitter: scripts/ops/stale-worktree-reaper.sh (RESILIENT-128)
+    emitter_paths: [scripts/ops/stale-worktree-reaper.sh]
+    trigger: >
+      Emitted when stale-worktree-reaper.sh reaps a prunable worktree entry surfaced
+      by git worktree list --porcelain and runs git worktree prune.
+    consumers: [scripts/ops/vital-signs.sh]
+    fields_required: [ts, kind, path, prior_branch, age]
+
+  - kind: cargo_target_reaper_run
+    status: active
+    effect_metric: self
+    emitter: scripts/ops/cargo-target-reaper.sh (RESILIENT-130)
+    emitter_paths: [scripts/ops/cargo-target-reaper.sh]
+    trigger: >
+      Emitted on every invocation of cargo-target-reaper.sh (via EXIT trap on both
+      normal completion and early non-zero failure) with rc, target_paths_scanned,
+      paths_reaped, and error_msg.
+    consumers: [scripts/ops/vital-signs.sh, scripts/coord/fleet-doctor-strict.sh]
+    fields_required: [ts, kind, rc, target_paths_scanned, paths_reaped, error_msg]
+
+  - kind: core_organ_neutered
+    status: active
+    effect_metric: self
+    emitter: scripts/coord/fleet-doctor-strict.sh (RESILIENT-1559)
+    emitter_paths: [scripts/coord/fleet-doctor-strict.sh]
+    trigger: >
+      Emitted by check_core_organs_not_neutered in fleet-doctor-strict.sh when a core
+      organ service has an ExecStart=/bin/true (or /usr/bin/true) drop-in override or
+      is masked while its timer remains active.
+    consumers: [scripts/coord/fleet-doctor-strict.sh, scripts/ops/vital-signs.sh]
+    fields_required: [ts, kind, unit, exec_start, dropin_path]
+
+  - kind: pr_conflict_triage
+    status: active
+    effect_metric: self
+    emitter: scripts/coord/auto-merge-armer.sh + scripts/coord/bot-merge.sh + scripts/coord/pr-shepherd-daemon.sh (RESILIENT-1576)
+    emitter_paths: [scripts/coord/auto-merge-armer.sh, scripts/coord/bot-merge.sh, scripts/coord/pr-shepherd-daemon.sh]
+    trigger: >
+      Emitted when auto-merge-armer.sh, bot-merge.sh, or pr-shepherd-daemon.sh refuses
+      to arm (or disarms) a PR whose mergeable state is CONFLICTING or whose
+      mergeStateStatus is DIRTY.
+    consumers: [scripts/coord/pr-shepherd-daemon.sh, scripts/ops/vital-signs.sh]
+    fields_required: [ts, kind, pr, mergeable, merge_state_status, action]
+
+  - kind: pr_dirty_stalled
+    status: active
+    effect_metric: self
+    emitter: scripts/coord/pr-shepherd-daemon.sh (RESILIENT-1576)
+    emitter_paths: [scripts/coord/pr-shepherd-daemon.sh]
+    trigger: >
+      Emitted by pr-shepherd-daemon.sh when a DIRTY (conflicting) PR has remained
+      stalled for >= 4 hours, surfacing it for conflict triage / rebase.
+    consumers: [scripts/ops/vital-signs.sh, scripts/coord/fleet-doctor-strict.sh]
+    fields_required: [ts, kind, pr, merge_state_status, stalled_hours, action]
+

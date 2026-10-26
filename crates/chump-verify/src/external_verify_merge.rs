@@ -270,7 +270,14 @@ fn run_inner(args: &[String]) -> anyhow::Result<i32> {
                     println!("  fails on base: {fails_on_base}");
                     println!("  passes on head: {passes_on_head}");
 
-                    if !fails_on_base {
+                    let pure_test_addition = if !fails_on_base && passes_on_head {
+                        is_pure_test_addition(&clone_dir, &base_sha, &head_sha, &test_files)
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+
+                    if !fails_on_base && !pure_test_addition {
                         let reason =
                             "test passes on base too — change is unproven (cosmetic or duplicate)";
                         println!("  FAIL: {reason}");
@@ -282,6 +289,11 @@ fn run_inner(args: &[String]) -> anyhow::Result<i32> {
                         println!("\nVerdict: HELD(unproven)");
                         println!("  {reason}");
                         return Ok(1);
+                    }
+                    if pure_test_addition {
+                        println!(
+                            "  PASS (pure-test-addition): PR adds only new test files covering existing behavior and passes on head"
+                        );
                     }
 
                     if !passes_on_head {
@@ -590,7 +602,7 @@ enum CiResult {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum TestRunner {
     /// `cargo test --test <name> -- <test_fn>`  (Rust)
     Cargo,
@@ -1276,6 +1288,73 @@ fn is_test_file(path: &str) -> bool {
         || lower.contains("test") // broad fallback: any file with "test" in the path
 }
 
+/// Return true if the PR is a pure test-coverage addition/extension PR:
+/// - every changed file between `base_sha` and `head_sha` is in `test_files`
+///   (or is a companion `DEPTH.md` / `e2e/DEPTH.md` ledger update), AND
+/// - every changed test file exists on head and contains both a test definition
+///   (`def test_`, `test(`, `it(`, or `#[test]`) and a real assertion
+///   (`assert`, `expect(`, or `pytest.raises`), rejecting trivial/cosmetic stubs.
+fn is_pure_test_addition(
+    clone_dir: &Path,
+    base_sha: &str,
+    head_sha: &str,
+    test_files: &[String],
+) -> anyhow::Result<bool> {
+    if test_files.is_empty() {
+        return Ok(false);
+    }
+    let out = ext_git()
+        .args([
+            "-C",
+            &clone_dir.to_string_lossy(),
+            "diff",
+            "--name-status",
+            &format!("{base_sha}..{head_sha}"),
+        ])
+        .output()
+        .map_err(|e| anyhow::anyhow!("git diff --name-status failed: {e}"))?;
+    if !out.status.success() {
+        return Ok(false);
+    }
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let mut saw_test = false;
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut parts = trimmed.splitn(2, '\t');
+        let status = parts.next().unwrap_or("").trim();
+        let path = parts.next().unwrap_or("").trim();
+        if path.is_empty() || (!status.starts_with('A') && !status.starts_with('M')) {
+            return Ok(false);
+        }
+        if path == "DEPTH.md" || path == "e2e/DEPTH.md" {
+            continue;
+        }
+        if !test_files.iter().any(|tf| tf == path) {
+            return Ok(false);
+        }
+        let full_path = clone_dir.join(path);
+        let Ok(content) = std::fs::read_to_string(&full_path) else {
+            return Ok(false);
+        };
+        let has_test_fn = content.contains("def test_")
+            || content.contains("async def test_")
+            || content.contains("#[test]")
+            || content.contains("test(")
+            || content.contains("it(");
+        let has_assertion = content.contains("assert")
+            || content.contains("expect(")
+            || content.contains("pytest.raises");
+        if !has_test_fn || !has_assertion {
+            return Ok(false);
+        }
+        saw_test = true;
+    }
+    Ok(saw_test)
+}
+
 /// Detect how to run tests for this repo.
 fn detect_test_runner(clone_dir: &Path) -> anyhow::Result<TestRunner> {
     // Rust
@@ -1297,6 +1376,8 @@ fn detect_test_runner(clone_dir: &Path) -> anyhow::Result<TestRunner> {
     if clone_dir.join("pytest.ini").exists()
         || clone_dir.join("pyproject.toml").exists()
         || clone_dir.join("setup.cfg").exists()
+        || clone_dir.join("conftest.py").exists()
+        || clone_dir.join("tests/conftest.py").exists()
     {
         return Ok(TestRunner::Pytest);
     }
@@ -1568,6 +1649,19 @@ fn git_checkout_detach(clone_dir: &Path, sha: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn python_bin() -> String {
+    if Command::new("which")
+        .arg("python3")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        "python3".to_string()
+    } else {
+        "python".to_string()
+    }
+}
+
 /// Build the test command for SPECIFIC changed test files (Gate 2).
 fn test_command_specific(runner: &TestRunner, test_files: &[String]) -> Vec<String> {
     match runner {
@@ -1600,7 +1694,7 @@ fn test_command_specific(runner: &TestRunner, test_files: &[String]) -> Vec<Stri
             cmd
         }
         TestRunner::Pytest => {
-            let mut cmd = vec!["python".into(), "-m".into(), "pytest".into(), "-x".into()];
+            let mut cmd = vec![python_bin(), "-m".into(), "pytest".into(), "-x".into()];
             for f in test_files {
                 cmd.push(f.clone());
             }
@@ -1789,7 +1883,7 @@ fn full_suite_command(runner: &TestRunner) -> Vec<String> {
             let npm = std::env::var("CHUMP_NPM_BIN").unwrap_or_else(|_| "npm".to_string());
             vec![npm, "test".into()]
         }
-        TestRunner::Pytest => vec!["python".into(), "-m".into(), "pytest".into()],
+        TestRunner::Pytest => vec![python_bin(), "-m".into(), "pytest".into()],
         TestRunner::Make => vec!["make".into(), "test".into()],
         TestRunner::Unknown => vec!["true".into()],
     }
@@ -3573,5 +3667,106 @@ exit 0
         assert!(std::fs::read_to_string(&amb)
             .unwrap()
             .contains("pr_arm_skipped_hold"));
+    }
+
+    #[test]
+    fn detect_test_runner_recognizes_conftest_and_tests_conftest() {
+        let tmp1 = tempfile::tempdir().unwrap();
+        std::fs::write(tmp1.path().join("conftest.py"), "# root conftest\n").unwrap();
+        assert_eq!(
+            super::detect_test_runner(tmp1.path()).unwrap(),
+            super::TestRunner::Pytest
+        );
+
+        let tmp2 = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp2.path().join("tests")).unwrap();
+        std::fs::write(
+            tmp2.path().join("tests/conftest.py"),
+            "# nested tests/conftest.py\n",
+        )
+        .unwrap();
+        assert_eq!(
+            super::detect_test_runner(tmp2.path()).unwrap(),
+            super::TestRunner::Pytest
+        );
+    }
+
+    #[test]
+    fn is_pure_test_addition_distinguishes_added_test_only_from_modified_prod() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let run_git = |args: &[&str]| {
+            let st = std::process::Command::new("git")
+                .args(["-C", &dir.to_string_lossy()])
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(st.success(), "git {args:?} failed");
+        };
+        run_git(&["init", "-b", "main"]);
+        run_git(&["config", "user.email", "test@example.com"]);
+        run_git(&["config", "user.name", "Test"]);
+        std::fs::write(dir.join("app.py"), "def add(a, b):\n    return a + b\n").unwrap();
+        run_git(&["add", "app.py"]);
+        run_git(&["commit", "-m", "initial"]);
+
+        let base_sha = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["-C", &dir.to_string_lossy(), "rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+
+        std::fs::create_dir_all(dir.join("tests")).unwrap();
+        std::fs::write(
+            dir.join("tests/test_app.py"),
+            "from app import add\ndef test_add():\n    assert add(1, 2) == 3\n",
+        )
+        .unwrap();
+        run_git(&["add", "tests/test_app.py"]);
+        run_git(&["commit", "-m", "add test only"]);
+
+        let head_pure = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["-C", &dir.to_string_lossy(), "rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+
+        let test_files = super::diff_test_files(dir, &base_sha, &head_pure).unwrap();
+        assert_eq!(test_files, vec!["tests/test_app.py".to_string()]);
+        assert!(
+            super::is_pure_test_addition(dir, &base_sha, &head_pure, &test_files).unwrap(),
+            "pure test-addition commit must return true"
+        );
+
+        // Now modify production file app.py -> no longer a pure test addition.
+        std::fs::write(dir.join("app.py"), "def add(a, b):\n    return a + b + 0\n").unwrap();
+        run_git(&["add", "app.py"]);
+        run_git(&["commit", "-m", "touch prod file"]);
+        let head_mixed = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["-C", &dir.to_string_lossy(), "rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+
+        let test_files_mixed = super::diff_test_files(dir, &base_sha, &head_mixed).unwrap();
+        assert!(
+            !super::is_pure_test_addition(dir, &base_sha, &head_mixed, &test_files_mixed).unwrap(),
+            "commit touching prod file must NOT be treated as pure test addition"
+        );
     }
 }

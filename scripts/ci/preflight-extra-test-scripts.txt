@@ -14,3 +14,7 @@
 # INFRA-8178: auto-arm-sweeper human-vs-gate disarm classification. Pure
 # fake-gh fixture test, no network, ~1s.
 scripts/ci/test-auto-arm-sweeper.sh
+# RESILIENT-110 (MISSION-036 / MISSION-038): external-scan-reaper + onboard-scout-scheduler
+scripts/ci/test-external-scan-reaper.sh
+scripts/ci/test-onboard-scout-scheduler.sh
+

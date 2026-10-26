@@ -785,6 +785,14 @@ Each gap is an atomic unit of work with a stable ID (e.g. `COMP-007`,
    opt-out: `touch <worktree>/.chump-no-reap`. Details: `CLAUDE.md` section
    **Worktree disk hygiene**.
 
+### No-idle anti-cargo-cult (RESILIENT-037)
+
+The no-idle rule requires ship-class progress, NOT performative busyness (**NOT-list**):
+- **Do NOT** file placeholder gaps with `TODO`/`TBD` in `acceptance_criteria` or `description` `< 200` chars (`scripts/git-hooks/pre-commit-gap-quality.sh`).
+- **Do NOT** emit heartbeat/status events to `ambient.jsonl` faster than 1 per 10 minutes without accompanying code/doc progress.
+- **Do NOT** re-run `cargo check` / `gh pr list` / `git status` in a loop when no file changed.
+- **Legitimate idle:** when no open unblocked gaps match your role, emit `kind=session_idle_standby` once and wait for a wakeup/cron tick.
+
 ### Diagnosing divergence (added 2026-05-02 / META-014)
 
 Before filing an RCA / regression gap that claims "X reverted my change /

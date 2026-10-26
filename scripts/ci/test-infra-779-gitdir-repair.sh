@@ -125,5 +125,14 @@ else
     fail "Test 5: worktree_gitdir_repaired not found in $EVENT_REG"
 fi
 
+# ── Test 6: RESILIENT-009 post-add gitdir verification + repair in gap-claim.sh ──
+printf 'gitdir: /nonexistent/broken/gitdir\n' > "$WT2/.git"
+CHUMP_REPO="$FAKE_GIT" CHUMP_AMBIENT_LOG="$AMBIENT" bash "$REPO_ROOT/scripts/coord/gap-claim.sh" --verify-gitdir "$WT2" "TEST-B" # INFRA-987
+if git -C "$WT2" rev-parse --show-toplevel >/dev/null 2>&1 && grep -q '"kind":"worktree_gitdir_repaired_postadd"' "$AMBIENT"; then
+    pass "Test 6: RESILIENT-009 gap-claim.sh --verify-gitdir repaired broken .git pointer and emitted worktree_gitdir_repaired_postadd"
+else
+    fail "Test 6: RESILIENT-009 gap-claim.sh --verify-gitdir failed to repair or emit worktree_gitdir_repaired_postadd"
+fi
+
 echo ""
-echo "All INFRA-1033 gitdir-repair checks passed (5/5)."
+echo "All INFRA-1033 / RESILIENT-009 gitdir-repair checks passed (6/6)."

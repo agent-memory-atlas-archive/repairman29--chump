@@ -1461,6 +1461,10 @@ fn discover_test_scripts(repo_root: &std::path::Path) -> Vec<std::path::PathBuf>
         "scripts/ci/test-readonly-claude-allowlists.sh",
         // CREDIBLE-1532 / 1533 / 1536 / 1540: CI + audit + nightly/weekly audit lane guard.
         "scripts/ci/test-audit-lanes-green.sh",
+        // RESILIENT-110 (MISSION-036 / MISSION-038): external-scan-reaper and
+        // onboard-scout-scheduler fast-checks parity mirrors (<3s each, pure local).
+        "scripts/ci/test-external-scan-reaper.sh",
+        "scripts/ci/test-onboard-scout-scheduler.sh",
         // RESILIENT-1544: do NOT append new test scripts to this array — it is a
         // hot file that collides when parallel PRs each add a gate (the 2026-10-06
         // burst DIRTY-treadmill). Add new scripts to the union-merged overflow file

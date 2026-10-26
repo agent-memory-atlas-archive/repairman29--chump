@@ -541,6 +541,7 @@ process_worktree() {
     #         "rescue-pattern" (standalone /tmp/ dir matching rescue pattern — INFRA-2339),
     #         "tmp-age" (standalone /tmp/ dir matched by age — INFRA-2339).
     local wt_source="${3:-claude_worktrees}"
+    local wt_prunable="${4:-0}"
     [[ -z "$wt_path" ]] && return 0
 
     # Avoid double-processing a path already handled in an earlier pass.
@@ -596,9 +597,38 @@ process_worktree() {
     info "----"
     info "worktree: $wt_path  branch=$wt_branch"
 
-    if [[ ! -d "$wt_path" ]]; then
-        warn "  path missing — git worktree prune would clean this; skipping"
-        SKIPPED=$((SKIPPED+1)); return 0
+    # RESILIENT-128: handle prunable worktrees surfaced by `git worktree list --porcelain`
+    # (either explicit `prunable` line or missing worktree directory).
+    if [[ "$wt_prunable" -eq 1 || ! -d "$wt_path" ]]; then
+        if is_active_lease "$wt_name"; then
+            info "  prunable worktree has active lease — keeping"
+            _emit_reaper_skipped "$wt_path" "active_lease"
+            KEPT=$((KEPT+1)); return 0
+        fi
+        local _pr_mtime=0 _pr_now _pr_age_h=0
+        if [[ -d "$wt_path" ]]; then
+            _pr_mtime=$(stat -f%m "$wt_path" 2>/dev/null || stat -c%Y "$wt_path" 2>/dev/null || echo 0)
+        elif [[ -d "$REPO_ROOT/.git/worktrees/$wt_name" ]]; then
+            _pr_mtime=$(stat -f%m "$REPO_ROOT/.git/worktrees/$wt_name" 2>/dev/null || stat -c%Y "$REPO_ROOT/.git/worktrees/$wt_name" 2>/dev/null || echo 0)
+        fi
+        _pr_now=$(date +%s)
+        [[ "$_pr_mtime" -gt 0 ]] && _pr_age_h=$(( (_pr_now - _pr_mtime) / 3600 ))
+        red "  REAPABLE (prunable): $wt_path  prior_branch=${wt_branch:-none} age=${_pr_age_h}h"
+        if [[ $DRY_RUN -eq 1 ]]; then
+            info "  [dry-run] would reap prunable worktree $wt_path and run git worktree prune"
+            log "DRY_RUN_REAPABLE $wt_path branch=$wt_branch reason='prunable worktree' scan_source=$wt_source"
+            REAPED=$((REAPED+1))
+            return 0
+        fi
+        [[ -d "$wt_path" ]] && rm -rf "$wt_path" 2>>"$LOG" || true
+        git worktree prune 2>>"$LOG" || true
+        green "  PRUNED $wt_path  [scan_source=$wt_source]"
+        log "REAPED_PRUNABLE $wt_path branch=$wt_branch age=${_pr_age_h}h scan_source=$wt_source"
+        # scanner-anchor: "kind":"worktree_reaped_prunable"
+        emit_reaper_event "worktree_reaped_prunable" "$wt_path" "prunable worktree" \
+            "\"prior_branch\":\"${wt_branch:-}\",\"age\":\"${_pr_age_h}h\",\"source\":\"$wt_source\""
+        REAPED=$((REAPED+1))
+        return 0
     fi
 
     # RESILIENT-1639 AC3: never touch /tmp/chump-pr-watch-cooldown (state, not a worktree).
@@ -1245,6 +1275,7 @@ enumerate_tmp_rescue_orphans() {
 # Stream the porcelain output, fire on blank line.
 # INFRA-2339: tag any /tmp/* git-registered worktree with scan_source=git-list
 # so process_worktree accepts it regardless of name pattern.
+current_prunable=0
 while IFS= read -r line; do
     if [[ -z "$line" ]]; then
         # Determine source: /tmp/* non-chump paths get git-list tag.
@@ -1253,14 +1284,15 @@ while IFS= read -r line; do
             /tmp/chump-*) _src="tmp_chump" ;;
             /tmp/*)       _src="git-list" ;;
         esac
-        process_worktree "$current_path" "$current_branch" "$_src"
-        current_path=""; current_branch=""
+        process_worktree "$current_path" "$current_branch" "$_src" "$current_prunable"
+        current_path=""; current_branch=""; current_prunable=0
         continue
     fi
     case "$line" in
         worktree\ *) current_path="${line#worktree }" ;;
         branch\ *)   current_branch="${line#branch refs/heads/}" ;;
         detached)    current_branch="" ;;
+        prunable|prunable\ *) current_prunable=1 ;;
     esac
 done <<< "$WTLIST"
 # Final block (no trailing blank).
@@ -1269,7 +1301,7 @@ case "$current_path" in
     /tmp/chump-*) _final_src="tmp_chump" ;;
     /tmp/*)       _final_src="git-list" ;;
 esac
-process_worktree "$current_path" "$current_branch" "$_final_src"
+process_worktree "$current_path" "$current_branch" "$_final_src" "$current_prunable"
 
 # ── INFRA-2020: /tmp/chump-* scan pass ───────────────────────────────────────
 # The git worktree list walk above only sees git-linked worktrees. The chump

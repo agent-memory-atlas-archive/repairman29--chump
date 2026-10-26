@@ -1535,6 +1535,41 @@ print(m.group(0) if m else '')
           _emit_pr_action_taken "$pr_num" "vote_request_broadcast" "" "$gap_id"
           _record_vote_request_sent "$pr_num" "$head_sha"
         fi
+
+      # RESILIENT-1576: DIRTY (conflicting) PRs — disarm stale auto-merge, surface
+      # stalled (>4h) conflict state via pr_dirty_stalled, and attempt rebase/triage.
+      elif [ "$c" = "DIRTY" ]; then
+        local _stalled_h=0
+        _stalled_h=$(python3 -c "import sys; h=float(sys.argv[1] or 0); a=float(sys.argv[2] or 0)/60.0; print(int(max(h, a)))" "${hours_since_update:-0}" "${age:-0}" 2>/dev/null || echo 0)
+        if [ "$has_automerge" = "1" ] && [ -z "$DRY_RUN" ]; then
+          chump_gh pr merge "$pr_num" --disable-auto >/dev/null 2>&1 || true
+          # scanner-anchor: "kind":"pr_conflict_triage"
+          printf '{"ts":"%s","kind":"pr_conflict_triage","pr":%s,"mergeable":"CONFLICTING","merge_state_status":"DIRTY","action":"disarmed_by_shepherd"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr_num" >> "$AMBIENT" 2>/dev/null || true
+        fi
+        if [ "$_stalled_h" -ge 4 ]; then
+          # scanner-anchor: "kind":"pr_dirty_stalled"
+          printf '{"ts":"%s","kind":"pr_dirty_stalled","pr":%s,"merge_state_status":"DIRTY","stalled_hours":%d,"action":"triage_rebase_or_hold"}\n' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pr_num" "$_stalled_h" >> "$AMBIENT" 2>/dev/null || true
+          wedged_signal_count=$((wedged_signal_count + 1))
+        fi
+        if ! _pr_has_active_claim "$gap_id" && ! _pr_in_rebase_debounce "$pr_num" "$head_sha" && [ "$rebase_count" -lt "$MAX_REBASES" ]; then
+          if [ -n "$DRY_RUN" ]; then
+            _emit_pr_action_taken "$pr_num" "rebase_dirty" "" "$gap_id"
+            rebase_count=$((rebase_count + 1))
+          elif merge_pipeline_lock_acquire; then
+            local _dirty_rb_out _dirty_rb_rc=0
+            _dirty_rb_out=$(bash "$REPO_ROOT/scripts/coord/lib/pr_rebase.sh" --now "$pr_num" "$REPO" 2>&1) || _dirty_rb_rc=$?
+            if [ "$_dirty_rb_rc" -eq 0 ]; then
+              _emit_pr_action_taken "$pr_num" "rebase_dirty" "" "$gap_id"
+              rebase_count=$((rebase_count + 1))
+            else
+              _record_rebase_debounce "$pr_num" "$head_sha" "$gap_id"
+              _emit_pr_action_taken "$pr_num" "rebase_skipped" "conflict" "$gap_id"
+            fi
+            merge_pipeline_lock_release
+          fi
+        fi
       fi
     done <<< "$classified"
   fi

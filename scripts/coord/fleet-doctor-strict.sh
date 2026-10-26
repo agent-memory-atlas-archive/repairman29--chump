@@ -2268,6 +2268,81 @@ PY
     fi
 }
 
+# ── RESILIENT-1559: Core organs must not be neutered via ExecStart=/bin/true ──
+# Detects systemd drop-ins or unit overrides that replace a core organ's
+# ExecStart with /bin/true or /usr/bin/true (leaving the .timer active and
+# appearing green while performing zero work), or mask a core organ while its
+# timer remains active.
+check_core_organs_not_neutered() {
+    local core_organs=(
+        "chump-pr-shepherd"
+        "chump-review-organ"
+        "chump-organ-reconcile"
+        "chump-merge-serializer"
+        "chump-farmer"
+        "chump-gap-closure-reconcile"
+    )
+    local unit_dirs="${CHUMP_SYSTEMD_UNIT_DIRS:-$HOME/.config/systemd/user /etc/systemd/system /etc/systemd/user}"
+    local sctl="${CHUMP_SYSTEMCTL_BIN:-}"
+    if [[ -z "$sctl" ]] && [[ "$(uname -s)" == "Linux" ]] && command -v systemctl >/dev/null 2>&1; then
+        sctl="systemctl"
+    fi
+
+    local neutered=()
+    local amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+    local u d f line exec_line load_state timer_active dropin_paths
+
+    for u in "${core_organs[@]}"; do
+        # 1. Inspect unit files and .service.d/*.conf drop-ins in unit_dirs
+        for d in $unit_dirs; do
+            [[ -d "$d" ]] || continue
+            for f in "$d/${u}.service" "$d/${u}.service.d"/*.conf; do
+                [[ -f "$f" ]] || continue
+                exec_line="$(grep -E '^[[:space:]]*ExecStart[[:space:]]*=[[:space:]]*(/usr)?/bin/true([[:space:]]|$)' "$f" 2>/dev/null | tail -n1 || true)"
+                if [[ -n "$exec_line" ]]; then
+                    neutered+=("${u}.service(${f})")
+                    mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+                    # scanner-anchor: "kind":"core_organ_neutered"
+                    printf '{"ts":"%s","kind":"core_organ_neutered","unit":"%s.service","exec_start":"%s","dropin_path":"%s"}\n' \
+                        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$u" "${exec_line#*=}" "$f" >> "$amb" 2>/dev/null || true
+                fi
+            done
+        done
+
+        # 2. If systemctl (or test stub) is available, inspect live show properties
+        if [[ -n "$sctl" ]]; then
+            local show_out
+            show_out="$("$sctl" --user show "${u}.service" -p ExecStart -p DropInPaths -p LoadState 2>/dev/null || true)"
+            if [[ "$show_out" =~ ExecStart=.*/bin/true([[:space:]\;]|$) ]]; then
+                dropin_paths="$(printf '%s\n' "$show_out" | sed -n 's/^DropInPaths=//p' | head -n1)"
+                neutered+=("${u}.service(systemctl:${dropin_paths:-ExecStart=/bin/true})")
+                mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+                printf '{"ts":"%s","kind":"core_organ_neutered","unit":"%s.service","exec_start":"/bin/true","dropin_path":"%s"}\n' \
+                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$u" "${dropin_paths:-systemctl}" >> "$amb" 2>/dev/null || true
+            fi
+            load_state="$(printf '%s\n' "$show_out" | sed -n 's/^LoadState=//p' | head -n1)"
+            if [[ "$load_state" == "masked" ]]; then
+                timer_active="$("$sctl" --user is-active "${u}.timer" 2>/dev/null || true)"
+                if [[ "$timer_active" == "active" ]]; then
+                    neutered+=("${u}.service(masked-with-active-timer)")
+                    mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+                    printf '{"ts":"%s","kind":"core_organ_neutered","unit":"%s.service","exec_start":"masked","dropin_path":"masked"}\n' \
+                        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$u" >> "$amb" 2>/dev/null || true
+                fi
+            fi
+        fi
+    done
+
+    if [[ ${#neutered[@]} -gt 0 ]]; then
+        register_check "core-organs-not-neutered" "fail" \
+            "RED: core organ(s) neutered via /bin/true drop-in or masked with active timer: ${neutered[*]}" \
+            "remove the /bin/true drop-in conf under .service.d/ and run systemctl --user daemon-reload && organ-reconcile.sh --apply"
+    else
+        register_check "core-organs-not-neutered" "pass" \
+            "GREEN: no core organs (${#core_organs[@]} checked) are neutered via /bin/true drop-ins" ""
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -2305,6 +2380,7 @@ check_cargo_storage_fixed_disk
 check_cargo_nextest
 check_installed_unit_host_literals
 check_organ_home_placement
+check_core_organs_not_neutered
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

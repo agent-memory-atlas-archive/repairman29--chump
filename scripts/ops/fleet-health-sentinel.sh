@@ -556,6 +556,11 @@ do_local_pass() {
     if [[ "${CHUMP_SENTINEL_CHECK_PRODUCT_TRUNKS:-0}" == "1" ]]; then
         check_product_trunks
     fi
+    if [[ $DRY -eq 0 && -f "$AMBIENT_LOG" && -x "$REPO_ROOT/scripts/coord/farmer-heartbeat-watchdog.sh" ]]; then
+        if grep -qE '"(farmer_heartbeat|farmer_tick)"|"session":"farmer' "$AMBIENT_LOG" 2>/dev/null; then
+            CHUMP_AMBIENT_LOG="$AMBIENT_LOG" bash "$REPO_ROOT/scripts/coord/farmer-heartbeat-watchdog.sh" --max-age-min 30 >/dev/null 2>&1 || true
+        fi
+    fi
     write_heartbeat
     local tick_state="active"
     _sentinel_node_paused && tick_state="paused_expected"

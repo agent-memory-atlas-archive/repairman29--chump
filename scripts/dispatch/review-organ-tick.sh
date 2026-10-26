@@ -76,6 +76,7 @@ REPO=""                # owner/repo; empty = current checkout's repo
 # never passes.
 ENABLE_REPAIR=1
 declare -a ONLY_PRS=()
+ORIG_ARGC=$#
 while (( $# )); do
     case "$1" in
         --claude-bin)     CLAUDE_BIN="${2:-}"; shift 2 ;;
@@ -150,6 +151,9 @@ source "$REPO_ROOT/scripts/coord/lib/review-hold.sh"
 # shellcheck source=scripts/coord/lib/state-store.sh
 source "$REPO_ROOT/scripts/coord/lib/state-store.sh"
 ORGAN_GAP_STORE="$(chump_state_db "$CHECKOUT")"
+if [[ ! -f "$ORGAN_GAP_STORE" && -f "$HOME/chump/.chump/state.db" && ( -n "$REPO" || "$CHECKOUT" == *"/.chump/external/"* || "$CHECKOUT" == *"froogle"* ) ]]; then
+    ORGAN_GAP_STORE="$(chump_state_db "$HOME/chump")"
+fi
 
 AMBIENT="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
 mkdir -p "$(dirname "$AMBIENT")" 2>/dev/null || true
@@ -223,7 +227,7 @@ verified_green() {
     roll="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} \
         --json statusCheckRollup,headRefOid 2>/dev/null || true)"
     [[ -n "$roll" ]] || return 1
-    HEAD_SHA="$head" python3 -c '
+    HEAD_SHA="$head" REPO_SLUG="$REPO" python3 -c '
 import json, os, sys
 try:
     d = json.loads(sys.argv[1])
@@ -239,22 +243,44 @@ if not checks:
 # "Protect main" ruleset (repos/.../rulesets/15133729 → required_status_checks).
 # A safety input is NEVER read from an env var (standing rule); update this list
 # by hand only when the ruleset itself changes.
-REQUIRED = {"verified"}
+repo_slug = (os.environ.get("REPO_SLUG") or "").strip().lower()
+if repo_slug in ("", "repairman29/chump"):
+    REQUIRED = {"verified"}
+elif repo_slug == "repairman29/froogle":
+    REQUIRED = {"ci-required"}
+else:
+    REQUIRED = set()
 required_success = set()
+any_success = False
+seen_names = set()
 for c in checks:
     status = (c.get("status") or "").upper()
     concl  = (c.get("conclusion") or "").upper()
     name   = c.get("name") or ""
+    seen_names.add(name)
     if status and status != "COMPLETED":
         sys.exit(1)       # queued / in-progress → not COMPLETED → fail closed
     if concl not in ("SUCCESS", "SKIPPED"):
         sys.exit(1)       # FAILURE/CANCELLED/TIMED_OUT/ACTION_REQUIRED/NEUTRAL/"" are NOT green
+    if concl == "SUCCESS":
+        any_success = True
     if name in REQUIRED and concl == "SUCCESS":
         required_success.add(name)
 # Every required check must be PRESENT and SUCCESS. A SKIPPED or missing required
 # check fails closed — a path filter can never satisfy a branch-protection gate.
-if required_success != REQUIRED:
-    sys.exit(1)
+if REQUIRED:
+    if required_success != REQUIRED:
+        sys.exit(1)
+else:
+    for cand in ("verified", "ci-required"):
+        if cand in seen_names:
+            if not any(
+                (c.get("name") or "") == cand and (c.get("conclusion") or "").upper() == "SUCCESS"
+                for c in checks
+            ):
+                sys.exit(1)
+    if not any_success:
+        sys.exit(1)
 sys.exit(0)
 ' "$roll"
 }
@@ -374,6 +400,18 @@ derive_gap_from_branch() {
     printf '%s' "$1" | sed -nE 's#^(chump/|claude/)?([A-Za-z]+-[0-9]+).*#\2#p' | tr '[:lower:]' '[:upper:]'
 }
 
+derive_gap_for_pr() {
+    local pr="$1" branch="$2" gap meta
+    gap="$(derive_gap_from_branch "$branch")"
+    if [[ -n "$gap" ]]; then
+        printf '%s' "$gap"
+        return 0
+    fi
+    meta="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json title,body --jq '(.title // "") + "\n" + (.body // "")' 2>/dev/null || true)"
+    gap="$(printf '%s\n' "$meta" | grep -oE '\b(EFFECTIVE|RESILIENT|CREDIBLE|INFRA|MISSION|META|COG|DOC|EVAL|SEC|PERF|UX|OPS|TEST)-[0-9]+\b' | head -n1 || true)"
+    printf '%s' "$gap"
+}
+
 # --auto-merge (AC4 / repair item 9). Derives the gap from the head branch name
 # and dispatches it; if no gap can be derived, logs and skips.
 #
@@ -395,7 +433,7 @@ dispatch_repair() {
         return 0
     fi
     branch="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json headRefName --jq '.headRefName' 2>/dev/null || true)"
-    gap="$(derive_gap_from_branch "$branch")"
+    gap="$(derive_gap_for_pr "$pr" "$branch")"
     if [[ -z "$gap" ]]; then
         log "PR #$pr: CHANGES REQUIRED but no gap id in branch '$branch' — no repair dispatched"
         return 0
@@ -516,7 +554,7 @@ sys.exit(1)
 
     local branch gap
     branch="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json headRefName --jq '.headRefName' 2>/dev/null || true)"
-    gap="$(derive_gap_from_branch "$branch")"
+    gap="$(derive_gap_for_pr "$pr" "$branch")"
     if [[ -z "$gap" ]]; then
         log "PR #$pr: deterministic CI-red ($failed_check) but no gap id in branch '$branch' — no repair dispatched"
         return 0
@@ -1024,7 +1062,7 @@ maybe_arm() {
 ship_merged_gap() {
     local pr="$1" head="$2" branch gap
     branch="$(CHUMP_GH_CALL_CRITICALITY=background GH pr view "$pr" ${REPO:+--repo "$REPO"} --json headRefName --jq '.headRefName' 2>/dev/null || true)"
-    gap="$(derive_gap_from_branch "$branch")"
+    gap="$(derive_gap_for_pr "$pr" "$branch")"
     if [[ -z "$gap" ]]; then
         log "PR #$pr: merged but no gap id in branch '$branch' — gap not auto-shipped (reconciler backstop covers a linked PR)"
         return 0
@@ -1069,6 +1107,7 @@ ship_merged_gap() {
     # and mark the tick failed so the oneshot exits non-zero — instead of the old
     # WARN that let every organ landing silently leave its gap open and undercount
     # the PHASE-R rollup. It is NEVER a WARN anymore.
+    git -C "$CHECKOUT" fetch origin main -q 2>/dev/null || true
     if CHUMP_REPO="$CHECKOUT" CHUMP_STATE_DB="$ORGAN_GAP_STORE" chump gap ship "$gap" --closed-pr "$pr" >/dev/null 2>&1; then
         log "PR #$pr: shipped $gap --closed-pr $pr (organ landing recorded in $ORGAN_GAP_STORE)"
     else
@@ -1100,6 +1139,10 @@ for pr in "${prs[@]}"; do process_pr "$pr"; done
 emit "$(printf '{"ts":"%s","kind":"review_organ_tick","reviewed":%s,"approved":%s,"changes_required":%s,"held_mutants":%s,"armed":%s,"dispatched":%s,"skipped":%s}' \
     "$(ts)" "$REVIEWED" "$APPROVED" "$CHANGES" "$HELD_MUTANTS" "$ARMED" "$DISPATCHED" "$SKIPPED")"
 log "tick done (reviewed=$REVIEWED approved=$APPROVED changes=$CHANGES held_mutants=$HELD_MUTANTS armed=$ARMED dispatched=$DISPATCHED skipped=$SKIPPED)"
+if [[ ( "$ORIG_ARGC" -eq 0 || ( "${#ONLY_PRS[@]}" -eq 0 && "$CHECKOUT" == "$HOME/chump" ) ) && -z "$REPO" && -d "$HOME/.chump/external/repairman29/froogle/.git" ]]; then
+    log "sweeping external repo repairman29/froogle ($HOME/.chump/external/repairman29/froogle)"
+    bash "$0" --repo repairman29/froogle --checkout "$HOME/.chump/external/repairman29/froogle" ${SELF_LOGIN:+--self-login "$SELF_LOGIN"} || ORGAN_TICK_FAIL=1
+fi
 # CREDIBLE-1602/1604 (AC4): a post-merge gap step that could not find its gap in
 # the canonical store (review_organ_gap_store_miss) or had its ship REFUSED
 # (review_organ_gap_ship_failed) already emitted its event; surface it as a

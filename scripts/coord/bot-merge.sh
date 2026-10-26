@@ -5229,6 +5229,18 @@ See docs/process/HITL_APPROVAL.md for the full operator flow." 2>/dev/null || tr
                 fi
             fi
             if [[ $_rest_direct_merged -eq 0 ]] && [[ "${_policy_blocked:-0}" != "1" ]] && [[ $_hitl_block -eq 0 ]]; then
+                # RESILIENT-1576: refuse to arm auto-merge when PR is already CONFLICTING/DIRTY.
+                _bm_conflict_json="$(chump_gh pr view "$TARGET_PR" --json mergeable,mergeStateStatus 2>/dev/null || true)"
+                _bm_mergeable="$(printf '%s' "$_bm_conflict_json" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print((d.get("mergeable") or "").upper())' 2>/dev/null || true)"
+                _bm_mss="$(printf '%s' "$_bm_conflict_json" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print((d.get("mergeStateStatus") or "").upper())' 2>/dev/null || true)"
+                if [[ "$_bm_mergeable" == "CONFLICTING" || "$_bm_mss" == "DIRTY" ]]; then
+                    # scanner-anchor: "kind":"pr_conflict_triage"
+                    printf '{"ts":"%s","kind":"pr_conflict_triage","pr":%s,"mergeable":"%s","merge_state_status":"%s","action":"refused_arm_bot_merge"}\n' \
+                        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TARGET_PR" "${_bm_mergeable:-UNKNOWN}" "${_bm_mss:-UNKNOWN}" \
+                        >> "${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}" 2>/dev/null || true
+                    red "PR #$TARGET_PR is CONFLICTING/DIRTY (mergeable=${_bm_mergeable:-?} mss=${_bm_mss:-?}) — refusing to arm auto-merge (RESILIENT-1576)."
+                    exit 2
+                fi
                 # INFRA-1113: delegate to centralized armer to enforce 5s spacing.
                 # INFRA-1311: auto-merge-armer.sh now enforces per-PR exponential
                 # backoff (30s→60s→120s→300s) via .chump-locks/bot-merge-backoff-<pr>.ts

@@ -2521,6 +2521,13 @@ fn verify_and_repair_gitdir(repo_root: &Path, _branch: &str, worktree_path: &Pat
             .with_context(|| format!("repairing gitdir file {}", gitdir_file.display()))?;
         emit_gitdir_repair_event(repo_root, wt_name, &recorded, &expected, attempt);
         emit_gitdir_repaired_event(repo_root, wt_name, &recorded, &expected);
+        emit_gitdir_repaired_postadd_event(
+            repo_root,
+            &worktree_path.to_string_lossy(),
+            _branch,
+            &recorded,
+            &expected,
+        );
 
         if attempt < MAX_ATTEMPTS {
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -2533,6 +2540,39 @@ fn verify_and_repair_gitdir(repo_root: &Path, _branch: &str, worktree_path: &Pat
     bail!(
         "INFRA-1056: gitdir back-ref for {wt_name} did not converge after {MAX_ATTEMPTS} repair attempts\n  expected: {expected}\n  last seen: {last_recorded}\n  Concurrent sibling claims are overwhelming the repair path; release leases and retry."
     );
+}
+
+/// RESILIENT-009: Emit `kind=worktree_gitdir_repaired_postadd` to ambient.jsonl
+/// when post-`git worktree add` gitdir verification repairs a dangling or
+/// mismatched `.git` pointer.
+fn emit_gitdir_repaired_postadd_event(
+    repo_root: &Path,
+    worktree: &str,
+    gap_id: &str,
+    repaired_from: &str,
+    repaired_to: &str,
+) {
+    let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let event = format!(
+        r#"{{"ts":"{ts}","kind":"worktree_gitdir_repaired_postadd","worktree":"{}","gap_id":"{}","repaired_from":"{}","repaired_to":"{}"}}"#,
+        json_escape(worktree),
+        json_escape(gap_id),
+        json_escape(repaired_from),
+        json_escape(repaired_to),
+    );
+    let lock_dir = repo_root.join(".chump-locks");
+    let _ = std::fs::create_dir_all(&lock_dir);
+    let path = std::env::var("CHUMP_AMBIENT_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| lock_dir.join("ambient.jsonl"));
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let _ = writeln!(f, "{}", event);
+    }
 }
 
 /// Emit `kind=worktree_gitdir_repair_fired` to ambient.jsonl. Best-effort —

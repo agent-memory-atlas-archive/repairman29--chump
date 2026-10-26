@@ -339,3 +339,13 @@ rules:
     protected: false
     estimated_cost_per_fire_s: 15
     description: Ratchet ceiling on skip/bypass/disable environment variables.
+
+  - id: pre-commit-gap-quality
+    source: git_hook
+    path: scripts/git-hooks/pre-commit-gap-quality.sh
+    signal: vague_ac_rejected
+    bypass_signal: vague_ac_bypass_used
+    protected: false
+    estimated_cost_per_fire_s: 2
+    description: Reject staged gap YAMLs with TODO/TBD in acceptance_criteria or description < 200 chars (RESILIENT-037).
+

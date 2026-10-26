@@ -80,6 +80,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+AMBIENT_LOG="${CHUMP_AMBIENT_LOG:-${REAPER_REPO_ROOT:-$REPO_ROOT}/.chump-locks/ambient.jsonl}"
+_reaped_count=0
+_target_paths_scanned=0
+_reaper_error_msg=""
+
+# RESILIENT-130: emit kind=cargo_target_reaper_run on every run (including early
+# non-zero exit) so launchd / systemd failures are never silent in ambient.jsonl.
+# scanner-anchor: "kind":"cargo_target_reaper_run"
+_emit_cargo_target_reaper_run() {
+    local rc=$?
+    local amb="${AMBIENT_LOG:-${REAPER_REPO_ROOT:-$REPO_ROOT}/.chump-locks/ambient.jsonl}"
+    mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+    local err="${_reaper_error_msg:-}"
+    if [[ $rc -ne 0 && -z "$err" ]]; then
+        err="exited with rc=$rc"
+    fi
+    err="${err//\\/\\\\}"
+    err="${err//\"/\\\"}"
+    printf '{"ts":"%s","kind":"cargo_target_reaper_run","rc":%d,"target_paths_scanned":%d,"paths_reaped":%d,"error_msg":"%s"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" "${_target_paths_scanned:-0}" "${_reaped_count:-0}" "$err" \
+        >> "$amb" 2>/dev/null || true
+}
+trap _emit_cargo_target_reaper_run EXIT
 
 EXECUTE=0
 EVENT_LISTEN=0
@@ -1555,6 +1578,7 @@ if [[ $EXECUTE -eq 0 && $_reaped_count -gt 0 ]]; then
 fi
 
 # Summary ambient event — includes worktree_orphan_count (INFRA-1170) + INFRA-2125 class counts + INFRA-2188 runner_scope_count + INFRA-7890 root_orphan_target_count + aggressive_mode flag.
+_target_paths_scanned=$(( ${_reaped_count:-0} + ${_tmp_orphan_count:-0} + ${_runner_scope_count:-0} + ${_root_orphan_target_count:-0} + ${_classd_count:-0} + 1 ))
 printf '{"ts":"%s","kind":"cargo_target_reaper_summary","reaped_count":%d,"bytes_freed":%d,"execute":%s,"worktree_orphan_count":%d,"cross_build_count":%d,"cargo_test_target_count":%d,"lease_auto_merge_count":%d,"runner_scope_count":%d,"root_orphan_target_count":%d,"class_d_count":%d,"aggressive_mode":%s}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_reaped_count" "$_total_bytes" \
     "$([[ $EXECUTE -eq 1 ]] && echo 'true' || echo 'false')" \

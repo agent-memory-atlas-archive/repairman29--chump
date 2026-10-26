@@ -489,9 +489,27 @@ for PR_NUM in "${PR_NUMS[@]}"; do
         sleep "${_wait}"
     fi
 
-    # Skip already-armed PRs — zero GraphQL cost.
+    # Skip already-armed PRs — unless CONFLICTING/DIRTY (RESILIENT-1576: disarm conflicting PRs).
     _already="$(CHUMP_GH_CALL_CRITICALITY=background chump_gh api "repos/${REPO}/pulls/${PR_NUM}" \
         --jq '.auto_merge != null' 2>/dev/null || echo 'false')"
+    _pr_conflict_json="$(CHUMP_GH_CALL_CRITICALITY=background chump_gh pr view "${PR_NUM}" --repo "${REPO}" \
+        --json mergeable,mergeStateStatus 2>/dev/null || true)"
+    _pr_mergeable="$(printf '%s' "${_pr_conflict_json}" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print((d.get("mergeable") or "").upper())' 2>/dev/null || true)"
+    _pr_mss="$(printf '%s' "${_pr_conflict_json}" | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print((d.get("mergeStateStatus") or "").upper())' 2>/dev/null || true)"
+    if [[ "${_pr_mergeable}" == "CONFLICTING" || "${_pr_mss}" == "DIRTY" ]]; then
+        _conflict_action="refused_arm"
+        if [[ "${_already}" == "true" ]]; then
+            CHUMP_GH_CALL_CRITICALITY=background chump_gh pr merge "${PR_NUM}" --repo "${REPO}" --disable-auto >/dev/null 2>&1 || true
+            _conflict_action="disarmed_conflicting"
+        fi
+        # scanner-anchor: "kind":"pr_conflict_triage"
+        _ambient_write "${LOCKS_DIR}/ambient.jsonl" \
+            "$(printf '{"ts":"%s","kind":"pr_conflict_triage","pr":%s,"mergeable":"%s","merge_state_status":"%s","action":"%s"}' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${PR_NUM}" "${_pr_mergeable:-UNKNOWN}" "${_pr_mss:-UNKNOWN}" "${_conflict_action}")"
+        echo "[auto-merge-armer] PR #${PR_NUM}: CONFLICTING/DIRTY (mergeable=${_pr_mergeable:-?} mss=${_pr_mss:-?}) — ${_conflict_action} (RESILIENT-1576)." >&2
+        LAST_ARM_TS="$(date -u +%s)"
+        continue
+    fi
     if [[ "${_already}" == "true" ]]; then
         echo "[auto-merge-armer] PR #${PR_NUM}: already armed — skipping."
         LAST_ARM_TS="$(date -u +%s)"

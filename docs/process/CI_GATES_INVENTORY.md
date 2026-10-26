@@ -353,8 +353,22 @@ Inventory + decision as of 2026-10-18:
 | `test-e2e` | **KEEP (allowlisted)** | Aggregator rollup over the `e2e` shards; `continue-on-error` is defensive against the aggregator's own runner errors contributing a spurious FAILURE to rollup state (INFRA-1348). Lives or dies with `e2e` above. |
 | `integration-test` (System integration test, INFRA-849) | **FIX landed; promotion to required pending 3 green main runs** | The job was red on every PR — masked by `continue-on-error` — at the `test-gap-close-decomposed-integration.sh` (RESILIENT-1373) step, which ran against the **shared** store and hit the PHASE-R R1 single-writer proof-of-merge guard (CREDIBLE-1491): `gap set --status done --closed-pr 9001` refused because no commit carrying `(#9001)` is on `origin/main`. (Assertion 4 of `test-system-integration.sh`, which INFRA-8184 named, already passes — the real red was elsewhere in the same job.) CREDIBLE-1522 isolates that test into its own `CHUMP_REPO` with no `.git`, so the R1 guard runs in fixture mode and the test stops mutating the canonical store. Per CREDIBLE-1492 AC1, the job joins the required `verified` lane and drops `continue-on-error` **after 3 consecutive green main runs** — until then it stays allowlisted with this decision. |
 
+## Scoped CI Path-Gate Contract (RESILIENT-1553)
+
+Every path-scoped CI gate in `.github/workflows/ci.yml` (`dorny/paths-filter` under the `changes` job) and every `scripts/ci/test-*.sh` gate MUST obey the **Scoped CI Path-Gate Contract**:
+
+1. **Trigger paths & diff scoping (`git diff origin/main...HEAD`)**:
+   - A gate that checks files modified by a PR MUST scope its scan to `git diff --name-only origin/main...HEAD` (with fallback to `HEAD~1..HEAD` on shallow clones) rather than scanning the entire repository unconditionally when a pre-existing violation on `origin/main` is unrelated to the PR's touched files.
+   - Any new path-filtered job in `.github/workflows/ci.yml` MUST have a corresponding `-stub` job (`if: always() && needs.changes.outputs.<filter> != 'true'`) and a `-required` rollup job so branch protection and `verified` never hang on a skipped path-filtered check (`scripts/ci/check-path-filter-coverage.sh`).
+2. **Baseline allowlist / ratchet**:
+   - Gates that audit a global repository invariant (e.g., `scripts/ci/env-vars-internal.txt`, `scripts/ci/raw-gh-allowlist.txt`, `scripts/ci/coe-pr-reporting-allowlist.txt`, `docs/observability/EVENT_REGISTRY.yaml`) MUST either maintain an explicit baseline allowlist / ratchet ceiling or fail only on net-new violations introduced in `origin/main...HEAD`.
+   - Unrelated PRs (e.g., docs-only or single-script fixes) MUST NOT be blocked by pre-existing drift outside their diff scope.
+3. **Local preflight parity (`chump preflight`)**:
+   - Every deterministic per-PR CI gate MUST either be mirrored in `crates/chump-preflight/src/preflight.rs` (`discover_test_scripts` / `scripts/ci/preflight-extra-test-scripts.txt`) or have a documented Tier-D / exceptions-file rationale in `scripts/ci/preflight-ci-parity-exceptions.txt` (`scripts/ci/test-preflight-ci-parity.sh`).
+
 ## Update history
 
+- **2026-10-25** — RESILIENT-1553: added the Scoped CI Path-Gate Contract section codifying `origin/main...HEAD` diff scoping, `-stub`/`-required` path-filter rollups, baseline allowlists, and `chump preflight` parity.
 - **2026-05-23** — Initial inventory. INFRA-1731 just shipped as the
   first mirror beyond cargo gates. INFRA-1787..1794 filed as per-gate
   follow-ups.

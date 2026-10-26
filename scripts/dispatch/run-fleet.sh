@@ -278,7 +278,16 @@ elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
     _fleet_auth_path="ANTHROPIC_API_KEY"
 fi
 
-FLEET_SIZE="${FLEET_SIZE:-8}"
+# RESILIENT-156: normalize integer strings before bash (( )) arithmetic to prevent
+# syntax errors when a command substitution produces empty, multi-line ("0\n0"),
+# or non-digit output.
+_norm_int() {
+    local v
+    v="$(printf '%s' "${1:-0}" | head -n1 | tr -cd '0-9')"
+    printf '%s' "${v:-0}"
+}
+
+FLEET_SIZE="$(_norm_int "${FLEET_SIZE:-8}")"
 
 # EFFECTIVE-086 AC #3: bind worker concurrency to the graduated autonomy
 # dial via the existing fleet scaling gate (docs/process/FLEET_SLOS.md /
@@ -331,6 +340,8 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 # rather than opt out of the safety net wholesale.
 if [[ "$FLEET_SIZE" != "0" ]]; then
     _fleet_nproc="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+    _fleet_nproc="$(_norm_int "$_fleet_nproc")"
+    CARGO_BUILD_JOBS="$(_norm_int "${CARGO_BUILD_JOBS:-4}")"
     if [[ "$_fleet_nproc" =~ ^[0-9]+$ ]] && (( _fleet_nproc > 0 )) && (( FLEET_SIZE * CARGO_BUILD_JOBS > _fleet_nproc )); then
         _fleet_size_before=$FLEET_SIZE
         _cargo_jobs_before=$CARGO_BUILD_JOBS
@@ -530,6 +541,7 @@ _detect_cargo_target_root() {
     while read -r fs avail_kb mnt; do
         [[ "$fs" == "$root_fs" ]] && continue
         [[ -w "$mnt" ]] || continue
+        avail_kb="$(_norm_int "$avail_kb")"
         if (( avail_kb > best_avail_kb )); then
             best_avail_kb=$avail_kb
             best="$mnt"
@@ -548,8 +560,9 @@ if [[ "$_FLEET_RESTART" -eq 1 ]]; then
     _fleet_from_size=0
     if tmux has-session -t "$FLEET_SESSION" 2>/dev/null; then
         # Count existing fleet-worker-N panes
-        _fleet_from_size=$(tmux list-panes -t "$FLEET_SESSION" -F '#{pane_title}' 2>/dev/null \
-            | grep -c "fleet-worker" || true)
+        _fleet_panes_raw="$(tmux list-panes -t "$FLEET_SESSION" -F '#{pane_title}' 2>/dev/null || true)"
+        _fleet_from_size="$(printf '%s\n' "$_fleet_panes_raw" | awk '/fleet-worker/{c++} END{print c+0}')"
+        _fleet_from_size="$(_norm_int "$_fleet_from_size")"
         echo "[run-fleet] --restart: tearing down $FLEET_SESSION ($FLEET_SIZE workers → restart)"
         if [[ -f "$FLEET_PIDS_FILE" ]]; then
             while IFS= read -r _pid; do
@@ -881,6 +894,7 @@ _db_open=0
 if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$_db" ]]; then
     _db_open=$(sqlite3 "$_db" "SELECT COUNT(*) FROM gaps WHERE status='open';" 2>/dev/null || echo 0)
 fi
+_db_open="$(_norm_int "$_db_open")"
 # Count open gaps visible in the published registry state.sql mirror.
 # grep -c prints "0" AND exits 1 on zero-match; the old `|| true` then wrote a
 # SECOND "0", yielding "0\n0" and a `((` syntax error (VOA-004). Capture the count
@@ -890,9 +904,10 @@ fi
 # registry remote there is no published count, so the drift signal is 0.
 _sql_open=0
 if git -C "$REPO_ROOT" remote get-url registry >/dev/null 2>&1; then
-    _sql_open=$(git -C "$REPO_ROOT" show "registry/main:.chump/state.sql" 2>/dev/null | grep -c "^INSERT.*'open'" 2>/dev/null)
-    _sql_open=${_sql_open:-0}
+    _sql_raw="$(git -C "$REPO_ROOT" show "registry/main:.chump/state.sql" 2>/dev/null || true)"
+    _sql_open="$(printf '%s\n' "$_sql_raw" | awk '/^INSERT.*'\''open'\''/{c++} END{print c+0}')"
 fi
+_sql_open="$(_norm_int "$_sql_open")"
 if (( _db_open < _sql_open )); then
     echo "[run-fleet] INFRA-465: state.db has $_db_open open gaps, the registry has $_sql_open — running 'chump gap import'"
     (cd "$REPO_ROOT" && chump gap import) \

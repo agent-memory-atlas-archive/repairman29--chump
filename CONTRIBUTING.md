@@ -199,7 +199,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 Optional: `bash scripts/ci/verify-external-golden-path.sh` (fast smoke; also runs in CI).
 
-CI definition: [.github/workflows/ci.yml](.github/workflows/ci.yml) (includes `fmt`, Node checks for web, Playwright PWA, battle sim, golden path timing, clippy).
+CI definition: [.github/workflows/ci.yml](.github/workflows/ci.yml) (includes `fmt`, Node checks for web, Playwright PWA, battle sim, golden path timing, clippy). See [docs/process/CI_GATES_INVENTORY.md](docs/process/CI_GATES_INVENTORY.md) (and [docs/ci/CI_GATES_INVENTORY.md](docs/ci/CI_GATES_INVENTORY.md)) for the **Scoped CI Path-Gate Contract (RESILIENT-1553)** when adding or modifying CI gates.
 
 **Ship and merge:** [docs/SHIP_AND_MERGE.md](docs/SHIP_AND_MERGE.md) — PR discipline, squash vs merge, branch protection, merge queue, post-merge ops.
 

@@ -591,6 +591,7 @@ case "$1 $2" in
     fi
     if [[ "$a" == *isCrossRepository* ]]; then [[ "$pr" == 202 ]] && echo true || echo false; exit 0; fi
     if [[ "$a" == *headRefName* ]]; then echo "${ORG_HEAD_REF:-claude/credible-9${pr}-x}"; exit 0; fi
+    if [[ "$a" == *"title,body"* ]]; then printf '%s\n%s\n' "${ORG_PR_TITLE:-feat: clean}" "${ORG_PR_BODY:-}"; exit 0; fi
     exit 0;;
   "pr diff")
     case "$pr" in
@@ -2036,6 +2037,31 @@ for hold_lbl in pr-cut no-auto-merge; do
 done
 unset ORG_ROLLUP
 
+# ── Froogle external-repo review-organ pipe-proof (ci-required + title/body gap fallback + store fallback) ──
+echo "--- Froogle external-repo review-organ: ci-required check, title/body gap fallback, canonical store fallback ---"
+FROOGLE_DIR="$D/froogle-checkout"
+mkdir -p "$FROOGLE_DIR" "$D/fake-home/chump/.chump"
+git -C "$FROOGLE_DIR" init -q 2>/dev/null || true
+touch "$D/fake-home/chump/.chump/state.db"
+export ORG_ROLLUP='{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS","name":"ci-required"}],"headRefOid":"deadbeef1234567890abcdef1234567890abcdef"}'
+export ORG_HEAD_REF="fix/froogle-test-branch"
+export ORG_PR_TITLE="feat(froogle): pipe proof"
+export ORG_PR_BODY="Closes: CREDIBLE-9203"
+: >"$ORGLOG" ; : >"$ORGLOG.merges" ; : >"$ORGLOG.edits" ; : >"$ORGLOG.labels" ; : >"$ORGLOG.chump" ; : >"$ORGLOG.store"
+echo '{"labels":[],"comments":[]}' >"$ORGCMT"
+( export PATH="$D/bin:$PATH" HOME="$D/fake-home" CHUMP_AMBIENT_LOG="$D/amb.jsonl"
+  bash "$ORGAN" --claude-bin "$D/bin/claude" --repo repairman29/froogle --checkout "$FROOGLE_DIR" --pr 203 ) >/dev/null 2>&1 || true
+grep -q 'MERGE pr merge 203 --repo repairman29/froogle --squash --match-head-commit deadbeef' "$ORGLOG.merges" \
+    && ok "Froogle review-organ: --repo repairman29/froogle arms/merges when ci-required check is SUCCESS" \
+    || bad "Froogle review-organ: expected head-pinned merge on ci-required=SUCCESS ($(cat "$ORGLOG.merges" 2>/dev/null))"
+grep -q '^chump gap ship CREDIBLE-9203 --closed-pr 203$' "$ORGLOG.chump" \
+    && ok "Froogle review-organ: derive_gap_for_pr falls back to PR title/body when branch lacks gap ID" \
+    || bad "Froogle review-organ: expected gap ship CREDIBLE-9203 from PR body ($(cat "$ORGLOG.chump" 2>/dev/null))"
+grep -q "^$D/fake-home/chump/.chump/state.db	gap ship CREDIBLE-9203 --closed-pr 203$" "$ORGLOG.store" \
+    && ok "Froogle review-organ: ORGAN_GAP_STORE falls back to \$HOME/chump/.chump/state.db for external checkout" \
+    || bad "Froogle review-organ: expected ORGAN_GAP_STORE fallback to \$HOME/chump/.chump/state.db ($(cat "$ORGLOG.store" 2>/dev/null))"
+unset ORG_ROLLUP ORG_HEAD_REF ORG_PR_TITLE ORG_PR_BODY
+
 # ── (h) META-196: bot-merge.sh --enqueue-batch enqueues into merge_group while honoring arm-policy ──
 echo "[h] META-196: bot-merge.sh --enqueue-batch enqueues clean PRs into merge_group and skips held PRs"
 : >"$STUB_LOG.arms"
@@ -2057,6 +2083,54 @@ grep -q '"kind":"pr_merge_group_enqueued","pr":102' "$CHUMP_AMBIENT_LOG" \
     && grep -q '"kind":"pr_merge_group_enqueued","pr":107' "$CHUMP_AMBIENT_LOG" \
     && ok "META-196: emitted kind=pr_merge_group_enqueued for batch-enqueued PRs" \
     || bad "META-196: missing pr_merge_group_enqueued in ambient ($(cat "$CHUMP_AMBIENT_LOG" 2>/dev/null))"
+
+# ── (i) Wave 19 Part B smoke tests (CREDIBLE-081 / RESILIENT-037 / 071 / 1559 / 1576) ──
+echo "[i] Wave 19 Part B: fleet-wire-leaderboard,farmer-heartbeat-watchdog,core-organ-neutered"
+W19_AMB="$TMP/w19-ambient.jsonl"
+: >"$W19_AMB"
+for _i in $(seq 1 12); do
+    printf '{"ts":"%s","kind":"fleet_wire_orphan_test"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$W19_AMB"
+done
+CHUMP_AMBIENT_LOG="$W19_AMB" CHUMP_FLEET_WIRE_ALERT_EMIT=1 \
+    bash "$REPO_ROOT/scripts/dev/fleet-wire-leaderboard.sh" --window 24h --json > "$TMP/w19-wire.json"
+grep -q '"status": "ZERO_CONSUMER"' "$TMP/w19-wire.json" \
+    && grep -q '"kind": "fleet_wire_zero_consumer"' "$W19_AMB" \
+    && ok "CREDIBLE-081: fleet-wire-leaderboard flags ZERO_CONSUMER (>10 published, 0 consumers) and emits fleet_wire_zero_consumer" \
+    || bad "CREDIBLE-081: fleet-wire-leaderboard failed to flag ZERO_CONSUMER or emit event"
+
+# RESILIENT-071: farmer-heartbeat-watchdog stale -> exit 1 + operator_recall; fresh -> exit 0
+W19_F_AMB="$TMP/w19-farmer.jsonl"
+: >"$W19_F_AMB"
+if CHUMP_AMBIENT_LOG="$W19_F_AMB" bash "$REPO_ROOT/scripts/coord/farmer-heartbeat-watchdog.sh" --max-age-min 30 >/dev/null 2>&1; then
+    bad "RESILIENT-071: farmer-heartbeat-watchdog exited 0 on empty/stale ambient"
+else
+    grep -q '"kind": "operator_recall"' "$W19_F_AMB" \
+        && grep -q '"reason": "farmer_heartbeat_stale"' "$W19_F_AMB" \
+        && ok "RESILIENT-071: farmer-heartbeat-watchdog exits 1 and emits operator_recall(farmer_heartbeat_stale)" \
+        || bad "RESILIENT-071: farmer-heartbeat-watchdog missing operator_recall in ambient"
+fi
+printf '{"ts":"%s","kind":"farmer_heartbeat","session":"farmer-1"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W19_F_AMB"
+if CHUMP_AMBIENT_LOG="$W19_F_AMB" bash "$REPO_ROOT/scripts/coord/farmer-heartbeat-watchdog.sh" --max-age-min 30 >/dev/null 2>&1; then
+    ok "RESILIENT-071: farmer-heartbeat-watchdog exits 0 when farmer_heartbeat is fresh"
+else
+    bad "RESILIENT-071: farmer-heartbeat-watchdog failed on fresh farmer_heartbeat"
+fi
+
+# RESILIENT-1559: check_core_organs_not_neutered in fleet-doctor-strict.sh
+W19_UNITS="$TMP/w19-systemd/chump-pr-shepherd.service.d"
+mkdir -p "$W19_UNITS"
+printf '[Service]\nExecStart=\nExecStart=/bin/true\n' > "$W19_UNITS/neuter.conf"
+W19_DOC_AMB="$TMP/w19-doc-amb.jsonl"
+: >"$W19_DOC_AMB"
+(
+    export FLEET_DOCTOR_SOURCED=1 CHUMP_SYSTEMD_UNIT_DIRS="$TMP/w19-systemd" CHUMP_AMBIENT_LOG="$W19_DOC_AMB"
+    # shellcheck disable=SC1090
+    source "$REPO_ROOT/scripts/coord/fleet-doctor-strict.sh"
+    check_core_organs_not_neutered
+    [[ "$FAIL_COUNT" -ge 1 ]]
+) && grep -q '"kind":"core_organ_neutered"' "$W19_DOC_AMB" \
+    && ok "RESILIENT-1559: check_core_organs_not_neutered detects ExecStart=/bin/true drop-in and emits core_organ_neutered" \
+    || bad "RESILIENT-1559: check_core_organs_not_neutered missed ExecStart=/bin/true drop-in"
 
 echo
 echo "=== test-arm-policy: $PASS passed, $FAIL failed ==="

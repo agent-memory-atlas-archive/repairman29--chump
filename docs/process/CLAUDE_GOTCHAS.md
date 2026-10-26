@@ -877,7 +877,13 @@ GIT_DIR=/Users/<you>/Projects/Chump/.git/worktrees/chump-infra-NNN GIT_WORK_TREE
 
 **Prevention:** `chump claim` auto-runs the gitdir repair since INFRA-779.
 If claiming manually via `gap-claim.sh`, add the repair step immediately after
-`git worktree add`.
+`git worktree add`. Under **RESILIENT-009**, both `chump claim` (`atomic_claim.rs`)
+and `scripts/coord/gap-claim.sh --verify-gitdir <wt_dir> <gap_id>` verify the newly
+created worktree immediately post-`git worktree add` via
+`git -C "$wt_dir" rev-parse --show-toplevel`, rewrite both `<wt_dir>/.git` and
+`<repo>/.git/worktrees/<wt_name>/gitdir` when dangling or mismatched, run
+`git worktree repair`, and emit `kind=worktree_gitdir_repaired_postadd` with
+`worktree`, `gap_id`, `repaired_from`, and `repaired_to`.
 
 **Related — worktree reaper data-loss protection (INFRA-1347).**
 `scripts/coord/worktree-prune.sh` now refuses to delete a worktree if **any**
