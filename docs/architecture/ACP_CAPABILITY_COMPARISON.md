@@ -1,15 +1,15 @@
 ---
 doc_tag: decision-record
 owner_gap: DOC-048
-last_audited: 2026-05-13
-re_audit_due: 2026-08-13
+last_audited: 2026-10-26
+re_audit_due: 2027-02-26
 ---
 
 # ACP Agent Capability Comparison
 
 This table benchmarks Chump against every agent in the [JetBrains ACP Agent Registry](https://jetbrains.com/acp) plus well-known open-source ACP implementations. Cells link to source documentation; cells marked **⚠️ verify** should be spot-checked at next audit because the registry is live and data can drift.
 
-**Freshness:** audited 2026-05-13. Re-audit filed as META-051 (due 2026-08-13). To update a cell, edit this file and bump `last_audited`. Re-audit tracked in META-062.
+**Freshness:** re-audited 2026-10-26 (META-062; prior audit 2026-05-13). The live JetBrains registry was not reachable from the fleet worker, so external-agent (Claude Code, Zed AI, Goose) **⚠️ verify** cells are carried forward unconfirmed and no new registry agents were added; a human or network-enabled pass should confirm them. Next re-audit due 2027-02-26. To update a cell, edit this file and bump `last_audited`. Re-audit tracked in META-062.
 
 ---
 
