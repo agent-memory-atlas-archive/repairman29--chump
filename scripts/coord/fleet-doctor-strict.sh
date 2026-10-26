@@ -2343,6 +2343,57 @@ check_core_organs_not_neutered() {
     fi
 }
 
+# ── Check 25 (RESILIENT-1657): closetjunky node hardening items (a)-(e) ──────
+# Verifies that on closetjunky (or when CHUMP_DOCTOR_CJ_ROOT is set in CI),
+# all five node-hardening items (a)-(e) provisioned by
+# scripts/setup/provision-closetjunky-hardening.sh are present.
+check_cj_node_hardening() {
+    # MUTANT_ANCHOR_CJ_NODE_HARDENING
+    local cj_root="${CHUMP_DOCTOR_CJ_ROOT:-}"
+    local host_now
+    host_now="$(hostname -s 2>/dev/null || hostname || echo unknown)"
+    if [[ -z "$cj_root" ]]; then
+        if [[ "$host_now" != "closetjunky" ]]; then
+            register_check "cj-node-hardening" "skip" "host is $host_now (not closetjunky) and CHUMP_DOCTOR_CJ_ROOT unset" ""
+            return
+        fi
+        cj_root="$HOME"
+    fi
+
+    local missing=()
+    # (a) Role policy: no Rust builds + worker MemoryMax/CPUQuota drop-in
+    if ! grep -qxF "CHUMP_ALLOW_RUST_BUILDS=0" "$cj_root/.chump/node.env" 2>/dev/null        || ! grep -qxF "CHUMP_MAX_CONCURRENT_CARGO_JOBS=0" "$cj_root/.chump/node.env" 2>/dev/null        || ! grep -q "^MemoryMax=" "$cj_root/.config/systemd/user/chump-cj-worker.service.d/10-hardening.conf" 2>/dev/null        || ! grep -q "^CPUQuota=" "$cj_root/.config/systemd/user/chump-cj-worker.service.d/10-hardening.conf" 2>/dev/null; then
+        missing+=("item-a(role-policy)")
+    fi
+    # (b) Memory governor: ollama MemoryMax drop-in + governor receipt
+    if ! grep -q "^MemoryMax=" "$cj_root/.config/systemd/user/ollama.service.d/10-memory-cap.conf" 2>/dev/null        || [[ ! -f "$cj_root/.chump/cj-memory-governor.receipt" ]]; then
+        missing+=("item-b(memory-governor)")
+    fi
+    # (c) Dead-man timers installed
+    if [[ ! -f "$cj_root/.config/systemd/user/chump-load-aware-deadman.timer" ]]        || [[ ! -f "$cj_root/.config/systemd/user/chump-cj-deadman-push.timer" ]]; then
+        missing+=("item-c(deadman-timers)")
+    fi
+    # (d) Out-of-band access + persistent journal receipt
+    if [[ ! -f "$cj_root/.chump/cj-oob-journal.receipt" ]]; then
+        missing+=("item-d(oob-journal)")
+    fi
+    # (e) Off-node witness receipt
+    if [[ ! -f "$cj_root/.chump/cj-offnode-witness.receipt" ]]; then
+        missing+=("item-e(offnode-witness)")
+    fi
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        register_check "cj-node-hardening" "pass"             "closetjunky hardening items (a)-(e) present under $cj_root" ""
+    else
+        local amb="${CHUMP_AMBIENT_LOG:-$REPO_ROOT/.chump-locks/ambient.jsonl}"
+        mkdir -p "$(dirname "$amb")" 2>/dev/null || true
+        # scanner-anchor: "kind":"cj_hardening_missing"
+        printf '{"ts":"%s","kind":"cj_hardening_missing","missing":"%s","source":"fleet-doctor-strict.sh"}
+'             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${missing[*]}" >> "$amb" 2>/dev/null || true
+        register_check "cj-node-hardening" "fail"             "closetjunky hardening item(s) missing under $cj_root (RESILIENT-1657): ${missing[*]}"             "run: bash scripts/setup/provision-closetjunky-hardening.sh"
+    fi
+}
+
 # When sourced for testing (FLEET_DOCTOR_SOURCED=1), stop here — the test
 # harness calls individual check_* functions directly instead of paying for
 # the full (networked) sweep.
@@ -2381,6 +2432,7 @@ check_cargo_nextest
 check_installed_unit_host_literals
 check_organ_home_placement
 check_core_organs_not_neutered
+check_cj_node_hardening
 
 # ── Render output ──────────────────────────────────────────────────────────────
 if [[ "$OUTPUT" == "json" ]]; then

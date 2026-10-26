@@ -164,7 +164,7 @@ for ported_organ in branch-reaper stale-branch-reaper armed-pr-rebaser dup-pr-de
     || fail "missing systemd timer unit scripts/dispatch/chump-${ported_organ}.timer"
   grep -Eq "^enabled[[:space:]]+chump-${ported_organ}\\.timer.*platforms=systemd,launchd" "$REPO_ROOT/scripts/ops/organ-manifest.txt" \
     || fail "organ-manifest.txt must declare chump-${ported_organ}.timer enabled with platforms=systemd,launchd"
-  organ_is_paused_or_retired "chump-${ported_organ}.timer" "$REPO_ROOT/scripts/ops/organ-manifest.txt" \
+  organ_is_paused_or_retired "chump-${ported_organ}.timer" "$REPO_ROOT/scripts/ops/organ-manifest.txt" /dev/null \
     && fail "chump-${ported_organ}.timer must NOT be marked paused or retired in organ-manifest.txt"
 done
 pass "INFRA-8126 / INFRA-8144 / INFRA-8146: all 8 Linux-ported organs have tracked systemd .service+.timer units and enabled platforms=systemd,launchd manifest entries"

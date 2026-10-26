@@ -1,0 +1,11 @@
+  - kind: duplicate_pr_held
+    effect_metric: zero_waste
+    emitter: scripts/coord/duplicate-pr-detector.sh (INFRA-8640)
+    trigger: >-
+      Emitted when duplicate-pr-detector.sh detects two or more open PRs
+      targeting the same gap ID and applies the review-held label + comment
+      to the later duplicate PR within one tick.
+    consumers: [review-organ, fleet-brief]
+    fields_required: [ts, kind, gap, loser, winner, source]
+    expected_volume: "0 on a healthy fleet; 1 per duplicate PR caught"
+    status: stable

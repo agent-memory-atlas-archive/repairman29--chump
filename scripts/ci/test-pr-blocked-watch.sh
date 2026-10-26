@@ -56,7 +56,7 @@ new_lines=$(( lines_after - lines_before ))
     echo "[FAIL] no ambient event written (before=$lines_before after=$lines_after)"
     exit 1
 }
-new_event=$(tail -1 "$AMBIENT")
+new_event=$(tail -n "$new_lines" "$AMBIENT")
 echo "$new_event" | grep -qE '"kind"[[:space:]]*:[[:space:]]*"reaper_run"' || {
     echo "[FAIL] expected reaper_run event, got: $new_event"; exit 1; }
 echo "[PASS] heartbeat written; ambient event: $(echo "$new_event" | head -c 120)…"

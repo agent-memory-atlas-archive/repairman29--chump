@@ -190,7 +190,11 @@ organ_is_paused_or_retired() {
   fi
 
   local pf raw_line stripped entry entry_base entry_bare
-  for pf in "$paused_file" "${HOME:-/root}/.chump/paused-timers.txt"; do
+  local -a paused_files=("$paused_file")
+  if [[ -z "${3:-}" && -z "${CHUMP_PAUSED_TIMERS_FILE:-}" ]]; then
+    paused_files+=("${HOME:-/root}/.chump/paused-timers.txt")
+  fi
+  for pf in "${paused_files[@]}"; do
     [[ -n "$pf" && -f "$pf" ]] || continue
     while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
       stripped="${raw_line%%#*}"

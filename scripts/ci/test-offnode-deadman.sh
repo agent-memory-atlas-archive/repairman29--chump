@@ -95,6 +95,34 @@ else
     bad "pusher dry-run payload malformed: $out"
 fi
 
+
+echo "== 8. RESILIENT-1657 item (i): WiFi flap (wpa_disconnect_reason + recent journal) → NO dead page =="
+p="{\"schema\":\"chump-deadman/1\",\"node\":\"closetjunky\",\"farmer_hb_epoch\":$((NOW-STALE-300)),\"pushed_epoch\":$((NOW-STALE-300)),\"last_journal_epoch\":$((NOW-120)),\"wpa_disconnect_reason\":\"reason=2\",\"link_carrier\":\"enp3s0:0,wlp4s0:0\"}"
+n="$(run_watch "$p" "$NOW")"
+if [[ "$n" == "0" ]] && grep -q '"kind":"cj_deadman_unreachable_wifi_flap"' "$STATE/offnode-deadman.events.jsonl"; then
+    ok "WiFi flap recorded as cj_deadman_unreachable_wifi_flap and did NOT page cj_deadman_dark"
+else
+    bad "WiFi flap falsely paged dead or missed event (pages=$n)"
+fi
+
+echo "== 9. RESILIENT-1657 item (i) mutant: disabling WiFi flap check pages dead on WiFi flap =="
+: > "$SINK"
+printf '%s' "$p" > "$WORK/payload_flap.json"
+sed 's/if true; then # MUTANT_ANCHOR_WIFI_FLAP_NOT_DEAD/if false; then/' "$WATCH" > "$WORK/watch_mutant.sh"
+CHUMP_DEADMAN_PAYLOAD_FILE="$WORK/payload_flap.json" \
+CHUMP_DEADMAN_PAGE_SINK="$SINK" \
+CHUMP_DEADMAN_STATE_DIR="$STATE" \
+CHUMP_DEADMAN_STALE_SECS="$STALE" \
+CHUMP_DEADMAN_NOW_EPOCH="$NOW" \
+CHUMP_DEADMAN_GIST_ID="fixture" \
+    bash "$WORK/watch_mutant.sh" >/dev/null 2>&1 || true
+n="$(count_pages)"
+if [[ "$n" -ge 1 ]] && grep -q cj_deadman_dark "$SINK"; then
+    ok "mutant CHUMP_DEADMAN_TREAT_UNREACHABLE_AS_DEAD=1 caught (would falsely page dead on WiFi flap)"
+else
+    bad "mutant CHUMP_DEADMAN_TREAT_UNREACHABLE_AS_DEAD=1 was NOT caught"
+fi
+
 echo
 echo "== RESULT: pass=$pass fail=$fail =="
 [[ "$fail" -eq 0 ]] || exit 1

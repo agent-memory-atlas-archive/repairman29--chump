@@ -176,9 +176,12 @@ _kind_registered() {
     if [[ -n "$REGISTRY_PATH" ]] && grep -qxF "  - kind: ${k}" "$REGISTRY_PATH" 2>/dev/null; then
         return 0
     fi
-    if [[ -n "$RESERVED_PATH" ]] && grep -v '^#' "$RESERVED_PATH" 2>/dev/null \
-            | grep -v '^[[:space:]]*$' | awk '{print $1}' | grep -qxF "$k"; then
-        return 0
+    if [[ -n "$RESERVED_PATH" ]]; then
+        local _reserved_toks
+        _reserved_toks="$(awk '!/^#/ && NF > 0 {print $1}' "$RESERVED_PATH" 2>/dev/null || true)"
+        if grep -qxF "$k" <<<"$_reserved_toks"; then
+            return 0
+        fi
     fi
     return 1
 }

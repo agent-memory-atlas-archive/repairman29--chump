@@ -21,7 +21,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+REPO_ROOT="${CHUMP_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd -P)}"
 
 APPLY=0
 SKIP_FRESH_MINS=15
@@ -50,7 +50,7 @@ gh api "repos/$repo/pulls?state=open&per_page=100" > "$_PRS_TMP" 2>/dev/null
 # is more likely to be the legitimate primary).
 ambient="$REPO_ROOT/.chump-locks/ambient.jsonl"
 
-# Decision JSON: [{group_id, winner, losers: [...]}]
+# Decision JSON: [{gap_id, winner, losers: [...], close_losers: [...]}]
 DECISIONS="$(python3 - "$_PRS_TMP" "$SKIP_FRESH_MINS" <<'PY'
 import json, re, sys, time
 from collections import defaultdict
@@ -58,49 +58,70 @@ from datetime import datetime
 prs_file = sys.argv[1]
 skip_fresh_mins = int(sys.argv[2])
 data = json.load(open(prs_file))
-# Only the LEADING gap id identifies a PR's gap (chump convention is
-# "GAP-ID: title"). A gap id merely MENTIONED later in the title — e.g.
-# "fix(dedup): ... (RESILIENT-1562 wedge)" — must NOT group the PR as a
-# duplicate of that gap. The old `\b...\b` findall-anywhere matched such
-# mentions and nearly closed the dedup fix's own PR (INFRA-8111).
-GAP_RE = re.compile(r'^\s*([A-Z]+-\d+)\b')
+# INFRA-8640: extract primary gap IDs from:
+#   1) leading "GAP-ID: ..."
+#   2) conventional commit scope "type(GAP-ID,...): ..."
+#   3) trailing parenthesized gap list "... (GAP-ID, META-196)" (excluding "wedge" notes)
+#   4) head branch ref "chump/<gap-id>-*", "fix/<GAP-ID>-*", "feat/<GAP-ID>-*", "claude/<gap-id>-*"
+LEAD_RE = re.compile(r'^\s*([A-Z]+-\d+)\b')
+CONV_RE = re.compile(r'^\s*[a-z]+\(([A-Z]+-\d+(?:,[A-Z]+-\d+)*)\):')
+TRAIL_RE = re.compile(r'\(([A-Z]+-\d+(?:,\s*[A-Z]+-\d+)*)\)\s*(?:#\d+\s*)?$')
+BRANCH_RE = re.compile(r'^(?:chump|fix|feat|claude)/([A-Za-z]+-\d+)\b')
+
 groups = defaultdict(list)
 for p in data:
-    m = GAP_RE.match(p.get('title', ''))
+    title = p.get('title', '') or ''
+    if 'dup-detector-skip' in title.lower() or title.lower().startswith('fix(dedup)'):
+        continue
+    gids = []
+    m = LEAD_RE.match(title)
     if m:
-        groups[m.group(1)].append(p)
+        gids.append(m.group(1))
+    mc = CONV_RE.match(title)
+    if mc:
+        for tok in mc.group(1).split(','):
+            tok = tok.strip()
+            if tok and tok not in gids:
+                gids.append(tok)
+    mt = TRAIL_RE.search(title)
+    if mt:
+        for tok in mt.group(1).split(','):
+            tok = tok.strip()
+            if tok and tok not in gids:
+                gids.append(tok)
+    head_ref = ((p.get('head') or {}).get('ref') or p.get('headRefName') or '').strip()
+    mb = BRANCH_RE.match(head_ref)
+    if mb:
+        btok = mb.group(1).upper()
+        if btok not in gids:
+            gids.append(btok)
+    for gid in gids:
+        groups[gid].append(p)
+
 decisions = []
 now = time.time()
 for g, prs in groups.items():
-    if len(prs) < 2:
+    by_num = {p['number']: p for p in prs if 'number' in p}
+    if len(by_num) < 2:
         continue
-    # Freshness guard (INFRA-8111 fix): exclude only the INDIVIDUAL PRs updated
-    # within skip_fresh_mins from being closed (they may be mid-creation). A
-    # single fresh PR must NOT exempt the whole group — a perpetually-refreshed
-    # swarm (a new attempt every ~hour, rescue organ re-touching them) is exactly
-    # the case that needs deduping, and the old `any-fresh -> skip whole group`
-    # logic guaranteed the janitor never ran on it (the RESILIENT-1562 wedge:
-    # 21 open PRs for one gap, "no eligible groups" for 33h).
+    prs_unique = list(by_num.values())
     def _too_fresh(p):
-        # Key on CREATED time, not updated_at: a rescue/shepherd organ touches
-        # updated_at constantly (mass-reopen), so updated_at is fresh forever and
-        # the janitor could never act. A PR created long ago is a stale swarm
-        # member regardless of bot pokes. (INFRA-8111: the RESILIENT-1562 wedge.)
         created = datetime.fromisoformat(p['created_at'].replace('Z', '+00:00'))
         return (now - created.timestamp()) / 60 < skip_fresh_mins
-    prs_sorted = sorted(prs, key=lambda x: x['created_at'])
+    prs_sorted = sorted(prs_unique, key=lambda x: (x.get('created_at') or '', x.get('number') or 0))
     stable = [p for p in prs_sorted if not _too_fresh(p)]
-    # winner: oldest stable PR (longest in queue); fall back to oldest overall
     winner = (stable or prs_sorted)[0]
-    # close every other PR except any still inside the fresh window (next run gets them)
-    losers = [p for p in prs_sorted
-              if p['number'] != winner['number'] and not _too_fresh(p)]
-    if not losers:
+    # INFRA-8640 (AC2): flag and hold EVERY second/later open PR within one tick
+    # (even inside skip_fresh_mins), while only auto-closing PRs older than skip_fresh_mins.
+    hold_losers = [p for p in prs_sorted if p['number'] != winner['number']]
+    close_losers = [p for p in hold_losers if not _too_fresh(p)]
+    if not hold_losers:
         continue
     decisions.append({
         'gap_id': g,
-        'winner': {'n': winner['number'], 'title': winner['title']},
-        'losers': [{'n': l['number'], 'title': l['title']} for l in losers],
+        'winner': {'n': winner['number'], 'title': winner.get('title', '')},
+        'losers': [{'n': l['number'], 'title': l.get('title', '')} for l in hold_losers],
+        'close_losers': [{'n': l['number'], 'title': l.get('title', '')} for l in close_losers],
     })
 print(json.dumps(decisions))
 PY
@@ -122,17 +143,36 @@ for d in json.load(sys.stdin):
 "
 
 if [ "$APPLY" = "0" ]; then
-    echo "[dup-pr-detector] (dry-run) re-run with --apply to close losers"
+    echo "[dup-pr-detector] (dry-run) re-run with --apply to hold/close losers"
     exit 0
 fi
 
+mkdir -p "$(dirname "$ambient")" 2>/dev/null || true
 closed=0
 echo "$DECISIONS" | python3 -c "
 import json, sys
 for d in json.load(sys.stdin):
-    print(f\"{d['gap_id']}|{d['winner']['n']}|\" + ','.join(str(l['n']) for l in d['losers']))
-" | while IFS='|' read -r gap winner losers; do
-    for loser in $(echo "$losers" | tr ',' ' '); do
+    hold_csv = ','.join(str(l['n']) for l in d.get('losers', []))
+    close_csv = ','.join(str(l['n']) for l in d.get('close_losers', []))
+    print(f\"{d['gap_id']}|{d['winner']['n']}|{hold_csv}|{close_csv}\")
+" | while IFS='|' read -r gap winner hold_losers close_losers; do
+    # INFRA-8640 (AC2): hold every later duplicate PR within one tick
+    # MUTANT_ANCHOR_DUP_PR_HOLD
+    if true; then # MUTANT_ANCHOR_DUP_PR_HOLD
+        for loser in $(echo "$hold_losers" | tr ',' ' '); do
+            [ -z "$loser" ] && continue
+            hold_msg="[dup-pr-detector] Holding duplicate PR #$loser (review-held): gap $gap already has earlier open PR #$winner (INFRA-8640)."
+            gh api -X POST "repos/$repo/issues/$loser/labels" -f "labels[]=review-held" >/dev/null 2>&1 || true
+            gh api -X POST "repos/$repo/issues/$loser/comments" -f body="$hold_msg" >/dev/null 2>&1 || true
+            echo "  held #$loser ($gap -> primary #$winner)"
+            # scanner-anchor: "kind":"duplicate_pr_held"
+            printf '{"ts":"%s","kind":"duplicate_pr_held","gap":"%s","loser":%s,"winner":%s,"source":"duplicate-pr-detector"}\n' \
+                "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$gap" "$loser" "$winner" \
+                >> "$ambient" 2>/dev/null || true
+        done
+    fi
+    for loser in $(echo "$close_losers" | tr ',' ' '); do
+        [ -z "$loser" ] && continue
         msg="Auto-closing as duplicate: gap $gap also has open PR #$winner (older / primary).
 Filed by INFRA-1222 duplicate-pr-detector. If this is wrong, reopen and add 'dup-detector-skip' to the title."
         if gh api -X POST "repos/$repo/issues/$loser/comments" -f body="$msg" >/dev/null 2>&1; then

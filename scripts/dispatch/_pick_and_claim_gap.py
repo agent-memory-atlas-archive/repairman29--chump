@@ -813,6 +813,76 @@ def cooled_down_gaps(cooldown_dir: str, worker_id: str = "") -> set[str]:
 # so worker.sh picks exactly as it did before this change.
 
 
+def _load_active_leased_gaps(repo_root: str, lock_dir: str) -> set[str]:
+    """INFRA-8640: collect gap_ids held by live .chump-locks/*.json leases or state.db leases."""
+    import time
+    from datetime import datetime
+    leased: set[str] = set()
+    now_epoch = time.time()
+    cur_session = os.environ.get("CHUMP_SESSION_ID", "").strip()
+    if lock_dir and os.path.isdir(lock_dir):
+        for fname in os.listdir(lock_dir):
+            if not fname.endswith(".json"):
+                continue
+            fpath = os.path.join(lock_dir, fname)
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    continue
+                if cur_session and (data.get("session_id") or "").strip() == cur_session:
+                    continue
+                gid = (data.get("gap_id") or "").strip()
+                if not gid:
+                    continue
+                exp = data.get("expires_at")
+                if isinstance(exp, (int, float)):
+                    if exp <= now_epoch:
+                        continue
+                elif isinstance(exp, str) and exp.strip():
+                    try:
+                        dt = datetime.fromisoformat(exp.strip().replace("Z", "+00:00"))
+                        if dt.timestamp() <= now_epoch:
+                            continue
+                    except Exception:
+                        pass
+                leased.add(gid)
+            except Exception:
+                continue
+
+    explicit_db = os.environ.get("CHUMP_STATE_DB", "").strip()
+    db_path = explicit_db or ("" if os.environ.get("GAP_JSON_FILE") else os.path.join(repo_root, ".chump", "state.db"))
+    if db_path and os.path.isfile(db_path):
+        try:
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute("SELECT gap_id, expires_at, session_id FROM leases").fetchall()
+            conn.close()
+            for rgid, rexp, rsess in rows:
+                if not rgid:
+                    continue
+                if cur_session and str(rsess or "").strip() == cur_session:
+                    continue
+                if isinstance(rexp, (int, float)):
+                    if rexp <= now_epoch:
+                        continue
+                elif isinstance(rexp, str) and rexp.strip():
+                    try:
+                        if rexp.strip().isdigit():
+                            if int(rexp.strip()) <= now_epoch:
+                                continue
+                        else:
+                            dt = datetime.fromisoformat(rexp.strip().replace("Z", "+00:00"))
+                            if dt.timestamp() <= now_epoch:
+                                continue
+                    except Exception:
+                        pass
+                leased.add(str(rgid).strip())
+        except Exception:
+            pass
+    return leased
+
+
 def _resolve_ambient_path() -> str:
     """Ambient log path, honoring the curator/test env the shim forwards.
 
@@ -1166,7 +1236,12 @@ def main() -> int:
     # explicitly framed as fixing the breach itself can still be claimed.
     # Unset/empty outside a pause: no restriction (default fleet behavior).
     require_title_substrs = [s.lower().strip() for s in csv("FLEET_REQUIRE_TITLE_SUBSTR") if s.strip()]
+    # MUTANT_ANCHOR_WAVE_LEASE_HONOURED (INFRA-8640)
     active = set(os.environ.get("ACTIVE_GAPS", "").split())
+    active |= _load_active_leased_gaps(
+        os.environ.get("CHUMP_REPO") or os.environ.get("REPO_ROOT") or os.getcwd(),
+        lock_dir or get_lock_dir(),
+    )  # MUTANT_ANCHOR_WAVE_LEASE_HONOURED
     # RESILIENT-332 (anti-spin, Layer B): gaps that already have an open PR /
     # in-progress branch on origin must NEVER be offered — a completed-but-
     # unmerged gap (e.g. RESILIENT-327 / PR #3795) stayed pickable and got

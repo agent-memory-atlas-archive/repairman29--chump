@@ -62,7 +62,8 @@ LOCK_DIR="${QUEUE_HEALTH_LOCK_DIR_OVERRIDE:-$MAIN_REPO/.chump-locks}"
 CHUMP_DIR="$MAIN_REPO/.chump"
 HEALTH_JSONL="$CHUMP_DIR/health.jsonl"
 ALERTS_LOG="$CHUMP_DIR/alerts.log"
-EMIT="$MAIN_REPO/scripts/dev/ambient-emit.sh"
+EMIT="$REPO_ROOT/scripts/dev/ambient-emit.sh"
+[[ -x "$EMIT" ]] || EMIT="$MAIN_REPO/scripts/dev/ambient-emit.sh"
 
 mkdir -p "$CHUMP_DIR"
 
@@ -95,7 +96,7 @@ emit_alert() {
     if [[ -x "$EMIT" ]]; then
         # Truncate long messages so a single alert doesn't blow the digest budget.
         local short="${msg:0:200}"
-        "$EMIT" ALERT "kind=$kind" "note=$short" 2>/dev/null || true
+        CHUMP_AMBIENT_LOG="${CHUMP_AMBIENT_LOG:-$LOCK_DIR/ambient.jsonl}" "$EMIT" ALERT "kind=$kind" "note=$short" 2>/dev/null || true
     fi
 }
 

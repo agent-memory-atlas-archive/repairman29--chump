@@ -133,3 +133,13 @@ roles:
     skills:
       - embedding-infrastructure
       - resource-optimization
+
+  - name: wave
+    description: >
+      Human/operator-supervised wave session claiming one or more gaps via
+      `chump claim <GAP-ID> --role wave --lease-only` so the fleet picker
+      honours in-progress wave work and never double-dispatches (INFRA-8640).
+    skills:
+      - fleet-coordination
+      - rust
+      - shell

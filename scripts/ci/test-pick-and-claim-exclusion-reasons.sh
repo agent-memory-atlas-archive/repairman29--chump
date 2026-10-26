@@ -104,6 +104,68 @@ echo "$err_ext_closed" | grep -q "external_repo gate: closed (2 gaps blocked)" \
     && pass "INFRA-8603: logs 'external_repo gate: closed (2 gaps blocked)'" \
     || fail "INFRA-8603: missing 'external_repo gate: closed (2 gaps blocked)' in: $err_ext_closed"
 
+# ── INFRA-8640: wave role + lease scan + duplicate-pr-detector review-held ──
+ROOT="$REPO_ROOT"
+PICKER="$CLAIMER"
+if grep -Eq "^  - name: wave" "$ROOT/docs/process/AGENT_ROLES.yaml"; then
+    pass "INFRA-8640: AGENT_ROLES.yaml defines wave role"
+else
+    fail "INFRA-8640: AGENT_ROLES.yaml missing wave role"
+fi
+
+mkdir -p "$TMP/i8640/.chump-locks" "$TMP/i8640/scripts/dispatch" "$TMP/i8640-bin"
+cp "$ROOT/scripts/dispatch/picker-policy.json" "$TMP/i8640/scripts/dispatch/picker-policy.json"
+NOW_ISO="$(python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+EXP_ISO="$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+cat > "$TMP/i8640/.chump-locks/claim-INFRA-9991-wave.json" <<EOF
+{"gap_id":"INFRA-9991","session_id":"wave-sess-1","role":"wave","worktree":"/tmp/wt-wave","claimed_at":"$NOW_ISO","heartbeat_at":"$NOW_ISO","expires_at":"$EXP_ISO","files":["scripts/foo.sh"]}
+EOF
+cat > "$TMP/gaps.json" <<JSON
+[
+  {"id":"INFRA-9991","title":"Leased by wave","status":"open","priority":"P1","domain":"INFRA","effort":"s","depends_on":"[]","acceptance_criteria":"$AC"}
+]
+JSON
+GAP_JSON_FILE="$TMP/gaps.json" REPO_ROOT="$TMP/i8640" CHUMP_REPO="$TMP/i8640" CHUMP_LOCK_DIR="$TMP/i8640/.chump-locks" \
+python3 "$PICKER" --dry-run --dump-reasons >"$TMP/i8640.out" 2>"$TMP/i8640.err" || true
+if [[ ! -s "$TMP/i8640.out" ]] && grep -q '"active_or_missing_id": 1' "$TMP/i8640.err"; then
+    pass "INFRA-8640: picker excludes gap with active .chump-locks/claim-*.json lease"
+else
+    fail "INFRA-8640: picker did not exclude lease-claimed gap"
+fi
+
+sed 's/return leased/return set()/' "$PICKER" > "$TMP/picker_mutant_8640.py"
+cp "$ROOT/scripts/dispatch/_dep_resolution.py" "$TMP/_dep_resolution.py"
+GAP_JSON_FILE="$TMP/gaps.json" REPO_ROOT="$TMP/i8640" CHUMP_REPO="$TMP/i8640" CHUMP_LOCK_DIR="$TMP/i8640/.chump-locks" \
+python3 "$TMP/picker_mutant_8640.py" --dry-run --dump-reasons >"$TMP/i8640_mut.out" 2>/dev/null || true
+if grep -q "INFRA-9991" "$TMP/i8640_mut.out"; then
+    pass "INFRA-8640 mutant: disabling _load_active_leased_gaps is caught"
+else
+    fail "INFRA-8640 mutant: mutant picker did not offer INFRA-9991"
+fi
+
+cat > "$TMP/open_prs.json" <<EOF
+[
+  {"number": 5701, "title": "fix(INFRA-8616): first implementation", "head": {"ref": "fix/INFRA-8616-first"}, "created_at": "2026-10-25T10:00:00Z"},
+  {"number": 5705, "title": "Follow-up duplicate implementation", "head": {"ref": "claude/infra-8616-dup"}, "created_at": "$NOW_ISO"}
+]
+EOF
+cat > "$TMP/i8640-bin/gh" <<EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "repo" && "\${2:-}" == "view" ]]; then echo "repairman29/chump"; exit 0; fi
+if [[ "\${1:-}" == "api" && "\${2:-}" == "repos/repairman29/chump/pulls?state=open&per_page=100" ]]; then cat "$TMP/open_prs.json"; exit 0; fi
+echo "\$*" >> "$TMP/gh_calls.log"
+exit 0
+EOF
+chmod +x "$TMP/i8640-bin/gh"
+PATH="$TMP/i8640-bin:$PATH" CHUMP_REPO_ROOT="$TMP/i8640" \
+bash "$ROOT/scripts/coord/duplicate-pr-detector.sh" --apply --skip-fresh-mins 15 >/dev/null
+if grep -Eq '"kind":"duplicate_pr_held"' "$TMP/i8640/.chump-locks/ambient.jsonl" \
+   && grep -q "labels\[\]=review-held" "$TMP/gh_calls.log"; then
+    pass "INFRA-8640: duplicate-pr-detector.sh holds duplicate PR #5705 and emits duplicate_pr_held"
+else
+    fail "INFRA-8640: duplicate-pr-detector.sh did not emit duplicate_pr_held"
+fi
+
 echo ""
 echo "Passed: $PASS  Failed: $FAIL"
 [ "$FAIL" -eq 0 ]

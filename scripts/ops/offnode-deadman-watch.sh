@@ -144,13 +144,36 @@ fi
 node="$(json_str "$payload" node)"; [[ -z "$node" ]] && node="closetjunky"
 pushed="$(json_int "$payload" pushed_epoch)"
 farmer="$(json_int "$payload" farmer_hb_epoch)"
+last_journal="$(json_int "$payload" last_journal_epoch)"
+wpa_reason="$(json_str "$payload" wpa_disconnect_reason)"
+link_carrier="$(json_str "$payload" link_carrier)"
 push_age=$(( NOW - pushed ))
 farmer_age=$(( NOW - farmer ))
+lan_evidence="wpa_disconnect_reason=${wpa_reason:-none} link_carrier=${link_carrier:-unknown} last_journal_epoch=${last_journal:-0}"
 
 dark=0
 if [[ "$pushed" -eq 0 || "$push_age" -gt "$STALE_SECS" ]]; then
     dark=1
-    page "cj_deadman_dark" "CJ ($node) has not beaten in ${push_age}s (> ${STALE_SECS}s) via $source — node dark or pusher dead. Fleet has NO coordinator/worker."
+    # RESILIENT-1657 item (i): distinguish tailnet-unreachable (WiFi flap) from
+    # node-dead. When LAN evidence shows a WiFi disconnect / lost carrier while
+    # the journal remained active after the last push (or within STALE_SECS),
+    # record cj_deadman_unreachable_wifi_flap and NEVER page cj_deadman_dark.
+    # MUTANT_ANCHOR_WIFI_FLAP_NOT_DEAD
+    wifi_flap=0
+    if true; then # MUTANT_ANCHOR_WIFI_FLAP_NOT_DEAD
+        if [[ -n "$wpa_reason" && "$wpa_reason" != "none" ]] || [[ "$link_carrier" == *"wlp"*:0* ]] || [[ "$link_carrier" == "no-carrier" ]]; then
+            if [[ "$last_journal" -gt 0 && $(( NOW - last_journal )) -le "$STALE_SECS" ]]; then
+                wifi_flap=1
+            fi
+        fi
+    fi
+    if [[ "$wifi_flap" -eq 1 ]]; then
+        log "WARN (cj_deadman_unreachable_wifi_flap): CJ ($node) unreachable over tailnet (${push_age}s > ${STALE_SECS}s) due to WiFi flap ($lan_evidence) — NOT paging dead"
+        printf '{"ts":"%s","kind":"cj_deadman_unreachable_wifi_flap","node":"%s","push_age":%d,"wpa_disconnect_reason":"%s","link_carrier":"%s","last_journal_epoch":%d}
+'             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$node" "$push_age" "$wpa_reason" "$link_carrier" "$last_journal"             >> "$STATE_DIR/offnode-deadman.events.jsonl" 2>/dev/null || true
+    else
+        page "cj_deadman_dark" "CJ ($node) has not beaten in ${push_age}s (> ${STALE_SECS}s) via $source ($lan_evidence) — node dark or pusher dead. Fleet has NO coordinator/worker."
+    fi
 fi
 if [[ "$dark" -eq 0 && ( "$farmer" -eq 0 || "$farmer_age" -gt "$STALE_SECS" ) ]]; then
     dark=1

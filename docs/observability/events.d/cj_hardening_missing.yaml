@@ -1,0 +1,10 @@
+  - kind: cj_hardening_missing
+    effect_metric: resilient
+    emitter: scripts/coord/fleet-doctor-strict.sh (RESILIENT-1657)
+    trigger: >-
+      Emitted when check_cj_node_hardening finds any of closetjunky's five
+      node-hardening items (a)-(e) missing on the target node.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, missing, source]
+    expected_volume: "0 after provision-closetjunky-hardening.sh runs"
+    status: stable

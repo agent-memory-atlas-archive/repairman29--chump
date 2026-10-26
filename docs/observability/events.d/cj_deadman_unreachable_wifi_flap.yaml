@@ -1,0 +1,12 @@
+  - kind: cj_deadman_unreachable_wifi_flap
+    effect_metric: resilient
+    emitter: scripts/ops/offnode-deadman-watch.sh (RESILIENT-1657)
+    trigger: >-
+      Emitted when offnode-deadman-watch.sh observes a stale pushed_epoch on
+      closetjunky alongside LAN/WiFi disconnect evidence (wpa_disconnect_reason
+      or lost wireless carrier) with a recent last_journal_epoch, recording a
+      tailnet WiFi flap instead of falsely paging cj_deadman_dark.
+    consumers: [fleet-brief, ops-audit]
+    fields_required: [ts, kind, node, push_age, wpa_disconnect_reason, link_carrier, last_journal_epoch]
+    expected_volume: "0 on wired Ethernet; >0 only during 2.4GHz WiFi deauth flaps"
+    status: stable

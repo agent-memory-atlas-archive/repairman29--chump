@@ -114,7 +114,7 @@ threshold_secs() {
 # turns that silence into a diagnosis.
 # scanner-anchor: "kind":"curator_silent"
 launchd_exit_status() {
-    launchctl list 2>/dev/null \
+    { launchctl list 2>/dev/null || true; } \
         | awk -v l="$1" '$3 == l {print $2; found=1} END {if (!found) print "absent"}'
 }
 

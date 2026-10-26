@@ -79,7 +79,7 @@ if [[ -x "$CHUMP" ]]; then
     || fail "chump completion fish missing 'complete -c chump'"
 
   # unknown shell exits non-zero
-  "$CHUMP" completion __bogus__ 2>/dev/null; rc=$?
+  rc=0; "$CHUMP" completion __bogus__ 2>/dev/null || rc=$?
   [[ $rc -ne 0 ]] \
     && ok "chump completion <unknown> exits non-zero ($rc)" \
     || fail "chump completion <unknown> should exit non-zero"

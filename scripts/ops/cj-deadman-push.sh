@@ -79,8 +79,25 @@ for repo in "$HOME/Projects/chump" "$HOME/chump"; do
     [[ "$e" -gt "$main_epoch" ]] && main_epoch="$e"
 done
 
-payload="$(printf '{"schema":"chump-deadman/1","node":"%s","farmer_hb_epoch":%s,"pushed_epoch":%s,"origin_main_epoch":%s,"pushed_iso":"%s"}' \
-    "$NODE_ID" "$farmer_epoch" "$now_epoch" "$main_epoch" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+# --- RESILIENT-1657 item (i): LAN/WiFi evidence for off-node witness ----------
+wpa_reason="${CHUMP_DEADMAN_WPA_REASON:-}"
+if [[ -z "$wpa_reason" ]] && command -v journalctl >/dev/null 2>&1; then
+    wpa_reason="$(journalctl -u wpa_supplicant -n 50 --no-pager 2>/dev/null | grep -oE 'reason=[0-9]+' | tail -1 || true)"
+fi
+link_carrier="${CHUMP_DEADMAN_LINK_CARRIER:-}"
+if [[ -z "$link_carrier" ]]; then
+    for _if in /sys/class/net/enp* /sys/class/net/eth* /sys/class/net/wlp* /sys/class/net/wlan*; do
+        [[ -f "$_if/carrier" ]] || continue
+        _ifname="$(basename "$_if")"
+        _car="$(cat "$_if/carrier" 2>/dev/null || echo 0)"
+        link_carrier="${link_carrier:+${link_carrier},}${_ifname}:${_car}"
+    done
+    [[ -z "$link_carrier" ]] && link_carrier="unknown"
+fi
+last_journal_epoch="${CHUMP_DEADMAN_LAST_JOURNAL_EPOCH:-$now_epoch}"
+
+payload="$(printf '{"schema":"chump-deadman/1","node":"%s","farmer_hb_epoch":%s,"pushed_epoch":%s,"origin_main_epoch":%s,"last_journal_epoch":%s,"wpa_disconnect_reason":"%s","link_carrier":"%s","pushed_iso":"%s"}' \
+    "$NODE_ID" "$farmer_epoch" "$now_epoch" "$main_epoch" "$last_journal_epoch" "$wpa_reason" "$link_carrier" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
 
 if [[ "${CHUMP_DEADMAN_DRY_RUN:-0}" == "1" ]]; then
     printf '%s\n' "$payload"

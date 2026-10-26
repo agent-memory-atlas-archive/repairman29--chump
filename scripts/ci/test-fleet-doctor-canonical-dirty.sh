@@ -111,4 +111,53 @@ else
     fail "expected pass with only untracked files, got status=$(last_status) detail=$(last_detail)"
 fi
 
+
+TMP="$FIXTURE"
+REAL_REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+# ── Test 7 (RESILIENT-1657): provision-closetjunky-hardening.sh + check_cj_node_hardening + memory-hog + offnode-deadman ──
+CJ_NODE="$TMP/cj-node"
+mkdir -p "$CJ_NODE"
+OUT1="$(CHUMP_CJ_TARGET_ROOT="$CJ_NODE" CHUMP_CJ_WATCHDOG_DEV="$TMP/no-watchdog" \
+    bash "$REAL_REPO/scripts/setup/provision-closetjunky-hardening.sh")"
+OUT2="$(CHUMP_CJ_TARGET_ROOT="$CJ_NODE" CHUMP_CJ_WATCHDOG_DEV="$TMP/no-watchdog" \
+    bash "$REAL_REPO/scripts/setup/provision-closetjunky-hardening.sh")"
+if echo "$OUT1" | grep -q "RECEIPT item-a-role-policy.*status=applied" \
+   && echo "$OUT2" | grep -q "RECEIPT item-a-role-policy.*status=already present" \
+   && grep -q '"item":"ethernet-enp3s0-primary"' "$CJ_NODE/.chump-locks/operator-asks.jsonl"; then
+    pass "RESILIENT-1657: provision-closetjunky-hardening.sh is idempotent and queues operator-hands asks"
+else
+    fail "RESILIENT-1657: provision-closetjunky-hardening.sh receipt or asks check failed"
+fi
+
+HOG_OUT="$(bash "$REAL_REPO/scripts/setup/provision-closetjunky-hardening.sh" --test-memory-hog)"
+if echo "$HOG_OUT" | grep -q "hog_killed=1" && echo "$HOG_OUT" | grep -qE "ssh_rtt_ms=[0-9]+"; then
+    pass "RESILIENT-1657: synthetic memory-hog test kills hog and records ssh/loopback RTT"
+else
+    fail "RESILIENT-1657: synthetic memory-hog test failed: $HOG_OUT"
+fi
+
+CHECKS=(); STATUSES=(); DETAILS=(); REMEDIES=(); PASS_COUNT=0; FAIL_COUNT=0
+CHUMP_DOCTOR_CJ_ROOT="$CJ_NODE" CHUMP_AMBIENT_LOG="$AMB" check_cj_node_hardening
+if [[ "$(last_status)" == "pass" ]]; then
+    pass "RESILIENT-1657: check_cj_node_hardening passes on provisioned node"
+else
+    fail "RESILIENT-1657: check_cj_node_hardening failed on provisioned node: $(last_detail)"
+fi
+
+rm -f "$CJ_NODE/.config/systemd/user/ollama.service.d/10-memory-cap.conf"
+: > "$AMB"
+CHECKS=(); STATUSES=(); DETAILS=(); REMEDIES=(); PASS_COUNT=0; FAIL_COUNT=0
+CHUMP_DOCTOR_CJ_ROOT="$CJ_NODE" CHUMP_AMBIENT_LOG="$AMB" check_cj_node_hardening
+if [[ "$(last_status)" == "fail" ]] && grep -q '"kind":"cj_hardening_missing"' "$AMB"; then
+    pass "RESILIENT-1657: check_cj_node_hardening goes RED when item (b) missing and emits cj_hardening_missing"
+else
+    fail "RESILIENT-1657: check_cj_node_hardening did not fail when item (b) missing"
+fi
+
+if bash "$REAL_REPO/scripts/ci/test-offnode-deadman.sh" >/dev/null; then
+    pass "RESILIENT-1657: test-offnode-deadman.sh (item i WiFi flap + mutant check) passed"
+else
+    fail "RESILIENT-1657: test-offnode-deadman.sh failed"
+fi
+
 echo "=== all fleet-doctor canonical-checkout-dirty tests passed ==="
