@@ -33,6 +33,10 @@
 #       the self-hosted runner accumulates 40-60GB here unbounded — it never
 #       runs as a worktree so (c)/(d) miss it. Safety guard: skip the
 #       sub-target dir if any chump-* binary mtime <24h ago (worker is hot).
+#   (k) ZERO-WASTE-142: /tmp/chump-main-preflight-*/ orphaned watchdog
+#       mirrors — the whole worktree dir (not just target/, since the
+#       watchdog now points CARGO_TARGET_DIR outside the mirror) left behind
+#       by a tick that crashed/was killed before its own cleanup ran.
 #   (j) RESILIENT-1620 + RESILIENT-1635: Class D — dispatch worktrees under the
 #       repo's .claude/worktrees. Reaps target/ + .cargo-test-target/ (build
 #       output only, source + branch untouched) when the worktree is lease-less,
@@ -1321,6 +1325,46 @@ for _wt_candidate in ${_TMP_GLOB}/; do
             "$([[ $EXECUTE -eq 1 ]] && echo 'false' || echo 'true')" \
             >> "$AMBIENT_LOG" 2>/dev/null || true
     fi
+done
+
+# ── (k) ZERO-WASTE-142: orphaned /tmp/chump-main-preflight-* watchdog mirrors ─
+# main-preflight-watchdog-daemon.sh now points CARGO_TARGET_DIR at a
+# persistent shared dir outside the per-tick mirror, so a crashed/killed tick
+# leaves the WHOLE mirror behind (no target/ subdir for class (d) above to
+# find — the mirror itself is the orphan). Reap the whole directory when it
+# is no longer a registered git worktree and old enough that it can't be a
+# tick still in flight.
+_main_preflight_orphan_count=0
+_MAIN_PREFLIGHT_GLOB="${CHUMP_CARGO_REAPER_MAIN_PREFLIGHT_GLOB:-/tmp/chump-main-preflight-*}"
+echo "[cargo-target-reaper] Scanning ${_MAIN_PREFLIGHT_GLOB} (orphaned main-preflight-watchdog mirrors)…"
+for _mp_dir in ${_MAIN_PREFLIGHT_GLOB}; do
+    [[ -d "$_mp_dir" ]] || continue
+    _mp_dir="${_mp_dir%/}"
+
+    if grep -qxF "$_mp_dir" "$_META117_REG_WTS_BUF" 2>/dev/null; then
+        echo "  skip (registered worktree): ${_mp_dir}"
+        continue
+    fi
+
+    _mp_age_min=$(( ( $(date +%s) - $(stat -f%m "$_mp_dir" 2>/dev/null || stat -c%Y "$_mp_dir" 2>/dev/null || echo 0) ) / 60 ))
+    if [[ $_mp_age_min -lt 30 ]]; then
+        echo "  skip (<30min old, may be a tick in flight): ${_mp_dir}"
+        continue
+    fi
+
+    _mp_size=$(du -sk "$_mp_dir" 2>/dev/null | awk '{print $1 * 1024}' || echo 0)
+    echo "${_dry_label}  orphaned main-preflight mirror: ${_mp_dir} (${_mp_age_min}min old, ~$(( _mp_size / 1024 / 1024 ))MB)"
+    if [[ $EXECUTE -eq 1 ]]; then
+        git -C "$REPO_ROOT" worktree remove --force "$_mp_dir" 2>/dev/null || true
+        rm -rf "$_mp_dir" 2>/dev/null || true
+    fi
+    _total_bytes=$(( _total_bytes + _mp_size ))
+    _reaped_count=$(( _reaped_count + 1 ))
+    _main_preflight_orphan_count=$(( _main_preflight_orphan_count + 1 ))
+    printf '{"ts":"%s","kind":"cargo_target_reaped","path":"%s","bytes_freed":%d,"age_days":0,"dry_run":%s,"class":"main_preflight_orphan_mirror"}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_mp_dir" "$_mp_size" \
+        "$([[ $EXECUTE -eq 1 ]] && echo 'false' || echo 'true')" \
+        >> "$AMBIENT_LOG" 2>/dev/null || true
 done
 
 # ── (e) INFRA-2125/A: Linux cross-build artifacts ───────────────────────────

@@ -45,6 +45,10 @@
 #   CHUMP_MAIN_PREFLIGHT_MOCK_PASS  non-empty → treat preflight as passed (test-mode only)
 #   CHUMP_AMBIENT_PATH              override ambient.jsonl path (META-248)
 #   CHUMP_AMBIENT_LOG               legacy alias for CHUMP_AMBIENT_PATH
+#   CHUMP_MAIN_PREFLIGHT_TARGET_DIR persistent CARGO_TARGET_DIR for ticks
+#                                   (default ~/.chump/main-preflight-target, ZERO-WASTE-142)
+#   CHUMP_MAIN_PREFLIGHT_MIN_INTERVAL_S floor between real ticks, seconds
+#                                   (default 1800, ZERO-WASTE-142)
 
 set -uo pipefail
 
@@ -162,6 +166,15 @@ _run_preflight() {
     local head_sha=""
     local failing_gates=""
 
+    # ZERO-WASTE-142: a persistent, shared CARGO_TARGET_DIR outside the
+    # per-tick mirror. Before this, every tick built into wt_path/target —
+    # a cold build every time (1h+ CPU, 11G on disk) because the mirror
+    # (and its target/) was deleted at tick end. Pointing CARGO_TARGET_DIR
+    # at a dir that outlives the mirror makes each tick an incremental
+    # build; only the source checkout (small) lives in /tmp.
+    local target_dir="${CHUMP_MAIN_PREFLIGHT_TARGET_DIR:-$HOME/.chump/main-preflight-target}"
+    mkdir -p "$target_dir" 2>/dev/null || true
+
     # Cleanup trap — runs on function exit regardless
     local cleanup_done=0
     _cleanup_wt() {
@@ -204,7 +217,7 @@ _run_preflight() {
     # preflight's CWD-relative file lookups work; REPO_ROOT pins config lookup.
     local preflight_out=""
     local preflight_rc=0
-    preflight_out="$(cd "$wt_path" && REPO_ROOT="$wt_path" \
+    preflight_out="$(cd "$wt_path" && REPO_ROOT="$wt_path" CARGO_TARGET_DIR="$target_dir" \
         "$CHUMP_BIN" preflight 2>&1)" || preflight_rc=$?
 
     # INFRA-2458: Parse `chump preflight`'s structured per-gate failure marker:
@@ -382,9 +395,55 @@ except Exception:
 }
 
 # ── (4) Tick — one reconcile iteration ───────────────────────────────────────
+#
+# ZERO-WASTE-142: before running the expensive worktree+preflight path, check
+# two cheap short-circuits against the PREVIOUS verdict's state:
+#   - cadence floor: don't run a real tick within CHUMP_MAIN_PREFLIGHT_MIN_INTERVAL_S
+#     of the previous real tick (no back-to-back hour-long ticks).
+#   - sha-unchanged: if origin/main hasn't moved since the last verdict, the
+#     answer can't have changed — skip the rebuild entirely.
+# Both reads are a `git fetch` + `rev-parse`, not a worktree checkout.
 cmd_tick() {
     local tick_id; tick_id="$(_tick_id)"
     log "tick start: $tick_id"
+
+    local floor_s="${CHUMP_MAIN_PREFLIGHT_MIN_INTERVAL_S:-1800}"
+    local prev_state_peek; prev_state_peek="$(_load_state)"
+    local prev_head_sha_peek prev_tick_at_peek
+    prev_head_sha_peek="$(printf '%s' "$prev_state_peek" | python3 -c "
+import json, sys
+try:
+    s = json.loads(sys.stdin.read() or '{}')
+    print(s.get('last_head_sha', ''))
+except Exception:
+    pass
+" 2>/dev/null || true)"
+    prev_tick_at_peek="$(printf '%s' "$prev_state_peek" | python3 -c "
+import json, sys
+try:
+    s = json.loads(sys.stdin.read() or '{}')
+    print(int(s.get('last_tick_at', 0) or 0))
+except Exception:
+    print(0)
+" 2>/dev/null || printf '0')"
+
+    if [[ -z "$MOCK_PASS" && -z "$MOCK_FAIL" ]]; then
+        local now_secs; now_secs="$(date -u +%s)"
+        if [[ -n "$prev_tick_at_peek" && "$prev_tick_at_peek" != "0" ]] \
+            && (( now_secs - prev_tick_at_peek < floor_s )); then
+            log "tick skip: cadence floor not elapsed ($(( now_secs - prev_tick_at_peek ))s < ${floor_s}s)"
+            return 0
+        fi
+
+        git -C "$REPO_ROOT" fetch origin main --quiet 2>/dev/null || true
+        local cur_head_sha_peek
+        cur_head_sha_peek="$(git -C "$REPO_ROOT" rev-parse origin/main 2>/dev/null || true)"
+        if [[ -n "$cur_head_sha_peek" && -n "$prev_head_sha_peek" \
+            && "$cur_head_sha_peek" == "$prev_head_sha_peek" ]]; then
+            log "tick skip: origin/main sha unchanged since last verdict (${cur_head_sha_peek:0:12})"
+            return 0
+        fi
+    fi
 
     # Run preflight; get CSV of failing gate names (empty = all passed)
     local failing_csv
