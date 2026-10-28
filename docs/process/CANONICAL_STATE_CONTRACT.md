@@ -1,10 +1,17 @@
 ---
 doc_tag: contract
 owner_gap: INFRA-766
-last_audited: 2026-05-11
+last_audited: 2026-10-28
 ---
 
 # Canonical State Contract
+
+> **state.db is the one canonical gap store (RESILIENT-1057, INFRA-8193).**
+> `docs/gaps/*.yaml` is export-only and never read back. See
+> [`docs/architecture/CANONICAL_GAP_STORE.md`](../architecture/CANONICAL_GAP_STORE.md)
+> for the current authoritative description; this doc's drift-mode catalog
+> below was updated (CLASH-1, 2026-10-28) to stop treating YAML staleness as
+> a correctness incident requiring bidirectional reconciliation.
 
 This document names every place gap-registry and coordination state lives,
 declares which store is authoritative for each fact, enumerates the drift
@@ -29,9 +36,9 @@ in the repo; one is the GitHub remote.
 | # | Store | Path | Schema | Role |
 |---|---|---|---|---|
 | 1 | **state.db** | `.chump/state.db` | SQLite (gaps, leases, intents, gap_counters, routing_outcomes) | **Canonical live state.** All writes go here first. |
-| 2 | **state.sql** | `.chump/state.sql` | SQL dump of state.db | **Tracked mirror.** Committed; the rebuild source if state.db is corrupt. |
-| 3 | **per-gap YAMLs** | `docs/gaps/<ID>.yaml` | YAML, one file per gap | **Human-readable mirror.** Reviewed in PRs; what PR authors edit. |
-| 4 | **legacy monolith** | `docs/gaps.yaml` | YAML, all gaps in one file | **Deprecated mirror.** Still read by some CI scripts for backward compat. |
+| 2 | **state.sql** | `.chump/state.sql` | SQL dump of state.db | **Not tracked in git since INFRA-8193** (Phase R R4) — see [`docs/architecture/CANONICAL_GAP_STORE.md`](../architecture/CANONICAL_GAP_STORE.md). A materialised local copy is gitignored; the cross-node copy lives only on the private `registry` remote. |
+| 3 | **per-gap YAMLs** | `docs/gaps/<ID>.yaml` | YAML, one file per gap | **Export-only mirror** (INFRA-8193). Written only by `chump gap dump --per-file` / `chump gap sync --push` / `chump gap ship`'s sync step; never read back — `chump gap sync --pull` is a hard error by design. |
+| 4 | **legacy monolith** | `docs/gaps.yaml` | YAML, all gaps in one file | **Retired mirror.** Not read by current tooling as a source of state. |
 | 5 | **lease files** | `.chump-locks/*.json` | JSON per session | **Live lease bookkeeping** for active claims, mirrored from `leases` table. |
 | 6 | **origin/main** | GitHub | git tree | **Cross-session canonical** — the only store all sibling agents can see. |
 | 7 | **fleet-server `/api/gap`** | HTTP, `127.0.0.1:<port>` | N/A (not a store) | **Delegated write path** (INFRA-3689) — not itself authoritative; it shells `chump gap reserve\|set\|ship` against store #1 on the machine it runs on. Exists so a non-canonical client can write #1 without holding a writable local copy of it. |
@@ -53,7 +60,7 @@ is correct and the others must be reconciled to it.
 
 | Fact | Canonical store | Mirrors that must follow |
 |---|---|---|
-| Gap content (title, status, AC, closed_pr, …) | **state.db** | state.sql, per-gap YAML, legacy monolith |
+| Gap content (title, status, AC, closed_pr, …) | **state.db** | per-gap YAML is an **export-only** mirror (INFRA-8193) — see [`docs/architecture/CANONICAL_GAP_STORE.md`](../architecture/CANONICAL_GAP_STORE.md); it is never read back, so it is not a "mirror that must follow" in the reconciliation sense below |
 | Active lease (who owns gap X right now) | **state.db.leases** | `.chump-locks/<session>.json` |
 | Next-free gap ID for domain D | **state.db.gap_counters**, intersected with **origin/main** open PR branches | local `chump gap reserve` output |
 | Closed-state of a PR | **GitHub** (`gh pr view`) | `gaps.closed_pr` + `gaps.status` |
@@ -136,11 +143,18 @@ Steps (in order, fail-fast unless `--auto-fix`):
    - **Premature closure** (status=done, PR unmerged) → [CREDIBLE-028](../gaps/CREDIBLE-028.yaml)
    - **Stale post-merge** (PR merged, status≠done) → CREDIBLE-028 reverse-mode
 
-3. **state.db ↔ YAML consistency**
-   - For every row in state.db.gaps, the per-gap YAML must match (status, closed_pr, closed_date, AC)
-   - For every per-gap YAML on disk, a corresponding state.db row must exist
-   - **YAML drift** (mismatch) → re-render YAML from state.db (state.db wins)
-   - **Orphan YAML** (file on disk, no row) → import to state.db OR delete YAML (operator picks)
+3. **state.db → YAML export freshness (one-directional, not a sync)**
+   - Per INFRA-8193, YAML is export-only and never read back — there is no
+     obligation for state.db to match YAML, only for the exporter
+     (`chump gap dump --per-file`, `chump gap sync --push`, `chump gap ship`)
+     to have run recently enough that YAML isn't wildly stale for human readers.
+   - **YAML drift** (mismatch) is expected staleness, not a correctness
+     incident — see [`docs/architecture/CANONICAL_GAP_STORE.md`](../architecture/CANONICAL_GAP_STORE.md).
+     Re-export from state.db if a human needs a fresh read; never pull YAML
+     into state.db (`chump gap sync --pull` is a hard error by design).
+   - **Orphan YAML** (file on disk, no row) → the insert-only `chump gap import`
+     may seed an empty store from it; otherwise it's dead export output and can
+     be deleted.
 
 4. **state.db ↔ lease-files consistency**
    - Every `.chump-locks/*.json` has a corresponding row in `state.db.leases` or is stale
@@ -233,25 +247,19 @@ lock-file remnants from prior sessions). Stale-gap-lock-reaper
 **Prevention**: reconcile step 4 above (canonical = state.db.leases);
 already partially implemented; INFRA-766's audit should formalize it.
 
-### Drift Mode E — YAML drift (content mismatch state.db vs per-gap YAML)
-**Symptom**: `docs/gaps/<ID>.yaml` on main contains different field values
-than `state.db.gaps` row for the same ID. Tools reading from YAML get one
-answer, tools reading state.db get another.
-
-**How it happens**: a PR edits a per-gap YAML directly (operator or agent
-hand-edit) without going through `chump gap set`. The YAML lands on main
-but state.db isn't updated. Or the reverse: `chump gap set` updated state.db
-but the YAML regen didn't run.
-
-**Real incident**: low-grade but pervasive — `chump gap audit-priorities`
-sees vague-pickable gaps in state.db whose per-gap YAML has TODO ACs,
-because `chump gap reserve` writes both but later `chump gap set` updates
-only state.db. Today's INFRA-819 / CREDIBLE-025 backfill was an instance
-that needed both files updated.
-
-**Prevention**: every state.db write must trigger a per-gap YAML re-render
-in the same transaction. Tested by `scripts/ci/test-gap-yaml-state-parity.sh`
-(to be built; the gap is part of INFRA-766's scope).
+### Drift Mode E — YAML staleness (superseded framing, see INFRA-8193)
+**Superseded (CLASH-1, 2026-10-28):** this drift mode used to describe
+`docs/gaps/<ID>.yaml` vs `state.db.gaps` mismatch as a split-brain
+correctness bug requiring a bidirectional reconciliation ("every state.db
+write must trigger a per-gap YAML re-render in the same transaction").
+That framing predates INFRA-8193's export-only doctrine. Per
+[`docs/architecture/CANONICAL_GAP_STORE.md`](../architecture/CANONICAL_GAP_STORE.md):
+YAML is a generated, export-only mirror written only by
+`chump gap dump --per-file` / `chump gap sync --push` / `chump gap ship`'s
+sync step, and is **never read back**. A YAML file lagging behind its
+state.db row is expected staleness, not a second truth to reconcile —
+there is one canonical store, and `scripts/ci/test-gap-yaml-export-only.sh`
+guards that nothing else writes the mirror by another route.
 
 ### Drift Mode F — Ghost closed_pr (gap marked done with PR that doesn't exist)
 **Symptom**: `gaps.closed_pr = 99999` (or any non-existent number),
